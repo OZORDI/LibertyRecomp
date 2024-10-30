@@ -37,6 +37,7 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
 
                 // Restore original window dimensions on F2.
                 case SDLK_F2:
+                    Config::Fullscreen = Window::SetFullscreen(false);
                     Window::SetDimensions(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, DEFAULT_WIDTH, DEFAULT_HEIGHT);
                     break;
             }

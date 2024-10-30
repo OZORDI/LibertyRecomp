@@ -251,9 +251,9 @@ enum class EWindowState : uint32_t
 
 CONFIG_DEFINE_ENUM_TEMPLATE(EWindowState)
 {
-    { "Normal",   EWindowState::Normal   },
-    { "Maximised",  EWindowState::Maximised  },
-    { "Maximized",  EWindowState::Maximised  }
+    { "Normal",    EWindowState::Normal    },
+    { "Maximised", EWindowState::Maximised },
+    { "Maximized", EWindowState::Maximised }
 };
 
 enum class EShadowResolution : int32_t
