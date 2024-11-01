@@ -4,10 +4,10 @@
 ```
 git clone --recurse-submodules https://github.com/hedge-dev/UnleashedRecomp.git
 ```
-2. Decompress and decrypt `default.xex` and place the resulting file in `./UnleashedRecompLib/private/`.
+2. Decompress and decrypt `default.xex`, apply the title update patch (`default.xexp`), and place the resulting file in `./UnleashedRecompLib/private/`.
 3. Decompress `shader.ar` and place the resulting file in `./UnleashedRecompLib/private/`.
-4. Open the repository directory in Visual Studio 2022 *(not Preview)* and wait for CMake generation to complete.
+4. Open the repository directory in Visual Studio 2022 *(not Preview)* and wait for CMake generation to complete. If you don't plan to debug, switch to the `x64-Clang-Release` configuration.
 5. Under Solution Explorer, right-click and choose "Switch to CMake Targets View".
 6. Right-click the **UnleashedRecomp** project and choose "Set as Startup Item", then choose "Add Debug Configuration".
 7. Add a `currentDir` property to the first element under `configurations` in the generated JSON and set its value to the path to your game directory (where root is the directory containing `dlc`, `game`, `save`, `update`, etc).
-8. Start debugging **UnleashedRecomp**. The initial compilation might take a while to complete due to code and shader recompilation.
+8. Run or debug **UnleashedRecomp**. The initial compilation might take a while to complete due to code and shader recompilation.
