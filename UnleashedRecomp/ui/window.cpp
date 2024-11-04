@@ -139,6 +139,9 @@ void Window::Init()
     s_width = Config::WindowWidth;
     s_height = Config::WindowHeight;
 
+    if (s_x == -1 && s_y == -1)
+        s_x = s_y = SDL_WINDOWPOS_CENTERED;
+
     if (!IsPositionValid())
     {
         s_x = SDL_WINDOWPOS_CENTERED;
@@ -153,6 +156,9 @@ void Window::Init()
     }
 
     s_pWindow = SDL_CreateWindow("SWA", s_x, s_y, s_width, s_height, GetWindowFlags());
+
+    if (Config::Fullscreen)
+        SDL_ShowCursor(SDL_DISABLE);
 
     SetIcon();
     SetTitle();
