@@ -100,7 +100,7 @@ PPC_FUNC(sub_8245F048)
     if (!pGameDocument)
         return;
 
-    printf("Resetting score to %d\n", m_lastCheckpointScore);
+    printf("[*] Resetting score to %d\n", m_lastCheckpointScore);
 
     pGameDocument->m_pMember->m_Score = m_lastCheckpointScore;
 }
@@ -200,6 +200,19 @@ void PostUnleashMidAsmHook(PPCRegister& r30)
 bool DisableHintsMidAsmHook()
 {
     return !Config::Hints;
+}
+
+bool DisableControlTutorialMidAsmHook()
+{
+    return !Config::ControlTutorial;
+}
+
+bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
+{
+    if (Config::ControlTutorial)
+        return true;
+
+    return r4.u32 == 1 && r5.u32 == 1;
 }
 
 void SetXButtonHomingMidAsmHook(PPCRegister& r30)

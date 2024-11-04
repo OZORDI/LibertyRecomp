@@ -9,6 +9,7 @@ public:
 
     CONFIG_DEFINE_ENUM("System", ELanguage, Language, ELanguage::English);
     CONFIG_DEFINE("System", bool, Hints, true);
+    CONFIG_DEFINE("System", bool, ControlTutorial, true);
     CONFIG_DEFINE_ENUM("System", EScoreBehaviour, ScoreBehaviour, EScoreBehaviour::CheckpointReset);
     CONFIG_DEFINE("System", bool, UnleashOutOfControlDrain, true);
     CONFIG_DEFINE("System", bool, WerehogHubTransformVideo, true);

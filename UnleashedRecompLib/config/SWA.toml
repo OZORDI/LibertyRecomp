@@ -122,6 +122,19 @@ name = "DisableHintsMidAsmHook"
 address = 0x827A2E34
 jump_address_on_true = 0x827A2E4C
 
+# Disable navigation volumes
+[[midasm_hook]]
+name = "DisableControlTutorialMidAsmHook"
+address = 0x827AA5EC
+jump_address_on_true = 0x827AA604
+
+# Disable Werehog button prompts
+[[midasm_hook]]
+name = "DisableEvilControlTutorialMidAsmHook"
+address = 0x823A4FF0
+registers = ["r4", "r5"]
+return_on_false = true
+
 [[midasm_hook]]
 name = "SetXButtonHomingMidAsmHook"
 address = 0x8237AC88
