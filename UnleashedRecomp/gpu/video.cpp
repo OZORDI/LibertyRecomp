@@ -313,14 +313,71 @@ struct UploadAllocator
 
 static UploadAllocator g_uploadAllocators[NUM_FRAMES];
 
-static Mutex g_tempMutex;
-static std::vector<std::unique_ptr<RenderTexture>> g_tempTextures[NUM_FRAMES];
+static std::vector<GuestResource*> g_tempResources[NUM_FRAMES];
 static std::vector<std::unique_ptr<RenderBuffer>> g_tempBuffers[NUM_FRAMES];
-static std::vector<uint32_t> g_tempDescriptorIndices[NUM_FRAMES];
-static std::vector<std::unique_ptr<RenderFramebuffer>> g_tempFramebuffers[NUM_FRAMES];
-
 static RenderBufferReference g_quadIndexBuffer;
 static uint32_t g_quadCount;
+
+static void DestructTempResources()
+{
+    for (auto resource : g_tempResources[g_frame])
+    {
+        switch (resource->type)
+        {
+        case ResourceType::Texture:
+        case ResourceType::VolumeTexture:
+        {
+            const auto texture = reinterpret_cast<GuestTexture*>(resource);
+
+            if (texture->mappedMemory != nullptr)
+                g_userHeap.Free(texture->mappedMemory);
+
+            g_textureDescriptorAllocator.free(texture->descriptorIndex);
+
+            texture->~GuestTexture();
+            break;
+        }
+
+        case ResourceType::VertexBuffer:
+        case ResourceType::IndexBuffer:
+        {
+            const auto buffer = reinterpret_cast<GuestBuffer*>(resource);
+
+            if (buffer->mappedMemory != nullptr)
+                g_userHeap.Free(buffer->mappedMemory);
+
+            buffer->~GuestBuffer();
+            break;
+        }
+
+        case ResourceType::RenderTarget:
+        case ResourceType::DepthStencil:
+        {
+            const auto surface = reinterpret_cast<GuestSurface*>(resource);
+
+            if (surface->descriptorIndex != NULL)
+                g_textureDescriptorAllocator.free(surface->descriptorIndex);
+
+            surface->~GuestSurface();
+            break;
+        }
+
+        case ResourceType::VertexDeclaration:
+            reinterpret_cast<GuestVertexDeclaration*>(resource)->~GuestVertexDeclaration();
+            break;
+
+        case ResourceType::VertexShader:
+        case ResourceType::PixelShader:
+            reinterpret_cast<GuestShader*>(resource)->~GuestShader();
+            break;
+        }
+
+        g_userHeap.Free(resource);
+    }
+
+    g_tempResources[g_frame].clear();
+    g_tempBuffers[g_frame].clear();
+}
 
 static uint32_t g_mainThreadId;
 
@@ -1105,78 +1162,7 @@ static void DestructResource(GuestResource* resource)
 static void ProcDestructResource(const RenderCommand& cmd)
 {
     const auto& args = cmd.destructResource;
-
-    switch (args.resource->type)
-    {
-    case ResourceType::Texture:
-    case ResourceType::VolumeTexture:
-    {
-        const auto texture = reinterpret_cast<GuestTexture*>(args.resource);
-
-        if (texture->mappedMemory != nullptr)
-            g_userHeap.Free(texture->mappedMemory);
-
-        {
-            std::lock_guard lock(g_tempMutex);
-            g_tempTextures[g_frame].emplace_back(std::move(texture->textureHolder));
-            g_tempDescriptorIndices[g_frame].push_back(texture->descriptorIndex);
-
-            if (texture->framebuffer != nullptr)
-                g_tempFramebuffers[g_frame].emplace_back(std::move(texture->framebuffer));
-        }
-
-        texture->~GuestTexture();
-        break;
-    }
-
-    case ResourceType::VertexBuffer:
-    case ResourceType::IndexBuffer:
-    {
-        const auto buffer = reinterpret_cast<GuestBuffer*>(args.resource);
-
-        if (buffer->mappedMemory != nullptr)
-            g_userHeap.Free(buffer->mappedMemory);
-
-        {
-            std::lock_guard lock(g_tempMutex);
-            g_tempBuffers[g_frame].emplace_back(std::move(buffer->buffer));
-        }
-
-        buffer->~GuestBuffer();
-        break;
-    }
-
-    case ResourceType::RenderTarget:
-    case ResourceType::DepthStencil:
-    {
-        const auto surface = reinterpret_cast<GuestSurface*>(args.resource);
-
-        {
-            std::lock_guard lock(g_tempMutex);
-            g_tempTextures[g_frame].emplace_back(std::move(surface->textureHolder));
-
-            if (surface->descriptorIndex != NULL)
-                g_tempDescriptorIndices[g_frame].push_back(surface->descriptorIndex);
-
-            for (auto& [texture, framebuffer] : surface->framebuffers)
-                g_tempFramebuffers[g_frame].emplace_back(std::move(framebuffer));
-        }
-
-        surface->~GuestSurface();
-        break;
-    }
-
-    case ResourceType::VertexDeclaration:
-        reinterpret_cast<GuestVertexDeclaration*>(args.resource)->~GuestVertexDeclaration();
-        break;
-
-    case ResourceType::VertexShader:
-    case ResourceType::PixelShader:
-        reinterpret_cast<GuestShader*>(args.resource)->~GuestShader();
-        break;
-    }
-
-    g_userHeap.Free(args.resource);
+    g_tempResources[g_frame].push_back(args.resource);
 }
 
 static constexpr uint32_t PITCH_ALIGNMENT = 0x100;
@@ -1364,7 +1350,6 @@ static uint32_t HashVertexDeclaration(uint32_t vertexDeclaration)
 static void Present() 
 {
     WaitForRenderThread();
-    bool needsResize = g_needsResize;
     g_pendingRenderThread = true;
 
     RenderCommand cmd;
@@ -1412,21 +1397,9 @@ static void ProcPresent(const RenderCommand& cmd)
         g_commandListStates[g_frame] = false;
     }
 
-    {
-        std::lock_guard lock(g_tempMutex);
-
-        g_tempBuffers[g_frame].clear();
-        g_tempTextures[g_frame].clear();
-
-        for (auto index : g_tempDescriptorIndices[g_frame])
-            g_textureDescriptorAllocator.free(index);
-
-        g_tempDescriptorIndices[g_frame].clear();
-        g_tempFramebuffers[g_frame].clear();
-    }
-
     g_dirtyStates = DirtyStates(true);
     g_uploadAllocators[g_frame].reset();
+    DestructTempResources();
     g_quadIndexBuffer = {};
     g_quadCount = 0;
 
