@@ -305,9 +305,9 @@ registers = ["r3"]
 [[midasm_hook]]
 name = "WerehogBattleMusicMidAsmHook"
 address = 0x82B47278
-registers = ["r3", "r11"]
+registers = ["r11"]
 
 [[midasm_hook]]
 name = "WerehogBattleMusicMidAsmHook"
 address = 0x82B47728
-registers = ["r3", "r11"]
+registers = ["r11"]

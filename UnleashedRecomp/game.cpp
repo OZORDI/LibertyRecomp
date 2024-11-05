@@ -216,7 +216,7 @@ bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
     return r4.u32 == 1 && r5.u32 == 1;
 }
 
-void WerehogBattleMusicMidAsmHook(PPCRegister& r3, PPCRegister& r11)
+void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
 {
     if (Config::WerehogBattleMusic)
         return;
