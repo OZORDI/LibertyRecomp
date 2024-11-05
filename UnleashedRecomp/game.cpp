@@ -246,16 +246,6 @@ PPC_FUNC(sub_825197C0)
     __imp__sub_825197C0(ctx, base);
 }
 
-void HighFrameRateDeltaTimeFixMidAsmHook(PPCRegister& f1)
-{
-    // Having 60 FPS threshold ensures we still retain
-    // the original game behavior when locked to 30/60 FPS.
-    constexpr double threshold = 1.0 / 60.0;
-
-    if (f1.f64 < threshold)
-        f1.f64 = threshold;
-}
-
 void GetStageIDMidAsmHook(PPCRegister& r5)
 {
     m_pStageID = *(xpointer<const char>*)g_memory.Translate(r5.u32);
@@ -328,6 +318,56 @@ PPC_FUNC(sub_82608E60)
 {
     memset(base + ctx.r3.u32, 0, 0x154);
     __imp__sub_82608E60(ctx, base);
+}
+
+#pragma endregion
+
+#pragma region HFR Patches
+
+void HighFrameRateDeltaTimeFixMidAsmHook(PPCRegister& f1)
+{
+    // Having 60 FPS threshold ensures we still retain
+    // the original game behavior when locked to 30/60 FPS.
+    constexpr double threshold = 1.0 / 60.0;
+
+    if (f1.f64 < threshold)
+        f1.f64 = threshold;
+}
+
+void CameraDeltaTimeFixMidAsmHook(PPCRegister& dest, PPCRegister& src)
+{
+    dest.f64 = src.f64 / 30.0;
+}
+
+void CameraDeltaTimeFixMidAsmHook(PPCRegister& dest)
+{
+    dest.f64 /= 30.0;
+}
+
+static double ComputeLerpFactor(double t, double deltaTime)
+{
+    // This type of lerp still falls behind when 
+    // playing catch with a constantly moving position. 
+    // The bias helps with approximately bringing it closer.
+    double fps = 1.0 / deltaTime;
+    double bias = t * 60.0;
+    return 1.0 - pow(1.0 - t, (30.0 + bias) / (fps + bias));
+}
+
+void CameraLerpFixMidAsmHook(PPCRegister& t, PPCRegister& deltaTime)
+{
+    t.f64 = ComputeLerpFactor(t.f64, deltaTime.f64);
+}
+
+void CameraTargetSideOffsetLerpFixMidAsmHook(PPCVRegister& v13, PPCVRegister& v62, PPCRegister& deltaTime)
+{
+    float factor = float(ComputeLerpFactor(double(v13.f32[0] * v62.f32[0]), deltaTime.f64));
+
+    for (size_t i = 0; i < 4; i++)
+    {
+        v62.f32[i] = factor;
+        v13.f32[i] = 1.0f;
+    }
 }
 
 #pragma endregion
