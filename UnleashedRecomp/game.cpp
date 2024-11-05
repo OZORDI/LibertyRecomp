@@ -212,7 +212,18 @@ bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
     if (Config::ControlTutorial)
         return true;
 
+    // Only allow enemy QTE prompts to get through.
     return r4.u32 == 1 && r5.u32 == 1;
+}
+
+void WerehogBattleMusicMidAsmHook(PPCRegister& r3, PPCRegister& r11)
+{
+    if (Config::WerehogBattleMusic)
+        return;
+
+    // Swap CStateBattle for CStateNormal.
+    if (r11.u8 == 4)
+        r11.u8 = 3;
 }
 
 void SetXButtonHomingMidAsmHook(PPCRegister& r30)

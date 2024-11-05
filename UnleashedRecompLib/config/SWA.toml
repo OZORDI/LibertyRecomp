@@ -217,3 +217,13 @@ registers = ["r30"]
 name = "MovieRendererMidAsmHook"
 address = 0x82AE3200
 registers = ["r3"]
+
+[[midasm_hook]]
+name = "WerehogBattleMusicMidAsmHook"
+address = 0x82B47278
+registers = ["r3", "r11"]
+
+[[midasm_hook]]
+name = "WerehogBattleMusicMidAsmHook"
+address = 0x82B47728
+registers = ["r3", "r11"]
