@@ -315,7 +315,8 @@ namespace RT64 {
     };
 
     struct D3D12Shader : RenderShader {
-        std::vector<uint8_t> d3d;
+        const void* data = nullptr;
+        uint64_t size = 0;
         std::string entryPointName;
         D3D12Device *device = nullptr;
         RenderShaderFormat format = RenderShaderFormat::UNKNOWN;

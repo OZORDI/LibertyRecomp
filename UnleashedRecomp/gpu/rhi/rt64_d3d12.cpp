@@ -2585,12 +2585,11 @@ namespace RT64 {
         assert(format != RenderShaderFormat::UNKNOWN);
         assert(format == RenderShaderFormat::DXIL);
 
+        this->data = data;
+        this->size = size;
         this->device = device;
         this->format = format;
         this->entryPointName = (entryPointName != nullptr) ? std::string(entryPointName) : std::string();
-
-        const uint8_t *dataBytes = reinterpret_cast<const uint8_t *>(data);
-        this->d3d = std::vector(dataBytes, dataBytes + size);
     }
 
     D3D12Shader::~D3D12Shader() { }
@@ -2662,8 +2661,8 @@ namespace RT64 {
         const D3D12Shader *computeShader = static_cast<const D3D12Shader *>(desc.computeShader);
         D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.pRootSignature = rootSignature->rootSignature;
-        psoDesc.CS.pShaderBytecode = computeShader->d3d.data();
-        psoDesc.CS.BytecodeLength = computeShader->d3d.size();
+        psoDesc.CS.pShaderBytecode = computeShader->data;
+        psoDesc.CS.BytecodeLength = computeShader->size;
         device->d3d->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&d3d));
     }
 
@@ -2691,12 +2690,12 @@ namespace RT64 {
         const D3D12Shader *pixelShader = static_cast<const D3D12Shader *>(desc.pixelShader);
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.pRootSignature = pipelineLayout->rootSignature;
-        psoDesc.VS.pShaderBytecode = (vertexShader != nullptr) ? vertexShader->d3d.data() : nullptr;
-        psoDesc.VS.BytecodeLength = (vertexShader != nullptr) ? vertexShader->d3d.size() : 0;
-        psoDesc.GS.pShaderBytecode = (geometryShader != nullptr) ? geometryShader->d3d.data() : nullptr;
-        psoDesc.GS.BytecodeLength = (geometryShader != nullptr) ? geometryShader->d3d.size() : 0;
-        psoDesc.PS.pShaderBytecode = (pixelShader != nullptr) ? pixelShader->d3d.data() : nullptr;
-        psoDesc.PS.BytecodeLength = (pixelShader != nullptr) ? pixelShader->d3d.size() : 0;
+        psoDesc.VS.pShaderBytecode = (vertexShader != nullptr) ? vertexShader->data : nullptr;
+        psoDesc.VS.BytecodeLength = (vertexShader != nullptr) ? vertexShader->size : 0;
+        psoDesc.GS.pShaderBytecode = (geometryShader != nullptr) ? geometryShader->data : nullptr;
+        psoDesc.GS.BytecodeLength = (geometryShader != nullptr) ? geometryShader->size : 0;
+        psoDesc.PS.pShaderBytecode = (pixelShader != nullptr) ? pixelShader->data : nullptr;
+        psoDesc.PS.BytecodeLength = (pixelShader != nullptr) ? pixelShader->size : 0;
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.SampleDesc.Count = desc.multisampling.sampleCount;
         if (desc.primitiveTopology == RenderPrimitiveTopology::LINE_STRIP || desc.primitiveTopology == RenderPrimitiveTopology::TRIANGLE_STRIP) {
@@ -2842,8 +2841,8 @@ namespace RT64 {
             assert(libraryShader != nullptr);
 
             D3D12_DXIL_LIBRARY_DESC &libraryDesc = libraryDescs[i];
-            libraryDesc.DXILLibrary.pShaderBytecode = libraryShader->d3d.data();
-            libraryDesc.DXILLibrary.BytecodeLength = libraryShader->d3d.size();
+            libraryDesc.DXILLibrary.pShaderBytecode = libraryShader->data;
+            libraryDesc.DXILLibrary.BytecodeLength = libraryShader->size;
             libraryDesc.pExports = &exportDescs[exportsIndexStart];
             libraryDesc.NumExports = exportsIndex - exportsIndexStart;
 
