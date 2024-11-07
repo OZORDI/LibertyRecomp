@@ -380,4 +380,9 @@ void Camera2DLerpFixMidAsmHook(PPCRegister& t, PPCRegister& deltaTime)
     t.f64 = ComputeLerpFactor(std::min<double>(1.0, t.f64 * 2.0), deltaTime.f64 / 60.0);
 }
 
+void Camera2DSlopeLerpFixMidAsmHook(PPCRegister& t, PPCRegister& deltaTime)
+{
+    t.f64 = ComputeLerpFactor(t.f64, deltaTime.f64 / 60.0);
+}
+
 #pragma endregion
