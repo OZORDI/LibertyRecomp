@@ -2996,6 +2996,8 @@ static void SetVertexDeclaration(GuestDevice* device, GuestVertexDeclaration* ve
     cmd.type = RenderCommandType::SetVertexDeclaration;
     cmd.setVertexDeclaration.vertexDeclaration = vertexDeclaration;
     g_renderQueue.enqueue(cmd);
+
+    device->vertexDeclaration = g_memory.MapVirtual(vertexDeclaration);
 }
 
 static void ProcSetVertexDeclaration(const RenderCommand& cmd)
