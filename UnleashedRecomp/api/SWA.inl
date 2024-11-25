@@ -11,26 +11,12 @@
     uint8_t SWA_CONCAT(pad, __LINE__)[length]
 
 #define SWA_ASSERT_OFFSETOF(type, field, offset) \
-    static inline swa_assert_offsetof<BB_OFFSETOF(type, field), offset> SWA_CONCAT(_, __COUNTER__)
+    static_assert(offsetof(type, field) == offset)
 
 #define SWA_ASSERT_SIZEOF(type, size) \
-    static inline swa_assert_sizeof<sizeof type, size> SWA_CONCAT(_, __COUNTER__)
+    static_assert(sizeof(type) == size)
 
 #define SWA_VIRTUAL_FUNCTION(returnType, virtualIndex, ...) \
     GuestToHostFunction<returnType>(*(be<uint32_t>*)(g_memory.Translate(*(be<uint32_t>*)(this) + (4 * virtualIndex))), __VA_ARGS__)
 
-struct swa_null_ctor
-{
-};
-
-template<int TActual, int TExpected>
-struct swa_assert_offsetof
-{
-    static_assert(TActual == TExpected, "offsetof assertion failed");
-};
-
-template<int TActual, int TExpected>
-struct swa_assert_sizeof
-{
-    static_assert(TActual == TExpected, "sizeof assertion failed");
-};
+struct swa_null_ctor {};

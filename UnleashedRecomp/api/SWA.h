@@ -15,7 +15,6 @@
 #include "CSD/Manager/csdmSceneObserver.h"
 #include "CSD/Manager/csdmSubjectBase.h"
 #include "CSD/Platform/csdTexList.h"
-#include "Hedgehog/Base/Container/hhVector.h"
 #include "Hedgehog/Base/System/hhAllocator.h"
 #include "Hedgehog/Base/Thread/hhHolder.h"
 #include "Hedgehog/Base/Thread/hhHolderBase.h"

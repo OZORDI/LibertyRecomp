@@ -12,6 +12,7 @@ add_compile_options(
     -Wno-unused-but-set-variable
     -Wno-void-pointer-to-int-cast
     -Wno-int-to-void-pointer-cast
+    -Wno-invalid-offsetof
 )
 
 add_compile_definitions(

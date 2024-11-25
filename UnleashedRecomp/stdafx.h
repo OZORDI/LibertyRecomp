@@ -27,6 +27,7 @@
 #include <imgui_internal.h>
 #include <imgui_impl_sdl2.h>
 #include <o1heap.h>
+#include <cstddef>
 
 #include "framework.h"
 #include "mutex.h"
