@@ -1,6 +1,8 @@
 project("UnleashedRecomp")
 set(TARGET_NAME "SWA")
 
+option(SWA_XAUDIO2 "Use XAudio2 for audio playback" OFF)
+
 add_compile_options(
     /fp:strict
     -march=sandybridge
@@ -57,9 +59,13 @@ set(SWA_GPU_CXX_SOURCES
 
 set(SWA_APU_CXX_SOURCES
     "apu/audio.cpp"
-    #"apu/driver/xaudio_driver.cpp"
-    "apu/driver/sdl2_driver.cpp"
 )
+
+if(SWA_XAUDIO2)
+    list(APPEND SWA_APU_CXX_SOURCES "apu/driver/xaudio_driver.cpp")
+else()
+    list(APPEND SWA_APU_CXX_SOURCES "apu/driver/sdl2_driver.cpp")
+endif()
 
 set(SWA_HID_CXX_SOURCES
     "hid/hid.cpp"
