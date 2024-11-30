@@ -5140,6 +5140,9 @@ static void ModelConsumerThread()
                     pipelineState.vertexDeclaration = g_vertexDeclarations[reinterpret_cast<XXH64_hash_t>(pipelineState.vertexDeclaration)];
                 }
 
+                if (!g_triangleFanSupported && pipelineState.primitiveTopology == RenderPrimitiveTopology::TRIANGLE_FAN)
+                    pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_LIST;
+
                 if (Config::GITextureFiltering == EGITextureFiltering::Bicubic)
                     pipelineState.specConstants |= SPEC_CONSTANT_BICUBIC_GI_FILTER;
 
