@@ -3,12 +3,12 @@
 //#define ASYNC_PSO_DEBUG
 #define PSO_CACHING
 
-#include "rhi/rt64_render_interface.h"
+#include "rhi/plume_render_interface.h"
 
 #define D3DCLEAR_TARGET  0x1
 #define D3DCLEAR_ZBUFFER 0x10
 
-using namespace RT64;
+using namespace plume;
 
 struct GuestSamplerState
 {

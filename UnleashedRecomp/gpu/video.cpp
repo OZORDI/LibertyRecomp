@@ -46,7 +46,7 @@ extern "C"
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
 
-namespace RT64
+namespace plume
 {
     extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
     extern std::unique_ptr<RenderInterface> CreateVulkanInterface();

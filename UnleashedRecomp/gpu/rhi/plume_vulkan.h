@@ -1,10 +1,13 @@
 //
-// RT64
+// plume
+//
+// Copyright (c) 2024 renderbag and contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE file for details.
 //
 
 #pragma once
 
-#include "rt64_render_interface.h"
+#include "plume_render_interface.h"
 
 #include <mutex>
 #include <set>
@@ -23,7 +26,7 @@
 
 #include "vk_mem_alloc.h"
 
-namespace RT64 {
+namespace plume {
     struct VulkanCommandQueue;
     struct VulkanDevice;
     struct VulkanInterface;

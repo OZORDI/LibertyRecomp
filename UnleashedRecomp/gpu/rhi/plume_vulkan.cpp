@@ -1,11 +1,14 @@
 //
-// RT64
+// plume
+//
+// Copyright (c) 2024 renderbag and contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE file for details.
 //
 
 #define VMA_IMPLEMENTATION
 #define VOLK_IMPLEMENTATION 
 
-#include "rt64_vulkan.h"
+#include "plume_vulkan.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +16,7 @@
 #include <unordered_map>
 
 #if DLSS_ENABLED
-#   include "render/rt64_dlss.h"
+#   include "render/plume_dlss.h"
 #endif
 
 #ifndef NDEBUG
@@ -24,7 +27,7 @@
 // TODO:
 // - Fix resource pools.
 
-namespace RT64 {
+namespace plume {
     // Backend constants.
 
     // Required buffer alignment for acceleration structures.
@@ -4063,9 +4066,9 @@ namespace RT64 {
         }
 
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "RT64";
+        appInfo.pApplicationName = "plume";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "RT64";
+        appInfo.pEngineName = "plume";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.apiVersion = VK_API_VERSION_1_2;
 

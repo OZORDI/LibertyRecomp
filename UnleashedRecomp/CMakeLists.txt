@@ -51,8 +51,8 @@ set(SWA_CPU_CXX_SOURCES
 set(SWA_GPU_CXX_SOURCES
     "gpu/video.cpp"
     "gpu/imgui_snapshot.cpp"
-    "gpu/rhi/rt64_d3d12.cpp"
-    "gpu/rhi/rt64_vulkan.cpp"
+    "gpu/rhi/plume_d3d12.cpp"
+    "gpu/rhi/plume_vulkan.cpp"
 )
 
 set(SWA_APU_CXX_SOURCES

@@ -1,8 +1,11 @@
 //
-// RT64
+// plume
+//
+// Copyright (c) 2024 renderbag and contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE file for details.
 //
 
-#include "rt64_d3d12.h"
+#include "plume_d3d12.h"
 
 #include <unordered_set>
 
@@ -34,7 +37,7 @@ extern "C" {
     __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
 }
 
-namespace RT64 {
+namespace plume {
     static const uint32_t ShaderDescriptorHeapSize = 65536;
     static const uint32_t SamplerDescriptorHeapSize = 1024;
     static const uint32_t TargetDescriptorHeapSize = 16384;
