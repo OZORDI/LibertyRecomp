@@ -57,7 +57,8 @@ set(SWA_GPU_CXX_SOURCES
 
 set(SWA_APU_CXX_SOURCES
     "apu/audio.cpp"
-    "apu/driver/xaudio_driver.cpp"
+    #"apu/driver/xaudio_driver.cpp"
+    "apu/driver/sdl2_driver.cpp"
 )
 
 set(SWA_HID_CXX_SOURCES
