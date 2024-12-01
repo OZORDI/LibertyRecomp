@@ -24,8 +24,8 @@ add_compile_definitions(
     _CRT_SECURE_NO_WARNINGS)
 
 # Generate icon bitmap header for SDL surface.
-BIN2H(SOURCE_FILE "res/icon.bmp" HEADER_FILE "res/icon.h" ARRAY_TYPE "unsigned char" VARIABLE_NAME "g_icon")
-BIN2H(SOURCE_FILE "res/icon_night.bmp" HEADER_FILE "res/icon_night.h" ARRAY_TYPE "unsigned char" VARIABLE_NAME "g_iconNight")
+BIN2H(SOURCE_FILE "../UnleashedRecompResources/images/game_icon.bmp" HEADER_FILE "res/icon.h" ARRAY_TYPE "unsigned char" VARIABLE_NAME "g_icon")
+BIN2H(SOURCE_FILE "../UnleashedRecompResources/images/game_icon_night.bmp" HEADER_FILE "res/icon_night.h" ARRAY_TYPE "unsigned char" VARIABLE_NAME "g_iconNight")
 
 set(SWA_PRECOMPILED_HEADERS
     "stdafx.h"
@@ -133,7 +133,7 @@ set(SWA_CXX_SOURCES
 
 if (WIN32)
     # Set up Win32 resources for application icon.
-    set(ICON_PATH "${PROJECT_SOURCE_DIR}/res/win32/icon.ico")
+    set(ICON_PATH "${PROJECT_SOURCE_DIR}/../UnleashedRecompResources/images/game_icon.ico")
     configure_file("res/win32/res.rc" "${CMAKE_BINARY_DIR}/res.rc" @ONLY)
     add_executable(UnleashedRecomp ${SWA_CXX_SOURCES} "${CMAKE_BINARY_DIR}/res.rc")
 else()
