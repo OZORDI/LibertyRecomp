@@ -5,6 +5,12 @@
 #include <ui/window_events.h>
 #include <cfg/config.h>
 
+#if _WIN32
+#include <dwmapi.h>
+#include <kernel/platform.h>
+#pragma comment(lib, "dwmapi.lib")
+#endif
+
 #define DEFAULT_WIDTH 1280
 #define DEFAULT_HEIGHT 720
 
@@ -68,6 +74,23 @@ public:
         }
 
         SDL_SetWindowTitle(s_pWindow, title);
+    }
+
+    static void SetDarkTitleBar(bool isEnabled)
+    {
+#if _WIN32
+        auto version = GetPlatformVersion();
+
+        if (version.Major < 10 || version.Build <= 17763)
+            return;
+
+        auto flag = version.Build >= 18985
+            ? DWMWA_USE_IMMERSIVE_DARK_MODE
+            : 19; // DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1
+
+        const DWORD useImmersiveDarkMode = isEnabled;
+        DwmSetWindowAttribute(s_handle, flag, &useImmersiveDarkMode, sizeof(useImmersiveDarkMode));
+#endif
     }
 
     static bool IsFullscreen()
@@ -139,7 +162,7 @@ public:
 
     static uint32_t GetWindowFlags()
     {
-        uint32_t flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
+        uint32_t flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE;
 
         if (Config::WindowState == EWindowState::Maximised)
             flags |= SDL_WINDOW_MAXIMIZED;
