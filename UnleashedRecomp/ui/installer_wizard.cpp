@@ -432,9 +432,6 @@ static void DrawLeftImage()
     ImVec2 min = { Scale(IMAGE_X), Scale(IMAGE_Y) };
     ImVec2 max = { Scale(IMAGE_X + IMAGE_WIDTH), Scale(IMAGE_Y + IMAGE_HEIGHT) };
     drawList->AddImage(guestTexture, min, max, ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
-
-    min.y = (min.y + max.y) / 2.0f;
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32_BLACK_TRANS, IM_COL32_BLACK_TRANS, IM_COL32(0, 0, 0, 255), IM_COL32(0, 0, 0, 255));
 }
 
 static void DrawHeaderIconsForInstallPhase(double iconsPosX, double iconsPosY, double iconsScale)
