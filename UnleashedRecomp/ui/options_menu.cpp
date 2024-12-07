@@ -236,6 +236,7 @@ static void ResetSelection()
     g_upWasHeld = false;
     g_rightWasHeld = false;
     g_downWasHeld = false;
+    g_canReset = false;
 }
 
 static bool DrawCategories()
