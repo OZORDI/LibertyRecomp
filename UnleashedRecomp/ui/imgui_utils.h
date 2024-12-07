@@ -88,15 +88,15 @@ static void DrawPauseContainer(GuestTexture* texture, ImVec2 min, ImVec2 max, fl
     auto commonHeight = Scale(35);
     auto bottomHeight = Scale(5);
 
-    auto tl = PIXELS_TO_UV_COORDS(512, 512, 0, 0, 35, 35);
-    auto tc = PIXELS_TO_UV_COORDS(512, 512, 51, 0, 5, 35);
-    auto tr = PIXELS_TO_UV_COORDS(512, 512, 70, 0, 35, 35);
-    auto cl = PIXELS_TO_UV_COORDS(512, 512, 0, 35, 35, 235);
-    auto cc = PIXELS_TO_UV_COORDS(512, 512, 51, 35, 5, 235);
-    auto cr = PIXELS_TO_UV_COORDS(512, 512, 70, 35, 35, 235);
-    auto bl = PIXELS_TO_UV_COORDS(512, 512, 0, 270, 35, 40);
-    auto bc = PIXELS_TO_UV_COORDS(512, 512, 51, 270, 5, 40);
-    auto br = PIXELS_TO_UV_COORDS(512, 512, 70, 270, 35, 40);
+    auto tl = PIXELS_TO_UV_COORDS(128, 512, 0, 0, 35, 35);
+    auto tc = PIXELS_TO_UV_COORDS(128, 512, 51, 0, 5, 35);
+    auto tr = PIXELS_TO_UV_COORDS(128, 512, 70, 0, 35, 35);
+    auto cl = PIXELS_TO_UV_COORDS(128, 512, 0, 35, 35, 235);
+    auto cc = PIXELS_TO_UV_COORDS(128, 512, 51, 35, 5, 235);
+    auto cr = PIXELS_TO_UV_COORDS(128, 512, 70, 35, 35, 235);
+    auto bl = PIXELS_TO_UV_COORDS(128, 512, 0, 270, 35, 40);
+    auto bc = PIXELS_TO_UV_COORDS(128, 512, 51, 270, 5, 40);
+    auto br = PIXELS_TO_UV_COORDS(128, 512, 70, 270, 35, 40);
 
     auto colour = IM_COL32(255, 255, 255, 255 * alpha);
 
@@ -117,9 +117,9 @@ static void DrawPauseHeaderContainer(GuestTexture* texture, ImVec2 min, ImVec2 m
 
     auto commonWidth = Scale(35);
 
-    auto left = PIXELS_TO_UV_COORDS(512, 512, 0, 314, 35, 60);
-    auto centre = PIXELS_TO_UV_COORDS(512, 512, 51, 314, 5, 60);
-    auto right = PIXELS_TO_UV_COORDS(512, 512, 70, 314, 35, 60);
+    auto left = PIXELS_TO_UV_COORDS(128, 512, 0, 314, 35, 60);
+    auto centre = PIXELS_TO_UV_COORDS(128, 512, 51, 314, 5, 60);
+    auto right = PIXELS_TO_UV_COORDS(128, 512, 70, 314, 35, 60);
 
     auto colour = IM_COL32(255, 255, 255, 255 * alpha);
 
