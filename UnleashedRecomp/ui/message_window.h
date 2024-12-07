@@ -1,5 +1,8 @@
 #pragma once
 
+#define MSG_OPEN   (false)
+#define MSG_CLOSED (true)
+
 class MessageWindow
 {
 public:

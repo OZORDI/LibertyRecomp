@@ -227,6 +227,30 @@ inline static std::unordered_map<std::string, std::unordered_map<ELanguage, std:
         }
     },
     {
+        "Installer_Message_TitleMissingDLC",
+        {
+            { ELanguage::English, "This will restart the game to\nallow you to install any DLC\nthat you are missing.\n\nInstalling DLC will improve the\nlighting quality across the game.\n\nWould you like to install missing\ncontent?" }
+        }
+    },
+    {
+        "Installer_Message_Title",
+        {
+            { ELanguage::English, "This restarts the game to\nallow you to install any DLC\nthat you may be missing.\n\nYou are not currently\nmissing any DLC.\n\nWould you like to proceed\nanyway?" }
+        }
+    },
+    {
+        "Common_Yes",
+        {
+            { ELanguage::English, "Yes" }
+        }
+    },
+    {
+        "Common_No",
+        {
+            { ELanguage::English, "No" }
+        }
+    },
+    {
         "Common_Next",
         {
             { ELanguage::English, "Next" }

@@ -1315,7 +1315,7 @@ static void DrawMessagePrompt()
     bool messageWindowReturned = false;
     if (g_currentMessagePromptConfirmation)
     {
-        std::array<std::string, 2> YesNoButtons = { "Yes", "No" };
+        std::array<std::string, 2> YesNoButtons = { Localise("Common_Yes"), Localise("Common_No") };
         messageWindowReturned = MessageWindow::Open(g_currentMessagePrompt, &g_currentMessageResult, YesNoButtons, 1);
     }
     else

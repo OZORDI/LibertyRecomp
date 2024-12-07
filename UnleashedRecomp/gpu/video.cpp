@@ -12,6 +12,7 @@
 #include <ui/achievement_menu.h>
 #include <ui/achievement_overlay.h>
 #include <ui/button_guide.h>
+#include <ui/fader.h>
 #include <ui/message_window.h>
 #include <ui/options_menu.h>
 #include <ui/installer_wizard.h>
@@ -1796,6 +1797,7 @@ static void DrawImGui()
     OptionsMenu::Draw();
     AchievementOverlay::Draw();
     InstallerWizard::Draw();
+    Fader::Draw();
     MessageWindow::Draw();
     ButtonGuide::Draw();
 

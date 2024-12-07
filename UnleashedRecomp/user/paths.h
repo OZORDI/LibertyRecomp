@@ -2,6 +2,11 @@
 
 #define USER_DIRECTORY "SWA"
 
+static std::filesystem::path GetGamePath()
+{
+    return std::filesystem::current_path();
+}
+
 static std::filesystem::path GetUserPath()
 {
     if (std::filesystem::exists("portable.txt"))

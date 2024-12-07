@@ -114,6 +114,7 @@ set(SWA_UI_CXX_SOURCES
     "ui/achievement_overlay.cpp"
     "ui/installer_wizard.cpp"
     "ui/button_guide.cpp"
+    "ui/fader.cpp"
     "ui/message_window.cpp"
     "ui/options_menu.cpp"
     "ui/sdl_listener.cpp"

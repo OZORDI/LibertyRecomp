@@ -65,6 +65,9 @@ public:
         {
             case SDL_KEYDOWN:
             {
+                if (g_isAppInit)
+                    break;
+
                 switch (event->key.keysym.scancode)
                 {
                     case SDL_SCANCODE_UP:
@@ -89,8 +92,14 @@ public:
             }
 
             case SDL_MOUSEBUTTONDOWN:
+            {
+                if (g_isAppInit)
+                    break;
+
                 g_isAccepted = true;
+
                 break;
+            }
 
             case SDL_CONTROLLERBUTTONDOWN:
             {
@@ -177,7 +186,7 @@ bool DrawContainer(float appearTime, ImVec2 centre, ImVec2 max, bool isForegroun
         g_foregroundCount++;
 
     if (isForeground)
-        drawList->AddRectFilled({ 0.0f, 0.0f }, ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 223 * (g_foregroundCount ? 1 : alpha)));
+        drawList->AddRectFilled({ 0.0f, 0.0f }, ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 190 * (g_foregroundCount ? 1 : alpha)));
 
     DrawPauseContainer(g_upWindow.get(), _min, _max, alpha);
 
@@ -264,8 +273,8 @@ void MessageWindow::Draw()
     auto textMarginX = Scale(37);
     auto textMarginY = Scale(45);
 
-    bool isController = hid::detail::g_inputDevice == hid::detail::EInputDevice::Controller;
-    bool isKeyboard = hid::detail::g_inputDevice == hid::detail::EInputDevice::Keyboard;
+    bool isController = g_isAppInit ? true : hid::detail::g_inputDevice == hid::detail::EInputDevice::Controller;
+    bool isKeyboard = g_isAppInit ? false : hid::detail::g_inputDevice == hid::detail::EInputDevice::Keyboard;
 
     if (DrawContainer(g_appearTime, centre, { textSize.x / 2 + textMarginX, textSize.y / 2 + textMarginY }, !g_isControlsVisible))
     {
@@ -328,14 +337,6 @@ void MessageWindow::Draw()
                     g_upWasHeld = upIsHeld;
                     g_downWasHeld = downIsHeld;
 
-                    if (g_isDeclined)
-                    {
-                        g_result = g_cancelButtonIndex;
-
-                        Game_PlaySound("sys_actstg_pausecansel");
-                        MessageWindow::Close();
-                    }
-
                     if (isController)
                     {
                         std::array<Button, 2> buttons =
@@ -349,6 +350,14 @@ void MessageWindow::Draw()
                     else
                     {
                         ButtonGuide::Open(Button(Localise("Common_Select"), EButtonIcon::Enter));
+                    }
+
+                    if (g_isDeclined)
+                    {
+                        g_result = g_cancelButtonIndex;
+
+                        Game_PlaySound("sys_actstg_pausecansel");
+                        MessageWindow::Close();
                     }
                 }
                 else
@@ -441,6 +450,7 @@ bool MessageWindow::Open(std::string text, int* result, std::span<std::string> b
 
     *result = g_result;
 
+    // Returns true when the message window is closed.
     return !g_isAwaitingResult;
 }
 

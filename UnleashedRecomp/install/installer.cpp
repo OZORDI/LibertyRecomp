@@ -18,7 +18,7 @@
 static const std::string GameDirectory = "game";
 static const std::string DLCDirectory = "dlc";
 static const std::string ApotosShamarDirectory = DLCDirectory + "/Apotos & Shamar Adventure Pack";
-static const std::string ChunnanDirectory = DLCDirectory + "/Chunnan Adventure Pack";
+static const std::string ChunnanDirectory = DLCDirectory + "/Chun-nan Adventure Pack";
 static const std::string EmpireCityAdabatDirectory = DLCDirectory + "/Empire City & Adabat Adventure Pack";
 static const std::string HoloskaDirectory = DLCDirectory + "/Holoska Adventure Pack";
 static const std::string MazuriDirectory = DLCDirectory + "/Mazuri Adventure Pack";
@@ -220,6 +220,19 @@ bool Installer::checkDLCInstall(const std::filesystem::path &baseDirectory, DLC 
     default:
         return false;
     }
+}
+
+bool Installer::checkAllDLC(const std::filesystem::path& baseDirectory)
+{
+    bool result = true;
+
+    for (int i = 1; i < (int)DLC::Count; i++)
+    {
+        if (!checkDLCInstall(baseDirectory, (DLC)i))
+            result = false;
+    }
+
+    return result;
 }
 
 bool Installer::computeTotalSize(std::span<const FilePair> filePairs, const uint64_t *fileHashes, VirtualFileSystem &sourceVfs, Journal &journal, uint64_t &totalSize)
