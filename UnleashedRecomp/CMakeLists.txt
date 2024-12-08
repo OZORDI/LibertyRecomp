@@ -62,15 +62,21 @@ set(SWA_KERNEL_CXX_SOURCES
     "kernel/xdm.cpp"
     "kernel/heap.cpp"
     "kernel/memory.cpp"
-    "kernel/platform.cpp"
     "kernel/xam.cpp"
     "kernel/io/file_system.cpp"
 )
 
 set(SWA_OS_CXX_SOURCES
-    "os/win32/process_win32.cpp"
     "os/process.cpp"
+    "os/version.cpp"
 )
+
+if (WIN32)
+    list(APPEND SWA_OS_CXX_SOURCES
+        "os/win32/process_win32.cpp"
+        "os/win32/version_win32.cpp"
+    )
+endif()
 
 set(SWA_CPU_CXX_SOURCES
     "cpu/guest_thread.cpp"
@@ -89,7 +95,7 @@ set(SWA_APU_CXX_SOURCES
     "apu/audio.cpp"
 )
 
-if(SWA_XAUDIO2)
+if (SWA_XAUDIO2)
     list(APPEND SWA_APU_CXX_SOURCES "apu/driver/xaudio_driver.cpp")
 else()
     list(APPEND SWA_APU_CXX_SOURCES "apu/driver/miniaudio_driver.cpp")

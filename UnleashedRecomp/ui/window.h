@@ -2,12 +2,12 @@
 
 #include <res/images/game_icon.bmp.h>
 #include <res/images/game_icon_night.bmp.h>
+#include <os/version.h>
 #include <ui/window_events.h>
 #include <user/config.h>
 
 #if _WIN32
 #include <dwmapi.h>
-#include <kernel/platform.h>
 #pragma comment(lib, "dwmapi.lib")
 #endif
 
@@ -76,7 +76,7 @@ public:
     static void SetDarkTitleBar(bool isEnabled)
     {
 #if _WIN32
-        auto version = GetPlatformVersion();
+        auto version = os::version::GetOSVersion();
 
         if (version.Major < 10 || version.Build <= 17763)
             return;

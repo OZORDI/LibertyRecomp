@@ -1,14 +1,11 @@
-#include <kernel/platform.h>
+#include <os/version_detail.h>
 
-#if _WIN32
 LIB_FUNCTION(LONG, "ntdll.dll", RtlGetVersion, PRTL_OSVERSIONINFOW);
-#endif
 
-PlatformVersion GetPlatformVersion()
+os::version::detail::OSVersion os::version::detail::GetOSVersion()
 {
-    auto result = PlatformVersion{};
+    auto result = os::version::detail::OSVersion{};
 
-#if _WIN32
     OSVERSIONINFOEXW osvi = { 0 };
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
 
@@ -18,7 +15,6 @@ PlatformVersion GetPlatformVersion()
     result.Major = osvi.dwMajorVersion;
     result.Minor = osvi.dwMinorVersion;
     result.Build = osvi.dwBuildNumber;
-#endif
 
     return result;
 }

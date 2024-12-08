@@ -1,7 +1,7 @@
 #include <cpu/guest_code.h>
 #include <user/config.h>
 #include <kernel/function.h>
-#include <kernel/platform.h>
+#include <os/version.h>
 #include <patches/audio_patches.h>
 #include <api/SWA.h>
 
@@ -13,24 +13,24 @@ using namespace winrt;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::Media::Control;
 
-GlobalSystemMediaTransportControlsSessionManager m_sessionManager = nullptr;
+static GlobalSystemMediaTransportControlsSessionManager g_sessionManager = nullptr;
 
-GlobalSystemMediaTransportControlsSessionManager GetSessionManager()
+static GlobalSystemMediaTransportControlsSessionManager GetSessionManager()
 {
-    if (m_sessionManager)
-        return m_sessionManager;
+    if (g_sessionManager)
+        return g_sessionManager;
 
     init_apartment();
 
-    return m_sessionManager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+    return g_sessionManager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
 }
 
-GlobalSystemMediaTransportControlsSession GetCurrentSession()
+static GlobalSystemMediaTransportControlsSession GetCurrentSession()
 {
     return GetSessionManager().GetCurrentSession();
 }
 
-bool IsExternalAudioPlaying()
+static bool IsExternalAudioPlaying()
 {
     auto session = GetCurrentSession();
 
@@ -43,7 +43,7 @@ bool IsExternalAudioPlaying()
 int AudioPatches::m_isAttenuationSupported = -1;
 #endif
 
-be<float>* GetVolume(bool isMusic = true)
+static be<float>* GetVolume(bool isMusic = true)
 {
     auto ppUnkClass = (be<uint32_t>*)g_memory.Translate(0x83362FFC);
 
@@ -60,7 +60,7 @@ bool AudioPatches::CanAttenuate()
     if (m_isAttenuationSupported >= 0)
         return m_isAttenuationSupported;
 
-    auto version = GetPlatformVersion();
+    auto version = os::version::GetOSVersion();
 
     m_isAttenuationSupported = version.Major >= 10 && version.Build >= 17763;
 

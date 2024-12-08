@@ -1,5 +1,5 @@
-#include "process.h"
-#include "process_detail.h"
+#include <os/process.h>
+#include <os/process_detail.h>
 
 std::filesystem::path os::process::GetExecutablePath()
 {
