@@ -63,5 +63,7 @@ namespace SWA
         be<EMenuType> m_Menu;
         be<EStatusType> m_Status;
         be<ETransitionType> m_Transition;
+        SWA_INSERT_PADDING(0x20);
+        bool m_IsShown;
     };
 }
