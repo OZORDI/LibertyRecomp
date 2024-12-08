@@ -236,6 +236,17 @@ void DrawButton(int rowIndex, float yOffset, float width, float height, std::str
     );
 }
 
+void DrawNextButtonGuide(bool isController, bool isKeyboard)
+{
+    auto icon = isController
+        ? EButtonIcon::A
+        : isKeyboard
+            ? EButtonIcon::Enter
+            : EButtonIcon::LMB;
+
+    ButtonGuide::Open(Button(Localise("Common_Next"), icon));
+}
+
 static void ResetSelection()
 {
     g_selectedRowIndex = g_defaultButtonIndex;
@@ -391,13 +402,7 @@ void MessageWindow::Draw()
             }
             else
             {
-                auto icon = isController
-                    ? EButtonIcon::A
-                    : isKeyboard
-                        ? EButtonIcon::Enter
-                        : EButtonIcon::LMB;
-
-                ButtonGuide::Open(Button(Localise("Common_Next"), icon));
+                DrawNextButtonGuide(isController, isKeyboard);
 
                 if (!g_isControlsVisible && g_isAccepted)
                 {
@@ -411,6 +416,8 @@ void MessageWindow::Draw()
         }
         else
         {
+            DrawNextButtonGuide(isController, isKeyboard);
+
             if (g_isAccepted)
             {
                 g_result = 0;
