@@ -504,6 +504,10 @@ static void DrawConfigOption(int32_t rowIndex, float yOffset, ConfigDef<T>* conf
                 if (g_canReset && padState.IsTapped(SWA::eKeyState_X))
                 {
                     config->MakeDefault();
+
+                    // TODO: check if value was changed?
+                    VideoConfigValueChangedCallback(config);
+
                     Game_PlaySound("sys_worldmap_decide");
                 }
             }
