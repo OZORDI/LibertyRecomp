@@ -8,7 +8,6 @@
 #include <decompressor.h>
 #include <res/images/common/controller.dds.h>
 #include <res/images/common/kbm.dds.h>
-#include <res/images/common/start_back.dds.h>
 
 constexpr float DEFAULT_SIDE_MARGINS = 379;
 
