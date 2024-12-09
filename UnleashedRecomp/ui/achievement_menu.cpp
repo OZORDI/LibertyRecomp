@@ -226,11 +226,12 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
         colTextShadow
     );
 
+    ImVec2 marqueeMin = { textMarqueeX, min.y };
+
+    SetMarqueeFade(marqueeMin, max, Scale(32));
+
     if (isSelected && textX + textSize.x >= max.x - Scale(10))
     {
-        ImVec2 marqueeMin = { textMarqueeX, min.y };
-        SetMarqueeFade(marqueeMin, max, Scale(32.0f));
-
         // Draw achievement description with marquee.
         DrawTextWithMarqueeShadow
         (
@@ -239,17 +240,15 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
             { textX, min.y + descTextY },
             marqueeMin,
             max,
-            isUnlocked ? IM_COL32(255, 255, 255, 255) : colLockedText,
+            isUnlocked ? IM_COL32_WHITE : colLockedText,
             desc,
             g_rowSelectionTime,
             0.9,
-            Scale(250.0),
+            Scale(250),
             shadowOffset,
             0.4f,
             colTextShadow
         );
-
-        ResetMarqueeFade();
     }
     else
     {
@@ -259,13 +258,15 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
             g_fntSeurat,
             fontSize,
             { textX, min.y + descTextY },
-            isUnlocked ? IM_COL32(255, 255, 255, 255) : colLockedText,
+            isUnlocked ? IM_COL32_WHITE : colLockedText,
             desc,
             shadowOffset,
             0.4f,
             colTextShadow
         );
     }
+
+    ResetMarqueeFade();
 
     drawList->PopClipRect();
 
