@@ -178,20 +178,21 @@ static void DrawGuide(float* offset, ImVec2 regionMin, ImVec2 regionMax, EButton
     auto btnIcon = GetButtonIcon(_icon);
     drawList->AddImage(std::get<1>(btnIcon), iconMin, iconMax, GET_UV_COORDS(std::get<0>(btnIcon)));
 
+    auto font = GetFont(fontQuality);
+
     auto textMarginX = alignment == EButtonAlignment::Left
         ? regionMin.x + *offset + dualIconMarginX
         : regionMax.x - *offset - dualIconMarginX * 2;
 
-    DrawTextWithOutline<int>
-    (
-        GetFont(fontQuality),
-        fontSize,
-        { /* X */ textMarginX, /* Y */ regionMin.y + Scale(8) },
-        IM_COL32(255, 255, 255, 255),
-        text,
-        2,
-        IM_COL32(0, 0, 0, 255)
-    );
+    auto textMarginY = regionMin.y + Scale(8);
+
+    ImVec2 textPosition = { textMarginX, textMarginY };
+
+    DrawTextWithOutline<int>(font, fontSize, textPosition, IM_COL32_WHITE, text, 2, IM_COL32_BLACK);
+
+    // Add extra luminance to low quality text.
+    if (fontQuality == EFontQuality::Low)
+        drawList->AddText(font, fontSize, textPosition, IM_COL32(255, 255, 255, 127), text);
 
     if (icon == EButtonIcon::LBRB || icon == EButtonIcon::LTRT)
     {
