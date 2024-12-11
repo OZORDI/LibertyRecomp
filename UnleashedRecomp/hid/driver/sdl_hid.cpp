@@ -169,6 +169,52 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
 {
     switch (event->type)
     {
+        case SDL_CONTROLLERDEVICEADDED:
+        {
+            const auto freeIndex = FindFreeController();
+
+            if (freeIndex != -1)
+                g_controllers[freeIndex] = Controller(event->cdevice.which);
+
+            break;
+        }
+
+        case SDL_CONTROLLERDEVICEREMOVED:
+        {
+            auto* controller = FindController(event->cdevice.which);
+
+            if (controller)
+                controller->Close();
+
+            break;
+        }
+
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+        case SDL_CONTROLLERAXISMOTION:
+        {
+            auto* controller = FindController(event->cdevice.which);
+
+            if (controller)
+            {
+                if (event->type == SDL_CONTROLLERAXISMOTION)
+                {
+                    if (abs(event->caxis.value) > 8000)
+                        SetControllerInputDevice(controller);
+
+                    controller->PollAxis();
+                }
+                else
+                {
+                    SetControllerInputDevice(controller);
+
+                    controller->Poll();
+                }
+            }
+
+            break;
+        }
+
         case SDL_KEYDOWN:
         case SDL_KEYUP:
             hid::detail::g_inputDevice = hid::detail::EInputDevice::Keyboard;
@@ -187,50 +233,6 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
                 // Stop vibrating controllers on focus lost.
                 for (auto& controller : g_controllers)
                     controller.SetVibration({ 0, 0 });
-            }
-
-            break;
-        }
-
-        default:
-        {
-            if (event->type >= SDL_CONTROLLERAXISMOTION && event->type < SDL_FINGERDOWN)
-            {
-                if (event->type == SDL_CONTROLLERDEVICEADDED)
-                {
-                    const auto freeIndex = FindFreeController();
-
-                    if (freeIndex != -1)
-                        g_controllers[freeIndex] = Controller(event->cdevice.which);
-                }
-                if (event->type == SDL_CONTROLLERDEVICEREMOVED)
-                {
-                    auto* controller = FindController(event->cdevice.which);
-
-                    if (controller)
-                        controller->Close();
-                }
-                else if (event->type == SDL_CONTROLLERBUTTONDOWN || event->type == SDL_CONTROLLERBUTTONUP || event->type == SDL_CONTROLLERAXISMOTION)
-                {
-                    auto* controller = FindController(event->cdevice.which);
-
-                    if (controller)
-                    {
-                        if (event->type == SDL_CONTROLLERAXISMOTION)
-                        {
-                            if (abs(event->caxis.value) > 8000)
-                                SetControllerInputDevice(controller);
-
-                            controller->PollAxis();
-                        }
-                        else
-                        {
-                            SetControllerInputDevice(controller);
-
-                            controller->Poll();
-                        }
-                    }
-                }
             }
 
             break;
