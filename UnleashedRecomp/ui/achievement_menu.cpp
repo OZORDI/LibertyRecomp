@@ -205,13 +205,14 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
 
     drawList->PushClipRect(min, max, true);
 
-    auto colLockedText = IM_COL32(60, 60, 60, 29);
+    auto colLockedText = IM_COL32(80, 80, 80, 127);
 
     auto colTextShadow = isUnlocked
         ? IM_COL32(0, 0, 0, 255)
-        : IM_COL32(60, 60, 60, 28);
+        : IM_COL32(20, 20, 20, 127);
 
     auto shadowOffset = isUnlocked ? 2 : 1;
+    auto shadowRadius = isUnlocked ? 1 : 0.5f;
 
     // Draw achievement name.
     DrawTextWithShadow
@@ -222,13 +223,14 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
         isUnlocked ? IM_COL32(252, 243, 5, 255) : colLockedText,
         achievement.Name.c_str(),
         shadowOffset,
-        1.0f,
+        shadowRadius,
         colTextShadow
     );
 
     ImVec2 marqueeMin = { textMarqueeX, min.y };
+    ImVec2 marqueeMax = { max.x - Scale(10) /* timestamp margin X */, max.y };
 
-    SetMarqueeFade(marqueeMin, max, Scale(32));
+    SetMarqueeFade(marqueeMin, marqueeMax, Scale(32));
 
     if (isSelected && textX + textSize.x >= max.x - Scale(10))
     {
@@ -239,14 +241,14 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
             fontSize,
             { textX, min.y + descTextY },
             marqueeMin,
-            max,
+            marqueeMax,
             isUnlocked ? IM_COL32_WHITE : colLockedText,
             desc,
             g_rowSelectionTime,
             0.9,
             Scale(250),
             shadowOffset,
-            0.4f,
+            shadowRadius,
             colTextShadow
         );
     }
@@ -261,7 +263,7 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
             isUnlocked ? IM_COL32_WHITE : colLockedText,
             desc,
             shadowOffset,
-            1.0f,
+            shadowRadius,
             colTextShadow
         );
     }
