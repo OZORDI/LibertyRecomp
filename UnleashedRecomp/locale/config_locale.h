@@ -133,7 +133,7 @@ CONFIG_DEFINE_ENUM_LOCALE(ETimeOfDayTransition)
 
 CONFIG_DEFINE_LOCALE(ControllerIcons)
 {
-    { ELanguage::English, { "Controller Icons", "[PLACEHOLDER]" } }
+    { ELanguage::English, { "Controller Icons", "Change the icons to match your controller." } }
 };
 
 CONFIG_DEFINE_ENUM_LOCALE(EControllerIcons)
@@ -141,8 +141,8 @@ CONFIG_DEFINE_ENUM_LOCALE(EControllerIcons)
     {
         ELanguage::English,
         {
-            { EControllerIcons::Xbox,        { "XBOX", "[PLACEHOLDER]" } },
-            { EControllerIcons::PlayStation, { "PLAYSTATION", "[PLACEHOLDER]" } }
+            { EControllerIcons::Xbox,        { "XBOX", "" } },
+            { EControllerIcons::PlayStation, { "PLAYSTATION", "" } }
         }
     }
 };
@@ -245,12 +245,12 @@ CONFIG_DEFINE_LOCALE(Fullscreen)
 
 CONFIG_DEFINE_LOCALE(VSync)
 {
-    { ELanguage::English, { "V-Sync", "[PLACEHOLDER]" } }
+    { ELanguage::English, { "V-Sync", "Synchronize the game to the refresh rate of the display to prevent screen tearing." } }
 };
 
 CONFIG_DEFINE_LOCALE(FPS)
 {
-    { ELanguage::English, { "FPS", "[PLACEHOLDER]" } }
+    { ELanguage::English, { "FPS", "Set the max frame rate the game can run at.\n\nWARNING: this may introduce glitches at frame rates higher than 60 FPS." } }
 };
 
 CONFIG_DEFINE_LOCALE(Brightness)
@@ -280,7 +280,7 @@ CONFIG_DEFINE_LOCALE(TransparencyAntiAliasing)
 
 CONFIG_DEFINE_LOCALE(ShadowResolution)
 {
-    { ELanguage::English, { "Shadow Resolution", "[PLACEHOLDER]" } }
+    { ELanguage::English, { "Shadow Resolution", "Set the quality level of real-time shadows." } }
 };
 
 CONFIG_DEFINE_ENUM_LOCALE(EShadowResolution)
@@ -289,13 +289,15 @@ CONFIG_DEFINE_ENUM_LOCALE(EShadowResolution)
         ELanguage::English,
         {
             { EShadowResolution::Original, { "ORIGINAL", "Original: the game will automatically determine the resolution of the shadows." } },
+            { EShadowResolution::x4096,    { "4096", "High resolutions can degrade performance significantly on lower end hardware." } },
+            { EShadowResolution::x8192,    { "8192", "High resolutions can degrade performance significantly on lower end hardware." } },
         }
     }
 };
 
 CONFIG_DEFINE_LOCALE(GITextureFiltering)
 {
-    { ELanguage::English, { "GI Texture Filtering", "[PLACEHOLDER]" } }
+    { ELanguage::English, { "GI Texture Filtering", "Change the quality of the filtering used for global illumination textures." } }
 };
 
 CONFIG_DEFINE_ENUM_LOCALE(EGITextureFiltering)
