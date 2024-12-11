@@ -363,6 +363,94 @@ static void DrawAchievement(int rowIndex, float yOffset, Achievement& achievemen
     drawList->PopClipRect();
 }
 
+static void DrawTrophySparkles(ImVec2 min, ImVec2 max, int recordCount, int trophyFrameIndex)
+{
+    auto drawList = ImGui::GetForegroundDrawList();
+
+    constexpr auto recordsHalfTotal = ACH_RECORDS / 2;
+
+    // Don't sparkle the bronze trophy.
+    if (recordCount < recordsHalfTotal)
+        return;
+
+    static int trophyAnimCycles = 0;
+    static bool isIncrementedCycles = false;
+
+    bool isGoldTrophy = recordCount >= ACH_RECORDS;
+
+    if (!trophyFrameIndex && !isIncrementedCycles)
+    {
+        trophyAnimCycles++;
+        trophyAnimCycles %= isGoldTrophy ? 4 : 3;
+        isIncrementedCycles = true;
+    }
+
+    if (trophyFrameIndex >= 1)
+        isIncrementedCycles = false;
+
+    if (trophyAnimCycles >= 2)
+    {
+        auto marginX = Scale(9);
+        auto uv = PIXELS_TO_UV_COORDS(2048, 1024, 1984, 960, 64, 64);
+        auto& uv0 = std::get<0>(uv);
+        auto& uv1 = std::get<1>(uv);
+        auto colour = IM_COL32(240, 240, 200, 200);
+
+        static auto scaleStart = ImGui::GetTime();
+        auto scale = Scale(18) * Hermite(1.0f, 0.0f, (sin((ImGui::GetTime() - scaleStart) * (2.0f * M_PI / (15.0f / 60.0f))) + 1.0f) / 2.0f);
+
+        // Don't do extra sparkles for the silver trophy.
+        if (isGoldTrophy)
+        {
+            if (trophyFrameIndex >= 0 && trophyFrameIndex <= 5)
+            {
+                auto marginXAdd = Scale(1);
+
+                // Centre Left
+                drawList->AddImage
+                (
+                    g_upTrophyIcon.get(),
+                    { min.x - scale / 2 + marginX + marginXAdd, max.y - ((max.y - min.y) / 2) - scale / 2 },
+                    { min.x + scale / 2 + marginX + marginXAdd, max.y - ((max.y - min.y) / 2) + scale / 2 },
+                    uv0, uv1,
+                    colour
+                );
+            }
+
+            if (trophyFrameIndex >= 16 && trophyFrameIndex <= 21)
+            {
+                auto marginXAdd = Scale(4);
+                auto marginY = Scale(11);
+
+                // Bottom Right
+                drawList->AddImage
+                (
+                    g_upTrophyIcon.get(),
+                    { max.x - scale / 2 - (marginX + marginXAdd), max.y - scale / 2 - marginY },
+                    { max.x + scale / 2 - (marginX + marginXAdd), max.y + scale / 2 - marginY },
+                    uv0, uv1,
+                    colour
+                );
+            }
+        }
+        
+        if (trophyFrameIndex >= 24 && trophyFrameIndex <= 29)
+        {
+            auto marginY = Scale(1);
+
+            // Top Right
+            drawList->AddImage
+            (
+                g_upTrophyIcon.get(),
+                { max.x - scale / 2 - marginX, min.y - scale / 2 + marginY },
+                { max.x + scale / 2 - marginX, min.y + scale / 2 + marginY },
+                uv0, uv1,
+                colour
+            );
+        }
+    }
+}
+
 static void DrawAchievementTotal(ImVec2 min, ImVec2 max)
 {
     auto drawList = ImGui::GetForegroundDrawList();
@@ -388,30 +476,48 @@ static void DrawAchievementTotal(ImVec2 min, ImVec2 max)
     auto uv0 = ImVec2(columnIndex * spriteSize / textureWidth, rowIndex * spriteSize / textureHeight);
     auto uv1 = ImVec2((columnIndex + 1) * spriteSize / textureWidth, (rowIndex + 1) * spriteSize / textureHeight);
 
+    constexpr auto recordsHalfTotal = ACH_RECORDS / 2;
     auto records = AchievementData::GetTotalRecords();
-    auto colour = IM_COL32(255, 255, 255, 255 * alpha);
 
-    if (records <= 24)
+    ImVec4 colBronze = ImGui::ColorConvertU32ToFloat4(IM_COL32(198, 105, 15, 255 * alpha));
+    ImVec4 colSilver = ImGui::ColorConvertU32ToFloat4(IM_COL32(220, 220, 220, 255 * alpha));
+    ImVec4 colGold   = ImGui::ColorConvertU32ToFloat4(IM_COL32(255, 195, 56, 255 * alpha));
+    ImVec4 colResult;
+
+    if (records <= 25)
     {
-        // Bronze
-        colour = IM_COL32(198, 105, 15, 255 * alpha);
+        float t = (float)records / 25.0f;
+
+        // Fade from bronze to silver.
+        colResult.x = colBronze.x + t * (colSilver.x - colBronze.x);
+        colResult.y = colBronze.y + t * (colSilver.y - colBronze.y);
+        colResult.z = colBronze.z + t * (colSilver.z - colBronze.z);
+        colResult.w = colBronze.w + t * (colSilver.w - colBronze.w);
     }
-    else if (records > 24 && records <= 49)
+    else if (records <= 50)
     {
-        // Silver
-        colour = IM_COL32(220, 220, 220, 255 * alpha);
+        float t = ((float)records - 25.0f) / 25.0f;
+
+        // Fade from silver to gold.
+        colResult.x = colSilver.x + t * (colGold.x - colSilver.x);
+        colResult.y = colSilver.y + t * (colGold.y - colSilver.y);
+        colResult.z = colSilver.z + t * (colGold.z - colSilver.z);
+        colResult.w = colSilver.w + t * (colGold.w - colSilver.w);
     }
-    else if (records > 49 && records <= 50)
+    else
     {
-        // Gold
-        colour = IM_COL32(255, 195, 56, 255 * alpha);
+        colResult = colGold;
     }
 
-    drawList->AddImage(g_upTrophyIcon.get(), imageMin, imageMax, uv0, uv1, colour);
+    drawList->AddImage(g_upTrophyIcon.get(), imageMin, imageMax, uv0, uv1, ImGui::ColorConvertFloat4ToU32(colResult));
 
     // Add extra luminance to the trophy for bronze and gold.
-    if (records <= 24 || records <= 50)
+    if (records < recordsHalfTotal || records >= ACH_RECORDS)
         drawList->AddImage(g_upTrophyIcon.get(), imageMin, imageMax, uv0, uv1, IM_COL32(255, 255, 255, 12));
+
+    // Draw sparkles on the trophy for silver and gold.
+    if (records >= recordsHalfTotal || records >= ACH_RECORDS)
+        DrawTrophySparkles(imageMin, imageMax, records, frameIndex);
 
     auto str = std::format("{} / {}", records, ACH_RECORDS);
     auto fontSize = Scale(20);
