@@ -794,7 +794,12 @@ void AchievementMenu::Open()
     g_achievements.clear();
 
     for (auto& achievement : g_xdbfWrapper.GetAchievements((EXDBFLanguage)Config::Language.Value))
+    {
+        if (Config::Language == ELanguage::English)
+            achievement.Name = xdbf::FixInvalidSequences(achievement.Name);
+
         g_achievements.push_back(std::make_tuple(achievement, AchievementData::GetTimestamp(achievement.ID)));
+    }
 
     std::sort(g_achievements.begin(), g_achievements.end(), [](const auto& a, const auto& b)
     {

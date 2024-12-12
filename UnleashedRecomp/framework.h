@@ -75,7 +75,7 @@ constexpr size_t FirstBitLow(TValue value)
     return 0;
 }
 
-static std::unique_ptr<uint8_t[]> ReadAllBytes(const char* filePath, size_t& fileSize)
+inline static std::unique_ptr<uint8_t[]> ReadAllBytes(const char* filePath, size_t& fileSize)
 {
     FILE* file = fopen(filePath, "rb");
 

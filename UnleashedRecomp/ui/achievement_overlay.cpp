@@ -178,6 +178,9 @@ void AchievementOverlay::Open(int id)
     g_appearTime = ImGui::GetTime();
     g_achievement = g_xdbfWrapper.GetAchievement((EXDBFLanguage)Config::Language.Value, id);
 
+    if (Config::Language == ELanguage::English)
+        g_achievement.Name = xdbf::FixInvalidSequences(g_achievement.Name);
+
     Game_PlaySound("obj_navi_appear");
 }
 
