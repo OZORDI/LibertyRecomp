@@ -7,11 +7,6 @@ HANDLE g_hStandardOutput = nullptr;
 
 void os::logger::detail::Log(const std::string& str, detail::ELogType type, const char* func)
 {
-#if !_DEBUG
-    if (type == ELogType::Utility)
-        return;
-#endif
-
     if (!g_hStandardOutput)
         g_hStandardOutput = GetStdHandle(STD_OUTPUT_HANDLE);
 
