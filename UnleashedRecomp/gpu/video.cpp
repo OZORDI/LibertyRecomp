@@ -34,7 +34,7 @@
 #include <magic_enum.hpp>
 #endif
 
-#include "../../thirdparty/ShaderRecomp/ShaderRecomp/shader_common.h"
+#include "../../tools/ShaderRecomp/ShaderRecomp/shader_common.h"
 #include "shader/copy_vs.hlsl.dxil.h"
 #include "shader/copy_vs.hlsl.spirv.h"
 #include "shader/csd_filter_ps.hlsl.dxil.h"

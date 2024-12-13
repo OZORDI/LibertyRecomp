@@ -1,4 +1,4 @@
-#include "../../../thirdparty/ShaderRecomp/ShaderRecomp/shader_common.h"
+#include "../../../tools/ShaderRecomp/ShaderRecomp/shader_common.h"
 
 #ifdef __spirv__
 

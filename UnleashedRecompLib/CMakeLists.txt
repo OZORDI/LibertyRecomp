@@ -25,7 +25,7 @@ add_custom_command(
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xex" "${CMAKE_CURRENT_SOURCE_DIR}/config/SWA.toml"
 )
 
-set(SHADER_RECOMP_ROOT "${SWA_THIRDPARTY_ROOT}/ShaderRecomp/ShaderRecomp")
+set(SHADER_RECOMP_ROOT "${SWA_TOOLS_ROOT}/ShaderRecomp/ShaderRecomp")
 set(SHADER_RECOMP_INCLUDE "${SHADER_RECOMP_ROOT}/shader_common.h")
 
 target_compile_definitions(ShaderRecomp PRIVATE 

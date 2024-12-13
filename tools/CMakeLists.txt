@@ -1,2 +1,5 @@
-add_subdirectory(${SWA_TOOLS_ROOT}/file_to_c)
 add_subdirectory(${SWA_TOOLS_ROOT}/bc_diff)
+add_subdirectory(${SWA_TOOLS_ROOT}/file_to_c)
+add_subdirectory(${SWA_TOOLS_ROOT}/fshasher)
+add_subdirectory(${SWA_TOOLS_ROOT}/PowerRecomp)
+add_subdirectory(${SWA_TOOLS_ROOT}/ShaderRecomp)

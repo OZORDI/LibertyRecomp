@@ -163,7 +163,7 @@ set(LIBMSPACK_C_SOURCES
 
 set_source_files_properties(${LIBMSPACK_C_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-set(SMOLV_SOURCE_DIR "${SWA_THIRDPARTY_ROOT}/ShaderRecomp/thirdparty/smol-v/source")
+set(SMOLV_SOURCE_DIR "${SWA_TOOLS_ROOT}/ShaderRecomp/thirdparty/smol-v/source")
 set(BC_DIFF_SOURCE_DIR "${SWA_TOOLS_ROOT}/bc_diff")
 
 set(MINIAUDIO_INCLUDE_DIRS "${SWA_THIRDPARTY_ROOT}/miniaudio")

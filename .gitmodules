@@ -1,11 +1,11 @@
 [submodule "thirdparty/PowerRecomp"]
-	path = thirdparty/PowerRecomp
+	path = tools/PowerRecomp
 	url = https://github.com/hedge-dev/PowerRecomp
 [submodule "thirdparty/ddspp"]
 	path = thirdparty/ddspp
 	url = https://github.com/redorav/ddspp.git
 [submodule "thirdparty/ShaderRecomp"]
-	path = thirdparty/ShaderRecomp
+	path = tools/ShaderRecomp
 	url = https://github.com/hedge-dev/ShaderRecomp.git
 [submodule "thirdparty/libmspack"]
 	path = thirdparty/libmspack
