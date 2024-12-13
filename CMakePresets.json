@@ -40,6 +40,14 @@
             }
         },
         {
+            "name": "x64-Clang-RelWithDebInfo",
+            "displayName": "RelWithDebInfo",
+            "inherits": "x64-Clang-Debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
             "name": "x64-Clang-Release",
             "displayName": "Release",
             "inherits": "x64-Clang-Debug",
