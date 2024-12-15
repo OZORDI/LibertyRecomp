@@ -1104,6 +1104,7 @@ static void InstallerStart()
 {
     g_currentPage = WizardPage::Installing;
     g_installerStartTime = ImGui::GetTime();
+    g_installerEndTime = DBL_MAX;
     g_installerProgressRatioCurrent = 0.0f;
     g_installerProgressRatioTarget = 0.0f;
     g_installerFailed = false;
