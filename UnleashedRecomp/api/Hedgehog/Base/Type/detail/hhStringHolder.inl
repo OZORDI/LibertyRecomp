@@ -61,7 +61,7 @@ namespace Hedgehog::Base
             decrementedValue = ByteSwap(ByteSwap(originalValue) - 1);
         } while (InterlockedCompareExchange(reinterpret_cast<LONG*>(&RefCountAndLength), decrementedValue, originalValue) != originalValue);
 
-        if (RefCountAndLength == 0)
+        if ((decrementedValue & 0xFFFF0000) == 0)
             __HH_FREE(this);
     }
 
