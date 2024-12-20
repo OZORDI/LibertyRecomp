@@ -10,11 +10,129 @@
 #include <memory>
 #include "xam.h"
 #include "xdm.h"
-#include <timeapi.h>
 #include <user/config.h>
 #include <os/logger.h>
 
+#ifdef _WIN32
 #include <ntstatus.h>
+#endif
+
+struct Event final : KernelObject, HostObject<XKEVENT>
+{
+    bool manualReset;
+    std::atomic<bool> signaled;
+
+    Event(XKEVENT* header)
+        : manualReset(!header->Type), signaled(!!header->SignalState)
+    {
+    }
+
+    Event(bool manualReset, bool initialState)
+        : manualReset(manualReset), signaled(initialState)
+    {
+    }
+
+    uint32_t Wait(uint32_t timeout) override
+    {
+        if (timeout == 0)
+        {
+            if (manualReset)
+            {
+                if (!signaled)
+                    return STATUS_TIMEOUT;
+            }
+            else
+            {
+                bool expected = true;
+                if (!signaled.compare_exchange_strong(expected, false))
+                    return STATUS_TIMEOUT;
+            }
+        }
+        else if (timeout == INFINITE)
+        {
+            if (manualReset)
+            {
+                signaled.wait(false);
+            }
+            else
+            {
+                while (true)
+                {
+                    bool expected = true;
+                    if (signaled.compare_exchange_weak(expected, false))
+                        break;
+
+                    signaled.wait(expected);
+                }
+            }
+        }
+        else
+        {
+            assert(false && "Unhandled timeout value.");
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    bool Set()
+    {
+        signaled = true;
+
+        if (manualReset)
+            signaled.notify_all();
+        else
+            signaled.notify_one();
+
+        return TRUE;
+    }
+
+    bool Reset()
+    {
+        signaled = false;
+        return TRUE;
+    }
+};
+
+static std::atomic<uint32_t> g_keSetEventGeneration;
+
+struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
+{
+    std::counting_semaphore<> semaphore;
+    uint32_t maximumCount;
+
+    Semaphore(XKSEMAPHORE* semaphore)
+        : semaphore(semaphore->Header.SignalState), maximumCount(semaphore->Limit)
+    {
+    }
+
+    Semaphore(uint32_t count, uint32_t maximumCount)
+        : semaphore(count), maximumCount(maximumCount)
+    {
+    }
+
+    uint32_t Wait(uint32_t timeout) override
+    {
+        if (timeout == 0)
+        {
+            return semaphore.try_acquire() ? STATUS_SUCCESS : STATUS_TIMEOUT;
+        }
+        else if (timeout == INFINITE)
+        {
+            semaphore.acquire();
+            return STATUS_SUCCESS;
+        }
+        else
+        {
+            assert(false && "Unhandled timeout value.");
+            return STATUS_TIMEOUT;
+        }
+    }
+
+    void Release(uint32_t releaseCount, uint32_t* previousCount)
+    {
+        semaphore.release(releaseCount);
+    }
+};
 
 inline void CloseKernelObject(XDISPATCHER_HEADER& header)
 {
@@ -23,10 +141,10 @@ inline void CloseKernelObject(XDISPATCHER_HEADER& header)
         return;
     }
 
-    ObCloseHandle(header.WaitListHead.Blink);
+    DestroyKernelObject(header.WaitListHead.Blink);
 }
 
-DWORD GuestTimeoutToMilliseconds(XLPQWORD timeout)
+uint32_t GuestTimeoutToMilliseconds(be<int64_t>* timeout)
 {
     return timeout ? (*timeout * -1) / 10000 : INFINITE;
 }
@@ -84,7 +202,7 @@ uint32_t XGetGameRegion()
     return 0x03FF;
 }
 
-uint32_t XMsgStartIORequest(DWORD App, DWORD Message, XXOVERLAPPED* lpOverlapped, void* Buffer, DWORD szBuffer)
+uint32_t XMsgStartIORequest(uint32_t App, uint32_t Message, XXOVERLAPPED* lpOverlapped, void* Buffer, uint32_t szBuffer)
 {
     return STATUS_SUCCESS;
 }
@@ -104,8 +222,7 @@ void XamContentDelete()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-
-uint32_t XamContentGetCreator(DWORD userIndex, const XCONTENT_DATA* contentData, PBOOL isCreator, XLPQWORD xuid, XXOVERLAPPED* overlapped)
+uint32_t XamContentGetCreator(uint32_t userIndex, const XCONTENT_DATA* contentData, be<uint32_t>* isCreator, be<uint64_t>* xuid, XXOVERLAPPED* overlapped)
 {
     if (isCreator)
         *isCreator = true;
@@ -146,7 +263,7 @@ uint32_t XamShowDeviceSelectorUI
     uint32_t contentType,
     uint32_t contentFlags,
     uint64_t totalRequested,
-    XDWORD* deviceId,
+    be<uint32_t>* deviceId,
     XXOVERLAPPED* overlapped
 )
 {
@@ -214,10 +331,10 @@ void RtlInitAnsiString(XANSI_STRING* destination, char* source)
     destination->Buffer = source;
 }
 
-DWORD NtCreateFile
+uint32_t NtCreateFile
 (
-    XLPDWORD FileHandle,
-    DWORD DesiredAccess,
+    be<uint32_t>* FileHandle,
+    uint32_t DesiredAccess,
     XOBJECT_ATTRIBUTES* Attributes,
     XIO_STATUS_BLOCK* IoStatusBlock,
     uint64_t* AllocationSize,
@@ -232,16 +349,19 @@ DWORD NtCreateFile
 
 uint32_t NtClose(uint32_t handle)
 {
-    if (handle == (uint32_t)INVALID_HANDLE_VALUE)
+    if (handle == GUEST_INVALID_HANDLE_VALUE)
         return 0xFFFFFFFF;
 
-    if (CHECK_GUEST_HANDLE(handle))
+    if (IsKernelObject(handle))
     {
-        ObCloseHandle(HOST_HANDLE(handle));
+        DestroyKernelObject(handle);
         return 0;
     }
-
-    return CloseHandle((HANDLE)handle) ? 0 : 0xFFFFFFFF;
+    else
+    {
+        assert(false && "Unrecognized kernel object.");
+        return 0xFFFFFFFF;
+    }
 }
 
 void NtSetInformationFile()
@@ -254,20 +374,21 @@ uint32_t FscSetCacheElementCount()
     return 0;
 }
 
-DWORD NtWaitForSingleObjectEx(DWORD Handle, DWORD WaitMode, DWORD Alertable, XLPQWORD Timeout)
+uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
-    const auto status = WaitForSingleObjectEx((HANDLE)Handle, GuestTimeoutToMilliseconds(Timeout), Alertable);
+    uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    assert(timeout == 0 || timeout == INFINITE);
 
-    if (status == WAIT_IO_COMPLETION)
+    if (IsKernelObject(Handle))
     {
-        return STATUS_USER_APC;
+        return GetKernelObject(Handle)->Wait(timeout);
     }
-    else if (status)
+    else
     {
-        return STATUS_ALERTED;
+        assert(false && "Unrecognized handle value.");
     }
 
-    return STATUS_SUCCESS;
+    return STATUS_TIMEOUT;
 }
 
 void NtWriteFile()
@@ -280,7 +401,7 @@ void vsprintf_x()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-uint32_t ExGetXConfigSetting(uint16_t Category, uint16_t Setting, void* Buffer, uint16_t SizeOfBuffer, XLPDWORD RequiredSize)
+uint32_t ExGetXConfigSetting(uint16_t Category, uint16_t Setting, void* Buffer, uint16_t SizeOfBuffer, be<uint32_t>* RequiredSize)
 {
     uint32_t data[4]{};
 
@@ -357,9 +478,9 @@ void MmQueryStatistics()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-uint32_t NtCreateEvent(uint32_t* handle, void* objAttributes, uint32_t eventType, uint32_t initialState)
+uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t eventType, uint32_t initialState)
 {
-    *handle = ByteSwap((uint32_t)CreateEventA(nullptr, !eventType, !!initialState, nullptr));
+    *handle = GetKernelHandle(CreateKernelObject<Event>(!eventType, !!initialState));
     return 0;
 }
 
@@ -393,9 +514,9 @@ void XexGetModuleSection()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-NTSTATUS RtlUnicodeToMultiByteN(PCHAR MultiByteString, DWORD MaxBytesInMultiByteString, XLPDWORD BytesInMultiByteString, PCWCH UnicodeString, ULONG BytesInUnicodeString)
+uint32_t RtlUnicodeToMultiByteN(char* MultiByteString, uint32_t MaxBytesInMultiByteString, be<uint32_t>* BytesInMultiByteString, const be<uint16_t>* UnicodeString, uint32_t BytesInUnicodeString)
 {
-    const auto reqSize = BytesInUnicodeString / sizeof(wchar_t);
+    const auto reqSize = BytesInUnicodeString / sizeof(uint16_t);
 
     if (BytesInMultiByteString)
         *BytesInMultiByteString = reqSize;
@@ -405,7 +526,7 @@ NTSTATUS RtlUnicodeToMultiByteN(PCHAR MultiByteString, DWORD MaxBytesInMultiByte
 
     for (size_t i = 0; i < reqSize; i++)
     {
-        const auto c = ByteSwap(UnicodeString[i]);
+        const auto c = UnicodeString[i].get();
 
         MultiByteString[i] = c < 256 ? c : '?';
     }
@@ -413,24 +534,22 @@ NTSTATUS RtlUnicodeToMultiByteN(PCHAR MultiByteString, DWORD MaxBytesInMultiByte
     return STATUS_SUCCESS;
 }
 
-DWORD KeDelayExecutionThread(DWORD WaitMode, bool Alertable, XLPQWORD Timeout)
+uint32_t KeDelayExecutionThread(uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
     // We don't do async file reads.
     if (Alertable)
         return STATUS_USER_APC;
 
-    timeBeginPeriod(1);
-    const auto status = SleepEx(GuestTimeoutToMilliseconds(Timeout), Alertable);
-    timeEndPeriod(1);
+    uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
 
-    if (status == WAIT_IO_COMPLETION)
-    {
-        return STATUS_USER_APC;
-    }
-    else if (status)
-    {
-        return STATUS_ALERTED;
-    }
+#ifdef _WIN32
+    Sleep(timeout);
+#else
+    if (timeout == 0)
+        std::this_thread::yield();
+    else
+        std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+#endif
 
     return STATUS_SUCCESS;
 }
@@ -485,8 +604,9 @@ void ObDereferenceObject()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void KeSetBasePriorityThread(uint32_t thread, int priority)
+void KeSetBasePriorityThread(GuestThreadHandle* hThread, int priority)
 {
+#ifdef _WIN32
     if (priority == 16)
     {
         priority = 15;
@@ -496,10 +616,11 @@ void KeSetBasePriorityThread(uint32_t thread, int priority)
         priority = -15;
     }
 
-    SetThreadPriority((HANDLE)thread, priority);
+    SetThreadPriority(hThread == GetKernelObject(CURRENT_THREAD_HANDLE) ? GetCurrentThread() : hThread->thread.native_handle(), priority);
+#endif
 }
 
-uint32_t ObReferenceObjectByHandle(uint32_t handle, uint32_t objectType, XLPDWORD object)
+uint32_t ObReferenceObjectByHandle(uint32_t handle, uint32_t objectType, be<uint32_t>* object)
 {
     *object = handle;
     return 0;
@@ -510,58 +631,23 @@ void KeQueryBasePriorityThread()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-uint32_t NtSuspendThread(uint32_t hThread, uint32_t* suspendCount)
+uint32_t NtSuspendThread(GuestThreadHandle* hThread, uint32_t* suspendCount)
 {
-    DWORD count = SuspendThread((HANDLE)hThread);
+    assert(hThread != GetKernelObject(CURRENT_THREAD_HANDLE) && hThread->thread.get_id() == std::this_thread::get_id());
 
-    if (count == (DWORD)-1)
-        return E_FAIL;
-
-    if (suspendCount != nullptr)
-        *suspendCount = ByteSwap(count);
+    hThread->suspended = true;
+    hThread->suspended.wait(true);
 
     return S_OK;
 }
 
-uint32_t KeSetAffinityThread(DWORD Thread, DWORD Affinity, XLPDWORD lpPreviousAffinity)
+uint32_t KeSetAffinityThread(uint32_t Thread, uint32_t Affinity, be<uint32_t>* lpPreviousAffinity)
 {
     if (lpPreviousAffinity)
         *lpPreviousAffinity = 2;
 
     return 0;
 }
-
-struct Event : HostObject<XKEVENT>
-{
-    HANDLE handle;
-
-    Event(XKEVENT* header)
-    {
-        handle = CreateEventA(nullptr, !header->Type, !!header->SignalState, nullptr);
-    }
-
-    bool Set()
-    {
-        return SetEvent(handle);
-    }
-
-    bool Reset()
-    {
-        return ResetEvent(handle);
-    }
-};
-
-struct Semaphore : HostObject<XKSEMAPHORE>
-{
-    HANDLE handle;
-
-    Semaphore(XKSEMAPHORE* semaphore)
-    {
-        handle = CreateSemaphoreA(nullptr, semaphore->Header.SignalState, semaphore->Limit, nullptr);
-    }
-};
-
-// https://devblogs.microsoft.com/oldnewthing/20160825-00/?p=94165
 
 void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
@@ -570,25 +656,29 @@ void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
     if (cs->RecursionCount != 0)
         return;
 
-    InterlockedExchange(&cs->OwningThread, 0);
-    WakeByAddressSingle(&cs->OwningThread);
+    std::atomic_ref owningThread(cs->OwningThread);
+    owningThread.store(0);
+    owningThread.notify_one();
 }
 
 void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
-    DWORD thisThread = GetCurrentThreadId();
+    uint32_t thisThread = g_ppcContext->r13.u32;
+    assert(thisThread != NULL);
+
+    std::atomic_ref owningThread(cs->OwningThread);
 
     while (true) 
     {
-        DWORD previousOwner = InterlockedCompareExchangeAcquire(&cs->OwningThread, thisThread, 0);
+        uint32_t previousOwner = 0;
 
-        if (previousOwner == 0 || previousOwner == thisThread)
+        if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
         {
             cs->RecursionCount++;
             return;
         }
 
-        WaitOnAddress(&cs->OwningThread, &previousOwner, sizeof(previousOwner), INFINITE);
+        owningThread.wait(previousOwner);
     }
 }
 
@@ -609,7 +699,7 @@ void RtlFillMemoryUlong()
 
 void KeBugCheckEx()
 {
-    __debugbreak();
+    __builtin_debugtrap();
 }
 
 uint32_t KeGetCurrentProcessType()
@@ -639,15 +729,22 @@ void RtlRaiseException_x()
 
 void KfReleaseSpinLock(uint32_t* spinLock)
 {
-    InterlockedExchange((volatile long*)spinLock, 0);
+    std::atomic_ref spinLockRef(*spinLock);
+    spinLockRef = 0;
 }
 
 void KfAcquireSpinLock(uint32_t* spinLock)
 {
-    const auto ctx = GetPPCContext();
+    std::atomic_ref spinLockRef(*spinLock);
 
-    while (InterlockedCompareExchange((volatile long*)spinLock, ByteSwap(*(uint32_t*)(g_memory.Translate(ctx->r13.u32 + 0x110))), 0) != 0)
-        Sleep(0);
+    while (true)
+    {
+        uint32_t expected = 0;
+        if (spinLockRef.compare_exchange_weak(expected, g_ppcContext->r13.u32))
+            break;
+
+        std::this_thread::yield();
+    }
 }
 
 uint64_t KeQueryPerformanceFrequency()
@@ -679,15 +776,22 @@ void VdGetSystemCommandBuffer()
 
 void KeReleaseSpinLockFromRaisedIrql(uint32_t* spinLock)
 {
-    InterlockedExchange((volatile long*)spinLock, 0);
+    std::atomic_ref spinLockRef(*spinLock);
+    spinLockRef = 0;
 }
 
 void KeAcquireSpinLockAtRaisedIrql(uint32_t* spinLock)
 {
-    const auto ctx = GetPPCContext();
+    std::atomic_ref spinLockRef(*spinLock);
 
-    while (InterlockedCompareExchange((volatile long*)spinLock, ByteSwap(*(uint32_t*)(g_memory.Translate(ctx->r13.u32 + 0x110))), 0) != 0)
-        Sleep(0);
+    while (true)
+    {
+        uint32_t expected = 0;
+        if (spinLockRef.compare_exchange_weak(expected, g_ppcContext->r13.u32))
+            break;
+
+        std::this_thread::yield();
+    }
 }
 
 uint32_t KiApcNormalRoutineNop()
@@ -851,7 +955,7 @@ void VdEnableDisableClockGating()
 
 void KeBugCheck()
 {
-    __debugbreak();
+    __builtin_debugtrap();
 }
 
 void KeLockL2()
@@ -864,62 +968,95 @@ void KeUnlockL2()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-bool KeSetEvent(XKEVENT* pEvent, DWORD Increment, bool Wait)
+bool KeSetEvent(XKEVENT* pEvent, uint32_t Increment, bool Wait)
 {
-    return ObQueryObject<Event>(*pEvent)->Set();
+    bool result = QueryKernelObject<Event>(*pEvent)->Set();
+
+    ++g_keSetEventGeneration;
+    g_keSetEventGeneration.notify_all();
+
+    return result;
 }
 
 bool KeResetEvent(XKEVENT* pEvent)
 {
-    return ObQueryObject<Event>(*pEvent)->Reset();
+    return QueryKernelObject<Event>(*pEvent)->Reset();
 }
 
-DWORD KeWaitForSingleObject(XDISPATCHER_HEADER* Object, DWORD WaitReason, DWORD WaitMode, bool Alertable, XLPQWORD Timeout)
+uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
-    const uint64_t timeout = GuestTimeoutToMilliseconds(Timeout);
-
-    HANDLE handle = nullptr;
+    const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    assert(timeout == INFINITE);
 
     switch (Object->Type)
     {
         case 0:
         case 1:
-            handle = ObQueryObject<Event>(*Object)->handle;
+            QueryKernelObject<Event>(*Object)->Wait(timeout);
             break;
 
         case 5:
-            handle = ObQueryObject<Semaphore>(*Object)->handle;
+            QueryKernelObject<Semaphore>(*Object)->Wait(timeout);
             break;
 
         default:
-            assert(false);
-            break;
+            assert(false && "Unrecognized kernel object type.");
+            return STATUS_TIMEOUT;
     }
 
-    return WaitForSingleObjectEx(handle, timeout, Alertable);
+    return STATUS_SUCCESS;
 }
 
-uint32_t KeTlsGetValue(DWORD dwTlsIndex)
+static std::vector<size_t> g_tlsFreeIndices;
+static size_t g_tlsNextIndex = 0;
+static Mutex g_tlsAllocationMutex;
+
+static uint32_t& KeTlsGetValueRef(size_t index)
 {
-    return (uint32_t)TlsGetValue(dwTlsIndex);
+    // Having this a global thread_local variable
+    // for some reason crashes on boot in debug builds.
+    thread_local std::vector<uint32_t> s_tlsValues;
+
+    if (s_tlsValues.size() <= index)
+    {
+        s_tlsValues.resize(index + 1, 0);
+    }
+
+    return s_tlsValues[index];
 }
 
-BOOL KeTlsSetValue(DWORD dwTlsIndex, DWORD lpTlsValue)
+uint32_t KeTlsGetValue(uint32_t dwTlsIndex)
 {
-    return TlsSetValue(dwTlsIndex, (LPVOID)lpTlsValue);
+    return KeTlsGetValueRef(dwTlsIndex);
 }
 
-DWORD KeTlsAlloc()
+uint32_t KeTlsSetValue(uint32_t dwTlsIndex, uint32_t lpTlsValue)
 {
-    return TlsAlloc();
+    KeTlsGetValueRef(dwTlsIndex) = lpTlsValue;
+    return TRUE;
 }
 
-BOOL KeTlsFree(DWORD dwTlsIndex)
+uint32_t KeTlsAlloc()
 {
-    return TlsFree(dwTlsIndex);
+    std::lock_guard<Mutex> lock(g_tlsAllocationMutex);
+    if (!g_tlsFreeIndices.empty())
+    {
+        size_t index = g_tlsFreeIndices.back();
+        g_tlsFreeIndices.pop_back();
+        return index;
+    }
+
+    return g_tlsNextIndex++;
 }
 
-DWORD XMsgInProcessCall(uint32_t app, uint32_t message, XDWORD* param1, XDWORD* param2)
+uint32_t KeTlsFree(uint32_t dwTlsIndex)
+{
+    std::lock_guard<Mutex> lock(g_tlsAllocationMutex);
+    g_tlsFreeIndices.push_back(dwTlsIndex);
+    return TRUE;
+}
+
+uint32_t XMsgInProcessCall(uint32_t app, uint32_t message, be<uint32_t>* param1, be<uint32_t>* param2)
 {
     if (message == 0x7001B)
     {
@@ -939,7 +1076,7 @@ void XamUserReadProfileSettings
     uint64_t* xuids,
     uint32_t settingCount,
     uint32_t* settingIds,
-    XDWORD* bufferSize,
+    be<uint32_t>* bufferSize,
     void* buffer,
     void* overlapped
 )
@@ -1036,10 +1173,14 @@ void XexGetModuleHandle()
 
 bool RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
-    DWORD thisThread = GetCurrentThreadId();
-    DWORD previousOwner = InterlockedCompareExchangeAcquire(&cs->OwningThread, thisThread, 0);
+    uint32_t thisThread = g_ppcContext->r13.u32;
+    assert(thisThread != NULL);
 
-    if (previousOwner == 0 || previousOwner == thisThread)
+    std::atomic_ref owningThread(cs->OwningThread);
+
+    uint32_t previousOwner = 0;
+
+    if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
     {
         cs->RecursionCount++;
         return true;
@@ -1116,19 +1257,15 @@ void NtQueryFullAttributesFile()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-NTSTATUS RtlMultiByteToUnicodeN(PWCH UnicodeString, ULONG MaxBytesInUnicodeString, XLPDWORD BytesInUnicodeString, const CHAR* MultiByteString, ULONG BytesInMultiByteString)
+uint32_t RtlMultiByteToUnicodeN(be<uint16_t>* UnicodeString, uint32_t MaxBytesInUnicodeString, be<uint32_t>* BytesInUnicodeString, const char* MultiByteString, uint32_t BytesInMultiByteString)
 {
-    // i am lazy
-    const auto n = MultiByteToWideChar(CP_UTF8, 0, MultiByteString, BytesInMultiByteString, UnicodeString, MaxBytesInUnicodeString);
+    uint32_t length = std::min(MaxBytesInUnicodeString / 2, BytesInMultiByteString);
 
-    if (BytesInUnicodeString)
-        *BytesInUnicodeString = n * sizeof(wchar_t);
+    for (size_t i = 0; i < length; i++)
+        UnicodeString[i] = MultiByteString[i];
 
-    if (n)
-    {
-        for (size_t i = 0; i < n; i++)
-            UnicodeString[i] = ByteSwap(UnicodeString[i]);
-    }
+    if (BytesInUnicodeString != nullptr)
+        *BytesInUnicodeString = length * 2;
 
     return STATUS_SUCCESS;
 }
@@ -1143,41 +1280,41 @@ void MmQueryAllocationSize()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-uint32_t NtClearEvent(uint32_t handle, uint32_t* previousState)
+uint32_t NtClearEvent(Event* handle, uint32_t* previousState)
 {
-    return ResetEvent((HANDLE)handle) ? 0 : 0xFFFFFFFF;
+    handle->Reset();
+    return 0;
 }
 
-uint32_t NtResumeThread(uint32_t hThread, uint32_t* suspendCount)
+uint32_t NtResumeThread(GuestThreadHandle* hThread, uint32_t* suspendCount)
 {
-    DWORD count = ResumeThread((HANDLE)hThread);
+    assert(hThread != GetKernelObject(CURRENT_THREAD_HANDLE));
 
-    if (count == (DWORD)-1)
-        return E_FAIL;
-
-    if (suspendCount != nullptr)
-        *suspendCount = ByteSwap(count);
+    hThread->suspended = false;
+    hThread->suspended.notify_all();
 
     return S_OK;
 }
 
-uint32_t NtSetEvent(uint32_t handle, uint32_t* previousState)
+uint32_t NtSetEvent(Event* handle, uint32_t* previousState)
 {
-    return SetEvent((HANDLE)handle) ? 0 : 0xFFFFFFFF;
+    handle->Set();
+    return 0;
 }
 
-NTSTATUS NtCreateSemaphore(XLPDWORD Handle, XOBJECT_ATTRIBUTES* ObjectAttributes, DWORD InitialCount, DWORD MaximumCount)
+uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttributes, uint32_t InitialCount, uint32_t MaximumCount)
 {
-    *Handle = (uint32_t)CreateSemaphoreA(nullptr, InitialCount, MaximumCount, nullptr);
+    *Handle = GetKernelHandle(CreateKernelObject<Semaphore>(InitialCount, MaximumCount));
     return STATUS_SUCCESS;
 }
 
-NTSTATUS NtReleaseSemaphore(uint32_t Handle, DWORD ReleaseCount, LONG* PreviousCount)
+uint32_t NtReleaseSemaphore(Semaphore* Handle, uint32_t ReleaseCount, int32_t* PreviousCount)
 {
-    ReleaseSemaphore((HANDLE)Handle, ReleaseCount, PreviousCount);
+    uint32_t previousCount;
+    Handle->Release(ReleaseCount, &previousCount);
 
-    if (PreviousCount)
-        *PreviousCount = ByteSwap(*PreviousCount);
+    if (PreviousCount != nullptr)
+        *PreviousCount = ByteSwap(previousCount);
 
     return STATUS_SUCCESS;
 }
@@ -1212,11 +1349,17 @@ void NtFlushBuffersFile()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void KeQuerySystemTime(uint64_t* time)
+void KeQuerySystemTime(be<uint64_t>* time)
 {
-    FILETIME t;
-    GetSystemTimeAsFileTime(&t);
-    *time = ByteSwap((uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime);
+    constexpr int64_t FILETIME_EPOCH_DIFFERENCE = 116444736000000000LL;
+
+    auto now = std::chrono::system_clock::now();
+    auto timeSinceEpoch = now.time_since_epoch();
+
+    int64_t currentTime100ns = std::chrono::duration_cast<std::chrono::duration<int64_t, std::ratio<1, 10000000>>>(timeSinceEpoch).count();
+    currentTime100ns += FILETIME_EPOCH_DIFFERENCE;
+
+    *time = currentTime100ns;
 }
 
 void RtlTimeToTimeFields()
@@ -1244,14 +1387,14 @@ void ExTerminateThread()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-uint32_t ExCreateThread(XLPDWORD handle, uint32_t stackSize, XLPDWORD threadId, uint32_t xApiThreadStartup, uint32_t startAddress, uint32_t startContext, uint32_t creationFlags)
+uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* threadId, uint32_t xApiThreadStartup, uint32_t startAddress, uint32_t startContext, uint32_t creationFlags)
 {
     LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}",
         (intptr_t)handle, stackSize, (intptr_t)threadId, xApiThreadStartup, startAddress, startContext, creationFlags);
 
-    DWORD hostThreadId;
+    uint32_t hostThreadId;
 
-    *handle = (uint32_t)GuestThread::Start(startAddress, startContext, creationFlags, &hostThreadId);
+    *handle = GetKernelHandle(GuestThread::Start({ startAddress, startContext, creationFlags }, &hostThreadId));
 
     if (threadId != nullptr)
         *threadId = hostThreadId;
@@ -1329,21 +1472,43 @@ void NetDll_XNetGetTitleXnAddr()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-DWORD KeWaitForMultipleObjects(DWORD Count, xpointer<XDISPATCHER_HEADER>* Objects, DWORD WaitType, DWORD WaitReason, DWORD WaitMode, DWORD Alertable, XLPQWORD Timeout)
+uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* Objects, uint32_t WaitType, uint32_t WaitReason, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
-    // TODO: create actual objects by type.
+    // FIXME: This function is only accounting for events.
+
     const uint64_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    assert(timeout == INFINITE);
 
-    thread_local std::vector<HANDLE> events;
-    events.resize(Count);
-
-    for (size_t i = 0; i < Count; i++)
+    if (WaitType == 0) // Wait all
     {
-        assert(Objects[i]->Type <= 1);
-        events[i] = ObQueryObject<Event>(*Objects[i].get())->handle;
+        for (size_t i = 0; i < Count; i++)
+            QueryKernelObject<Event>(*Objects[i])->Wait(timeout);
+    }
+    else
+    {
+        thread_local std::vector<Event*> s_events;
+        s_events.resize(Count);
+
+        for (size_t i = 0; i < Count; i++)
+            s_events[i] = QueryKernelObject<Event>(*Objects[i]);
+
+        while (true)
+        {
+            uint32_t generation = g_keSetEventGeneration.load();
+
+            for (size_t i = 0; i < Count; i++)
+            {
+                if (s_events[i]->Wait(0) == STATUS_SUCCESS)
+                {
+                    return STATUS_WAIT_0 + i;
+                }
+            }
+
+            g_keSetEventGeneration.wait(generation);
+        }
     }
 
-    return WaitForMultipleObjectsEx(Count, events.data(), WaitType == 0, timeout, Alertable);
+    return STATUS_SUCCESS;
 }
 
 uint32_t KeRaiseIrqlToDpcLevel()
@@ -1355,8 +1520,9 @@ void KfLowerIrql() { }
 
 uint32_t KeReleaseSemaphore(XKSEMAPHORE* semaphore, uint32_t increment, uint32_t adjustment, uint32_t wait)
 {
-    auto* object = ObQueryObject<Semaphore>(semaphore->Header);
-    return ReleaseSemaphore(object->handle, adjustment, nullptr) ? 0 : 0xFFFFFFFF;
+    auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+    object->Release(adjustment, nullptr);
+    return STATUS_SUCCESS;
 }
 
 void XAudioGetVoiceCategoryVolume()
@@ -1364,16 +1530,19 @@ void XAudioGetVoiceCategoryVolume()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-DWORD XAudioGetVoiceCategoryVolumeChangeMask(DWORD Driver, XLPDWORD Mask)
+uint32_t XAudioGetVoiceCategoryVolumeChangeMask(uint32_t Driver, be<uint32_t>* Mask)
 {
     *Mask = 0;
     return 0;
 }
 
-uint32_t KeResumeThread(uint32_t object)
+uint32_t KeResumeThread(GuestThreadHandle* object)
 {
-    LOGF_UTILITY("0x{:x}", object);
-    return ResumeThread((HANDLE)object);
+    assert(object != GetKernelObject(CURRENT_THREAD_HANDLE));
+
+    object->suspended = false;
+    object->suspended.notify_all();
+    return 0;
 }
 
 void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limit)
@@ -1382,7 +1551,7 @@ void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limi
     semaphore->Header.SignalState = count;
     semaphore->Limit = limit;
 
-    auto* object = ObQueryObject<Semaphore>(semaphore->Header);
+    auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
 }
 
 void XMAReleaseContext()
@@ -1395,7 +1564,7 @@ void XMACreateContext()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-// uint32_t XAudioRegisterRenderDriverClient(XLPDWORD callback, XLPDWORD driver)
+// uint32_t XAudioRegisterRenderDriverClient(be<uint32_t>* callback, be<uint32_t>* driver)
 // {
 //     //printf("XAudioRegisterRenderDriverClient(): %x %x\n");
 // 

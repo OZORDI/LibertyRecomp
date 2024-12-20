@@ -2,9 +2,21 @@
 
 #define NOMINMAX
 
+#if defined(_WIN32)
 #include <windows.h>
-#include <dxcapi.h>
 #include <ShlObj_core.h>
+#include <wrl/client.h>
+
+using Microsoft::WRL::ComPtr;
+#elif defined(__linux__)
+#include <unistd.h>
+#include <pwd.h>
+#endif
+
+#ifdef SWA_D3D12
+#include <dxcapi.h>
+#endif
+
 #include <algorithm>
 #include <mutex>
 #include <filesystem>
@@ -22,21 +34,23 @@
 #include <toml++/toml.hpp>
 #include <zstd.h>
 #include <stb_image.h>
-#include <concurrentqueue/blockingconcurrentqueue.h>
+#include <blockingconcurrentqueue.h>
 #include <SDL.h>
+#include <SDL_mixer.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_sdl2.h>
+#include <backends/imgui_impl_sdl2.h>
 #include <o1heap.h>
 #include <cstddef>
-#include <wrl/client.h>
 #include <smolv.h>
 #include <set>
-#include <miniaudio.h>
-#include <extras/miniaudio_libvorbis.h>
 #include <fmt/core.h>
-
-using Microsoft::WRL::ComPtr;
+#include <list>
+#include <semaphore>
 
 #include "framework.h"
 #include "mutex.h"
+
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif

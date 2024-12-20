@@ -2,16 +2,92 @@
 #include "xam.h"
 #include "xdm.h"
 #include <hid/hid.h>
-#include <ui/window.h>
+#include <ui/game_window.h>
 #include <cpu/guest_thread.h>
 #include <ranges>
 #include <unordered_set>
-#include <CommCtrl.h>
 #include "xxHashMap.h"
 #include <user/paths.h>
+#include <SDL.h>
 
+#ifdef _WIN32
+#include <CommCtrl.h>
 // Needed for commctrl
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
+
+struct XamListener : KernelObject
+{
+    uint32_t id{};
+    uint64_t areas{};
+    std::vector<std::tuple<uint32_t, uint32_t>> notifications;
+
+    XamListener(const XamListener&) = delete;
+    XamListener& operator=(const XamListener&) = delete;
+
+    XamListener();
+    ~XamListener();
+};
+
+struct XamEnumeratorBase : KernelObject
+{
+    virtual uint32_t Next(void* buffer)
+    {
+        return -1;
+    }
+};
+
+template<typename TIterator = std::vector<XHOSTCONTENT_DATA>::iterator>
+struct XamEnumerator : XamEnumeratorBase
+{
+    uint32_t fetch;
+    size_t size;
+    TIterator position;
+    TIterator begin;
+    TIterator end;
+
+    XamEnumerator() = default;
+    XamEnumerator(uint32_t fetch, size_t size, TIterator begin, TIterator end) : fetch(fetch), size(size), position(begin), begin(begin), end(end)
+    {
+
+    }
+
+    uint32_t Next(void* buffer) override
+    {
+        if (position == end)
+        {
+            return -1;
+        }
+
+        if (buffer == nullptr)
+        {
+            for (size_t i = 0; i < fetch; i++)
+            {
+                if (position == end)
+                {
+                    return i == 0 ? -1 : i;
+                }
+
+                ++position;
+            }
+        }
+
+        for (size_t i = 0; i < fetch; i++)
+        {
+            if (position == end)
+            {
+                return i == 0 ? -1 : i;
+            }
+
+            memcpy(buffer, &*position, size);
+
+            ++position;
+            buffer = (void*)((size_t)buffer + size);
+        }
+
+        return fetch;
+    }
+};
 
 std::array<xxHashMap<XHOSTCONTENT_DATA>, 3> gContentRegistry{};
 std::unordered_set<XamListener*> gListeners{};
@@ -42,7 +118,7 @@ XamListener::~XamListener()
     gListeners.erase(this);
 }
 
-XCONTENT_DATA XamMakeContent(DWORD type, const std::string_view& name)
+XCONTENT_DATA XamMakeContent(uint32_t type, const std::string_view& name)
 {
     XCONTENT_DATA data{ 1, type };
 
@@ -58,7 +134,7 @@ void XamRegisterContent(const XCONTENT_DATA& data, const std::string_view& root)
     gContentRegistry[idx].emplace(StringHash(data.szFileName), XHOSTCONTENT_DATA{ data }).first->second.szRoot = root;
 }
 
-void XamRegisterContent(DWORD type, const std::string_view name, const std::string_view& root)
+void XamRegisterContent(uint32_t type, const std::string_view name, const std::string_view& root)
 {
     XCONTENT_DATA data{ 1, type, {}, "" };
 
@@ -67,17 +143,16 @@ void XamRegisterContent(DWORD type, const std::string_view name, const std::stri
     XamRegisterContent(data, root);
 }
 
-SWA_API DWORD XamNotifyCreateListener(uint64_t qwAreas)
+SWA_API uint32_t XamNotifyCreateListener(uint64_t qwAreas)
 {
-    int handle;
-    auto* listener = ObCreateObject<XamListener>(handle);
+    auto* listener = CreateKernelObject<XamListener>();
 
     listener->areas = qwAreas;
 
-    return GUEST_HANDLE(handle);
+    return GetKernelHandle(listener);
 }
 
-SWA_API void XamNotifyEnqueueEvent(DWORD dwId, DWORD dwParam)
+SWA_API void XamNotifyEnqueueEvent(uint32_t dwId, uint32_t dwParam)
 {
     for (const auto& listener : gListeners)
     {
@@ -88,9 +163,9 @@ SWA_API void XamNotifyEnqueueEvent(DWORD dwId, DWORD dwParam)
     }
 }
 
-SWA_API bool XNotifyGetNext(DWORD hNotification, DWORD dwMsgFilter, XDWORD* pdwId, XDWORD* pParam)
+SWA_API bool XNotifyGetNext(uint32_t hNotification, uint32_t dwMsgFilter, be<uint32_t>* pdwId, be<uint32_t>* pParam)
 {
-    auto& listener = *ObTryQueryObject<XamListener>(HOST_HANDLE(hNotification));
+    auto& listener = *GetKernelObject<XamListener>(hNotification);
 
     if (dwMsgFilter)
     {
@@ -129,9 +204,12 @@ SWA_API bool XNotifyGetNext(DWORD hNotification, DWORD dwMsgFilter, XDWORD* pdwI
     return false;
 }
 
-SWA_API uint32_t XamShowMessageBoxUI(DWORD dwUserIndex, XWORD* wszTitle, XWORD* wszText, DWORD cButtons,
-    xpointer<XWORD>* pwszButtons, DWORD dwFocusButton, DWORD dwFlags, XLPDWORD pResult, XXOVERLAPPED* pOverlapped)
+SWA_API uint32_t XamShowMessageBoxUI(uint32_t dwUserIndex, be<uint16_t>* wszTitle, be<uint16_t>* wszText, uint32_t cButtons,
+    xpointer<be<uint16_t>>* pwszButtons, uint32_t dwFocusButton, uint32_t dwFlags, be<uint32_t>* pResult, XXOVERLAPPED* pOverlapped)
 {
+    int button{};
+
+#ifdef _WIN32
     std::vector<std::wstring> texts{};
     std::vector<TASKDIALOG_BUTTON> buttons{};
 
@@ -154,20 +232,19 @@ SWA_API uint32_t XamShowMessageBoxUI(DWORD dwUserIndex, XWORD* wszTitle, XWORD* 
 
     TASKDIALOGCONFIG config{};
     config.cbSize = sizeof(config);
-    // config.hwndParent = Window::s_hWnd;
     config.pszWindowTitle = texts[0].c_str();
     config.pszContent = texts[1].c_str();
     config.cButtons = cButtons;
     config.pButtons = buttons.data();
 
-    int button{};
     TaskDialogIndirect(&config, &button, nullptr, nullptr);
+#endif
 
     *pResult = button;
 
     if (pOverlapped)
     {
-        pOverlapped->dwCompletionContext = GetCurrentThreadId();
+        pOverlapped->dwCompletionContext = GuestThread::GetCurrentThreadId();
         pOverlapped->Error = 0;
         pOverlapped->Length = -1;
     }
@@ -177,8 +254,8 @@ SWA_API uint32_t XamShowMessageBoxUI(DWORD dwUserIndex, XWORD* wszTitle, XWORD* 
     return 0;
 }
 
-SWA_API uint32_t XamContentCreateEnumerator(DWORD dwUserIndex, DWORD DeviceID, DWORD dwContentType,
-    DWORD dwContentFlags, DWORD cItem, XLPDWORD pcbBuffer, XLPDWORD phEnum)
+SWA_API uint32_t XamContentCreateEnumerator(uint32_t dwUserIndex, uint32_t DeviceID, uint32_t dwContentType,
+    uint32_t dwContentFlags, uint32_t cItem, be<uint32_t>* pcbBuffer, be<uint32_t>* phEnum)
 {
     if (dwUserIndex != 0)
     {
@@ -188,19 +265,19 @@ SWA_API uint32_t XamContentCreateEnumerator(DWORD dwUserIndex, DWORD DeviceID, D
 
     const auto& registry = gContentRegistry[dwContentType - 1];
     const auto& values = registry | std::views::values;
-    const int handle = ObInsertObject(new XamEnumerator(cItem, sizeof(_XCONTENT_DATA), values.begin(), values.end()));
+    auto* enumerator = CreateKernelObject<XamEnumerator<decltype(values.begin())>>(cItem, sizeof(_XCONTENT_DATA), values.begin(), values.end());
 
     if (pcbBuffer)
         *pcbBuffer = sizeof(_XCONTENT_DATA) * cItem;
 
-    *phEnum = GUEST_HANDLE(handle);
+    *phEnum = GetKernelHandle(enumerator);
 
     return 0;
 }
 
-SWA_API uint32_t XamEnumerate(uint32_t hEnum, DWORD dwFlags, PVOID pvBuffer, DWORD cbBuffer, XLPDWORD pcItemsReturned, XXOVERLAPPED* pOverlapped)
+SWA_API uint32_t XamEnumerate(uint32_t hEnum, uint32_t dwFlags, void* pvBuffer, uint32_t cbBuffer, be<uint32_t>* pcItemsReturned, XXOVERLAPPED* pOverlapped)
 {
-    auto* enumerator = ObTryQueryObject<XamEnumeratorBase>(HOST_HANDLE(hEnum));
+    auto* enumerator = GetKernelObject<XamEnumeratorBase>(hEnum);
     const auto count = enumerator->Next(pvBuffer);
 
     if (count == -1)
@@ -212,9 +289,9 @@ SWA_API uint32_t XamEnumerate(uint32_t hEnum, DWORD dwFlags, PVOID pvBuffer, DWO
     return ERROR_SUCCESS;
 }
 
-SWA_API uint32_t XamContentCreateEx(DWORD dwUserIndex, LPCSTR szRootName, const XCONTENT_DATA* pContentData,
-    DWORD dwContentFlags, XLPDWORD pdwDisposition, XLPDWORD pdwLicenseMask,
-    DWORD dwFileCacheSize, uint64_t uliContentSize, PXXOVERLAPPED pOverlapped)
+SWA_API uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const XCONTENT_DATA* pContentData,
+    uint32_t dwContentFlags, be<uint32_t>* pdwDisposition, be<uint32_t>* pdwLicenseMask,
+    uint32_t dwFileCacheSize, uint64_t uliContentSize, PXXOVERLAPPED pOverlapped)
 {
     const auto& registry = gContentRegistry[pContentData->dwContentType - 1];
     const auto exists = registry.contains(StringHash(pContentData->szFileName));
@@ -231,19 +308,23 @@ SWA_API uint32_t XamContentCreateEx(DWORD dwUserIndex, LPCSTR szRootName, const 
 
             if (pContentData->dwContentType == XCONTENTTYPE_SAVEDATA)
             {
-                root = GetSavePath().string();
+                std::u8string savePathU8 = GetSavePath().u8string();
+                root = (const char *)(savePathU8.c_str());
             }
             else if (pContentData->dwContentType == XCONTENTTYPE_DLC)
             {
-                root = ".\\dlc";
+                root = GAME_INSTALL_DIRECTORY "/dlc";
             }
             else
             {
-                root = ".";
+                root = GAME_INSTALL_DIRECTORY;
             }
 
             XamRegisterContent(*pContentData, root);
-            CreateDirectoryA(root.c_str(), nullptr);
+
+            std::error_code ec;
+            std::filesystem::create_directory(std::u8string_view((const char8_t*)(root.c_str())), ec);
+
             XamRootCreate(szRootName, root);
         }
         else
@@ -277,13 +358,13 @@ SWA_API uint32_t XamContentCreateEx(DWORD dwUserIndex, LPCSTR szRootName, const 
     return ERROR_PATH_NOT_FOUND;
 }
 
-SWA_API uint32_t XamContentClose(LPCSTR szRootName, XXOVERLAPPED* pOverlapped)
+SWA_API uint32_t XamContentClose(const char* szRootName, XXOVERLAPPED* pOverlapped)
 {
     gRootMap.erase(StringHash(szRootName));
     return 0;
 }
 
-SWA_API uint32_t XamContentGetDeviceData(DWORD DeviceID, XDEVICE_DATA* pDeviceData)
+SWA_API uint32_t XamContentGetDeviceData(uint32_t DeviceID, XDEVICE_DATA* pDeviceData)
 {
     pDeviceData->DeviceID = DeviceID;
     pDeviceData->DeviceType = XCONTENTDEVICETYPE_HDD;
@@ -320,73 +401,63 @@ SWA_API uint32_t XamInputGetCapabilities(uint32_t unk, uint32_t userIndex, uint3
 
 SWA_API uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* state)
 {
+    memset(state, 0, sizeof(*state));
+
     uint32_t result = hid::GetState(userIndex, state);
 
-    if (result == ERROR_SUCCESS)
+    if (GameWindow::s_isFocused)
     {
-        ByteSwapInplace(state->dwPacketNumber);
-        ByteSwapInplace(state->Gamepad.wButtons);
-        ByteSwapInplace(state->Gamepad.sThumbLX);
-        ByteSwapInplace(state->Gamepad.sThumbLY);
-        ByteSwapInplace(state->Gamepad.sThumbRX);
-        ByteSwapInplace(state->Gamepad.sThumbRY);
-    }
-    else if (userIndex == 0)
-    {
-        if (!Window::s_isFocused)
-            return ERROR_SUCCESS;
+        auto keyboardState = SDL_GetKeyboardState(NULL);
 
-        memset(state, 0, sizeof(*state));
-        if (GetAsyncKeyState('W') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_W])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_Y;
-        if (GetAsyncKeyState('A') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_A])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_X;
-        if (GetAsyncKeyState('S') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_S])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_A;
-        if (GetAsyncKeyState('D') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_D])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_B;
-        if (GetAsyncKeyState('Q') & 0x8000)
+
+        if (keyboardState[SDL_SCANCODE_Q])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_LEFT_SHOULDER;
-        if (GetAsyncKeyState('E') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_E])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_RIGHT_SHOULDER;
-        if (GetAsyncKeyState('1') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_1])
             state->Gamepad.bLeftTrigger = 0xFF;
-        if (GetAsyncKeyState('3') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_3])
             state->Gamepad.bRightTrigger = 0xFF;
 
-        if (GetAsyncKeyState('I') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_I])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_UP;
-        if (GetAsyncKeyState('J') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_J])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_LEFT;
-        if (GetAsyncKeyState('K') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_K])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_DOWN;
-        if (GetAsyncKeyState('L') & 0x8000)
+        if (keyboardState[SDL_SCANCODE_L])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_RIGHT;
 
-        if (GetAsyncKeyState(VK_UP) & 0x8000)
+        if (keyboardState[SDL_SCANCODE_UP])
             state->Gamepad.sThumbLY = 32767;
-        if (GetAsyncKeyState(VK_LEFT) & 0x8000)
+        if (keyboardState[SDL_SCANCODE_LEFT])
             state->Gamepad.sThumbLX = -32768;
-        if (GetAsyncKeyState(VK_DOWN) & 0x8000)
+        if (keyboardState[SDL_SCANCODE_DOWN])
             state->Gamepad.sThumbLY = -32768;
-        if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
+        if (keyboardState[SDL_SCANCODE_RIGHT])
             state->Gamepad.sThumbLX = 32767;
 
-        if (GetAsyncKeyState(VK_RETURN) & 0x8000)
-            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_START;    
-        if (GetAsyncKeyState(VK_BACK) & 0x8000)
+        if (keyboardState[SDL_SCANCODE_RETURN])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_START;
+        if (keyboardState[SDL_SCANCODE_BACKSPACE])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_BACK;
-
-        ByteSwapInplace(state->Gamepad.wButtons);
-        ByteSwapInplace(state->Gamepad.sThumbLX);
-        ByteSwapInplace(state->Gamepad.sThumbLY);
-        ByteSwapInplace(state->Gamepad.sThumbRX);
-        ByteSwapInplace(state->Gamepad.sThumbRY);
-
-        result = ERROR_SUCCESS;
     }
 
-    return result;
+    ByteSwapInplace(state->Gamepad.wButtons);
+    ByteSwapInplace(state->Gamepad.sThumbLX);
+    ByteSwapInplace(state->Gamepad.sThumbLY);
+    ByteSwapInplace(state->Gamepad.sThumbRX);
+    ByteSwapInplace(state->Gamepad.sThumbRY);
+
+    return ERROR_SUCCESS;
 }
 
 SWA_API uint32_t XamInputSetState(uint32_t userIndex, uint32_t flags, XAMINPUT_VIBRATION* vibration)

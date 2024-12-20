@@ -13,7 +13,7 @@
 #include <ui/button_guide.h>
 #include <ui/message_window.h>
 #include <ui/sdl_listener.h>
-#include <ui/window.h>
+#include <ui/game_window.h>
 #include <decompressor.h>
 
 #include <res/images/installer/install_001.dds.h>
@@ -96,7 +96,7 @@ static double g_appearTime = 0.0;
 static double g_disappearTime = DBL_MAX;
 static bool g_isDisappearing = false;
 
-static std::filesystem::path g_installPath = ".";
+static std::filesystem::path g_installPath;
 static std::filesystem::path g_gameSourcePath;
 static std::filesystem::path g_updateSourcePath;
 static std::array<std::filesystem::path, int(DLC::Count)> g_dlcSourcePaths;
@@ -133,8 +133,13 @@ static WizardPage g_firstPage = WizardPage::SelectLanguage;
 static WizardPage g_currentPage = g_firstPage;
 static std::string g_currentMessagePrompt = "";
 static bool g_currentMessagePromptConfirmation = false;
+static std::list<std::filesystem::path> g_currentPickerResults;
+static std::atomic<bool> g_currentPickerResultsReady = false;
+static std::string g_currentPickerErrorMessage;
+static std::unique_ptr<std::thread> g_currentPickerThread;
+static bool g_currentPickerVisible = false;
+static bool g_currentPickerFolderMode = false;
 static int g_currentMessageResult = -1;
-static bool g_filesPickerSkipUpdate = false;
 static ImVec2 g_joypadAxis = {};
 static int g_currentCursorIndex = -1;
 static int g_currentCursorDefault = 0;
@@ -148,7 +153,7 @@ public:
     {
         constexpr float AxisValueRange = 32767.0f;
         constexpr float AxisTapRange = 0.5f;
-        if (!InstallerWizard::s_isVisible || !g_currentMessagePrompt.empty())
+        if (!InstallerWizard::s_isVisible || !g_currentMessagePrompt.empty() || g_currentPickerVisible)
         {
             return;
         }
@@ -217,7 +222,7 @@ public:
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEMOTION:
         {
-            for (size_t i = 0; i < g_currentCursorRects.size() && !g_filesPickerSkipUpdate; i++)
+            for (size_t i = 0; i < g_currentCursorRects.size(); i++)
             {
                 auto &currentRect = g_currentCursorRects[i];
                 if (ImGui::IsMouseHoveringRect(currentRect.first, currentRect.second, false))
@@ -734,7 +739,7 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
 
     int baser = 0;
     int baseg = 0;
-    if (g_currentMessagePrompt.empty() && !sourceButton && buttonEnabled && (alpha >= 1.0f))
+    if (g_currentMessagePrompt.empty() && !g_currentPickerVisible && !sourceButton && buttonEnabled && (alpha >= 1.0f))
     {
         bool cursorOnButton = PushCursorRect(min, max, buttonPressed, makeDefault);
         if (cursorOnButton)
@@ -868,58 +873,65 @@ static bool ConvertPathSet(const nfdpathset_t *pathSet, std::list<std::filesyste
 
     for (nfdpathsetsize_t i = 0; i < pathSetCount; i++)
     {
-        char *pathSetPath = nullptr;
-        if (NFD_PathSet_GetPathU8(pathSet, i, &pathSetPath) != NFD_OKAY)
+        nfdnchar_t *pathSetPath = nullptr;
+        if (NFD_PathSet_GetPathN(pathSet, i, &pathSetPath) != NFD_OKAY)
         {
             filePaths.clear();
             return false;
         }
 
-        filePaths.emplace_back(std::filesystem::path(std::u8string_view((const char8_t *)(pathSetPath))));
-        NFD_PathSet_FreePathU8(pathSetPath);
+        filePaths.emplace_back(std::filesystem::path(pathSetPath));
+        NFD_PathSet_FreePathN(pathSetPath);
     }
 
     return true;
 }
 
-static bool ShowFilesPicker(std::list<std::filesystem::path> &filePaths)
+static void PickerThreadProcess()
 {
-    filePaths.clear();
-
     const nfdpathset_t *pathSet;
-    nfdresult_t result = NFD_OpenDialogMultipleU8(&pathSet, nullptr, 0, nullptr);
-    g_filesPickerSkipUpdate = true;
-
-    if (result == NFD_OKAY)
+    nfdresult_t result = NFD_ERROR;
+    if (g_currentPickerFolderMode)
     {
-        bool pathsConverted = ConvertPathSet(pathSet, filePaths);
-        NFD_PathSet_Free(pathSet);
-        return pathsConverted;
+        result = NFD_PickFolderMultipleN(&pathSet, nullptr);
     }
     else
     {
-        return false;
+        result = NFD_OpenDialogMultipleN(&pathSet, nullptr, 0, nullptr);
     }
+    
+    if (result == NFD_OKAY)
+    {
+        bool pathsConverted = ConvertPathSet(pathSet, g_currentPickerResults);
+        NFD_PathSet_Free(pathSet);
+    }
+    else if (result == NFD_ERROR)
+    {
+        g_currentPickerErrorMessage = NFD_GetError();
+    }
+
+    g_currentPickerResultsReady = true;
 }
 
-static bool ShowFoldersPicker(std::list<std::filesystem::path> &folderPaths)
+static void ShowPicker(bool folderMode)
 {
-    folderPaths.clear();
-
-    const nfdpathset_t *pathSet;
-    nfdresult_t result = NFD_PickFolderMultipleU8(&pathSet, nullptr);
-    g_filesPickerSkipUpdate = true;
-
-    if (result == NFD_OKAY)
+    if (g_currentPickerThread != nullptr)
     {
-        bool pathsConverted = ConvertPathSet(pathSet, folderPaths);
-        NFD_PathSet_Free(pathSet);
-        return pathsConverted;
+        g_currentPickerThread->join();
+        g_currentPickerThread.reset();
     }
+
+    g_currentPickerResults.clear();
+    g_currentPickerFolderMode = folderMode;
+    g_currentPickerResultsReady = false;
+    g_currentPickerVisible = true;
+    
+    // Optional single thread mode for testing on systems that do not interact well with the separate thread being used for NFD.
+    constexpr bool singleThreadMode = false;
+    if (singleThreadMode)
+        PickerThreadProcess();
     else
-    {
-        return false;
-    }
+        g_currentPickerThread = std::make_unique<std::thread>(PickerThreadProcess);
 }
 
 static void ParseSourcePaths(std::list<std::filesystem::path> &paths)
@@ -973,7 +985,8 @@ static void ParseSourcePaths(std::list<std::filesystem::path> &paths)
         stringStream << Localise("Installer_Message_InvalidFilesList") << std::endl;
         for (const std::filesystem::path &path : failedPaths)
         {
-            stringStream << std::endl << "- " << Truncate(path.filename().string(), 32, true, true);
+            std::u8string filenameU8 = path.filename().u8string();
+            stringStream << std::endl << "- " << Truncate(std::string(filenameU8.begin(), filenameU8.end()), 32, true, true);
         }
 
         if (isFailedPathsOverLimit)
@@ -1012,8 +1025,6 @@ static void DrawLanguagePicker()
 
 static void DrawSourcePickers()
 {
-    g_filesPickerSkipUpdate = false;
-
     bool buttonPressed = false;
     std::list<std::filesystem::path> paths;
     if (g_currentPage == WizardPage::SelectGameAndUpdate || g_currentPage == WizardPage::SelectDLC)
@@ -1027,9 +1038,9 @@ static void DrawSourcePickers()
         ImVec2 min = { Scale(AlignToNextGrid(CONTAINER_X) + BOTTOM_X_GAP), Scale(AlignToNextGrid(CONTAINER_Y + CONTAINER_HEIGHT) + BOTTOM_Y_GAP) };
         ImVec2 max = { Scale(AlignToNextGrid(CONTAINER_X) + BOTTOM_X_GAP + textSize.x * squashRatio), Scale(AlignToNextGrid(CONTAINER_Y + CONTAINER_HEIGHT) + BOTTOM_Y_GAP + BUTTON_HEIGHT) };
         DrawButton(min, max, addFilesText.c_str(), false, true, buttonPressed, ADD_BUTTON_MAX_TEXT_WIDTH);
-        if (buttonPressed && ShowFilesPicker(paths))
+        if (buttonPressed)
         {
-            ParseSourcePaths(paths);
+            ShowPicker(false);
         }
 
         min.x += Scale(BOTTOM_X_GAP + textSize.x * squashRatio);
@@ -1040,9 +1051,9 @@ static void DrawSourcePickers()
 
         max.x = min.x + Scale(textSize.x * squashRatio);
         DrawButton(min, max, addFolderText.c_str(), false, true, buttonPressed, ADD_BUTTON_MAX_TEXT_WIDTH);
-        if (buttonPressed && ShowFoldersPicker(paths))
+        if (buttonPressed)
         {
-            ParseSourcePaths(paths);
+            ShowPicker(true);
         }
     }
 }
@@ -1304,14 +1315,6 @@ static void DrawBorders()
 
 static void DrawMessagePrompt()
 {
-    if (g_filesPickerSkipUpdate)
-    {
-        // If a blocking function like the files picker is called, we must wait one update before actually showing
-        // the message box, as a lot of time has passed since the last real update. Otherwise, animations will play
-        // too quickly and input glitches might happen.
-        return;
-    }
-
     if (g_currentMessagePrompt.empty())
     {
         return;
@@ -1339,6 +1342,25 @@ static void DrawMessagePrompt()
         g_currentMessagePrompt.clear();
         g_currentMessageResult = -1;
     }
+}
+
+static void CheckPickerResults()
+{
+    if (!g_currentPickerResultsReady)
+    {
+        return;
+    }
+
+    if (!g_currentPickerErrorMessage.empty())
+    {
+        g_currentMessagePrompt = g_currentPickerErrorMessage;
+        g_currentMessagePromptConfirmation = false;
+        g_currentPickerErrorMessage.clear();
+    }
+
+    ParseSourcePaths(g_currentPickerResults);
+    g_currentPickerResultsReady = false;
+    g_currentPickerVisible = false;
 }
 
 void InstallerWizard::Init()
@@ -1379,6 +1401,7 @@ void InstallerWizard::Draw()
     DrawNextButton();
     DrawBorders();
     DrawMessagePrompt();
+    CheckPickerResults();
 
     if (g_isDisappearing)
     {
@@ -1392,11 +1415,17 @@ void InstallerWizard::Draw()
 
 void InstallerWizard::Shutdown()
 {
-    // Wait for and erase the thread.
+    // Wait for and erase the threads.
     if (g_installerThread != nullptr)
     {
         g_installerThread->join();
         g_installerThread.reset();
+    }
+
+    if (g_currentPickerThread != nullptr)
+    {
+        g_currentPickerThread->join();
+        g_currentPickerThread.reset();
     }
 
     // Erase the sources.
@@ -1418,8 +1447,10 @@ void InstallerWizard::Shutdown()
     }
 }
 
-bool InstallerWizard::Run(bool skipGame)
+bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
 {
+    g_installPath = installPath;
+
     EmbeddedPlayer::Init();
     NFD_Init();
 
@@ -1438,18 +1469,18 @@ bool InstallerWizard::Run(bool skipGame)
         g_currentPage = g_firstPage;
     }
 
-    Window::SetFullscreenCursorVisibility(true);
+    GameWindow::SetFullscreenCursorVisibility(true);
     s_isVisible = true;
 
     while (s_isVisible)
     {
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-        Window::Update();
+        GameWindow::Update();
         Video::HostPresent();
     }
 
-    Window::SetFullscreenCursorVisibility(false);
+    GameWindow::SetFullscreenCursorVisibility(false);
     NFD_Quit();
 
     InstallerWizard::Shutdown();

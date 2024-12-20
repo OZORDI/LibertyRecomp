@@ -26,56 +26,68 @@
 #include <ui/message_window.h>
 #include <ui/options_menu.h>
 #include <ui/sdl_listener.h>
-#include <ui/window.h>
+#include <ui/game_window.h>
 #include <user/config.h>
 #include <xxHashMap.h>
 
 #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
-#include <magic_enum.hpp>
+#include <magic_enum/magic_enum.hpp>
 #endif
 
 #include "../../tools/ShaderRecomp/ShaderRecomp/shader_common.h"
+
+#ifdef SWA_D3D12
 #include "shader/copy_vs.hlsl.dxil.h"
-#include "shader/copy_vs.hlsl.spirv.h"
 #include "shader/csd_filter_ps.hlsl.dxil.h"
-#include "shader/csd_filter_ps.hlsl.spirv.h"
 #include "shader/enhanced_motion_blur_ps.hlsl.dxil.h"
-#include "shader/enhanced_motion_blur_ps.hlsl.spirv.h"
 #include "shader/gamma_correction_ps.hlsl.dxil.h"
-#include "shader/gamma_correction_ps.hlsl.spirv.h"
 #include "shader/gaussian_blur_3x3.hlsl.dxil.h"
-#include "shader/gaussian_blur_3x3.hlsl.spirv.h"
 #include "shader/gaussian_blur_5x5.hlsl.dxil.h"
-#include "shader/gaussian_blur_5x5.hlsl.spirv.h"
 #include "shader/gaussian_blur_7x7.hlsl.dxil.h"
-#include "shader/gaussian_blur_7x7.hlsl.spirv.h"
 #include "shader/gaussian_blur_9x9.hlsl.dxil.h"
-#include "shader/gaussian_blur_9x9.hlsl.spirv.h"
 #include "shader/imgui_ps.hlsl.dxil.h"
-#include "shader/imgui_ps.hlsl.spirv.h"
 #include "shader/imgui_vs.hlsl.dxil.h"
-#include "shader/imgui_vs.hlsl.spirv.h"
 #include "shader/movie_ps.hlsl.dxil.h"
-#include "shader/movie_ps.hlsl.spirv.h"
 #include "shader/movie_vs.hlsl.dxil.h"
-#include "shader/movie_vs.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_2x.hlsl.dxil.h"
-#include "shader/resolve_msaa_depth_2x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_4x.hlsl.dxil.h"
-#include "shader/resolve_msaa_depth_4x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_8x.hlsl.dxil.h"
+#endif
+
+#include "shader/copy_vs.hlsl.spirv.h"
+#include "shader/csd_filter_ps.hlsl.spirv.h"
+#include "shader/enhanced_motion_blur_ps.hlsl.spirv.h"
+#include "shader/gamma_correction_ps.hlsl.spirv.h"
+#include "shader/gaussian_blur_3x3.hlsl.spirv.h"
+#include "shader/gaussian_blur_5x5.hlsl.spirv.h"
+#include "shader/gaussian_blur_7x7.hlsl.spirv.h"
+#include "shader/gaussian_blur_9x9.hlsl.spirv.h"
+#include "shader/imgui_ps.hlsl.spirv.h"
+#include "shader/imgui_vs.hlsl.spirv.h"
+#include "shader/movie_ps.hlsl.spirv.h"
+#include "shader/movie_vs.hlsl.spirv.h"
+#include "shader/resolve_msaa_depth_2x.hlsl.spirv.h"
+#include "shader/resolve_msaa_depth_4x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_8x.hlsl.spirv.h"
 
+#ifdef _WIN32
 extern "C"
 {
     __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
+#endif
 
 namespace plume
 {
+#ifdef SWA_D3D12
     extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
+#endif
+#ifdef SDL_VULKAN_ENABLED
+    extern std::unique_ptr<RenderInterface> CreateVulkanInterface(RenderWindow sdlWindow);
+#else
     extern std::unique_ptr<RenderInterface> CreateVulkanInterface();
+#endif
 }
 
 #pragma pack(push, 1)
@@ -165,7 +177,7 @@ struct DirtyStates
 static DirtyStates g_dirtyStates(true);
 
 template<typename T>
-static FORCEINLINE void SetDirtyValue(bool& dirtyState, T& dest, const T& src)
+static void SetDirtyValue(bool& dirtyState, T& dest, const T& src)
 {
     if (dest != src)
     {
@@ -174,7 +186,12 @@ static FORCEINLINE void SetDirtyValue(bool& dirtyState, T& dest, const T& src)
     }
 }
 
-static bool g_vulkan;
+#ifdef SWA_D3D12
+static bool g_vulkan = false;
+#else
+static constexpr bool g_vulkan = true;
+#endif
+
 static std::unique_ptr<RenderInterface> g_interface;
 static std::unique_ptr<RenderDevice> g_device;
 
@@ -197,7 +214,6 @@ static std::unique_ptr<RenderCommandFence> g_copyCommandFence;
 
 static std::unique_ptr<RenderSwapChain> g_swapChain;
 static bool g_swapChainValid;
-static bool g_needsResize;
 
 static constexpr RenderFormat BACKBUFFER_FORMAT = RenderFormat::B8G8R8A8_UNORM;
 
@@ -545,7 +561,7 @@ static void DestructTempResources()
     g_tempBuffers[g_frame].clear();
 }
 
-static uint32_t g_mainThreadId;
+static std::thread::id g_mainThreadId;
 
 static ankerl::unordered_dense::map<RenderTexture*, RenderTextureLayout> g_barrierMap;
 
@@ -579,13 +595,18 @@ static std::unique_ptr<uint8_t[]> g_buttonBcDiff;
 
 static void LoadEmbeddedResources()
 {
-    const size_t decompressedSize = g_vulkan ? g_spirvCacheDecompressedSize : g_dxilCacheDecompressedSize;
-    g_shaderCache = std::make_unique<uint8_t[]>(decompressedSize);
-
-    ZSTD_decompress(g_shaderCache.get(), 
-        decompressedSize, 
-        g_vulkan ? g_compressedSpirvCache : g_compressedDxilCache, 
-        g_vulkan ? g_spirvCacheCompressedSize : g_dxilCacheCompressedSize);
+    if (g_vulkan)
+    {
+        g_shaderCache = std::make_unique<uint8_t[]>(g_spirvCacheDecompressedSize);
+        ZSTD_decompress(g_shaderCache.get(), g_spirvCacheDecompressedSize, g_compressedSpirvCache, g_spirvCacheCompressedSize);
+    }
+#ifdef SWA_D3D12
+    else
+    {
+        g_shaderCache = std::make_unique<uint8_t[]>(g_dxilCacheDecompressedSize);
+        ZSTD_decompress(g_shaderCache.get(), g_dxilCacheDecompressedSize, g_compressedDxilCache, g_dxilCacheCompressedSize);
+    }
+#endif
 
     g_buttonBcDiff = decompressZstd(g_button_bc_diff, g_button_bc_diff_uncompressed_size);
 }
@@ -1023,7 +1044,7 @@ static void ProcSetRenderState(const RenderCommand& cmd)
     }
 }
 
-static const std::pair<GuestRenderState, void*> g_setRenderStateFunctions[] =
+static const std::pair<GuestRenderState, PPCFunc*> g_setRenderStateFunctions[] =
 {
     { D3DRS_ZENABLE, HostToGuestFunction<SetRenderState<D3DRS_ZENABLE>> },
     { D3DRS_ZWRITEENABLE, HostToGuestFunction<SetRenderState<D3DRS_ZWRITEENABLE>> },
@@ -1062,6 +1083,8 @@ static GuestShader* g_csdShader;
 
 static std::unique_ptr<GuestShader> g_enhancedMotionBlurShader;
 
+#ifdef SWA_D3D12
+
 #define CREATE_SHADER(NAME) \
     g_device->createShader( \
         g_vulkan ? g_##NAME##_spirv : g_##NAME##_dxil, \
@@ -1069,11 +1092,20 @@ static std::unique_ptr<GuestShader> g_enhancedMotionBlurShader;
         "main", \
         g_vulkan ? RenderShaderFormat::SPIRV : RenderShaderFormat::DXIL)
 
+#else
+
+#define CREATE_SHADER(NAME) \
+    g_device->createShader(g_##NAME##_spirv, sizeof(g_##NAME##_spirv), "main", RenderShaderFormat::SPIRV);
+
+#endif
+
+#ifdef _WIN32
 static bool DetectWine()
 {
     HMODULE dllHandle = GetModuleHandle("ntdll.dll");
     return dllHandle != nullptr && GetProcAddress(dllHandle, "wine_get_version") != nullptr;
 }
+#endif
 
 static constexpr size_t TEXTURE_DESCRIPTOR_SIZE = 65536;
 static constexpr size_t SAMPLER_DESCRIPTOR_SIZE = 1024;
@@ -1136,7 +1168,7 @@ static void CreateImGuiBackend()
     OptionsMenu::Init();
     InstallerWizard::Init();
 
-    ImGui_ImplSDL2_InitForOther(Window::s_pWindow);
+    ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
 
 #ifdef ENABLE_IM_FONT_ATLAS_SNAPSHOT
     g_imFontTexture = LoadTexture(
@@ -1278,7 +1310,7 @@ static void CreateImGuiBackend()
 
 static void BeginCommandList();
 
-void Video::CreateHostDevice()
+void Video::CreateHostDevice(bool sdlVideoDefault)
 {
     for (uint32_t i = 0; i < 16; i++)
         g_inputSlots[i].index = i;
@@ -1286,13 +1318,25 @@ void Video::CreateHostDevice()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
-    Window::Init();
+    GameWindow::Init(sdlVideoDefault);
 
+#ifdef SWA_D3D12
     g_vulkan = DetectWine() || Config::GraphicsAPI == EGraphicsAPI::Vulkan;
+#endif
 
     LoadEmbeddedResources();
 
-    g_interface = g_vulkan ? CreateVulkanInterface() : CreateD3D12Interface();
+    if (g_vulkan)
+#ifdef SDL_VULKAN_ENABLED
+        g_interface = CreateVulkanInterface(GameWindow::s_renderWindow);
+#else
+        g_interface = CreateVulkanInterface();
+#endif
+#ifdef SWA_D3D12
+    else
+        g_interface = CreateD3D12Interface();
+#endif
+
     g_device = g_interface->createDevice();
 
     g_triangleFanSupported = g_device->getCapabilities().triangleFan;
@@ -1314,7 +1358,17 @@ void Video::CreateHostDevice()
     switch (Config::TripleBuffering)
     {
     case ETripleBuffering::Auto:
-        bufferCount = g_vulkan ? 2 : 3; // Defaulting to 3 is fine on D3D12 thanks to flip discard model.
+        if (g_vulkan)
+        {
+            // Defaulting to 3 is fine if presentWait as supported, as the maximum frame latency allowed is only 1.
+            bufferCount = g_device->getCapabilities().presentWait ? 3 : 2;
+        }
+        else
+        {
+            // Defaulting to 3 is fine on D3D12 thanks to flip discard model.
+            bufferCount = 3;
+        }
+
         break;
     case ETripleBuffering::On:
         bufferCount = 3;
@@ -1324,7 +1378,7 @@ void Video::CreateHostDevice()
         break;
     }
 
-    g_swapChain = g_queue->createSwapChain(Window::s_handle, bufferCount, BACKBUFFER_FORMAT);
+    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, BACKBUFFER_FORMAT);
     g_swapChain->setVsyncEnabled(Config::VSync);
     g_swapChainValid = !g_swapChain->needsResize();
 
@@ -1334,7 +1388,7 @@ void Video::CreateHostDevice()
     for (auto& renderSemaphore : g_renderSemaphores)
         renderSemaphore = g_device->createCommandSemaphore();
 
-    g_mainThreadId = GetCurrentThreadId();
+    g_mainThreadId = std::this_thread::get_id();
 
     RenderPipelineLayoutBuilder pipelineLayoutBuilder;
     pipelineLayoutBuilder.begin(false, true);
@@ -1626,9 +1680,9 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     memset(device, 0, sizeof(*device));
 
     uint32_t functionOffset = 0x443344; // D3D
-    g_codeCache.Insert(functionOffset, reinterpret_cast<void*>(HostToGuestFunction<SetRenderStateUnimplemented>));
+    g_codeCache.Insert(functionOffset, HostToGuestFunction<SetRenderStateUnimplemented>);
 
-    for (size_t i = 0; i < _countof(device->setRenderStateFunctions); i++)
+    for (size_t i = 0; i < std::size(device->setRenderStateFunctions); i++)
         device->setRenderStateFunctions[i] = functionOffset;
 
     for (auto& [state, function] : g_setRenderStateFunctions)
@@ -1638,7 +1692,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
         device->setRenderStateFunctions[state / 4] = functionOffset;
     }
 
-    for (size_t i = 0; i < _countof(device->setSamplerStateFunctions); i++)
+    for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
         device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x8330F3DC + i * 0xC));
 
     device->viewport.width = 1280.0f;
@@ -1763,7 +1817,7 @@ static void UnlockBuffer(GuestBuffer* buffer)
 {
     if (!buffer->lockedReadOnly)
     {
-        if (GetCurrentThreadId() == g_mainThreadId)
+        if (std::this_thread::get_id() == g_mainThreadId)
         {
             RenderCommand cmd;
             cmd.type = (sizeof(T) == 2) ? RenderCommandType::UnlockBuffer16 : RenderCommandType::UnlockBuffer32;
@@ -2765,9 +2819,6 @@ static void ProcSetScissorRect(const RenderCommand& cmd)
     SetDirtyValue<int32_t>(g_dirtyStates.scissorRect, g_scissorRect.right, args.right);
 }
 
-static Mutex g_compiledSpecConstantLibraryBlobMutex;
-static ankerl::unordered_dense::map<uint32_t, ComPtr<IDxcBlob>> g_compiledSpecConstantLibraryBlobs;
-
 static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specConstants)
 {
     if (g_vulkan ||
@@ -2808,8 +2859,12 @@ static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specCons
         shader = guestShader->linkedShaders[specConstants].get();
     }
 
+#ifdef SWA_D3D12
     if (shader == nullptr)
     {
+        static Mutex g_compiledSpecConstantLibraryBlobMutex;
+        static ankerl::unordered_dense::map<uint32_t, ComPtr<IDxcBlob>> g_compiledSpecConstantLibraryBlobs;
+
         thread_local ComPtr<IDxcCompiler3> s_dxcCompiler;
         thread_local ComPtr<IDxcLinker> s_dxcLinker;
         thread_local ComPtr<IDxcUtils> s_dxcUtils;
@@ -2916,6 +2971,7 @@ static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specCons
             shader = linkedShader.get();
         }        
     }
+#endif
 
     return shader;
 }
@@ -4013,8 +4069,9 @@ static void ProcSetPixelShader(const RenderCommand& cmd)
 
 static std::thread g_renderThread([]
     {
+#ifdef _WIN32
         GuestThread::SetThreadName(GetCurrentThreadId(), "Render Thread");
-
+#endif
         RenderCommand commands[32];
 
         while (true)
@@ -4821,40 +4878,20 @@ struct PipelineStateQueueItem
 
 static moodycamel::BlockingConcurrentQueue<PipelineStateQueueItem> g_pipelineStateQueue;
 
-struct MinimalGuestThreadContext
-{
-    uint8_t* stack = nullptr;
-    PPCContext ppcContext{};
-
-    ~MinimalGuestThreadContext()
-    {
-        if (stack != nullptr)
-            g_userHeap.Free(stack);
-    }
-
-    void ensureValid()
-    {
-        if (stack == nullptr)
-        {
-            stack = reinterpret_cast<uint8_t*>(g_userHeap.Alloc(0x4000));
-            ppcContext.fn = (uint8_t*)g_codeCache.bucket;
-            ppcContext.r1.u64 = g_memory.MapVirtual(stack + 0x4000);
-            SetPPCContext(ppcContext);
-        }
-    }
-};
-
 static void PipelineCompilerThread()
 {
+#ifdef _WIN32
     GuestThread::SetThreadName(GetCurrentThreadId(), "Pipeline Compiler Thread");
-    MinimalGuestThreadContext ctx;
+#endif
+    std::unique_ptr<GuestThreadContext> ctx;
 
     while (true)
     {
         PipelineStateQueueItem queueItem;
         g_pipelineStateQueue.wait_dequeue(queueItem);
 
-        ctx.ensureValid();
+        if (ctx == nullptr)
+            ctx = std::make_unique<GuestThreadContext>(0);
 
         auto pipeline = CreateGraphicsPipeline(queueItem.pipelineState);
 #ifdef ASYNC_PSO_DEBUG
@@ -4867,6 +4904,8 @@ static void PipelineCompilerThread()
         cmd.addPipeline.hash = queueItem.pipelineHash;
         cmd.addPipeline.pipeline = pipeline.release();
         g_renderQueue.enqueue(cmd);
+
+        std::this_thread::yield();
     }
 }
 
@@ -5496,10 +5535,11 @@ static bool CheckMadeAll(const T& modelData)
 
 static void ModelConsumerThread()
 {
+#ifdef _WIN32
     GuestThread::SetThreadName(GetCurrentThreadId(), "Model Consumer Thread");
-
+#endif
     std::vector<boost::shared_ptr<Hedgehog::Database::CDatabaseData>> localPendingDataQueue;
-    MinimalGuestThreadContext ctx;
+    std::unique_ptr<GuestThreadContext> ctx;
 
     while (true)
     {
@@ -5508,7 +5548,8 @@ static void ModelConsumerThread()
         while ((pendingDataCount = g_pendingDataCount.load()) == 0)
             g_pendingDataCount.wait(pendingDataCount);
 
-        ctx.ensureValid();
+        if (ctx == nullptr)
+            ctx = std::make_unique<GuestThreadContext>(0);
 
         if (g_pendingPipelineStateCache)
         {
@@ -5673,6 +5714,8 @@ static void ModelConsumerThread()
 
         if (allHandled)
             localPendingDataQueue.clear();
+
+        std::this_thread::yield();
     }
 }
 

@@ -1,18 +1,23 @@
 #include "stdafx.h"
 #include <kernel/function.h>
+#include <kernel/xdm.h>
 
-BOOL QueryPerformanceCounterImpl(LARGE_INTEGER* lpPerformanceCount)
+uint32_t QueryPerformanceCounterImpl(LARGE_INTEGER* lpPerformanceCount)
 {
-    BOOL result = QueryPerformanceCounter(lpPerformanceCount);
-    ByteSwapInplace(lpPerformanceCount->QuadPart);
-    return result;
+    lpPerformanceCount->QuadPart = ByteSwap(std::chrono::steady_clock::now().time_since_epoch().count());
+    return TRUE;
 }
 
-BOOL QueryPerformanceFrequencyImpl(LARGE_INTEGER* lpFrequency)
+uint32_t QueryPerformanceFrequencyImpl(LARGE_INTEGER* lpFrequency)
 {
-    BOOL result = QueryPerformanceFrequency(lpFrequency);
-    ByteSwapInplace(lpFrequency->QuadPart);
-    return result;
+    constexpr auto Frequency = std::chrono::steady_clock::period::den / std::chrono::steady_clock::period::num;
+    lpFrequency->QuadPart = ByteSwap(Frequency);
+    return TRUE;
+}
+
+uint32_t GetTickCountImpl()
+{
+    return uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 void GlobalMemoryStatusImpl(XLPMEMORYSTATUS lpMemoryStatus)
@@ -38,11 +43,15 @@ GUEST_FUNCTION_HOOK(sub_831B5E00, memmove);
 GUEST_FUNCTION_HOOK(sub_831B0BA0, memset);
 GUEST_FUNCTION_HOOK(sub_831CCAA0, memset);
 
+#ifdef _WIN32
 GUEST_FUNCTION_HOOK(sub_82BD4CA8, OutputDebugStringA);
+#else
+GUEST_FUNCTION_STUB(sub_82BD4CA8);
+#endif
 
 GUEST_FUNCTION_HOOK(sub_82BD4AC8, QueryPerformanceCounterImpl);
 GUEST_FUNCTION_HOOK(sub_831CD040, QueryPerformanceFrequencyImpl);
-GUEST_FUNCTION_HOOK(sub_831CDAD0, GetTickCount);
+GUEST_FUNCTION_HOOK(sub_831CDAD0, GetTickCountImpl);
 
 GUEST_FUNCTION_HOOK(sub_82BD4BC0, GlobalMemoryStatusImpl);
 

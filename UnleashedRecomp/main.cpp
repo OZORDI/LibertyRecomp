@@ -50,15 +50,17 @@ void KiSystemStartup()
 {
     const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
     const auto updateContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Update");
-    XamRegisterContent(gameContent, DirectoryExists(".\\game") ? ".\\game" : ".");
-    XamRegisterContent(updateContent, ".\\update");
+    XamRegisterContent(gameContent, GAME_INSTALL_DIRECTORY "/game");
+    XamRegisterContent(updateContent, GAME_INSTALL_DIRECTORY "/update");
 
     const auto savePath = GetSavePath();
     const auto saveName = "SYS-DATA";
 
-    // TODO: implement save slots?
     if (std::filesystem::exists(savePath / saveName))
-        XamRegisterContent(XamMakeContent(XCONTENTTYPE_SAVEDATA, saveName), savePath.string());
+    {
+        std::u8string savePathU8 = savePath.u8string();
+        XamRegisterContent(XamMakeContent(XCONTENTTYPE_SAVEDATA, saveName), (const char *)(savePathU8.c_str()));
+    }
 
     // Mount game
     XamContentCreateEx(0, "game", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
@@ -67,33 +69,23 @@ void KiSystemStartup()
     // OS mounts game data to D:
     XamContentCreateEx(0, "D", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
 
-    WIN32_FIND_DATAA fdata;
-    const auto findHandle = FindFirstFileA(".\\dlc\\*.*", &fdata);
-    if (findHandle != INVALID_HANDLE_VALUE)
+    std::error_code ec;
+    for (auto& file : std::filesystem::directory_iterator(GAME_INSTALL_DIRECTORY "/dlc", ec))
     {
-        char strBuf[256];
-        do
+        if (file.is_directory())
         {
-            if (strcmp(fdata.cFileName, ".") == 0 || strcmp(fdata.cFileName, "..") == 0)
-            {
-                continue;
-            }
-
-            if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            {
-                snprintf(strBuf, sizeof(strBuf), ".\\dlc\\%s", fdata.cFileName);
-                XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, fdata.cFileName), strBuf);
-            }
-        } while (FindNextFileA(findHandle, &fdata));
-        FindClose(findHandle);
+            std::u8string fileNameU8 = file.path().filename().u8string();
+            std::u8string filePathU8 = file.path().u8string();
+            XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, (const char*)(fileNameU8.c_str())), (const char*)(filePathU8.c_str()));
+        }
     }
 
     XAudioInitializeSystem();
 }
 
-uint32_t LdrLoadModule(const char* path)
+uint32_t LdrLoadModule(const std::filesystem::path &path)
 {
-    auto loadResult = LoadFile(FileSystem::TransformPath(GAME_XEX_PATH));
+    auto loadResult = LoadFile(path);
     if (loadResult.empty())
     {
         assert("Failed to load module" && false);
@@ -145,27 +137,33 @@ uint32_t LdrLoadModule(const char* path)
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+    timeBeginPeriod(1);
+#endif
+
     os::logger::Init();
 
     bool forceInstaller = false;
     bool forceDLCInstaller = false;
+    bool sdlVideoDefault = false;
     for (uint32_t i = 1; i < argc; i++)
     {
         forceInstaller = forceInstaller || (strcmp(argv[i], "--install") == 0);
         forceDLCInstaller = forceDLCInstaller || (strcmp(argv[i], "--install-dlc") == 0);
+        sdlVideoDefault = sdlVideoDefault || (strcmp(argv[i], "--sdl-video-default") == 0);
     }
 
     Config::Load();
 
     HostStartup();
 
-    bool isGameInstalled = Installer::checkGameInstall(".");
+    bool isGameInstalled = Installer::checkGameInstall(GAME_INSTALL_DIRECTORY);
     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
     if (runInstallerWizard)
     {
-        Video::CreateHostDevice();
+        Video::CreateHostDevice(sdlVideoDefault);
 
-        if (!InstallerWizard::Run(isGameInstalled && forceDLCInstaller))
+        if (!InstallerWizard::Run(GAME_INSTALL_DIRECTORY, isGameInstalled && forceDLCInstaller))
         {
             return 1;
         }
@@ -175,14 +173,15 @@ int main(int argc, char *argv[])
 
     KiSystemStartup();
 
-    uint32_t entry = LdrLoadModule(FileSystem::TransformPath(GAME_XEX_PATH));
+    const char *modulePath = FileSystem::TransformPath(GAME_XEX_PATH);
+    uint32_t entry = LdrLoadModule(std::u8string_view((const char8_t*)(modulePath)));
 
     if (!runInstallerWizard)
-        Video::CreateHostDevice();
+        Video::CreateHostDevice(sdlVideoDefault);
 
     Video::StartPipelinePrecompilation();
 
-    GuestThread::Start(entry);
+    GuestThread::Start({ entry, 0, 0 });
 
     return 0;
 }

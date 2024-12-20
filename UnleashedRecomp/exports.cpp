@@ -4,7 +4,7 @@
 #include <kernel/memory.h>
 #include <cpu/guest_stack_var.h>
 #include <ui/installer_wizard.h>
-#include <ui/window.h>
+#include <ui/game_window.h>
 #include <api/boost/smart_ptr/shared_ptr.h>
 
 SWA_API void Game_PlaySound(const char* pName)
@@ -31,10 +31,10 @@ SWA_API void Game_PlaySound(const char* pName)
 
 SWA_API void Window_SetDisplay(int displayIndex)
 {
-    Window::SetDisplay(displayIndex);
+    GameWindow::SetDisplay(displayIndex);
 }
 
 SWA_API void Window_SetFullscreen(bool isEnabled)
 {
-    Window::SetFullscreen(isEnabled);
+    GameWindow::SetFullscreen(isEnabled);
 }

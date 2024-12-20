@@ -14,7 +14,7 @@ using namespace plume;
 
 struct Video
 {
-    static void CreateHostDevice();
+    static void CreateHostDevice(bool sdlVideoDefault);
     static void HostPresent();
     static void StartPipelinePrecompilation();
     static void WaitForGPU();
@@ -84,22 +84,26 @@ struct GuestResource
 
     void AddRef()
     {
+        std::atomic_ref atomicRef(refCount.value);
+
         uint32_t originalValue, incrementedValue;
         do
         {
             originalValue = refCount.value;
             incrementedValue = ByteSwap(ByteSwap(originalValue) + 1);
-        } while (InterlockedCompareExchange(reinterpret_cast<LONG*>(&refCount), incrementedValue, originalValue) != originalValue);
+        } while (!atomicRef.compare_exchange_weak(originalValue, incrementedValue));
     }
 
     void Release()
     {
+        std::atomic_ref atomicRef(refCount.value);
+
         uint32_t originalValue, decrementedValue;
         do
         {
             originalValue = refCount.value;
             decrementedValue = ByteSwap(ByteSwap(originalValue) - 1);
-        } while (InterlockedCompareExchange(reinterpret_cast<LONG*>(&refCount), decrementedValue, originalValue) != originalValue);
+        } while (!atomicRef.compare_exchange_weak(originalValue, decrementedValue));
 
         // Normally we are supposed to release here, so only use this
         // function when you know you won't be the one destructing it.
@@ -274,8 +278,10 @@ struct GuestShader : GuestResource
     std::unique_ptr<RenderShader> shader;
     struct ShaderCacheEntry* shaderCacheEntry = nullptr;
     ankerl::unordered_dense::map<uint32_t, std::unique_ptr<RenderShader>> linkedShaders;
+#ifdef SWA_D3D12
     std::vector<ComPtr<IDxcBlob>> shaderBlobs;
     ComPtr<IDxcBlobEncoding> libraryBlob;
+#endif
 #ifdef ASYNC_PSO_DEBUG
     const char* name = "<unknown>";
 #endif
@@ -390,7 +396,7 @@ enum GuestTextureAddress
     D3DTADDRESS_BORDER = 6
 };
 
-extern bool g_needsResize;
+inline bool g_needsResize;
 
 extern std::unique_ptr<GuestTexture> LoadTexture(const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping = RenderComponentMapping());
 

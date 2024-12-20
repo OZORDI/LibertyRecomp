@@ -1,6 +1,14 @@
 project("UnleashedRecomp")
 set(TARGET_NAME "SWA")
 
+if (WIN32)
+    option(SWA_D3D12 "Add D3D12 support for rendering" ON)
+endif()
+
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    option(SWA_FLATPAK "Configure the build for Flatpak compatibility." OFF)
+endif()
+
 option(SWA_XAUDIO2 "Use XAudio2 for audio playback" OFF)
 
 function(BIN2C)
@@ -23,8 +31,8 @@ function(BIN2C)
     endif()
 
     add_custom_command(OUTPUT "${BIN2C_ARGS_DEST_FILE}.c"
-        COMMAND file_to_c "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
-        DEPENDS "${BIN2C_ARGS_SOURCE_FILE}" file_to_c
+        COMMAND $<TARGET_FILE:file_to_c> "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
+        DEPENDS "${BIN2C_ARGS_SOURCE_FILE}"
         BYPRODUCTS "${BIN2C_ARGS_DEST_FILE}.h"
         COMMENT "Generating binary header for ${BIN2C_ARGS_SOURCE_FILE}..."
     )
@@ -34,7 +42,6 @@ function(BIN2C)
 endfunction()
 
 add_compile_options(
-    /fp:strict
     -march=sandybridge
     -fno-strict-aliasing
 
@@ -45,7 +52,16 @@ add_compile_options(
     -Wno-void-pointer-to-int-cast
     -Wno-int-to-void-pointer-cast
     -Wno-invalid-offsetof
+    -Wno-null-arithmetic
+    -Wno-null-conversion
+    -Wno-tautological-undefined-compare
 )
+
+if (WIN32)
+    add_compile_options(/fp:strict)
+else()
+    add_compile_options(-ffp-model=strict)
+endif()
 
 add_compile_definitions(
     SWA_IMPL
@@ -85,6 +101,13 @@ if (WIN32)
         "os/win32/process_win32.cpp"
         "os/win32/version_win32.cpp"
     )
+elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    list(APPEND SWA_OS_CXX_SOURCES
+        "os/linux/logger_linux.cpp"
+        "os/linux/media_linux.cpp"
+        "os/linux/process_linux.cpp"
+        "os/linux/version_linux.cpp"
+    )
 endif()
 
 set(SWA_CPU_CXX_SOURCES
@@ -97,9 +120,14 @@ set(SWA_GPU_CXX_SOURCES
     "gpu/imgui/imgui_common.cpp"
     "gpu/imgui/imgui_font_builder.cpp"
     "gpu/imgui/imgui_snapshot.cpp"
-    "gpu/rhi/plume_d3d12.cpp"
     "gpu/rhi/plume_vulkan.cpp"
 )
+
+if (SWA_D3D12)
+    list(APPEND SWA_GPU_CXX_SOURCES
+        "gpu/rhi/plume_d3d12.cpp"
+    )
+endif()
 
 set(SWA_APU_CXX_SOURCES
     "apu/audio.cpp"
@@ -109,7 +137,7 @@ set(SWA_APU_CXX_SOURCES
 if (SWA_XAUDIO2)
     list(APPEND SWA_APU_CXX_SOURCES "apu/driver/xaudio_driver.cpp")
 else()
-    list(APPEND SWA_APU_CXX_SOURCES "apu/driver/miniaudio_driver.cpp")
+    list(APPEND SWA_APU_CXX_SOURCES "apu/driver/sdl2_driver.cpp")
 endif()
 
 set(SWA_HID_CXX_SOURCES
@@ -142,7 +170,7 @@ set(SWA_UI_CXX_SOURCES
     "ui/options_menu_thumbnails.cpp"
     "ui/options_menu.cpp"
     "ui/sdl_listener.cpp"
-    "ui/window.cpp"
+    "ui/game_window.cpp"
 )
 
 set(SWA_INSTALL_CXX_SOURCES
@@ -161,24 +189,46 @@ set(SWA_INSTALL_CXX_SOURCES
     "install/hashes/update.cpp"
 )
 
-set(LIBMSPACK_PATH ${SWA_THIRDPARTY_ROOT}/libmspack/libmspack/mspack)
-
-set(LIBMSPACK_C_SOURCES
-    ${LIBMSPACK_PATH}/lzxd.c
-)
-
-set_source_files_properties(${LIBMSPACK_C_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-
-set(SMOLV_SOURCE_DIR "${SWA_TOOLS_ROOT}/ShaderRecomp/thirdparty/smol-v/source")
-set(BC_DIFF_SOURCE_DIR "${SWA_TOOLS_ROOT}/bc_diff")
-
-set(MINIAUDIO_INCLUDE_DIRS "${SWA_THIRDPARTY_ROOT}/miniaudio")
-
 set(SWA_USER_CXX_SOURCES
     "user/achievement_data.cpp"
     "user/config.cpp"
-    "user/config_detail.cpp"
 )
+
+set(SWA_THIRDPARTY_SOURCES
+    "${SWA_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl2.cpp"
+    "${SWA_THIRDPARTY_ROOT}/imgui/imgui.cpp"
+    "${SWA_THIRDPARTY_ROOT}/imgui/imgui_demo.cpp"
+    "${SWA_THIRDPARTY_ROOT}/imgui/imgui_draw.cpp"
+    "${SWA_THIRDPARTY_ROOT}/imgui/imgui_tables.cpp"
+    "${SWA_THIRDPARTY_ROOT}/imgui/imgui_widgets.cpp"
+    "${SWA_THIRDPARTY_ROOT}/libmspack/libmspack/mspack/lzxd.c"
+    "${SWA_THIRDPARTY_ROOT}/tiny-AES-c/aes.c"
+    "${SWA_TOOLS_ROOT}/ShaderRecomp/thirdparty/smol-v/source/smolv.cpp"
+)
+
+set(SWA_THIRDPARTY_INCLUDES
+    "${SWA_THIRDPARTY_ROOT}/concurrentqueue"
+    "${SWA_THIRDPARTY_ROOT}/ddspp"
+    "${SWA_THIRDPARTY_ROOT}/imgui"
+    "${SWA_THIRDPARTY_ROOT}/libmspack/libmspack/mspack"
+    "${SWA_THIRDPARTY_ROOT}/magic_enum/include"
+    "${SWA_THIRDPARTY_ROOT}/stb"
+    "${SWA_THIRDPARTY_ROOT}/tiny-AES-c"
+    "${SWA_THIRDPARTY_ROOT}/TinySHA1"
+    "${SWA_THIRDPARTY_ROOT}/unordered_dense/include"
+    "${SWA_THIRDPARTY_ROOT}/volk"
+    "${SWA_THIRDPARTY_ROOT}/Vulkan-Headers/include"
+    "${SWA_THIRDPARTY_ROOT}/VulkanMemoryAllocator/include"
+    "${SWA_TOOLS_ROOT}/bc_diff"
+    "${SWA_TOOLS_ROOT}/ShaderRecomp/thirdparty/smol-v/source"
+)
+
+if (SWA_D3D12)
+    list(APPEND SWA_THIRDPARTY_INCLUDES "${SWA_THIRDPARTY_ROOT}/D3D12MemoryAllocator/include")
+    list(APPEND SWA_THIRDPARTY_SOURCES "${SWA_THIRDPARTY_ROOT}/D3D12MemoryAllocator/src/D3D12MemAlloc.cpp")
+endif()
+
+set_source_files_properties(${SWA_THIRDPARTY_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 set(SWA_CXX_SOURCES
     "app.cpp"
@@ -197,9 +247,8 @@ set(SWA_CXX_SOURCES
     ${SWA_PATCHES_CXX_SOURCES}
     ${SWA_UI_CXX_SOURCES}
     ${SWA_INSTALL_CXX_SOURCES}
-    ${LIBMSPACK_C_SOURCES}
-    "${SMOLV_SOURCE_DIR}/smolv.cpp"
     ${SWA_USER_CXX_SOURCES}
+    ${SWA_THIRDPARTY_SOURCES}
 )
 
 if (WIN32)
@@ -213,98 +262,98 @@ endif()
 
 set_target_properties(UnleashedRecomp PROPERTIES OUTPUT_NAME ${TARGET_NAME})
 
-find_package(directx-headers CONFIG REQUIRED)
-find_package(directx12-agility CONFIG REQUIRED)
-find_package(d3d12-memory-allocator CONFIG REQUIRED)
-find_package(SDL2 CONFIG REQUIRED)
-find_package(unordered_dense CONFIG REQUIRED)
-find_package(VulkanHeaders CONFIG)
-find_package(volk CONFIG REQUIRED)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
-find_package(xxHash CONFIG REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(tomlplusplus REQUIRED IMPORTED_TARGET tomlplusplus)
+if (SWA_FLATPAK)
+    target_compile_definitions(UnleashedRecomp PRIVATE "GAME_INSTALL_DIRECTORY=\"/var/data\"")
+endif()
+
+if (SWA_D3D12)
+    find_package(directx-headers CONFIG REQUIRED)
+    find_package(directx12-agility CONFIG REQUIRED)
+    target_compile_definitions(UnleashedRecomp PRIVATE SWA_D3D12)
+endif()
+
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    target_compile_definitions(UnleashedRecomp PRIVATE SDL_VULKAN_ENABLED)
+endif()
+
 find_package(directx-dxc REQUIRED)
-find_package(zstd CONFIG REQUIRED)
-find_package(Stb REQUIRED)
-find_package(unofficial-concurrentqueue REQUIRED)
-find_package(imgui CONFIG REQUIRED)
-find_package(magic_enum CONFIG REQUIRED)
-find_package(unofficial-tiny-aes-c CONFIG REQUIRED)
-find_package(nfd CONFIG REQUIRED)
-find_package(Vorbis CONFIG REQUIRED)
-find_package(fmt CONFIG REQUIRED)
 
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/D3D12)
-add_custom_command(TARGET UnleashedRecomp POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Core,IMPORTED_LOCATION_RELEASE> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Layers,IMPORTED_LOCATION_DEBUG> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
-   COMMAND_EXPAND_LISTS
-)
+if (SWA_D3D12)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/D3D12)
+    add_custom_command(TARGET UnleashedRecomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Core,IMPORTED_LOCATION_RELEASE> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Layers,IMPORTED_LOCATION_DEBUG> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
+       COMMAND_EXPAND_LISTS
+    )
 
-file(COPY ${PACKAGE_PREFIX_DIR}/bin/dxil.dll DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+    file(COPY ${PACKAGE_PREFIX_DIR}/bin/dxil.dll DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
+    target_link_libraries(UnleashedRecomp PRIVATE
+        Microsoft::DirectX-Headers 
+        Microsoft::DirectX-Guids 
+        Microsoft::DirectX12-Agility
+        Microsoft::DirectXShaderCompiler
+        Microsoft::DXIL
+        dxgi
+    )
+endif()
+
+file(CHMOD ${DIRECTX_DXC_TOOL} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+
+if (WIN32)
+    target_link_libraries(UnleashedRecomp PRIVATE
+        comctl32
+        ntdll
+        winmm
+        Synchronization
+    )
+endif()
 
 target_link_libraries(UnleashedRecomp PRIVATE
-    Microsoft::DirectX-Headers 
-    Microsoft::DirectX-Guids 
-    Microsoft::DirectX12-Agility
-    Microsoft::DirectXShaderCompiler
-    comctl32
-    dxgi
-    Vulkan::Headers
-    volk::volk 
-    volk::volk_headers
-    GPUOpen::VulkanMemoryAllocator
-    ntdll
+    fmt::fmt
+    libzstd_static
+    msdf-atlas-gen::msdf-atlas-gen
+    nfd::nfd
     o1heap
     PowerUtils
     SDL2::SDL2-static
+    SDL2_mixer
+    tomlplusplus::tomlplusplus
     UnleashedRecompLib
-    unofficial::D3D12MemoryAllocator
-    unordered_dense::unordered_dense
-    winmm
     xxHash::xxhash
-    PkgConfig::tomlplusplus
-    zstd::libzstd_static
-    unofficial::concurrentqueue::concurrentqueue
-    Synchronization
-    imgui::imgui
-    magic_enum::magic_enum
-    unofficial::tiny-aes-c::tiny-aes-c
-    nfd::nfd
-    msdf-atlas-gen::msdf-atlas-gen
-    Vorbis::vorbisfile
-    fmt::fmt
 )
 
 target_include_directories(UnleashedRecomp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/api
-    ${SWA_THIRDPARTY_ROOT}/ddspp
-    ${SWA_THIRDPARTY_ROOT}/TinySHA1
-    ${LIBMSPACK_PATH}
-    ${Stb_INCLUDE_DIR}
-    ${SMOLV_SOURCE_DIR}
-    ${MINIAUDIO_INCLUDE_DIRS}
-    ${BC_DIFF_SOURCE_DIR}
+    "${CMAKE_CURRENT_SOURCE_DIR}/api"
+    ${SWA_THIRDPARTY_INCLUDES}
 )
+
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    find_package(X11 REQUIRED)
+    target_include_directories(UnleashedRecomp PRIVATE ${X11_INCLUDE_DIR})
+    target_link_libraries(UnleashedRecomp PRIVATE ${X11_LIBRARIES})
+endif()
 
 target_precompile_headers(UnleashedRecomp PUBLIC ${SWA_PRECOMPILED_HEADERS})
 
 function(compile_shader FILE_PATH TARGET_NAME)
     set(FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/gpu/shader/${FILE_PATH}.hlsl)
     cmake_path(GET FILE_PATH STEM VARIABLE_NAME)
-    add_custom_command(
-        OUTPUT ${FILE_PATH}.dxil.h
-        COMMAND ${DIRECTX_DXC_TOOL} -T ${TARGET_NAME} -HV 2021 -all-resources-bound -Wno-ignored-attributes -Fh ${FILE_PATH}.dxil.h ${FILE_PATH} -Vn g_${VARIABLE_NAME}_dxil
-        DEPENDS ${FILE_PATH}
-    )
+    if (SWA_D3D12)
+        add_custom_command(
+            OUTPUT ${FILE_PATH}.dxil.h
+            COMMAND ${DIRECTX_DXC_TOOL} -T ${TARGET_NAME} -HV 2021 -all-resources-bound -Wno-ignored-attributes -Fh ${FILE_PATH}.dxil.h ${FILE_PATH} -Vn g_${VARIABLE_NAME}_dxil
+            DEPENDS ${FILE_PATH}
+        )
+        target_sources(UnleashedRecomp PRIVATE ${FILE_PATH}.dxil.h)
+    endif()
     add_custom_command(
         OUTPUT ${FILE_PATH}.spirv.h
         COMMAND ${DIRECTX_DXC_TOOL} -T ${TARGET_NAME} -HV 2021 -all-resources-bound -spirv -fvk-use-dx-layout ${ARGN} -Fh ${FILE_PATH}.spirv.h ${FILE_PATH} -Vn g_${VARIABLE_NAME}_spirv
         DEPENDS ${FILE_PATH}
     )
-    target_sources(UnleashedRecomp PRIVATE ${FILE_PATH}.dxil.h ${FILE_PATH}.spirv.h)
+    target_sources(UnleashedRecomp PRIVATE ${FILE_PATH}.spirv.h)
 endfunction()
 
 function(compile_vertex_shader FILE_PATH)

@@ -22,9 +22,18 @@
 #define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
-#include "volk.h"
+#include <volk.h>
 
-#include "vk_mem_alloc.h"
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif
+
+#include <vk_mem_alloc.h>
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 namespace plume {
     struct VulkanCommandQueue;
@@ -220,6 +229,7 @@ namespace plume {
         VkPresentModeKHR requiredPresentMode = VK_PRESENT_MODE_FIFO_KHR;
         VkCompositeAlphaFlagBitsKHR pickedAlphaFlag = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         std::vector<VulkanTexture> textures;
+        uint64_t currentPresentId = 0;
         bool immediatePresentModeSupported = false;
 
         VulkanSwapChain(VulkanCommandQueue *commandQueue, RenderWindow renderWindow, uint32_t textureCount, RenderFormat format);
@@ -412,7 +422,12 @@ namespace plume {
         VkApplicationInfo appInfo = {};
         RenderInterfaceCapabilities capabilities;
 
+#   if SDL_VULKAN_ENABLED
+        VulkanInterface(RenderWindow sdlWindow);
+#   else
         VulkanInterface();
+#   endif
+
         ~VulkanInterface() override;
         std::unique_ptr<RenderDevice> createDevice() override;
         const RenderInterfaceCapabilities &getCapabilities() const override;
