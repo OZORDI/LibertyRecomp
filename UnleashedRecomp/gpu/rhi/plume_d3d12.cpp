@@ -1213,7 +1213,7 @@ namespace plume {
         swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swapChainDesc.SampleDesc.Count = 1;
-        swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+        swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
         IDXGISwapChain1 *swapChain1;
         IDXGIFactory4 *dxgiFactory = commandQueue->device->renderInterface->dxgiFactory;
@@ -1265,11 +1265,14 @@ namespace plume {
 
     bool D3D12SwapChain::present(uint32_t textureIndex, RenderCommandSemaphore **waitSemaphores, uint32_t waitSemaphoreCount) {
         if (waitableObject != NULL) {
-            while (WaitForSingleObjectEx(waitableObject, 0, FALSE));
+            while (WaitForSingleObjectEx(waitableObject, 0, FALSE)) {
+                std::this_thread::yield();
+            }
         }
 
         UINT syncInterval = vsyncEnabled ? 1 : 0;
-        HRESULT res = d3d->Present(syncInterval, 0);
+        UINT flags = !vsyncEnabled ? DXGI_PRESENT_ALLOW_TEARING : 0;
+        HRESULT res = d3d->Present(syncInterval, flags);
         return SUCCEEDED(res);
     }
 
@@ -1287,7 +1290,7 @@ namespace plume {
             textures[i].d3d = nullptr;
         }
 
-        HRESULT res = d3d->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+        HRESULT res = d3d->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         if (FAILED(res)) {
             fprintf(stderr, "ResizeBuffers failed with error code 0x%lX.\n", res);
             return false;
