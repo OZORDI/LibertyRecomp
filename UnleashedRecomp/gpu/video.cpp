@@ -4,6 +4,7 @@
 #include "imgui/imgui_snapshot.h"
 #include "imgui/imgui_font_builder.h"
 
+#include <app.h>
 #include <bc_diff.h>
 #include <cpu/code_cache.h>
 #include <cpu/guest_code.h>
@@ -1317,6 +1318,7 @@ void Video::CreateHostDevice(bool sdlVideoDefault)
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
 
     GameWindow::Init(sdlVideoDefault);
 
@@ -1885,6 +1887,100 @@ static uint32_t HashVertexDeclaration(uint32_t vertexDeclaration)
     return vertexDeclaration;
 }
 
+static constexpr size_t PROFILER_VALUE_COUNT = 1024;
+static size_t g_profilerValueIndex;
+
+struct Profiler
+{
+    std::atomic<double> value;
+    double values[PROFILER_VALUE_COUNT];
+    std::chrono::steady_clock::time_point start;
+
+    void Begin()
+    {
+        start = std::chrono::steady_clock::now();
+    }
+
+    void End()
+    {
+        value = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    }
+
+    double UpdateAndReturnAverage()
+    {
+        values[g_profilerValueIndex] = value;
+        return std::accumulate(values, values + PROFILER_VALUE_COUNT, 0.0) / PROFILER_VALUE_COUNT;
+    }
+};
+
+static double g_applicationValues[PROFILER_VALUE_COUNT];
+static Profiler g_renderDirectorProfiler;
+
+static bool g_profilerVisible;
+static bool g_profilerWasToggled;
+
+static void DrawProfiler()
+{
+    bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1] != 0;
+
+    if (!g_profilerWasToggled && toggleProfiler)
+        g_profilerVisible = !g_profilerVisible;
+
+    g_profilerWasToggled = toggleProfiler;
+
+    if (!g_profilerVisible)
+        return;
+
+    ImFont* font = ImFontAtlasSnapshot::GetFont("FOT-SeuratPro-M.otf");
+    float defaultScale = font->Scale;
+    font->Scale = ImGui::GetDefaultFont()->FontSize / font->FontSize;
+    ImGui::PushFont(font);
+
+    if (ImGui::Begin("Profiler", &g_profilerVisible))
+    {
+        g_applicationValues[g_profilerValueIndex] = App::s_deltaTime * 1000.0;
+        double renderDirectorAvg = g_renderDirectorProfiler.UpdateAndReturnAverage();
+
+        if (ImPlot::BeginPlot("Frame Time"))
+        {
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 20.0);
+            ImPlot::SetupAxis(ImAxis_Y1, "ms", ImPlotAxisFlags_None);
+            ImPlot::PlotLine<double>("Application", g_applicationValues, PROFILER_VALUE_COUNT, 1.0, 0.0, ImPlotLineFlags_None, g_profilerValueIndex);
+            ImPlot::PlotLine<double>("Render Director", g_renderDirectorProfiler.values, PROFILER_VALUE_COUNT, 1.0, 0.0, ImPlotLineFlags_None, g_profilerValueIndex);
+
+            ImPlot::EndPlot();
+        }
+
+        g_profilerValueIndex = (g_profilerValueIndex + 1) % PROFILER_VALUE_COUNT;
+
+        const double applicationAvg = std::accumulate(g_applicationValues, g_applicationValues + PROFILER_VALUE_COUNT, 0.0) / PROFILER_VALUE_COUNT;
+
+        ImGui::Text("Average Application: %g ms (%g FPS)", applicationAvg, 1000.0 / applicationAvg);
+        ImGui::Text("Average Render Director: %g ms (%g FPS)", renderDirectorAvg, 1000.0 / renderDirectorAvg);
+        
+        O1HeapDiagnostics diagnostics, physicalDiagnostics;
+        {
+            std::lock_guard lock(g_userHeap.mutex);
+            diagnostics = o1heapGetDiagnostics(g_userHeap.heap);
+        }
+        {
+            std::lock_guard lock(g_userHeap.physicalMutex);
+            physicalDiagnostics = o1heapGetDiagnostics(g_userHeap.physicalHeap);
+        }
+
+        ImGui::Text("Heap Allocated: %d MB", int32_t(diagnostics.allocated / (1024 * 1024)));
+        ImGui::Text("Physical Heap Allocated: %d MB", int32_t(physicalDiagnostics.allocated / (1024 * 1024)));
+
+        auto capabilities = g_device->getCapabilities();
+        ImGui::Text("Present Wait: %s", capabilities.presentWait ? "Supported" : "Unsupported");
+        ImGui::Text("Triangle Fan: %s", capabilities.triangleFan ? "Supported" : "Unsupported");
+    }
+    ImGui::End();
+
+    ImGui::PopFont();
+    font->Scale = defaultScale;
+}
+
 static void DrawImGui()
 {
     ImGui_ImplSDL2_NewFrame();
@@ -1915,6 +2011,8 @@ static void DrawImGui()
     Fader::Draw();
     MessageWindow::Draw();
     ButtonGuide::Draw();
+
+    DrawProfiler();
 
     ImGui::Render();
 
@@ -4077,6 +4175,7 @@ static std::thread g_renderThread([]
         while (true)
         {
             size_t count = g_renderQueue.wait_dequeue_bulk(commands, std::size(commands));
+
             for (size_t i = 0; i < count; i++)
             {
                 auto& cmd = commands[i];
@@ -4750,6 +4849,8 @@ PPC_FUNC(sub_8258C8A0)
 PPC_FUNC_IMPL(__imp__sub_8258CAE0);
 PPC_FUNC(sub_8258CAE0)
 {
+    g_renderDirectorProfiler.Begin();
+
     if (g_needsResize)
     {
         auto r3 = ctx.r3;
@@ -4762,6 +4863,8 @@ PPC_FUNC(sub_8258CAE0)
     }
 
     __imp__sub_8258CAE0(ctx, base);
+
+    g_renderDirectorProfiler.End();
 }
 
 void PostProcessResolutionFix(PPCRegister& r4, PPCRegister& f1, PPCRegister& f2)

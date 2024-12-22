@@ -15,3 +15,4 @@ public:
     static void Restart(std::vector<std::string> restartArgs = {});
     static void Exit();
 };
+
