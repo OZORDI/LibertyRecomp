@@ -97,16 +97,16 @@ static std::atomic<uint32_t> g_keSetEventGeneration;
 
 struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 {
-    std::counting_semaphore<> semaphore;
+    std::atomic<uint32_t> count;
     uint32_t maximumCount;
 
     Semaphore(XKSEMAPHORE* semaphore)
-        : semaphore(semaphore->Header.SignalState), maximumCount(semaphore->Limit)
+        : count(semaphore->Header.SignalState), maximumCount(semaphore->Limit)
     {
     }
 
     Semaphore(uint32_t count, uint32_t maximumCount)
-        : semaphore(count), maximumCount(maximumCount)
+        : count(count), maximumCount(maximumCount)
     {
     }
 
@@ -114,11 +114,32 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
     {
         if (timeout == 0)
         {
-            return semaphore.try_acquire() ? STATUS_SUCCESS : STATUS_TIMEOUT;
+            uint32_t currentCount = count.load();
+            if (currentCount != 0)
+            {
+                if (count.compare_exchange_weak(currentCount, currentCount - 1))
+                    return STATUS_SUCCESS;
+            }
+
+            return STATUS_TIMEOUT;
         }
         else if (timeout == INFINITE)
         {
-            semaphore.acquire();
+            uint32_t currentCount;
+            while (true)
+            {
+                currentCount = count.load();
+                if (currentCount != 0)
+                {
+                    if (count.compare_exchange_weak(currentCount, currentCount - 1))
+                        return STATUS_SUCCESS;
+                }
+                else
+                {
+                    count.wait(0);
+                }
+            }
+
             return STATUS_SUCCESS;
         }
         else
@@ -130,7 +151,13 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 
     void Release(uint32_t releaseCount, uint32_t* previousCount)
     {
-        semaphore.release(releaseCount);
+        if (previousCount != nullptr)
+            *previousCount = count;
+
+        assert(count + releaseCount <= maximumCount);
+
+        count += releaseCount;
+        count.notify_all();
     }
 };
 
