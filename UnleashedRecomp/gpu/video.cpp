@@ -562,7 +562,6 @@ static void DestructTempResources()
     g_tempBuffers[g_frame].clear();
 }
 
-static std::thread::id g_mainThreadId;
 static std::thread::id g_presentThreadId = std::this_thread::get_id();
 
 PPC_FUNC_IMPL(__imp__sub_824ECA00);
@@ -1482,8 +1481,6 @@ void Video::CreateHostDevice(const char *sdlVideoDriver)
     for (auto& renderSemaphore : g_renderSemaphores)
         renderSemaphore = g_device->createCommandSemaphore();
 
-    g_mainThreadId = std::this_thread::get_id();
-
     RenderPipelineLayoutBuilder pipelineLayoutBuilder;
     pipelineLayoutBuilder.begin(false, true);
     
@@ -1742,6 +1739,8 @@ static void LockTextureRect(GuestTexture* texture, uint32_t, GuestLockedRect* lo
 
 static void UnlockTextureRect(GuestTexture* texture) 
 {
+    assert(std::this_thread::get_id() == g_presentThreadId);
+
     RenderCommand cmd;
     cmd.type = RenderCommandType::UnlockTextureRect;
     cmd.unlockTextureRect.texture = texture;
@@ -5540,14 +5539,27 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
     }
 }
 
+#ifdef _DEBUG
+static std::thread::id g_mainThreadId = std::this_thread::get_id();
+#endif
+
 // SWA::CGameModeStage::ExitLoading
 PPC_FUNC_IMPL(__imp__sub_825369A0);
 PPC_FUNC(sub_825369A0)
 {
+    assert(std::this_thread::get_id() == g_mainThreadId);
+
     // Wait for pipeline compilations to finish.
     uint32_t value;
     while ((value = g_compilingDataCount.load()) != 0)
+    {
+        // Pump SDL events to prevent the OS
+        // from thinking the process is unresponsive.
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+
         g_compilingDataCount.wait(value);
+    }
 
     __imp__sub_825369A0(ctx, base);
 }

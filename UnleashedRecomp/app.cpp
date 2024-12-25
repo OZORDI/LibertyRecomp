@@ -35,6 +35,8 @@ PPC_FUNC(sub_824EB490)
     __imp__sub_824EB490(ctx, base);
 }
 
+static std::thread::id g_mainThreadId = std::this_thread::get_id();
+
 // CApplication::Update
 PPC_FUNC_IMPL(__imp__sub_822C1130);
 PPC_FUNC(sub_822C1130)
@@ -51,8 +53,15 @@ PPC_FUNC(sub_822C1130)
 
     App::s_deltaTime = ctx.f1.f64;
 
-    SDL_PumpEvents();
-    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    // This function can also be called by the loading thread,
+    // which SDL does not like. To prevent the OS from thinking
+    // the process is unresponsive, we will flush while waiting
+    // for the pipelines to finish compiling in video.cpp.
+    if (std::this_thread::get_id() == g_mainThreadId)
+    {
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    }
 
     GameWindow::Update();
     AudioPatches::Update(App::s_deltaTime);
