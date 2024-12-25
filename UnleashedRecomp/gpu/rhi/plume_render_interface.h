@@ -87,6 +87,7 @@ namespace plume {
     struct RenderSwapChain {
         virtual ~RenderSwapChain() { }
         virtual bool present(uint32_t textureIndex, RenderCommandSemaphore **waitSemaphores, uint32_t waitSemaphoreCount) = 0;
+        virtual void wait() = 0;
         virtual bool resize() = 0;
         virtual bool needsResize() const = 0;
         virtual void setVsyncEnabled(bool vsyncEnabled) = 0;
@@ -190,7 +191,7 @@ namespace plume {
 
     struct RenderCommandQueue {
         virtual ~RenderCommandQueue() { }
-        virtual std::unique_ptr<RenderSwapChain> createSwapChain(RenderWindow renderWindow, uint32_t textureCount, RenderFormat format) = 0;
+        virtual std::unique_ptr<RenderSwapChain> createSwapChain(RenderWindow renderWindow, uint32_t textureCount, RenderFormat format, uint32_t maxFrameLatency) = 0;
         virtual void executeCommandLists(const RenderCommandList **commandLists, uint32_t commandListCount, RenderCommandSemaphore **waitSemaphores = nullptr, uint32_t waitSemaphoreCount = 0, RenderCommandSemaphore **signalSemaphores = nullptr, uint32_t signalSemaphoreCount = 0, RenderCommandFence *signalFence = nullptr) = 0;
         virtual void waitForCommandFence(RenderCommandFence *fence) = 0;
 

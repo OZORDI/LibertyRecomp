@@ -629,7 +629,8 @@ enum class RenderCommandType
     UnlockBuffer16,
     UnlockBuffer32,
     DrawImGui,
-    Present,
+    ExecuteCommandList,
+    BeginCommandList,
     StretchRect,
     SetRenderTarget,
     SetDepthStencilSurface,
@@ -1114,7 +1115,6 @@ static constexpr size_t SAMPLER_DESCRIPTOR_SIZE = 1024;
 static std::unique_ptr<GuestTexture> g_imFontTexture;
 static std::unique_ptr<RenderPipelineLayout> g_imPipelineLayout;
 static std::unique_ptr<RenderPipeline> g_imPipeline;
-static ImDrawDataSnapshot g_imSnapshot;
 
 template<typename T>
 static void ExecuteCopyCommandList(const T& function)
@@ -1309,7 +1309,91 @@ static void CreateImGuiBackend()
 #endif
 }
 
-static void BeginCommandList();
+static void CheckSwapChain()
+{
+    g_swapChain->setVsyncEnabled(Config::VSync);
+    g_swapChainValid &= !g_swapChain->needsResize();
+
+    if (!g_swapChainValid)
+    {
+        Video::WaitForGPU();
+        g_backBuffer->framebuffers.clear();
+        g_swapChainValid = g_swapChain->resize();
+        g_needsResize = g_swapChainValid;
+    }
+
+    if (g_swapChainValid)
+        g_swapChainValid = g_swapChain->acquireTexture(g_acquireSemaphores[g_frame].get(), &g_backBufferIndex);
+}
+
+static void BeginCommandList()
+{
+    g_renderTarget = g_backBuffer;
+    g_depthStencil = nullptr;
+    g_framebuffer = nullptr;
+
+    g_pipelineState.renderTargetFormat = BACKBUFFER_FORMAT;
+    g_pipelineState.depthStencilFormat = RenderFormat::UNKNOWN;
+
+    if (g_swapChainValid)
+    {
+        bool applyingGammaCorrection = Config::XboxColorCorrection || abs(Config::Brightness - 0.5f) > 0.001f;
+
+        if (applyingGammaCorrection)
+        {
+            uint32_t width = g_swapChain->getWidth();
+            uint32_t height = g_swapChain->getHeight();
+
+            if (g_intermediaryBackBufferTextureWidth != width ||
+                g_intermediaryBackBufferTextureHeight != height)
+            {
+                if (g_intermediaryBackBufferTextureDescriptorIndex == NULL)
+                    g_intermediaryBackBufferTextureDescriptorIndex = g_textureDescriptorAllocator.allocate();
+
+                Video::WaitForGPU(); // Fine to wait for GPU, this'll only happen during resize.
+
+                g_intermediaryBackBufferTexture = g_device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
+                g_textureDescriptorSet->setTexture(g_intermediaryBackBufferTextureDescriptorIndex, g_intermediaryBackBufferTexture.get(), RenderTextureLayout::SHADER_READ);
+
+                g_intermediaryBackBufferTextureWidth = width;
+                g_intermediaryBackBufferTextureHeight = height;
+            }
+
+            g_backBuffer->texture = g_intermediaryBackBufferTexture.get();
+        }
+        else
+        {
+            g_backBuffer->texture = g_swapChain->getTexture(g_backBufferIndex);
+        }
+    }
+    else
+    {
+        g_backBuffer->texture = g_backBuffer->textureHolder.get();
+    }
+
+    g_backBuffer->layout = RenderTextureLayout::UNKNOWN;
+
+    for (size_t i = 0; i < 16; i++)
+    {
+        g_sharedConstants.texture2DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D;
+        g_sharedConstants.texture3DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D;
+        g_sharedConstants.textureCubeIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE;
+    }
+
+    if (Config::GITextureFiltering == EGITextureFiltering::Bicubic)
+        g_pipelineState.specConstants |= SPEC_CONSTANT_BICUBIC_GI_FILTER;
+    else
+        g_pipelineState.specConstants &= ~SPEC_CONSTANT_BICUBIC_GI_FILTER;
+
+    auto& commandList = g_commandLists[g_frame];
+
+    commandList->begin();
+    commandList->setGraphicsPipelineLayout(g_pipelineLayout.get());
+    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
+    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 1);
+    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 2);
+    commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 3);
+}
 
 void Video::CreateHostDevice(const char *sdlVideoDriver)
 {
@@ -1380,7 +1464,7 @@ void Video::CreateHostDevice(const char *sdlVideoDriver)
         break;
     }
 
-    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, BACKBUFFER_FORMAT);
+    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, BACKBUFFER_FORMAT, Config::MaxFrameLatency);
     g_swapChain->setVsyncEnabled(Config::VSync);
     g_swapChainValid = !g_swapChain->needsResize();
 
@@ -1544,6 +1628,7 @@ void Video::CreateHostDevice(const char *sdlVideoDriver)
     g_backBuffer->format = BACKBUFFER_FORMAT;
     g_backBuffer->textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
 
+    CheckSwapChain();
     BeginCommandList();
 
     RenderTextureBarrier blankTextureBarriers[TEXTURE_DESCRIPTOR_NULL_COUNT];
@@ -1572,96 +1657,6 @@ void Video::WaitForGPU()
         g_queue->executeCommandLists(nullptr, g_commandFences[0].get());
         g_queue->waitForCommandFence(g_commandFences[0].get());
     }
-}
-
-static std::atomic<bool> g_pendingRenderThread;
-
-static void WaitForRenderThread()
-{
-    g_pendingRenderThread.wait(true);
-}
-
-static void BeginCommandList()
-{
-    g_renderTarget = g_backBuffer;
-    g_depthStencil = nullptr;
-    g_framebuffer = nullptr;
-
-    g_pipelineState.renderTargetFormat = BACKBUFFER_FORMAT;
-    g_pipelineState.depthStencilFormat = RenderFormat::UNKNOWN;
-
-    g_swapChain->setVsyncEnabled(Config::VSync);
-    g_swapChainValid &= !g_swapChain->needsResize();
-
-    if (!g_swapChainValid)
-    {
-        Video::WaitForGPU();
-        g_backBuffer->framebuffers.clear();
-        g_swapChainValid = g_swapChain->resize();
-        g_needsResize = g_swapChainValid;
-    }
-
-    if (g_swapChainValid)
-        g_swapChainValid = g_swapChain->acquireTexture(g_acquireSemaphores[g_frame].get(), &g_backBufferIndex);
-
-    if (g_swapChainValid)
-    {
-        bool applyingGammaCorrection = Config::XboxColorCorrection || abs(Config::Brightness - 0.5f) > 0.001f;
-
-        if (applyingGammaCorrection)
-        {
-            uint32_t width = g_swapChain->getWidth();
-            uint32_t height = g_swapChain->getHeight();
-
-            if (g_intermediaryBackBufferTextureWidth != width ||
-                g_intermediaryBackBufferTextureHeight != height)
-            {
-                if (g_intermediaryBackBufferTextureDescriptorIndex == NULL)
-                    g_intermediaryBackBufferTextureDescriptorIndex = g_textureDescriptorAllocator.allocate();
-
-                Video::WaitForGPU(); // Fine to wait for GPU, this'll only happen during resize.
-
-                g_intermediaryBackBufferTexture = g_device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
-                g_textureDescriptorSet->setTexture(g_intermediaryBackBufferTextureDescriptorIndex, g_intermediaryBackBufferTexture.get(), RenderTextureLayout::SHADER_READ);
-
-                g_intermediaryBackBufferTextureWidth = width;
-                g_intermediaryBackBufferTextureHeight = height;
-            }
-
-            g_backBuffer->texture = g_intermediaryBackBufferTexture.get();
-        }
-        else
-        {
-            g_backBuffer->texture = g_swapChain->getTexture(g_backBufferIndex);
-        }
-    }
-    else
-    {
-        g_backBuffer->texture = g_backBuffer->textureHolder.get();
-    }
-
-    g_backBuffer->layout = RenderTextureLayout::UNKNOWN;
-
-    for (size_t i = 0; i < 16; i++)
-    {
-        g_sharedConstants.texture2DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D;
-        g_sharedConstants.texture3DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D;
-        g_sharedConstants.textureCubeIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE;
-    }
-
-    if (Config::GITextureFiltering == EGITextureFiltering::Bicubic)
-        g_pipelineState.specConstants |= SPEC_CONSTANT_BICUBIC_GI_FILTER;
-    else
-        g_pipelineState.specConstants &= ~SPEC_CONSTANT_BICUBIC_GI_FILTER;
-
-    auto& commandList = g_commandLists[g_frame];
-
-    commandList->begin();
-    commandList->setGraphicsPipelineLayout(g_pipelineLayout.get());
-    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
-    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 1);
-    commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 2);
-    commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 3);
 }
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
@@ -1906,6 +1901,12 @@ struct Profiler
         value = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     }
 
+    void Reset()
+    {
+        End();
+        Begin();
+    }
+
     double UpdateAndReturnAverage()
     {
         values[g_profilerValueIndex] = value;
@@ -1914,6 +1915,7 @@ struct Profiler
 };
 
 static double g_applicationValues[PROFILER_VALUE_COUNT];
+static Profiler g_presentProfiler;
 static Profiler g_renderDirectorProfiler;
 
 static bool g_profilerVisible;
@@ -1939,6 +1941,9 @@ static void DrawProfiler()
     if (ImGui::Begin("Profiler", &g_profilerVisible))
     {
         g_applicationValues[g_profilerValueIndex] = App::s_deltaTime * 1000.0;
+
+        const double applicationAvg = std::accumulate(g_applicationValues, g_applicationValues + PROFILER_VALUE_COUNT, 0.0) / PROFILER_VALUE_COUNT;
+        double presentAvg = g_presentProfiler.UpdateAndReturnAverage();
         double renderDirectorAvg = g_renderDirectorProfiler.UpdateAndReturnAverage();
 
         if (ImPlot::BeginPlot("Frame Time"))
@@ -1946,18 +1951,23 @@ static void DrawProfiler()
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 20.0);
             ImPlot::SetupAxis(ImAxis_Y1, "ms", ImPlotAxisFlags_None);
             ImPlot::PlotLine<double>("Application", g_applicationValues, PROFILER_VALUE_COUNT, 1.0, 0.0, ImPlotLineFlags_None, g_profilerValueIndex);
+            ImPlot::PlotLine<double>("Present", g_presentProfiler.values, PROFILER_VALUE_COUNT, 1.0, 0.0, ImPlotLineFlags_None, g_profilerValueIndex);
             ImPlot::PlotLine<double>("Render Director", g_renderDirectorProfiler.values, PROFILER_VALUE_COUNT, 1.0, 0.0, ImPlotLineFlags_None, g_profilerValueIndex);
-
             ImPlot::EndPlot();
         }
 
         g_profilerValueIndex = (g_profilerValueIndex + 1) % PROFILER_VALUE_COUNT;
 
-        const double applicationAvg = std::accumulate(g_applicationValues, g_applicationValues + PROFILER_VALUE_COUNT, 0.0) / PROFILER_VALUE_COUNT;
+        ImGui::Text("Current Application: %g ms (%g FPS)", App::s_deltaTime * 1000.0, 1.0 / App::s_deltaTime);
+        ImGui::Text("Current Present: %g ms (%g FPS)", g_presentProfiler.value.load(), 1000.0 / g_presentProfiler.value.load());
+        ImGui::Text("Current Render Director: %g ms (%g FPS)", g_renderDirectorProfiler.value.load(), 1000.0 / g_renderDirectorProfiler.value.load());
+        ImGui::NewLine();
 
         ImGui::Text("Average Application: %g ms (%g FPS)", applicationAvg, 1000.0 / applicationAvg);
+        ImGui::Text("Average Present: %g ms (%g FPS)", presentAvg, 1000.0 / presentAvg);
         ImGui::Text("Average Render Director: %g ms (%g FPS)", renderDirectorAvg, 1000.0 / renderDirectorAvg);
-        
+        ImGui::NewLine();
+
         O1HeapDiagnostics diagnostics, physicalDiagnostics;
         {
             std::lock_guard lock(g_userHeap.mutex);
@@ -1970,10 +1980,12 @@ static void DrawProfiler()
 
         ImGui::Text("Heap Allocated: %d MB", int32_t(diagnostics.allocated / (1024 * 1024)));
         ImGui::Text("Physical Heap Allocated: %d MB", int32_t(physicalDiagnostics.allocated / (1024 * 1024)));
+        ImGui::NewLine();
 
         auto capabilities = g_device->getCapabilities();
         ImGui::Text("Present Wait: %s", capabilities.presentWait ? "Supported" : "Unsupported");
         ImGui::Text("Triangle Fan: %s", capabilities.triangleFan ? "Supported" : "Unsupported");
+        ImGui::NewLine();
 
         const char* sdlVideoDriver = SDL_GetCurrentVideoDriver();
         if (sdlVideoDriver != nullptr)
@@ -2023,8 +2035,6 @@ static void DrawImGui()
     auto drawData = ImGui::GetDrawData();
     if (drawData->CmdListsCount != 0)
     {
-        g_imSnapshot.SnapUsingSwap(drawData, ImGui::GetTime());
-
         RenderCommand cmd;
         cmd.type = RenderCommandType::DrawImGui;
         g_renderQueue.enqueue(cmd);
@@ -2047,7 +2057,7 @@ static void ProcDrawImGui(const RenderCommand& cmd)
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
     commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 1);
 
-    auto& drawData = g_imSnapshot.DrawData;
+    auto& drawData = *ImGui::GetDrawData();
     commandList->setViewports(RenderViewport(drawData.DisplayPos.x, drawData.DisplayPos.y, drawData.DisplaySize.x, drawData.DisplaySize.y));
 
     ImGuiPushConstants pushConstants{};
@@ -2163,17 +2173,34 @@ static void ProcDrawImGui(const RenderCommand& cmd)
     }
 }
 
-static bool g_shouldPrecompilePipelines = false;
+// We have to check for this to properly handle the following situation:
+// 1. Wait on swap chain.
+// 2. Create loading thread.
+// 3. Loading thread also waits on swap chain.
+// 4. Loading thread presents and quits.
+// 5. After the loading thread quits, application also presents.
+static bool g_pendingWaitOnSwapChain = true;
 
-void Video::HostPresent() 
+void Video::WaitOnSwapChain()
 {
-    WaitForRenderThread();
+    if (g_pendingWaitOnSwapChain)
+    {
+        if (g_swapChainValid)
+            g_swapChain->wait();
+
+        g_pendingWaitOnSwapChain = false;
+    }
+}
+
+static bool g_shouldPrecompilePipelines;
+static std::atomic<bool> g_executedCommandList;
+
+void Video::Present() 
+{
     DrawImGui();
 
-    g_pendingRenderThread.store(true);
-
     RenderCommand cmd;
-    cmd.type = RenderCommandType::Present;
+    cmd.type = RenderCommandType::ExecuteCommandList;
     g_renderQueue.enqueue(cmd);
 
     // All the shaders are available at this point. We can precompile embedded PSOs then.
@@ -2187,16 +2214,69 @@ void Video::HostPresent()
 
         g_shouldPrecompilePipelines = false;
     }
+
+    g_executedCommandList.wait(false);
+    g_executedCommandList = false;
+
+    if (g_swapChainValid)
+    {
+        if (g_pendingWaitOnSwapChain)
+            g_swapChain->wait(); // Never gonna happen outside loading threads as explained above.
+
+        RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
+        g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
+    }
+
+    g_pendingWaitOnSwapChain = true;
+
+    g_frame = g_nextFrame;
+    g_nextFrame = (g_frame + 1) % NUM_FRAMES;
+
+    if (g_commandListStates[g_frame])
+    {
+        g_queue->waitForCommandFence(g_commandFences[g_frame].get());
+        g_commandListStates[g_frame] = false;
+    }
+
+    g_dirtyStates = DirtyStates(true);
+    g_uploadAllocators[g_frame].reset();
+    g_triangleFanIndexData.reset();
+    g_quadIndexData.reset();
+
+    CheckSwapChain();
+
+    cmd.type = RenderCommandType::BeginCommandList;
+    g_renderQueue.enqueue(cmd);
+
+    if (Config::FPS >= FPS_MIN && Config::FPS < FPS_MAX)
+    {
+        using namespace std::chrono_literals;
+
+        static std::chrono::steady_clock::time_point s_next;
+
+        auto now = std::chrono::steady_clock::now();
+
+        if (now < s_next)
+        {
+            std::this_thread::sleep_for(std::chrono::floor<std::chrono::milliseconds>(s_next - now - 2ms));
+
+            while ((now = std::chrono::steady_clock::now()) < s_next)
+                std::this_thread::yield();
+        }
+        else
+        {
+            s_next = now;
+        }
+
+        s_next += 1000000000ns / Config::FPS;
+    }
+
+    g_presentProfiler.Reset();
 }
 
 void Video::StartPipelinePrecompilation()
 {
     g_shouldPrecompilePipelines = true;
-}
-
-static void GuestPresent() 
-{
-    Video::HostPresent();
 }
 
 static void SetRootDescriptor(const UploadAllocation& allocation, size_t index)
@@ -2209,7 +2289,7 @@ static void SetRootDescriptor(const UploadAllocation& allocation, size_t index)
         commandList->setGraphicsRootDescriptor(allocation.buffer->at(allocation.offset), index);
 }
 
-static void ProcPresent(const RenderCommand& cmd)
+static void ProcExecuteCommandList(const RenderCommand& cmd)
 {
     if (g_swapChainValid)
     {
@@ -2292,8 +2372,6 @@ static void ProcPresent(const RenderCommand& cmd)
             waitSemaphores, std::size(waitSemaphores),
             signalSemaphores, std::size(signalSemaphores),
             g_commandFences[g_frame].get());
-
-        g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
     }
     else
     {
@@ -2302,25 +2380,14 @@ static void ProcPresent(const RenderCommand& cmd)
 
     g_commandListStates[g_frame] = true;
 
-    g_frame = g_nextFrame;
-    g_nextFrame = (g_frame + 1) % NUM_FRAMES;
+    g_executedCommandList = true;
+    g_executedCommandList.notify_one();
+}
 
-    if (g_commandListStates[g_frame])
-    {
-        g_queue->waitForCommandFence(g_commandFences[g_frame].get());
-        g_commandListStates[g_frame] = false;
-    }
-
-    g_dirtyStates = DirtyStates(true);
-    g_uploadAllocators[g_frame].reset();
+static void ProcBeginCommandList(const RenderCommand& cmd)
+{
     DestructTempResources();
-    g_triangleFanIndexData.reset();
-    g_quadIndexData.reset();
-
     BeginCommandList();
-
-    g_pendingRenderThread.store(false);
-    g_pendingRenderThread.notify_all();
 }
 
 static GuestSurface* GetBackBuffer() 
@@ -3387,8 +3454,6 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
 
     if (g_dirtyStates.vertexShaderConstants || device->dirtyFlags[0] != 0)
     {
-        WaitForRenderThread();
-
         auto& cmd = queue.enqueue();
         cmd.type = RenderCommandType::SetVertexShaderConstants;
         cmd.setVertexShaderConstants.allocation = g_uploadAllocators[g_frame].allocate<true>(device->vertexShaderFloatConstants, 0x1000, 0x100);
@@ -3398,8 +3463,6 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
 
     if (g_dirtyStates.pixelShaderConstants || device->dirtyFlags[1] != 0)
     {
-        WaitForRenderThread();
-
         auto& cmd = queue.enqueue();
         cmd.type = RenderCommandType::SetPixelShaderConstants;
         cmd.setPixelShaderConstants.allocation = g_uploadAllocators[g_frame].allocate<true>(device->pixelShaderFloatConstants, 0xE00, 0x100);
@@ -3640,7 +3703,6 @@ static void DrawPrimitiveUP(GuestDevice* device, uint32_t primitiveType, uint32_
 {
     LocalRenderCommandQueue queue;
     FlushRenderStateForMainThread(device, queue);
-    WaitForRenderThread();
 
     auto& cmd = queue.enqueue();
     cmd.type = RenderCommandType::DrawPrimitiveUP;
@@ -4191,7 +4253,8 @@ static std::thread g_renderThread([]
                 case RenderCommandType::UnlockBuffer16:           ProcUnlockBuffer16(cmd); break;
                 case RenderCommandType::UnlockBuffer32:           ProcUnlockBuffer32(cmd); break;
                 case RenderCommandType::DrawImGui:                ProcDrawImGui(cmd); break;
-                case RenderCommandType::Present:                  ProcPresent(cmd); break;
+                case RenderCommandType::ExecuteCommandList:       ProcExecuteCommandList(cmd); break;
+                case RenderCommandType::BeginCommandList:         ProcBeginCommandList(cmd); break;
                 case RenderCommandType::StretchRect:              ProcStretchRect(cmd); break;
                 case RenderCommandType::SetRenderTarget:          ProcSetRenderTarget(cmd); break;
                 case RenderCommandType::SetDepthStencilSurface:   ProcSetDepthStencilSurface(cmd); break;
@@ -6025,7 +6088,7 @@ GUEST_FUNCTION_HOOK(sub_82BE96F0, GetSurfaceDesc);
 GUEST_FUNCTION_HOOK(sub_82BE04B0, GetVertexDeclaration);
 GUEST_FUNCTION_HOOK(sub_82BE0530, HashVertexDeclaration);
 
-GUEST_FUNCTION_HOOK(sub_82BDA8C0, GuestPresent);
+GUEST_FUNCTION_HOOK(sub_82BDA8C0, Video::Present);
 GUEST_FUNCTION_HOOK(sub_82BDD330, GetBackBuffer);
 
 GUEST_FUNCTION_HOOK(sub_82BE9498, CreateTexture);

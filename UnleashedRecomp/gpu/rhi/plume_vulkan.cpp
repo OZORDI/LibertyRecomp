@@ -1966,13 +1966,14 @@ namespace plume {
 
     // VulkanSwapChain
 
-    VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, RenderWindow renderWindow, uint32_t textureCount, RenderFormat format) {
+    VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, RenderWindow renderWindow, uint32_t textureCount, RenderFormat format, uint32_t maxFrameLatency) {
         assert(commandQueue != nullptr);
         assert(textureCount > 0);
 
         this->commandQueue = commandQueue;
         this->renderWindow = renderWindow;
         this->format = format;
+        this->maxFrameLatency = maxFrameLatency;
 
         VkResult res;
 
@@ -2131,12 +2132,6 @@ namespace plume {
     }
 
     bool VulkanSwapChain::present(uint32_t textureIndex, RenderCommandSemaphore **waitSemaphores, uint32_t waitSemaphoreCount) {
-        constexpr uint64_t MaxFrameDelay = 1;
-        if (commandQueue->device->capabilities.presentWait && (currentPresentId > MaxFrameDelay)) {
-            constexpr uint64_t waitTimeout = 100000000;
-            vkWaitForPresentKHR(commandQueue->device->vk, vk, currentPresentId - MaxFrameDelay, waitTimeout);
-        }
-
         thread_local std::vector<VkSemaphore> waitSemaphoresVector;
         waitSemaphoresVector.clear();
         for (uint32_t i = 0; i < waitSemaphoreCount; i++) {
@@ -2173,6 +2168,13 @@ namespace plume {
         }
 
         return true;
+    }
+
+    void VulkanSwapChain::wait() {
+        if (commandQueue->device->capabilities.presentWait && (currentPresentId >= maxFrameLatency)) {
+            constexpr uint64_t waitTimeout = 100000000;
+            vkWaitForPresentKHR(commandQueue->device->vk, vk, currentPresentId - (maxFrameLatency - 1), waitTimeout);
+        }
     }
 
     bool VulkanSwapChain::resize() {
@@ -3274,8 +3276,8 @@ namespace plume {
         device->queueFamilies[familyIndex].remove(this);
     }
 
-    std::unique_ptr<RenderSwapChain> VulkanCommandQueue::createSwapChain(RenderWindow renderWindow, uint32_t bufferCount, RenderFormat format) {
-        return std::make_unique<VulkanSwapChain>(this, renderWindow, bufferCount, format);
+    std::unique_ptr<RenderSwapChain> VulkanCommandQueue::createSwapChain(RenderWindow renderWindow, uint32_t bufferCount, RenderFormat format, uint32_t maxFrameLatency) {
+        return std::make_unique<VulkanSwapChain>(this, renderWindow, bufferCount, format, maxFrameLatency);
     }
 
     void VulkanCommandQueue::executeCommandLists(const RenderCommandList **commandLists, uint32_t commandListCount, RenderCommandSemaphore **waitSemaphores, uint32_t waitSemaphoreCount, RenderCommandSemaphore **signalSemaphores, uint32_t signalSemaphoreCount, RenderCommandFence *signalFence) {
