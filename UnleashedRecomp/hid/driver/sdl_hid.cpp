@@ -238,6 +238,21 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
 
             break;
         }
+
+        case SDL_USER_EVILSONIC:
+        {
+            if (!g_activeController)
+                break;
+
+            auto isNight = event->user.code;
+            auto r = isNight ? 22 : 0;
+            auto g = isNight ? 0 : 37;
+            auto b = isNight ? 101 : 184;
+
+            SDL_GameControllerSetLED(g_activeController->controller, r, g, b);
+
+            break;
+        }
     }
 
     return 0;
