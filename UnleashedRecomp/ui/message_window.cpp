@@ -89,8 +89,19 @@ public:
             }
 
             case SDL_MOUSEBUTTONDOWN:
+            {
+                // Only accept left mouse button.
+                if (event->button.button != SDL_BUTTON_LEFT)
+                    break;
+
+                // Only accept mouse buttons when an item is selected.
+                if (g_isControlsVisible && g_selectedRowIndex == -1)
+                    break;
+
                 g_isAccepted = true;
+
                 break;
+            }
 
             case SDL_CONTROLLERBUTTONDOWN:
             {
@@ -244,7 +255,12 @@ void DrawNextButtonGuide(bool isController, bool isKeyboard)
 
 static void ResetSelection()
 {
-    g_selectedRowIndex = g_defaultButtonIndex;
+    /* Always use -1 for mouse input to prevent the selection
+       cursor from erroneously appearing where it shouldn't. */
+    g_selectedRowIndex = hid::detail::g_inputDevice == hid::detail::EInputDevice::Mouse
+        ? -1
+        : g_defaultButtonIndex;
+
     g_upWasHeld = false;
     g_downWasHeld = false;
     g_joypadAxis = {};
@@ -392,7 +408,12 @@ void MessageWindow::Draw()
                     auto clipRectMin = drawList->GetClipRectMin();
                     auto clipRectMax = drawList->GetClipRectMax();
 
-                    g_selectedRowIndex = -1;
+                    ImVec2 listMin = { clipRectMin.x + windowMarginX, clipRectMin.y + windowMarginY };
+                    ImVec2 listMax = { clipRectMax.x - windowMarginX, clipRectMin.y + windowMarginY + itemHeight * rowCount };
+
+                    // Invalidate index if the mouse cursor is outside of the list box.
+                    if (!ImGui::IsMouseHoveringRect(listMin, listMax, false))
+                        g_selectedRowIndex = -1;
 
                     for (int i = 0; i < rowCount; i++)
                     {
@@ -400,7 +421,14 @@ void MessageWindow::Draw()
                         ImVec2 itemMax = { clipRectMax.x - windowMarginX, clipRectMin.y + windowMarginY + itemHeight * i + itemHeight };
 
                         if (ImGui::IsMouseHoveringRect(itemMin, itemMax, false))
+                        {
+                            if (g_selectedRowIndex != i)
+                                Game_PlaySound("sys_actstg_pausecursor");
+
                             g_selectedRowIndex = i;
+
+                            break;
+                        }
                     }
 
                     ButtonGuide::Open(Button(Localise("Common_Select"), EButtonIcon::LMB));
