@@ -6154,6 +6154,12 @@ GUEST_FUNCTION_HOOK(sub_82E9EE38, SetResolution);
 
 GUEST_FUNCTION_HOOK(sub_82AE2BF8, ScreenShaderInit);
 
+// This is a buggy function that recreates framebuffers
+// if the inverse capture ratio is not 2.0, but the parameter
+// is completely unused and not stored, so it ends up
+// recreating framebuffers every single frame instead.
+GUEST_FUNCTION_STUB(sub_82BAAD38);
+
 GUEST_FUNCTION_STUB(sub_822C15D8);
 GUEST_FUNCTION_STUB(sub_822C1810);
 GUEST_FUNCTION_STUB(sub_82BD97A8);
