@@ -294,8 +294,9 @@ if (SWA_D3D12)
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Layers,IMPORTED_LOCATION_DEBUG> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
        COMMAND_EXPAND_LISTS
     )
-
-    file(COPY ${PACKAGE_PREFIX_DIR}/bin/dxil.dll DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+    
+    find_file(DIRECTX_DXIL_LIBRARY "dxil.dll")
+    file(COPY ${DIRECTX_DXIL_LIBRARY} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
     target_link_libraries(UnleashedRecomp PRIVATE
         Microsoft::DirectX-Headers 
