@@ -160,16 +160,18 @@ int main(int argc, char *argv[])
     bool forceInstaller = false;
     bool forceDLCInstaller = false;
     const char *sdlVideoDriver = nullptr;
+
     for (uint32_t i = 1; i < argc; i++)
     {
         forceInstaller = forceInstaller || (strcmp(argv[i], "--install") == 0);
         forceDLCInstaller = forceDLCInstaller || (strcmp(argv[i], "--install-dlc") == 0);
+
         if (strcmp(argv[i], "--sdl-video-driver") == 0)
         {
             if ((i + 1) < argc)
                 sdlVideoDriver = argv[++i];
             else
-                fmt::println("No argument was specified for --sdl-video-driver. Option was ignored.");
+                LOGN_WARNING("No argument was specified for --sdl-video-driver. Option will be ignored.");
         }
     }
 

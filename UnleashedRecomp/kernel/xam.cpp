@@ -2,6 +2,7 @@
 #include "xam.h"
 #include "xdm.h"
 #include <hid/hid.h>
+#include <hid/hid_detail.h>
 #include <ui/game_window.h>
 #include <cpu/guest_thread.h>
 #include <ranges>
@@ -462,6 +463,9 @@ SWA_API uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_S
 
 SWA_API uint32_t XamInputSetState(uint32_t userIndex, uint32_t flags, XAMINPUT_VIBRATION* vibration)
 {
+    if (!hid::detail::IsInputDeviceController() || !Config::Vibration)
+        return ERROR_SUCCESS;
+
     ByteSwapInplace(vibration->wLeftMotorSpeed);
     ByteSwapInplace(vibration->wRightMotorSpeed);
 

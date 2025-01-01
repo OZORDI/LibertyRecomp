@@ -89,9 +89,14 @@ CONFIG_DEFINE_LOCALE(InvertCameraY)
     { ELanguage::English, { "Invert Camera Y", "Toggle between inverted up and down camera movement." } }
 };
 
+CONFIG_DEFINE_LOCALE(Vibration)
+{
+    { ELanguage::English, { "Vibration", "Toggle controller vibration." } }
+};
+
 CONFIG_DEFINE_LOCALE(AllowBackgroundInput)
 {
-    { ELanguage::English, { "Allow Background Input", "Accept controller input whilst the game window is unfocused." } }
+    { ELanguage::English, { "Allow Background Input", "Allow controller input whilst the game window is unfocused." } }
 };
 
 CONFIG_DEFINE_LOCALE(AllowDPadMovement)

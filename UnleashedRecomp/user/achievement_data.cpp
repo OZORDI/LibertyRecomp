@@ -110,6 +110,7 @@ void AchievementData::Load()
     {
         // Try loading base achievement data as fallback.
         dataPath = GetDataPath(false);
+
         if (!std::filesystem::exists(dataPath))
             return;
     }
@@ -156,7 +157,7 @@ void AchievementData::Load()
     // TODO: display error message to user before wiping data?
     if (!VerifyChecksum())
     {
-        LOGN_ERROR("Achievement data checksum mismatch.");
+        LOGN_WARNING("Achievement data checksum mismatch.");
         memset(&Data.Records, 0, sizeof(Data.Records));
     }
 
