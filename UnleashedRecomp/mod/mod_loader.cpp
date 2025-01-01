@@ -5,6 +5,7 @@
 #include <cpu/guest_stack_var.h>
 #include <kernel/function.h>
 #include <kernel/heap.h>
+#include <user/paths.h>
 #include <xxHashMap.h>
 
 enum class ModType
@@ -89,9 +90,16 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
 
 void ModLoader::Init()
 {
+    std::filesystem::path userPath = GetUserPath();
+
     IniFile configIni;
-    if (!configIni.read("cpkredir.ini"))
-        return;
+    if (!configIni.read(userPath / "cpkredir.ini"))
+    {
+        configIni = {};
+
+        if (!configIni.read(GAME_INSTALL_DIRECTORY "/cpkredir.ini"))
+            return;
+    }
 
     if (!configIni.getBool("CPKREDIR", "Enabled", true))
         return;
@@ -102,7 +110,7 @@ void ModLoader::Init()
         if (!saveFilePathU8.empty())
             ModLoader::s_saveFilePath = std::u8string_view((const char8_t*)saveFilePathU8.c_str());
         else
-            ModLoader::s_saveFilePath = "mlsave/SYS-DATA";
+            ModLoader::s_saveFilePath = userPath / "mlsave/SYS-DATA";
     }
 
     std::string modsDbIniFilePathU8 = configIni.getString("CPKREDIR", "ModsDbIni", "");
