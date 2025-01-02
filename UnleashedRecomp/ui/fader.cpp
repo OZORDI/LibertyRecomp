@@ -8,7 +8,7 @@ static bool g_isFadeIn;
 static float g_startTime;
 
 static float g_duration;
-static ImU32 g_colour = IM_COL32(0, 0, 0, 255);
+static ImU32 g_colour = IM_COL32_BLACK;
 static std::function<void()> g_endCallback;
 static float g_endCallbackDelay;
 
@@ -25,7 +25,10 @@ void Fader::Draw()
         if (time >= g_duration + g_endCallbackDelay)
         {
             if (g_endCallback)
+            {
                 g_endCallback();
+                g_endCallback = nullptr;
+            }
 
             g_isFading = false;
         }
@@ -37,6 +40,9 @@ void Fader::Draw()
             : Lerp(0, 1, time);
     }
 
+    if (g_isFadeIn && !g_isFading)
+        return;
+
     auto colour = IM_COL32(g_colour & 0xFF, (g_colour >> 8) & 0xFF, (g_colour >> 16) & 0xFF, 255 * alpha);
 
     ImGui::GetForegroundDrawList()->AddRectFilled({ 0, 0 }, ImGui::GetIO().DisplaySize, colour);
@@ -47,13 +53,14 @@ static void DoFade(bool isFadeIn, float duration, std::function<void()> endCallb
     if (g_isFading)
         return;
 
-    Fader::s_isVisible = true;
     g_isFading = true;
     g_isFadeIn = isFadeIn;
     g_startTime = ImGui::GetTime();
     g_duration = duration;
     g_endCallback = endCallback;
     g_endCallbackDelay = endCallbackDelay;
+
+    Fader::s_isVisible = true;
 }
 
 void Fader::SetFadeColour(ImU32 colour)

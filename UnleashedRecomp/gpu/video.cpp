@@ -2032,9 +2032,9 @@ static void DrawImGui()
     OptionsMenu::Draw();
     AchievementOverlay::Draw();
     InstallerWizard::Draw();
-    Fader::Draw();
     MessageWindow::Draw();
     ButtonGuide::Draw();
+    Fader::Draw();
 
     DrawProfiler();
 

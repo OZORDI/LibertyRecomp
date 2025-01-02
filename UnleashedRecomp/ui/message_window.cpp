@@ -417,8 +417,8 @@ void MessageWindow::Draw()
 
                     for (int i = 0; i < rowCount; i++)
                     {
-                        ImVec2 itemMin = { clipRectMin.x + windowMarginX, clipRectMin.y + windowMarginY + itemHeight * i };
-                        ImVec2 itemMax = { clipRectMax.x - windowMarginX, clipRectMin.y + windowMarginY + itemHeight * i + itemHeight };
+                        ImVec2 itemMin = { listMin.x, listMin.y + itemHeight * i };
+                        ImVec2 itemMax = { listMax.x, clipRectMin.y + windowMarginY + itemHeight * i + itemHeight };
 
                         if (ImGui::IsMouseHoveringRect(itemMin, itemMax, false))
                         {

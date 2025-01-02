@@ -13,8 +13,17 @@
 #include <locale/locale.h>
 #include <ui/button_guide.h>
 #include <app.h>
+#include <decompressor.h>
 
 #include <patches/audio_patches.h>
+
+#include <res/images/options_menu/miles_electric.dds.h>
+
+static constexpr double MILES_ELECTRIC_SCALE_DURATION = 16.0;
+static constexpr double MILES_ELECTRIC_BACKGROUND_DURATION = 16.0;
+static constexpr double MILES_ELECTRIC_FOREGROUND_FADE_DURATION = 6.0;
+static constexpr double MILES_ELECTRIC_FOREGROUND_FADE_IN_TIME = MILES_ELECTRIC_SCALE_DURATION - 2.0;
+static constexpr double MILES_ELECTRIC_FOREGROUND_FADE_OUT_TIME = MILES_ELECTRIC_FOREGROUND_FADE_IN_TIME + MILES_ELECTRIC_FOREGROUND_FADE_DURATION;
 
 static constexpr double CONTAINER_LINE_ANIMATION_DURATION = 8.0;
 
@@ -66,11 +75,16 @@ static const IConfigDef* g_selectedItem;
 
 static std::string* g_inaccessibleReason;
 
+static bool g_isStage = false;
+static bool g_isClosing = false;
+static bool g_isControlsVisible = false;
 static bool g_isEnterKeyBuffered = false;
 static bool g_canReset = false;
 static bool g_isLanguageOptionChanged = false;
 
 static double g_appearTime = 0.0;
+
+static std::unique_ptr<GuestTexture> g_upMilesElectric;
 
 static void DrawScanlineBars()
 {
@@ -174,7 +188,7 @@ static float AlignToNextGrid(float value)
 
 static void DrawContainer(ImVec2 min, ImVec2 max)
 {
-    double containerHeight = ComputeMotion(g_appearTime, 0.0, CONTAINER_LINE_ANIMATION_DURATION);
+    double containerHeight = g_isStage ? 1.0 : ComputeMotion(g_appearTime, 0.0, CONTAINER_LINE_ANIMATION_DURATION);
 
     float center = (min.y + max.y) / 2.0f;
     min.y = Lerp(center, min.y, containerHeight);
@@ -183,9 +197,9 @@ static void DrawContainer(ImVec2 min, ImVec2 max)
     auto& res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetForegroundDrawList();
 
-    double outerAlpha = ComputeMotion(g_appearTime, CONTAINER_OUTER_TIME, CONTAINER_OUTER_DURATION);
-    double innerAlpha = ComputeMotion(g_appearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
-    double backgroundAlpha = ComputeMotion(g_appearTime, CONTAINER_BACKGROUND_TIME, CONTAINER_BACKGROUND_DURATION);
+    double outerAlpha = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_OUTER_TIME, CONTAINER_OUTER_DURATION);
+    double innerAlpha = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
+    double backgroundAlpha = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_BACKGROUND_TIME, CONTAINER_BACKGROUND_DURATION);
 
     const uint32_t lineColor = IM_COL32(0, 89, 0, 255 * containerHeight);
     const uint32_t outerColor = IM_COL32(0, 49, 0, 255 * outerAlpha);
@@ -252,7 +266,7 @@ static void ResetSelection()
 
 static bool DrawCategories()
 {
-    double motion = ComputeMotion(g_appearTime, CONTAINER_CATEGORY_TIME, CONTAINER_CATEGORY_DURATION);
+    double motion = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_CATEGORY_TIME, CONTAINER_CATEGORY_DURATION);
 
     if (motion == 0.0)
         return false;
@@ -412,7 +426,7 @@ static bool DrawCategories()
         ResetGradient();
     }
 
-    if ((ImGui::GetTime() - g_appearTime) >= (CONTAINER_FULL_DURATION / 60.0))
+    if (g_isStage || (ImGui::GetTime() - g_appearTime) >= (CONTAINER_FULL_DURATION / 60.0))
     {
         drawList->PushClipRect({ clipRectMin.x, clipRectMin.y + gridSize * 6.0f }, { clipRectMax.x - gridSize, clipRectMax.y - gridSize });
         return true;
@@ -555,7 +569,7 @@ static void DrawConfigOption(int32_t rowIndex, float yOffset, ConfigDef<T>* conf
         DrawTextWithMarquee(g_seuratFont, size, textPos, min, max, textColour, configName.c_str(), g_rowSelectionTime, 0.9, Scale(250.0));
 
         // Show reset button if this option is accessible or not a language option.
-        g_canReset = g_selectedItem->GetName().find("Language") == std::string::npos && isAccessible;
+        g_canReset = !g_lockedOnOption && g_selectedItem->GetName().find("Language") == std::string::npos && isAccessible;
     }
     else
     {
@@ -1026,6 +1040,78 @@ static void DrawInfoPanel()
     drawList->PopClipRect();
 }
 
+static bool DrawMilesElectric()
+{
+    auto drawList = ImGui::GetForegroundDrawList();
+    auto& res = ImGui::GetIO().DisplaySize;
+
+    auto scaleMotion = ComputeMotion(g_appearTime, 0, MILES_ELECTRIC_SCALE_DURATION);
+
+    if (scaleMotion >= 1.0)
+    {
+        if (g_isClosing)
+            OptionsMenu::s_isVisible = false;
+    
+        return true;
+    }
+
+    auto bgAlphaMotion = ComputeMotion(g_appearTime, 0, MILES_ELECTRIC_BACKGROUND_DURATION);
+    auto bgAlpha = g_isClosing
+        ? Hermite(255, 0, bgAlphaMotion)
+        : Hermite(0, 255, bgAlphaMotion);
+
+    drawList->AddRectFilled({ 0, 0 }, res, IM_COL32(64, 64, 64, bgAlpha));
+
+    auto y = g_isClosing
+        ? Hermite(140, 0, scaleMotion)
+        : Hermite(0, 140, scaleMotion);
+
+    auto scale = g_isClosing
+        ? Hermite(Scale(1400), Scale(64), scaleMotion)
+        : Hermite(Scale(64), Scale(1400), scaleMotion);
+
+    ImVec2 centre = { res.x / 2, res.y / 2 - Scale(y) };
+
+    auto alpha = g_isClosing
+        ? Hermite(255, 0, scaleMotion)
+        : Hermite(255, 127, scaleMotion);
+
+    drawList->AddImage
+    (
+        g_upMilesElectric.get(),
+        { centre.x - scale, centre.y - scale },
+        { centre.x + scale, centre.y + scale },
+        { 0, 0 },
+        { 1, 1 },
+        IM_COL32(255, 255, 255, alpha)
+    );
+
+    return false;
+}
+
+static bool DrawFadeTransition()
+{
+    auto drawList = ImGui::GetForegroundDrawList();
+    auto& res = ImGui::GetIO().DisplaySize;
+
+    auto scaleMotion = ComputeMotion(g_appearTime, 0, MILES_ELECTRIC_SCALE_DURATION);
+    auto fgAlphaOutMotion = ComputeMotion(g_appearTime, MILES_ELECTRIC_FOREGROUND_FADE_OUT_TIME, MILES_ELECTRIC_FOREGROUND_FADE_DURATION);
+
+    if (scaleMotion < 0.8)
+        return false;
+
+    if (fgAlphaOutMotion >= 1.0)
+    {
+        g_isControlsVisible = true;
+    }
+    else
+    {
+        drawList->AddRectFilled({ 0, 0 }, res, IM_COL32(0, 0, 0, Lerp(255, 0, fgAlphaOutMotion)));
+    }
+
+    return fgAlphaOutMotion >= 1.0;
+}
+
 void OptionsMenu::Init()
 {
     auto& io = ImGui::GetIO();
@@ -1035,27 +1121,48 @@ void OptionsMenu::Init()
     g_newRodinFont = ImFontAtlasSnapshot::GetFont("FOT-NewRodinPro-DB.otf");
 
     LoadThumbnails();
+
+    g_upMilesElectric = LOAD_ZSTD_TEXTURE(g_miles_electric);
 }
 
 void OptionsMenu::Draw()
 {
     if (!s_isVisible)
+    {
+        g_isControlsVisible = false;
         return;
+    }
 
     // We've entered the menu now, no need to check this.
     auto pInputState = SWA::CInputState::GetInstance();
     if (pInputState->GetPadState().IsReleased(SWA::eKeyState_A))
         g_isEnterKeyBuffered = false;
-    
-    auto& res = ImGui::GetIO().DisplaySize;
-    auto drawList = ImGui::GetForegroundDrawList();
-    
-    if (s_isPause && s_pauseMenuType != SWA::eMenuType_WorldMap)
-        drawList->AddRectFilled({ 0.0f, 0.0f }, res, IM_COL32(0, 0, 0, 223));
 
-    DrawScanlineBars();
-    DrawSettingsPanel();
-    DrawInfoPanel();
+    if (g_isStage)
+    {
+        if (!DrawMilesElectric())
+            return;
+    }
+    else
+    {
+        g_isControlsVisible = true;
+    }
+
+    if (!g_isClosing)
+    {
+        auto drawList = ImGui::GetForegroundDrawList();
+        auto& res = ImGui::GetIO().DisplaySize;
+
+        if (g_isStage)
+            drawList->AddRectFilled({ 0.0f, 0.0f }, res, IM_COL32(0, 0, 0, 223));
+
+        DrawScanlineBars();
+        DrawSettingsPanel();
+        DrawInfoPanel();
+
+        if (g_isStage)
+            DrawFadeTransition();
+    }
 
     s_isRestartRequired = Config::Language != App::s_language;
 }
@@ -1063,10 +1170,11 @@ void OptionsMenu::Draw()
 void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
 {
     s_isVisible = true;
+    g_isClosing = false;
     s_isPause = isPause;
-
     s_pauseMenuType = pauseMenuType;
-
+    g_isStage = isPause && pauseMenuType != SWA::eMenuType_WorldMap;
+    
     g_appearTime = ImGui::GetTime();
     g_categoryIndex = 0;
     g_categoryAnimMin = { 0.0f, 0.0f };
@@ -1079,34 +1187,36 @@ void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
         g_isEnterKeyBuffered = true;
 
     ResetSelection();
-
+    
+    // Hide CSD UI.
     *(bool*)g_memory.Translate(0x8328BB26) = false;
 
     std::array<Button, 4> buttons =
     {
-        Button(Localise("Common_Switch"), EButtonIcon::LBRB, EButtonAlignment::Left),
+        Button(Localise("Common_Switch"), EButtonIcon::LBRB, EButtonAlignment::Left, &g_isControlsVisible),
         Button(Localise("Common_Reset"), EButtonIcon::X, &g_canReset),
-        Button(Localise("Common_Select"), EButtonIcon::A),
-        Button(Localise("Common_Back"), EButtonIcon::B)
+        Button(Localise("Common_Select"), EButtonIcon::A, &g_isControlsVisible),
+        Button(Localise("Common_Back"), EButtonIcon::B, &g_isControlsVisible)
     };
-
-    ButtonGuide::Open(buttons);
     
+    ButtonGuide::Open(buttons);
     ButtonGuide::SetSideMargins(250);
-
-    // TODO: animate Miles Electric in if we're in a stage.
 }
 
 void OptionsMenu::Close()
 {
-    s_isVisible = false;
+    g_isClosing = true;
+    g_appearTime = ImGui::GetTime();
 
+    // Skip Miles Electric animation at main menu.
+    if (!g_isStage)
+        s_isVisible = false;
+
+    // Show CSD UI.
     *(bool*)g_memory.Translate(0x8328BB26) = true;
 
     ButtonGuide::Close();
     Config::Save();
-
-    // TODO: animate Miles Electric out if we're in a stage.
 }
 
 bool OptionsMenu::CanClose()

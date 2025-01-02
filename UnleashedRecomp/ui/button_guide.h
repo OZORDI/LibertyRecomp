@@ -47,6 +47,8 @@ public:
     Button(std::string name, EButtonIcon icon, EButtonAlignment alignment, EFontQuality fontQuality = EFontQuality::High, bool* visibility = nullptr)
         : Name(name), Icon(icon), Alignment(alignment), FontQuality(fontQuality), Visibility(visibility) {}
 
+    Button(std::string name, EButtonIcon icon, EButtonAlignment alignment, bool* visibility) : Name(name), Icon(icon), Alignment(alignment), Visibility(visibility) {}
+
     Button(std::string name, EButtonIcon icon, bool* visibility) : Name(name), Icon(icon), Visibility(visibility) {}
 
     Button(std::string name, EButtonIcon icon) : Name(name), Icon(icon) {}
