@@ -3,7 +3,7 @@
 #include <bit>
 
 #include "audio.h"
-#include "cpu/code_cache.h"
+#include <kernel/memory.h>
 
 #define AUDIO_DRIVER_KEY (uint32_t)('DAUD')
 
@@ -21,7 +21,7 @@ uint32_t XAudioRegisterRenderDriverClient(be<uint32_t>* callback, be<uint32_t>* 
 #endif
 
     *driver = AUDIO_DRIVER_KEY;
-    XAudioRegisterClient(KeFindHostFunction(*callback), callback[1]);
+    XAudioRegisterClient(g_memory.FindFunction(*callback), callback[1]);
     return 0;
 }
 

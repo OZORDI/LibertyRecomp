@@ -6,8 +6,6 @@
 
 #include <app.h>
 #include <bc_diff.h>
-#include <cpu/code_cache.h>
-#include <cpu/guest_code.h>
 #include <cpu/guest_thread.h>
 #include <decompressor.h>
 #include <kernel/function.h>
@@ -1682,7 +1680,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     memset(device, 0, sizeof(*device));
 
     uint32_t functionOffset = 0x443344; // D3D
-    g_codeCache.Insert(functionOffset, HostToGuestFunction<SetRenderStateUnimplemented>);
+    g_memory.InsertFunction(functionOffset, HostToGuestFunction<SetRenderStateUnimplemented>);
 
     for (size_t i = 0; i < std::size(device->setRenderStateFunctions); i++)
         device->setRenderStateFunctions[i] = functionOffset;
@@ -1690,7 +1688,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     for (auto& [state, function] : g_setRenderStateFunctions)
     {
         functionOffset += 4;
-        g_codeCache.Insert(functionOffset, function);
+        g_memory.InsertFunction(functionOffset, function);
         device->setRenderStateFunctions[state / 4] = functionOffset;
     }
 

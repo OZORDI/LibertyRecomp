@@ -1,5 +1,3 @@
-#include <cpu/guest_code.h>
-
 // CObjFlame::CObjFlame
 // A field is not zero initialized,
 // causing collisions to constantly get created

@@ -1,5 +1,4 @@
-#include <cpu/code_cache.h>
-#include <cpu/guest_code.h>
+#include <kernel/memory.h>
 #include <api/SWA.h>
 #include <ui/game_window.h>
 #include <user/config.h>
@@ -87,13 +86,13 @@ bool LoadingUpdateMidAsmHook(PPCRegister& r31)
     double deltaTime = std::min(std::chrono::duration<double>(now - g_prev).count(), 1.0 / 15.0);
     g_prev = now;
 
-    uint8_t* base = reinterpret_cast<uint8_t*>(g_memory.base);
+    uint8_t* base = g_memory.base;
     uint32_t application = PPC_LOAD_U32(PPC_LOAD_U32(r31.u32 + 4));
     uint32_t update = PPC_LOAD_U32(PPC_LOAD_U32(application) + 20);
 
     g_ppcContext->r3.u32 = application;
     g_ppcContext->f1.f64 = deltaTime;
-    reinterpret_cast<PPCFunc*>(g_codeCache.Find(update))(*g_ppcContext, base);
+    g_memory.FindFunction(update)(*g_ppcContext, base);
 
     bool loading = PPC_LOAD_U8(0x83367A4C);
     if (loading)

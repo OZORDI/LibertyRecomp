@@ -5,29 +5,21 @@
 #define MEM_RESERVE 0x00002000  
 #endif
 
-class Memory
+struct Memory
 {
-public:
-    char* base{};
-    size_t size{};
-    size_t guestBase{};
+    uint8_t* base{};
 
-    Memory(void* address, size_t size);
-
-    void* Alloc(size_t offset, size_t size, uint32_t type);
-
-    void* Commit(size_t offset, size_t size);
-    void* Reserve(size_t offset, size_t size);
+    Memory();
 
     bool IsInMemoryRange(const void* host) const noexcept
     {
-        return host >= base && host < (base + size);
+        return host >= base && host < (base + PPC_MEMORY_SIZE);
     }
 
     void* Translate(size_t offset) const noexcept
     {
         if (offset)
-            assert(offset < 0x100000000ull);
+            assert(offset < PPC_MEMORY_SIZE);
 
         return base + offset;
     }
@@ -37,7 +29,17 @@ public:
         if (host)
             assert(IsInMemoryRange(host));
 
-        return static_cast<uint32_t>(static_cast<const char*>(host) - base);
+        return static_cast<uint32_t>(static_cast<const uint8_t*>(host) - base);
+    }
+
+    PPCFunc* FindFunction(uint32_t guest) const noexcept
+    {
+        return *reinterpret_cast<PPCFunc**>(base + PPC_FUNC_TABLE_OFFSET + (uint64_t(guest) * 2));
+    }
+
+    void InsertFunction(uint32_t guest, PPCFunc* host)
+    {
+        *reinterpret_cast<PPCFunc**>(base + PPC_FUNC_TABLE_OFFSET + (uint64_t(guest) * 2)) = host;
     }
 };
 

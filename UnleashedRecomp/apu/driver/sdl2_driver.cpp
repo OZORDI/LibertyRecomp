@@ -1,7 +1,5 @@
 #include "sdl2_driver.h"
-#include <cpu/code_cache.h>
 #include <cpu/guest_thread.h>
-#include <cpu/guest_code.h>
 #include <kernel/heap.h>
 
 static PPCFunc* g_clientCallback{};
@@ -50,7 +48,7 @@ static void AudioThread()
         if ((queuedAudioSize / callbackAudioSize) <= MAX_LATENCY)
         {
             ctx.ppcContext.r3.u32 = g_clientCallbackParam;
-            g_clientCallback(ctx.ppcContext, reinterpret_cast<uint8_t*>(g_memory.base));
+            g_clientCallback(ctx.ppcContext, g_memory.base);
         }
 
         auto now = std::chrono::steady_clock::now();

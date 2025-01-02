@@ -1,5 +1,4 @@
 #include <stdafx.h>
-#include <cpu/code_cache.h>
 #include <cpu/guest_thread.h>
 #include <gpu/video.h>
 #include <kernel/function.h>
@@ -25,9 +24,8 @@
 const size_t XMAIOBegin = 0x7FEA0000;
 const size_t XMAIOEnd = XMAIOBegin + 0x0000FFFF;
 
-Memory g_memory{ reinterpret_cast<void*>(0x100000000), 0x100000000 };
+Memory g_memory;
 Heap g_userHeap;
-CodeCache g_codeCache;
 XDBFWrapper g_xdbfWrapper;
 std::unordered_map<uint16_t, GuestTexture*> g_xdbfTextureCache;
 
@@ -37,11 +35,7 @@ void HostStartup()
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
 
-    g_memory.Alloc(0x10000, 0x1000, MEM_COMMIT);
     g_userHeap.Init();
-    g_codeCache.Init();
-
-    g_memory.Alloc(XMAIOBegin, 0xFFFF, MEM_COMMIT);
 
     hid::Init();
 }
@@ -108,8 +102,6 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
 
     auto* xex = reinterpret_cast<XEX_HEADER*>(loadResult.data());
     auto security = reinterpret_cast<XEX2_SECURITY_INFO*>((char*)xex + xex->AddressOfSecurityInfo);
-
-    g_memory.Alloc(security->ImageBase, security->SizeOfImage, MEM_COMMIT);
 
     auto format = Xex2FindOptionalHeader<XEX_FILE_FORMAT_INFO>(xex, XEX_HEADER_FILE_FORMAT_INFO);
     auto entry = *Xex2FindOptionalHeader<uint32_t>(xex, XEX_HEADER_ENTRY_POINT);

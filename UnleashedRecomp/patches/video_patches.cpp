@@ -1,4 +1,3 @@
-#include <cpu/guest_code.h>
 #include <user/config.h>
 #include <api/SWA.h>
 #include <ui/game_window.h>

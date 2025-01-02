@@ -1,9 +1,7 @@
 #include <stdafx.h>
 #include "xaudio_driver.h"
 #include <xaudio2.h>
-#include <cpu/code_cache.h>
 #include <cpu/guest_thread.h>
-#include <cpu/guest_code.h>
 #include <cpu/ppc_context.h>
 #include <kernel/heap.h>
 
@@ -55,7 +53,7 @@ PPC_FUNC(DriverLoop)
         WaitForSingleObject(g_audioSemaphore, INFINITE);
 
         ctx.r3.u64 = g_clientCallbackParam;
-        GuestCode::Run((void*)g_clientCallback, &ctx);
+        g_clientCallback(ctx, g_memory.base);
     }
 }
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cpu/guest_code.h>
 #include <cpu/guest_stack_var.h>
 #include <kernel/function.h>
 

@@ -3,8 +3,6 @@
 #include <kernel/memory.h>
 #include <kernel/heap.h>
 #include <kernel/function.h>
-#include "code_cache.h"
-#include "guest_code.h"
 #include "ppc_context.h"
 
 constexpr size_t PCR_SIZE = 0xAB0;
@@ -29,7 +27,6 @@ GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
     *(uint32_t*)(thread + PCR_SIZE + 0x10) = 0xFFFFFFFF; // that one TLS entry that felt quirky
     *(uint32_t*)(thread + PCR_SIZE + TLS_SIZE + 0x14C) = ByteSwap(GuestThread::GetCurrentThreadId()); // thread id
 
-    ppcContext.fn = (uint8_t*)g_codeCache.bucket;
     ppcContext.r1.u64 = g_memory.MapVirtual(thread + PCR_SIZE + TLS_SIZE + TEB_SIZE + STACK_SIZE); // stack pointer
     ppcContext.r13.u64 = g_memory.MapVirtual(thread);
     ppcContext.fpscr.loadFromHost();
@@ -78,7 +75,7 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
     GuestThreadContext ctx(cpuNumber);
     ctx.ppcContext.r3.u64 = params.value;
 
-    reinterpret_cast<PPCFunc*>(g_codeCache.Find(params.function))(ctx.ppcContext, reinterpret_cast<uint8_t*>(g_memory.base));
+    g_memory.FindFunction(params.function)(ctx.ppcContext, g_memory.base);
 
     return ctx.ppcContext.r3.u32;
 }

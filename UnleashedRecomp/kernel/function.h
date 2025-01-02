@@ -314,19 +314,18 @@ T GuestToHostFunction(const TFunction& func, TArgs&&... argv)
     auto& currentCtx = *GetPPCContext();
 
     PPCContext newCtx; // NOTE: No need for zero initialization, has lots of unnecessary code generation.
-    newCtx.fn = currentCtx.fn;
     newCtx.r1 = currentCtx.r1;
     newCtx.r13 = currentCtx.r13;
     newCtx.fpscr = currentCtx.fpscr;
 
-    _translate_args_to_guest(newCtx, (uint8_t*)g_memory.base, args);
+    _translate_args_to_guest(newCtx, g_memory.base, args);
 
     SetPPCContext(newCtx);
 
     if constexpr (std::is_function_v<TFunction>)
-        func(newCtx, (uint8_t*)g_memory.base);
+        func(newCtx, g_memory.base);
     else
-        (*(PPCFunc**)(newCtx.fn + uint64_t(func) * 2))(newCtx, (uint8_t*)g_memory.base);
+        g_memory.FindFunction(func)(newCtx, g_memory.base);
 
     currentCtx.fpscr = newCtx.fpscr;
     SetPPCContext(currentCtx);

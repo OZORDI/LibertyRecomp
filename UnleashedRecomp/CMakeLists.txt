@@ -112,7 +112,6 @@ endif()
 
 set(SWA_CPU_CXX_SOURCES
     "cpu/guest_thread.cpp"
-    "cpu/code_cache.cpp"
 )
 
 set(SWA_GPU_CXX_SOURCES

@@ -1,4 +1,3 @@
-#include <cpu/guest_code.h>
 #include <api/SWA.h>
 #include <locale/locale.h>
 #include <ui/button_guide.h>

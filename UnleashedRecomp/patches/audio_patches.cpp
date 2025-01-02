@@ -1,4 +1,3 @@
-#include <cpu/guest_code.h>
 #include <user/config.h>
 #include <kernel/function.h>
 #include <os/media.h>
