@@ -406,10 +406,10 @@ SWA_API uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_S
 
     uint32_t result = hid::GetState(userIndex, state);
 
-    if (GameWindow::s_isFocused)
-    {
-        auto keyboardState = SDL_GetKeyboardState(NULL);
+    auto keyboardState = SDL_GetKeyboardState(NULL);
 
+    if (GameWindow::s_isFocused && !keyboardState[SDL_SCANCODE_LALT])
+    {
         if (keyboardState[SDL_SCANCODE_W])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_Y;
         if (keyboardState[SDL_SCANCODE_A])

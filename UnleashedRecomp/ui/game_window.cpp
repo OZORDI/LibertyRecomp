@@ -185,7 +185,7 @@ void GameWindow::Init(const char* sdlVideoDriver)
     {
         // Try matching the current window size with a known configuration.
         if (def->Value < 0)
-            def->Value = GameWindow::FindNearestDisplayMode();
+            def->Value = FindNearestDisplayMode();
     };
 
     Config::WindowSize.ApplyCallback = [](ConfigDef<int32_t>* def)
