@@ -302,7 +302,7 @@ static const PipelineState g_pipelineStateCache[] =
 #include "cache/pipeline_state_cache.h"
 };
 
-static bool g_pendingPipelineStateCache = true;
+static bool g_pendingPipelineStateCache;
 
 #include "cache/vertex_element_cache.h"
 
@@ -2221,6 +2221,7 @@ void Video::Present()
             g_pendingDataCount.notify_all();
 
         g_shouldPrecompilePipelines = false;
+        g_pendingPipelineStateCache = true;
     }
 
     g_executedCommandList.wait(false);
