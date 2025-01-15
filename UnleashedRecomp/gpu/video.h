@@ -2,6 +2,7 @@
 
 //#define ASYNC_PSO_DEBUG
 #define PSO_CACHING
+//#define PSO_CACHING_CLEANUP
 
 #include "rhi/plume_render_interface.h"
 
@@ -269,6 +270,7 @@ struct GuestVertexDeclaration : GuestResource
     uint32_t vertexElementCount = 0;
     uint32_t swappedTexcoords = 0;
     bool hasR11G11B10Normal = false;
+    bool vertexStreams[16]{};
     uint32_t indexVertexStream = 0;
 };
 
