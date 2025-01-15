@@ -338,11 +338,6 @@ address = 0x82476778 # Slope
 registers = ["f1", "f28"]
 
 [[midasm_hook]]
-name = "GetStageIDMidAsmHook"
-address = 0x82528198
-registers = ["r5"]
-
-[[midasm_hook]]
 name = "PostUnleashMidAsmHook"
 address = 0x823C6788
 registers = ["r30"]

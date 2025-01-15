@@ -4,9 +4,10 @@
 #include <user/config.h>
 #include <os/logger.h>
 
-uint32_t m_lastCheckpointScore = 0;
-float m_lastDarkGaiaEnergy = 0.0f;
-bool m_isUnleashCancelled = false;
+static uint32_t g_lastEnemyScore;
+static uint32_t g_lastTrickScore;
+static float g_lastDarkGaiaEnergy;
+static bool g_isUnleashCancelled;
 
 void PostureDPadSupportMidAsmHook(PPCRegister& r3)
 {
@@ -38,14 +39,13 @@ PPC_FUNC(sub_82624308)
     if (!Config::SaveScoreAtCheckpoints)
         return;
 
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
+    if (auto pGameDocument = SWA::CGameDocument::GetInstance())
+    {
+        g_lastEnemyScore = pGameDocument->m_pMember->m_ScoreInfo.EnemyScore;
+        g_lastTrickScore = pGameDocument->m_pMember->m_ScoreInfo.TrickScore;
 
-    if (!pGameDocument)
-        return;
-
-    m_lastCheckpointScore = pGameDocument->m_pMember->m_Score;
-
-    LOGFN("Score: {}", m_lastCheckpointScore);
+        LOGFN("Score: {}", g_lastEnemyScore + g_lastTrickScore);
+    }
 }
 
 /* Hook function that resets the score
@@ -58,19 +58,22 @@ PPC_FUNC(sub_8245F048)
     if (!Config::SaveScoreAtCheckpoints)
         return;
 
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
+    if (auto pGameDocument = SWA::CGameDocument::GetInstance())
+    {
+        LOGFN("Score: {}", g_lastEnemyScore + g_lastTrickScore);
 
-    if (!pGameDocument)
-        return;
-
-    LOGFN("Score: {}", m_lastCheckpointScore);
-
-    pGameDocument->m_pMember->m_Score = m_lastCheckpointScore;
+        pGameDocument->m_pMember->m_ScoreInfo.EnemyScore = g_lastEnemyScore;
+        pGameDocument->m_pMember->m_ScoreInfo.TrickScore = g_lastTrickScore;
+    }
 }
 
 void ResetScoreOnRestartMidAsmHook()
 {
-    m_lastCheckpointScore = 0;
+    if (auto pGameDocument = SWA::CGameDocument::GetInstance())
+    {
+        pGameDocument->m_pMember->m_ScoreInfo.EnemyScore = 0;
+        pGameDocument->m_pMember->m_ScoreInfo.TrickScore = 0;
+    }
 }
 
 // Dark Gaia energy change hook.
@@ -79,7 +82,7 @@ PPC_FUNC(sub_823AF7A8)
 {
     auto pEvilSonicContext = (SWA::Player::CEvilSonicContext*)g_memory.Translate(ctx.r3.u32);
 
-    m_lastDarkGaiaEnergy = pEvilSonicContext->m_DarkGaiaEnergy;
+    g_lastDarkGaiaEnergy = pEvilSonicContext->m_DarkGaiaEnergy;
 
     // Don't drain energy if out of control.
     if (Config::FixUnleashOutOfControlDrain && pEvilSonicContext->m_OutOfControlCount && ctx.f1.f64 < 0.0)
@@ -99,19 +102,19 @@ PPC_FUNC(sub_823AF7A8)
     if (pInputState->GetPadState().IsTapped(SWA::eKeyState_RightBumper))
     {
         pEvilSonicContext->m_DarkGaiaEnergy = 0.0f;
-        m_isUnleashCancelled = true;
+        g_isUnleashCancelled = true;
     }
 }
 
 void PostUnleashMidAsmHook(PPCRegister& r30)
 {
-    if (m_isUnleashCancelled)
-    {
-        if (auto pEvilSonicContext = (SWA::Player::CEvilSonicContext*)g_memory.Translate(r30.u32))
-            pEvilSonicContext->m_DarkGaiaEnergy = std::max(0.0f, m_lastDarkGaiaEnergy - 35.0f);
+    if (!g_isUnleashCancelled)
+        return;
 
-        m_isUnleashCancelled = false;
-    }
+    if (auto pEvilSonicContext = (SWA::Player::CEvilSonicContext*)g_memory.Translate(r30.u32))
+        pEvilSonicContext->m_DarkGaiaEnergy = std::max(0.0f, g_lastDarkGaiaEnergy - 35.0f);
+
+    g_isUnleashCancelled = false;
 }
 
 void SetXButtonHomingMidAsmHook(PPCRegister& r30)

@@ -5,7 +5,7 @@
 #include <CSD/Manager/csdmResourceBase.h>
 #include <CSD/Manager/csdmNodeObserver.h>
 #include <CSD/Manager/csdmSubjectBase.h>
-#include <Hedgehog/Math/Vector2.h>
+#include <Hedgehog/Math/Vector.h>
 
 namespace Chao::CSD
 {

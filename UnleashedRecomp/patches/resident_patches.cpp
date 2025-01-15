@@ -5,14 +5,7 @@
 #include <hid/hid_detail.h>
 #include <app.h>
 
-const char* m_pStageID;
-
 bool m_isSavedAchievementData = false;
-
-void GetStageIDMidAsmHook(PPCRegister& r5)
-{
-    m_pStageID = *(xpointer<const char>*)g_memory.Translate(r5.u32);
-}
 
 // SWA::Message::MsgRequestStartLoading::Impl
 PPC_FUNC_IMPL(__imp__sub_824DCF38);
@@ -27,12 +20,17 @@ PPC_FUNC(sub_824DCF38)
             ctx.r4.u32 = SWA::eLoadingDisplayType_Arrows;
     }
 
-    if (m_pStageID)
+    if (auto pGameDocument = SWA::CGameDocument::GetInstance())
     {
-        /* Fix restarting Eggmanland as the Werehog
-           erroneously using the Event Gallery transition. */
-        if (ctx.r4.u32 == SWA::eLoadingDisplayType_EventGallery && !strcmp(m_pStageID, "Act_EggmanLand"))
-            ctx.r4.u32 = SWA::eLoadingDisplayType_NowLoading;
+        auto stageName = pGameDocument->m_pMember->m_StageName.c_str();
+
+        if (stageName && strlen(stageName))
+        {
+            /* Fix restarting Eggmanland as the Werehog
+               erroneously using the Event Gallery transition. */
+            if (ctx.r4.u32 == SWA::eLoadingDisplayType_EventGallery && !strcmp(stageName, "Act_EggmanLand"))
+                ctx.r4.u32 = SWA::eLoadingDisplayType_NowLoading;
+        }
     }
 
     __imp__sub_824DCF38(ctx, base);
