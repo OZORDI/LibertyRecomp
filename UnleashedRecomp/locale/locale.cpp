@@ -256,6 +256,18 @@ std::unordered_map<std::string, std::unordered_map<ELanguage, std::string>> g_lo
         }
     },
     {
+        "Installer_Message_FilePickerTutorial",
+        {
+            { ELanguage::English, "Select a digital dump from\nyour Xbox 360.\n\nFor choosing a folder with\npre-existing game files,\nuse the \"Add Folder\"\noption instead." },
+        }
+    },
+    {
+        "Installer_Message_FolderPickerTutorial",
+        {
+            { ELanguage::English, "Select a folder that contains\nthe files that have been\nextracted from the game.\n\nFor choosing a digital dump\nfrom your Xbox 360, use the\n\"Add Files\" option instead." },
+        }
+    },
+    {
         "Installer_Message_IncompatibleGameData",
         {
             { ELanguage::English, "The specified game and\nupdate file are incompatible.\n\nPlease ensure the files are\nfor the same version and\nregion and try again." },
