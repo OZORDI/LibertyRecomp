@@ -3,6 +3,7 @@
 #include <ui/window_events.h>
 #include <user/config.h>
 #include <os/logger.h>
+#include <app.h>
 
 static uint32_t g_lastEnemyScore;
 static uint32_t g_lastTrickScore;
@@ -122,20 +123,24 @@ void SetXButtonHomingMidAsmHook(PPCRegister& r30)
     r30.u32 = Config::HomingAttackOnBoost;
 }
 
-// SWA::Player::CEvilSonicContext::Ctor
+// SWA::Player::CEvilSonicContext
 PPC_FUNC_IMPL(__imp__sub_823B49D8);
 PPC_FUNC(sub_823B49D8)
 {
     __imp__sub_823B49D8(ctx, base);
 
+    App::s_isWerehog = true;
+
     SDL_User_EvilSonic(true);
 }
 
-// SWA::Player::CEvilSonicContext::Dtor
+// ~SWA::Player::CEvilSonicContext
 PPC_FUNC_IMPL(__imp__sub_823B4590);
 PPC_FUNC(sub_823B4590)
 {
     __imp__sub_823B4590(ctx, base);
+
+    App::s_isWerehog = false;
 
     SDL_User_EvilSonic(false);
 }
