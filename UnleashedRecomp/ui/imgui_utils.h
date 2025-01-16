@@ -256,28 +256,88 @@ inline std::string Truncate(const std::string& input, size_t maxLength, bool use
     return input;
 }
 
-inline std::vector<std::string> Split(const char* str, char delimiter)
+inline std::vector<std::string> Split(const char* strStart, const ImFont *font, float fontSize, float maxWidth)
 {
+    if (!strStart)
+        return {};
+
     std::vector<std::string> result;
-
-    if (!str)
-        return result;
-
-    const char* start = str;
-    const char* current = str;
-
-    while (*current)
+    float textWidth = 0.0f;
+    float lineWidth = 0.0f;
+    const float scale = fontSize / font->FontSize;
+    const char *str = strStart;
+    const char *strEnd = strStart + strlen(strStart);
+    const char *lineStart = strStart;
+    const bool wordWrapEnabled = (maxWidth > 0.0f);
+    const char *wordWrapEOL = nullptr;
+    while (*str != 0) 
     {
-        if (*current == delimiter)
+        if (wordWrapEnabled)
         {
-            result.emplace_back(start, current - start);
-            start = current + 1;
+            if (wordWrapEOL == nullptr)
+            {
+                wordWrapEOL = font->CalcWordWrapPositionA(scale, str, strEnd, maxWidth - lineWidth);
+            }
+
+            if (str >= wordWrapEOL)
+            {
+                if (textWidth < lineWidth)
+                    textWidth = lineWidth;
+
+                result.emplace_back(lineStart, str);
+                lineWidth = 0.0f;
+                wordWrapEOL = nullptr;
+
+                while (str < strEnd && ImCharIsBlankA(*str))
+                    str++;
+
+                if (*str == '\n')
+                    str++;
+
+                lineStart = str;
+                continue;
+            }
         }
 
-        current++;
+        const char *prevStr = str;
+        unsigned int c = (unsigned int)*str;
+        if (c < 0x80)
+            str += 1;
+        else
+            str += ImTextCharFromUtf8(&c, str, strEnd);
+
+        if (c < 32)
+        {
+            if (c == '\n')
+            {
+                result.emplace_back(lineStart, str - 1);
+                lineStart = str;
+                textWidth = ImMax(textWidth, lineWidth);
+                lineWidth = 0.0f;
+                continue;
+            }
+
+            if (c == '\r')
+            {
+                lineStart = str;
+                continue;
+            }
+        }
+
+        const float charWidth = ((int)c < font->IndexAdvanceX.Size ? font->IndexAdvanceX.Data[c] : font->FallbackAdvanceX) * scale;
+        if (lineWidth + charWidth >= maxWidth)
+        {
+            str = prevStr;
+            break;
+        }
+
+        lineWidth += charWidth;
     }
 
-    result.emplace_back(start);
+    if (str != lineStart) 
+    {
+        result.emplace_back(lineStart, str);
+    }
 
     return result;
 }
@@ -298,40 +358,29 @@ inline ImVec2 MeasureCentredParagraph(const ImFont* font, float fontSize, float 
     return { x, y };
 }
 
-inline ImVec2 MeasureCentredParagraph(const ImFont* font, float fontSize, float lineMargin, const char* text)
+inline ImVec2 MeasureCentredParagraph(const ImFont* font, float fontSize, float maxWidth, float lineMargin, const char* text)
 {
-    return MeasureCentredParagraph(font, fontSize, lineMargin, Split(text, '\n'));
+    return MeasureCentredParagraph(font, fontSize, lineMargin, Split(text, font, fontSize, maxWidth));
 }
 
-inline void DrawCentredParagraph(const ImFont* font, float fontSize, const ImVec2& centre, float lineMargin, const char* text, std::function<void(const char*, ImVec2)> drawMethod)
+inline void DrawCentredParagraph(const ImFont* font, float fontSize, float maxWidth, const ImVec2& centre, float lineMargin, const char* text, std::function<void(const char*, ImVec2)> drawMethod)
 {
-    auto lines = Split(text, '\n');
+    auto lines = Split(text, font, fontSize, maxWidth);
     auto paragraphSize = MeasureCentredParagraph(font, fontSize, lineMargin, lines);
     auto offsetY = 0.0f;
-
-    auto hasList = std::strstr(text, "- ");
-    auto isList = false;
-    auto listOffsetX = 0.0f;
 
     for (int i = 0; i < lines.size(); i++)
     {
         auto& str = lines[i];
         auto textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0, str.c_str());
 
-        if (hasList)
-        {
-            if (!isList && str.starts_with("- ") && lines.size() > i + 1 && lines[i + 1].starts_with("- "))
-            {
-                isList = true;
-                listOffsetX = centre.x - textSize.x / 2;
-            }
-            else if (isList && !str.starts_with("- "))
-            {
-                isList = false;
-            }
-        }
+        auto textX = str.starts_with("- ")
+            ? centre.x - paragraphSize.x / 2
+            : centre.x - textSize.x / 2;
 
-        drawMethod(str.c_str(), ImVec2(/* X */ isList ? listOffsetX : centre.x - textSize.x / 2, /* Y */ centre.y - paragraphSize.y / 2 + offsetY));
+        auto textY = centre.y - paragraphSize.y / 2 + offsetY;
+
+        drawMethod(str.c_str(), { textX, textY });
 
         offsetY += textSize.y + Scale(lineMargin);
     }
