@@ -152,6 +152,7 @@ set(SWA_PATCHES_CXX_SOURCES
     "patches/ui/CTitleStateIntro_patches.cpp"
     "patches/ui/CTitleStateMenu_patches.cpp"
     "patches/ui/frontend_listener.cpp"
+    "patches/aspect_ratio_patches.cpp"
     "patches/audio_patches.cpp"
     "patches/camera_patches.cpp"
     "patches/fps_patches.cpp"
@@ -380,6 +381,8 @@ endfunction()
 
 compile_vertex_shader(copy_vs)
 compile_pixel_shader(csd_filter_ps)
+compile_vertex_shader(csd_no_tex_vs)
+compile_vertex_shader(csd_vs)
 compile_pixel_shader(enhanced_motion_blur_ps)
 compile_pixel_shader(gaussian_blur_3x3)
 compile_pixel_shader(gaussian_blur_5x5)
