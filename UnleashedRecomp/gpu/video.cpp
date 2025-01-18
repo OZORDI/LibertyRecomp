@@ -2818,7 +2818,10 @@ static void ProcStretchRect(const RenderCommand& cmd)
             g_dirtyStates.pipelineState = true;
 
             if (g_vulkan)
+            {
+                g_dirtyStates.depthBias = true; // Static depth bias in MSAA pipeline invalidates dynamic depth bias.
                 g_dirtyStates.vertexShaderConstants = true;
+            }
 
             SetHalfPixel(oldHalfPixel);
         }
