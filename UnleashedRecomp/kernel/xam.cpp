@@ -206,7 +206,10 @@ uint32_t XamShowMessageBoxUI(uint32_t dwUserIndex, be<uint16_t>* wszTitle, be<ui
 
 #if _DEBUG
     assert("XamShowMessageBoxUI encountered!" && false);
-#else
+#elif _WIN32
+    // This code is Win32-only as it'll most likely crash, misbehave or
+    // cause corruption due to using a different type of memory than what
+    // wchar_t is on Linux. Windows uses 2 bytes while Linux uses 4 bytes.
     std::vector<std::wstring> texts{};
 
     texts.emplace_back(reinterpret_cast<wchar_t*>(wszTitle));
