@@ -185,35 +185,44 @@ void AspectRatioPatches::ComputeOffsets()
     float height = Video::s_viewportHeight;
 
     g_aspectRatio = width / height;
-    g_aspectRatioScale = 1.0f;
+    g_aspectRatioGameplayScale = 1.0f;
 
     if (g_aspectRatio >= NARROW_ASPECT_RATIO)
     {
-        // height is locked to 720 in this case 
-        g_aspectRatioOffsetX = 0.5f * (g_aspectRatio * 720.0f - 1280.0f);
+        g_aspectRatioOffsetX = (width - height * WIDE_ASPECT_RATIO) / 2.0f;
         g_aspectRatioOffsetY = 0.0f;
+        g_aspectRatioScale = height / 720.0f;
 
         // keep same scale above Steam Deck aspect ratio
         if (g_aspectRatio < WIDE_ASPECT_RATIO)
         {
             // interpolate to original 4:3 scale
-            float steamDeckScale = g_aspectRatio / WIDE_ASPECT_RATIO;
+            float steamDeckScale = 1.0f / g_aspectRatioScale;
             float narrowScale = ComputeScale(NARROW_ASPECT_RATIO);
 
             float lerpFactor = std::clamp((g_aspectRatio - NARROW_ASPECT_RATIO) / (STEAM_DECK_ASPECT_RATIO - NARROW_ASPECT_RATIO), 0.0f, 1.0f);
-            g_aspectRatioScale = narrowScale + (steamDeckScale - narrowScale) * lerpFactor;
+            g_aspectRatioGameplayScale = narrowScale + (steamDeckScale - narrowScale) * lerpFactor;
         }
     }
     else
     {
-        // width is locked to 960 in this case to have 4:3 crop
-        g_aspectRatioOffsetX = 0.5f * (960.0f - 1280.0f);
-        g_aspectRatioOffsetY = 0.5f * (960.0f / g_aspectRatio - 720.0f);
-        g_aspectRatioScale = ComputeScale(NARROW_ASPECT_RATIO);
+        // 4:3 crop
+        g_aspectRatioOffsetX = (width - width * NARROW_ASPECT_RATIO) / 2.0f;
+        g_aspectRatioOffsetY = (height - width / NARROW_ASPECT_RATIO) / 2.0f;
+        g_aspectRatioScale = width / 960.0f;
+        g_aspectRatioGameplayScale = ComputeScale(NARROW_ASPECT_RATIO);
     } 
 
-    g_narrowOffsetScale = std::clamp((g_aspectRatio - NARROW_ASPECT_RATIO) / (WIDE_ASPECT_RATIO - NARROW_ASPECT_RATIO), 0.0f, 1.0f);
+    g_aspectRatioNarrowScale = std::clamp((g_aspectRatio - NARROW_ASPECT_RATIO) / (WIDE_ASPECT_RATIO - NARROW_ASPECT_RATIO), 0.0f, 1.0f);
 }
+
+static void GetViewport(void* application, be<uint32_t>* width, be<uint32_t>* height)
+{
+    *width = 1280;
+    *height = 720;
+}
+
+GUEST_FUNCTION_HOOK(sub_82E169B8, GetViewport);
 
 // SWA::CGameDocument::ComputeScreenPosition
 PPC_FUNC_IMPL(__imp__sub_8250FC70);
@@ -222,14 +231,15 @@ PPC_FUNC(sub_8250FC70)
     __imp__sub_8250FC70(ctx, base);
 
     auto position = reinterpret_cast<be<float>*>(base + ctx.r3.u32);
-    position[0] = position[0] - g_aspectRatioOffsetX;
-    position[1] = position[1] - g_aspectRatioOffsetY;
+
+    position[0] = (position[0] / 1280.0f * Video::s_viewportWidth - g_aspectRatioOffsetX) / g_aspectRatioScale;
+    position[1] = (position[1] / 720.0f * Video::s_viewportHeight - g_aspectRatioOffsetY) / g_aspectRatioScale;
 }
 
 void ComputeScreenPositionMidAsmHook(PPCRegister& f1, PPCRegister& f2)
 {
-    f1.f64 -= g_aspectRatioOffsetX;
-    f2.f64 -= g_aspectRatioOffsetY;
+    f1.f64 = (f1.f64 / 1280.0 * Video::s_viewportWidth - g_aspectRatioOffsetX) / g_aspectRatioScale;
+    f2.f64 = (f2.f64 / 720.0 * Video::s_viewportHeight - g_aspectRatioOffsetY) / g_aspectRatioScale;
 }
 
 void WorldMapInfoMidAsmHook(PPCRegister& r4)
@@ -258,11 +268,11 @@ PPC_FUNC(sub_8258B558)
                     if (scene != NULL)
                     {
                         ctx.r3.u32 = scene;
-                        ctx.f1.f64 = offsetX + g_narrowOffsetScale * 140.0f;
+                        ctx.f1.f64 = offsetX + g_aspectRatioNarrowScale * 140.0f;
                         ctx.f2.f64 = offsetY;
 
-                        if (Config::UIScaleMode == EUIScaleMode::Edge && g_narrowOffsetScale >= 1.0f)
-                            ctx.f1.f64 += g_aspectRatioOffsetX;
+                        if (Config::UIScaleMode == EUIScaleMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+                            ctx.f1.f64 += g_aspectRatioOffsetX / g_aspectRatioScale;
 
                         sub_830BB3D0(ctx, base);
                     }
@@ -282,9 +292,9 @@ PPC_FUNC(sub_8258B558)
             uint32_t textBox = PPC_LOAD_U32(menuTextBox + 0x4);
             if (textBox != NULL)
             {
-                float value = 708.0f + g_narrowOffsetScale * 140.0f;
-                if (Config::UIScaleMode == EUIScaleMode::Edge && g_narrowOffsetScale >= 1.0f)
-                    value += g_aspectRatioOffsetX;
+                float value = 708.0f + g_aspectRatioNarrowScale * 140.0f;
+                if (Config::UIScaleMode == EUIScaleMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+                    value += g_aspectRatioOffsetX / g_aspectRatioScale;
 
                 PPC_STORE_U32(textBox + 0x38, reinterpret_cast<uint32_t&>(value));
             }
@@ -740,8 +750,6 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
             modifier.flags &= ~(ALIGN_LEFT | ALIGN_RIGHT);
     }
 
-    auto backBuffer = Video::GetBackBuffer();
-
     uint32_t size = ctx.r5.u32 * stride;
     ctx.r1.u32 -= size;
 
@@ -755,10 +763,12 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
 
     if ((modifier.flags & STRETCH_HORIZONTAL) != 0)
     {
-        scaleX = backBuffer->width / 1280.0f;
+        scaleX = Video::s_viewportWidth / 1280.0f;
     }
     else
     {
+        scaleX = g_aspectRatioScale;
+
         if ((modifier.flags & ALIGN_RIGHT) != 0)
             offsetX = g_aspectRatioOffsetX * 2.0f;
         else if ((modifier.flags & ALIGN_LEFT) == 0)
@@ -766,27 +776,29 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
 
         if ((modifier.flags & SCALE) != 0)
         {
-            scaleX = g_aspectRatioScale;
+            scaleX *= g_aspectRatioGameplayScale;
 
             if ((modifier.flags & ALIGN_RIGHT) != 0)
-                offsetX += 1280.0f * (1.0f - scaleX);
+                offsetX += 1280.0f * (1.0f - g_aspectRatioGameplayScale) * g_aspectRatioScale;
             else if ((modifier.flags & ALIGN_LEFT) == 0)
-                offsetX += 640.0f * (1.0f - scaleX);
+                offsetX += 640.0f * (1.0f - g_aspectRatioGameplayScale) * g_aspectRatioScale;
         }
 
         if ((modifier.flags & WORLD_MAP) != 0)
         {
             if ((modifier.flags & ALIGN_LEFT) != 0)
-                offsetX += (1.0f - g_narrowOffsetScale) * -20.0f;
+                offsetX += (1.0f - g_aspectRatioNarrowScale) * g_aspectRatioScale * -20.0f;
         }
     }
 
     if ((modifier.flags & STRETCH_VERTICAL) != 0)
     {
-        scaleY = backBuffer->height / 720.0f;
+        scaleY = Video::s_viewportHeight / 720.0f;
     }
     else
     {
+        scaleY = g_aspectRatioScale;
+
         if ((modifier.flags & ALIGN_BOTTOM) != 0)
             offsetY = g_aspectRatioOffsetY * 2.0f;
         else if ((modifier.flags & ALIGN_TOP) == 0)
@@ -794,12 +806,12 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
 
         if ((modifier.flags & SCALE) != 0)
         {
-            scaleY = g_aspectRatioScale;
+            scaleY *= g_aspectRatioGameplayScale;
 
             if ((modifier.flags & ALIGN_BOTTOM) != 0)
-                offsetY += 720.0f * (1.0f - scaleY);
+                offsetY += 720.0f * (1.0f - g_aspectRatioGameplayScale) * g_aspectRatioScale;
             else if ((modifier.flags & ALIGN_TOP) == 0)
-                offsetY += 360.0f * (1.0f - scaleY);
+                offsetY += 360.0f * (1.0f - g_aspectRatioGameplayScale) * g_aspectRatioScale;
         }
     }
 
@@ -836,7 +848,7 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
         if ((offsetScaleModifier.flags & OFFSET_SCALE_LEFT) != 0)
             offsetX *= corner / offsetScaleModifier.cornerMax;
         else if ((offsetScaleModifier.flags & OFFSET_SCALE_RIGHT) != 0)
-            offsetX = 1280.0f - (1280.0f - offsetX) * (1280.0f - corner) / (1280.0f - offsetScaleModifier.cornerMax);
+            offsetX = Video::s_viewportWidth - (Video::s_viewportWidth - offsetX) * (1280.0f - corner) / (1280.0f - offsetScaleModifier.cornerMax);
     }
 
     for (size_t i = 0; i < ctx.r5.u32; i++)
@@ -852,11 +864,11 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
         }
         else if ((modifier.flags & EXTEND_RIGHT) != 0 && (i == 2 || i == 3))
         {
-            x = std::max(x, float(backBuffer->width));
+            x = std::max(x, float(Video::s_viewportWidth));
         }
 
-        position[0] = round(x / backBuffer->width * Video::s_viewportWidth) / Video::s_viewportWidth * backBuffer->width;
-        position[1] = round(y / backBuffer->height * Video::s_viewportHeight) / Video::s_viewportHeight * backBuffer->height;
+        position[0] = round(x);
+        position[1] = round(y);
     }
 
     ctx.r4.u32 = ctx.r1.u32;
@@ -882,13 +894,12 @@ PPC_FUNC(sub_825E2E88)
 PPC_FUNC_IMPL(__imp__sub_82E16C70);
 PPC_FUNC(sub_82E16C70)
 {
-    auto backBuffer = Video::GetBackBuffer();
     auto scissorRect = reinterpret_cast<GuestRect*>(base + ctx.r4.u32);
 
-    scissorRect->left = scissorRect->left + g_aspectRatioOffsetX;
-    scissorRect->top = scissorRect->top + g_aspectRatioOffsetY;
-    scissorRect->right = scissorRect->right + g_aspectRatioOffsetX;
-    scissorRect->bottom = scissorRect->bottom + g_aspectRatioOffsetY;
+    scissorRect->left = scissorRect->left * g_aspectRatioScale + g_aspectRatioOffsetX;
+    scissorRect->top = scissorRect->top * g_aspectRatioScale + g_aspectRatioOffsetY;
+    scissorRect->right = scissorRect->right * g_aspectRatioScale + g_aspectRatioOffsetX;
+    scissorRect->bottom = scissorRect->bottom * g_aspectRatioScale + g_aspectRatioOffsetY;
 
     __imp__sub_82E16C70(ctx, base);
 }
@@ -926,66 +937,77 @@ PPC_FUNC(sub_830D1EF0)
 
     __imp__sub_830D1EF0(ctx, base);
 
-    if (!PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET))
+    struct Vertex
     {
-        auto backBuffer = Video::GetBackBuffer();
+        be<float> x;
+        be<float> y;
+        be<float> z;
+        be<float> w;
+        be<uint32_t> color;
+        be<float> u;
+        be<float> v;
+    };
 
-        struct Vertex
+    auto vertex = reinterpret_cast<Vertex*>(base + ctx.r4.u32);
+
+    for (size_t i = 0; i < 4; i++)
+    {
+        float x = vertex[i].x * 640.0f + 640.0f;
+        float y = vertex[i].y * -360.0f + 360.0f;
+
+        if (PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET))
         {
-            be<float> x;
-            be<float> y;
-            be<float> z;
-            be<float> w;
-            be<uint32_t> color;
-            be<float> u;
-            be<float> v;
-        };
-
-        auto vertex = reinterpret_cast<Vertex*>(base + ctx.r4.u32);
-
-        for (size_t i = 0; i < 4; i++)
+            // Stretch
+            x = ((x + 0.5f) / 1280.0f) * Video::s_viewportWidth;
+            y = ((y + 0.5f) / 720.0f) * Video::s_viewportHeight;
+        }
+        else
         {
-            vertex[i].x = vertex[i].x * 1280.0f / backBuffer->width;
-            vertex[i].y = vertex[i].y * 720.0f / backBuffer->height;
+            // Center
+            x = g_aspectRatioOffsetX + (x + 0.5f) * g_aspectRatioScale;
+            y = g_aspectRatioOffsetY + (y + 0.5f) * g_aspectRatioScale;
         }
 
-        bool letterboxTop = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x1);
-        bool letterboxBottom = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x2);
+        vertex[i].x = ((x - 0.5f) / Video::s_viewportWidth) * 2.0f - 1.0f;
+        vertex[i].y = ((y - 0.5f) / Video::s_viewportHeight) * -2.0f + 1.0f;
+    }
 
-        if (letterboxTop || letterboxBottom)
+    bool letterboxTop = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x1);
+    bool letterboxBottom = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x2);
+
+    if (letterboxTop || letterboxBottom)
+    {
+        float halfPixelX = 1.0f / Video::s_viewportWidth;
+        float halfPixelY = 1.0f / Video::s_viewportHeight;
+
+        if (letterboxTop)
         {
-            float halfPixelX = 1.0f / backBuffer->width;
-            float halfPixelY = 1.0f / backBuffer->height;
+            vertex[0].x = -1.0f - halfPixelX;
+            vertex[0].y = 1.0f + halfPixelY;
 
-            if (letterboxTop)
-            {
-                vertex[0].x = -1.0f - halfPixelX;
-                vertex[0].y = 1.0f + halfPixelY;         
-                
-                vertex[1].x = 1.0f - halfPixelX;
-                vertex[1].y = 1.0f + halfPixelY;      
-                
-                vertex[2].x = -1.0f - halfPixelX;
-                // vertex[2].y untouched
+            vertex[1].x = 1.0f - halfPixelX;
+            vertex[1].y = 1.0f + halfPixelY;
 
-                vertex[3].x = 1.0f - halfPixelX;
-                // vertex[3].y untouched
-            }
-            else if (letterboxBottom)
-            {
-                vertex[0].x = -1.0f - halfPixelX;
-                // vertex[0].y untouched
+            vertex[2].x = -1.0f - halfPixelX;
+            // vertex[2].y untouched
 
-                vertex[1].x = 1.0f - halfPixelX;
-                // vertex[1].y untouched
+            vertex[3].x = 1.0f - halfPixelX;
+            // vertex[3].y untouched
+        }
+        else if (letterboxBottom)
+        {
+            vertex[0].x = -1.0f - halfPixelX;
+            // vertex[0].y untouched
 
-                vertex[2].x = -1.0f - halfPixelX;
-                vertex[2].y = -1.0f + halfPixelY;
+            vertex[1].x = 1.0f - halfPixelX;
+            // vertex[1].y untouched
 
-                vertex[3].x = 1.0f - halfPixelX;
-                vertex[3].y = -1.0f + halfPixelY;
-            }
-        }      
+            vertex[2].x = -1.0f - halfPixelX;
+            vertex[2].y = -1.0f + halfPixelY;
+
+            vertex[3].x = 1.0f - halfPixelX;
+            vertex[3].y = -1.0f + halfPixelY;
+        }
     }
 }
 
@@ -1018,8 +1040,9 @@ static double ComputeObjGetItemX(uint32_t type)
             x = 1058.0;
 
         x *= g_aspectRatioScale;
+        x *= g_aspectRatioGameplayScale;
 
-        double scaleOffset = (1280.0 * (1.0 - g_aspectRatioScale));
+        double scaleOffset = (1280.0 * (1.0 - g_aspectRatioGameplayScale)) * g_aspectRatioScale;
 
         if (Config::UIScaleMode == EUIScaleMode::Edge)
         {
@@ -1031,8 +1054,7 @@ static double ComputeObjGetItemX(uint32_t type)
             x += g_aspectRatioOffsetX + scaleOffset;
         }
 
-        auto backBuffer = Video::GetBackBuffer();
-        return (x - (0.5 * backBuffer->width)) / (0.5 * backBuffer->height) * OBJ_GET_ITEM_TANGENT;
+        return (x - (0.5 * Video::s_viewportWidth)) / (0.5 * Video::s_viewportHeight) * OBJ_GET_ITEM_TANGENT;
     }
 
     return 0.0;
@@ -1066,10 +1088,10 @@ static double ComputeObjGetItemY(uint32_t type)
             y = 582.0;
 
         y *= g_aspectRatioScale;
-        y += g_aspectRatioOffsetY * 2.0 + 720.0 * (1.0 - g_aspectRatioScale);
+        y *= g_aspectRatioGameplayScale;
+        y += g_aspectRatioOffsetY * 2.0 + 720.0 * (1.0 - g_aspectRatioGameplayScale) * g_aspectRatioScale;
 
-        auto backBuffer = Video::GetBackBuffer();
-        return ((0.5 * backBuffer->height) - y) / (0.5 * backBuffer->height) * OBJ_GET_ITEM_TANGENT;
+        return ((0.5 * Video::s_viewportHeight) - y) / (0.5 * Video::s_viewportHeight) * OBJ_GET_ITEM_TANGENT;
     }
 
     return 0.25;
@@ -1133,12 +1155,12 @@ PPC_FUNC(sub_82B8AA40)
     PPC_STORE_U8(ctx.r3.u32, shouldDrawLetterbox);
     if (shouldDrawLetterbox)
     {
-        auto backBuffer = Video::GetBackBuffer();
-        uint32_t height = std::min(720u, backBuffer->height);
+        float aspectRatio = std::max(NARROW_ASPECT_RATIO, g_aspectRatio);
+        uint32_t width = aspectRatio * 720;
 
-        PPC_STORE_U32(ctx.r3.u32 + 0xC, backBuffer->width);
-        PPC_STORE_U32(ctx.r3.u32 + 0x10, height);
-        PPC_STORE_U32(ctx.r3.u32 + 0x14, (height - backBuffer->width * 9 / 16) / 2);
+        PPC_STORE_U32(ctx.r3.u32 + 0xC, width);
+        PPC_STORE_U32(ctx.r3.u32 + 0x10, 720);
+        PPC_STORE_U32(ctx.r3.u32 + 0x14, (720 - width * 9 / 16) / 2);
     }
 
     __imp__sub_82B8AA40(ctx, base);
@@ -1161,5 +1183,5 @@ void InspireSubtitleMidAsmHook(PPCRegister& r3)
     constexpr float NARROW_OFFSET = 485.0f;
     constexpr float WIDE_OFFSET = 560.0f;
 
-    *reinterpret_cast<be<float>*>(g_memory.base + r3.u32 + 0x3C) = NARROW_OFFSET + (WIDE_OFFSET - NARROW_OFFSET) * g_narrowOffsetScale;
+    *reinterpret_cast<be<float>*>(g_memory.base + r3.u32 + 0x3C) = NARROW_OFFSET + (WIDE_OFFSET - NARROW_OFFSET) * g_aspectRatioNarrowScale;
 }
