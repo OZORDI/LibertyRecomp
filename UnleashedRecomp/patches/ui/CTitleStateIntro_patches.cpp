@@ -62,29 +62,12 @@ static bool ProcessCorruptSaveMessage()
 void StorageDevicePromptMidAsmHook() {}
 
 // Save data validation hook.
-PPC_FUNC_IMPL(__imp__sub_822C4330);
-PPC_FUNC(sub_822C4330)
+PPC_FUNC_IMPL(__imp__sub_822C55B0);
+PPC_FUNC(sub_822C55B0)
 {
-    std::error_code ec;
-    auto saveFileSize = std::filesystem::file_size(GetSaveFilePath(true), ec);
-
-    auto expectedSize = ctx.r5.u32;
-    auto expectedSizeAdd = *(be<uint32_t>*)g_memory.Translate(0x83262110);
-
-    // TODO: check for backups here and restore them?
-    if (saveFileSize != expectedSize + expectedSizeAdd)
-    {
-        App::s_isSaveDataCorrupt = true;
-
-        g_corruptSaveMessageOpen = true;
-        g_corruptSaveMessageOpen.wait(true);
-
-        ctx.r3.u32 = 0;
-
-        return;
-    }
-
-    ctx.r3.u32 = 1;
+    g_corruptSaveMessageOpen = true;
+    g_corruptSaveMessageOpen.wait(true);
+    ctx.r3.u32 = 0;
 }
 
 // SWA::CTitleStateIntro::Update
