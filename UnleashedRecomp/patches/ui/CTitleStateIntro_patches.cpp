@@ -6,7 +6,7 @@
 #include <user/paths.h>
 #include <app.h>
 
-static bool g_quitMessageOpen = false;
+bool g_quitMessageOpen = false;
 static bool g_quitMessageFaderBegun = false;
 static int g_quitMessageResult = -1;
 
