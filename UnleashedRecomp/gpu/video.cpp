@@ -4352,16 +4352,33 @@ static void ProcSetPixelShader(const RenderCommand& cmd)
 
             default:
             {
-                size_t height = round(Video::s_viewportHeight * Config::ResolutionScale);
+                if (g_aspectRatio >= WIDE_ASPECT_RATIO)
+                {
+                    size_t height = round(Video::s_viewportHeight * Config::ResolutionScale);
 
-                if (height > 1440)
-                    shaderIndex = GAUSSIAN_BLUR_9X9;
-                else if (height > 1080)
-                    shaderIndex = GAUSSIAN_BLUR_7X7;
-                else if (height > 720)
-                    shaderIndex = GAUSSIAN_BLUR_5X5;
+                    if (height > 1440)
+                        shaderIndex = GAUSSIAN_BLUR_9X9;
+                    else if (height > 1080)
+                        shaderIndex = GAUSSIAN_BLUR_7X7;
+                    else if (height > 720)
+                        shaderIndex = GAUSSIAN_BLUR_5X5;
+                    else
+                        shaderIndex = GAUSSIAN_BLUR_3X3;
+                }
                 else
-                    shaderIndex = GAUSSIAN_BLUR_3X3;
+                {
+                    // Narrow aspect ratios should check for width to account for VERT+.
+                    size_t width = round(Video::s_viewportWidth * Config::ResolutionScale);
+
+                    if (width > 2560)
+                        shaderIndex = GAUSSIAN_BLUR_9X9;
+                    else if (width > 1920)
+                        shaderIndex = GAUSSIAN_BLUR_7X7;
+                    else if (width > 1280)
+                        shaderIndex = GAUSSIAN_BLUR_5X5;
+                    else
+                        shaderIndex = GAUSSIAN_BLUR_3X3;
+                }
 
                 break;
             }
@@ -5089,23 +5106,40 @@ PPC_FUNC(sub_8258CAE0)
     g_renderDirectorProfiler.End();
 }
 
+// World map disables VERT+, so scaling by width does not work for it.
+static uint32_t g_forceCheckHeightForPostProcessFix;
+
+// SWA::CWorldMapCamera::CWorldMapCamera
+PPC_FUNC_IMPL(__imp__sub_824860E0);
+PPC_FUNC(sub_824860E0)
+{
+    ++g_forceCheckHeightForPostProcessFix;
+    __imp__sub_824860E0(ctx, base);
+}
+
+// SWA::CCameraController::~CCameraController
+PPC_FUNC_IMPL(__imp__sub_824831D0);
+PPC_FUNC(sub_824831D0)
+{
+    if (PPC_LOAD_U32(ctx.r3.u32) == 0x8202BF1C) // SWA::CWorldMapCamera
+        --g_forceCheckHeightForPostProcessFix;
+
+    __imp__sub_824831D0(ctx, base);
+}
+
 void PostProcessResolutionFix(PPCRegister& r4, PPCRegister& f1, PPCRegister& f2)
 {
     auto device = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(r4.u32));
 
     uint32_t width = device[46].get();
     uint32_t height = device[47].get();
+    double aspectRatio = double(width) / double(height);
 
-#if 0
-    // TODO: Figure out why this breaks for height > weight
     double factor;
-    if (width > height)
+    if ((aspectRatio >= WIDE_ASPECT_RATIO) || (g_forceCheckHeightForPostProcessFix != 0))
         factor = 720.0 / double(height);
     else
         factor = 1280.0 / double(width);
-#else 
-    double factor = 720.0 / double(height);
-#endif
 
     f1.f64 *= factor;
     f2.f64 *= factor;
