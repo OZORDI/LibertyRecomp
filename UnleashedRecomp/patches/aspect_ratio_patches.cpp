@@ -1195,11 +1195,22 @@ void ViewRingXMidAsmHook(PPCRegister& f1, PPCVRegister& v62)
     }
 }
 
+// SWA::Inspire::CLetterbox::CLetterbox
+PPC_FUNC_IMPL(__imp__sub_82B8A8F8);
+PPC_FUNC(sub_82B8A8F8)
+{
+    // Permanently store the letterbox bool instead of letting the game set it to false from widescreen check.
+    bool letterbox = PPC_LOAD_U8(ctx.r4.u32);
+    __imp__sub_82B8A8F8(ctx, base);
+    PPC_STORE_U8(ctx.r3.u32, letterbox);
+}
+
 // SWA::Inspire::CLetterbox::Draw
 PPC_FUNC_IMPL(__imp__sub_82B8AA40);
 PPC_FUNC(sub_82B8AA40)
 {
-    bool shouldDrawLetterbox = Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio < WIDE_ASPECT_RATIO;
+    bool letterbox = PPC_LOAD_U8(ctx.r3.u32);
+    bool shouldDrawLetterbox = letterbox && Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio < WIDE_ASPECT_RATIO;
 
     PPC_STORE_U8(ctx.r3.u32, shouldDrawLetterbox);
     if (shouldDrawLetterbox)
@@ -1212,7 +1223,11 @@ PPC_FUNC(sub_82B8AA40)
         PPC_STORE_U32(ctx.r3.u32 + 0x14, (720 - width * 9 / 16) / 2);
     }
 
+    auto r3 = ctx.r3;
     __imp__sub_82B8AA40(ctx, base);
+
+    // Restore the original letterbox value.
+    PPC_STORE_U8(r3.u32, letterbox);
 }
 
 void InspireLetterboxTopMidAsmHook(PPCRegister& r3)
@@ -1233,4 +1248,65 @@ void InspireSubtitleMidAsmHook(PPCRegister& r3)
     constexpr float WIDE_OFFSET = 560.0f;
 
     *reinterpret_cast<be<float>*>(g_memory.base + r3.u32 + 0x3C) = NARROW_OFFSET + (WIDE_OFFSET - NARROW_OFFSET) * g_aspectRatioNarrowScale;
+}
+
+enum class FadeTextureMode
+{
+    Unknown,
+    Letterbox,
+    SideCrop
+};
+
+static FadeTextureMode g_fadeTextureMode;
+
+void FxFadePreRenderQuadMidAsmHook(PPCRegister& r31)
+{
+    g_fadeTextureMode = *(g_memory.base + r31.u32 + 0x44) ? FadeTextureMode::Letterbox : FadeTextureMode::SideCrop;
+}
+
+void FxFadePostRenderQuadMidAsmHook()
+{
+    g_fadeTextureMode = FadeTextureMode::Unknown;
+}
+
+void YggdrasillRenderQuadMidAsmHook(PPCRegister& r3, PPCRegister& r6)
+{
+    if (g_fadeTextureMode != FadeTextureMode::Unknown)
+    {
+        float scaleX = 1.0f;
+        float scaleY = 1.0f;
+        
+        // Fade textures are slightly squashed in the original game at 4:3.
+        if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
+        {
+            if (g_fadeTextureMode == FadeTextureMode::Letterbox)
+                scaleY = NARROW_ASPECT_RATIO;
+            else
+                scaleX = 0.8f;
+        }
+        else
+        {
+            if (g_fadeTextureMode == FadeTextureMode::Letterbox && g_aspectRatio < WIDE_ASPECT_RATIO)
+                scaleY = WIDE_ASPECT_RATIO / g_aspectRatio;
+            else
+                scaleX = g_aspectRatio / WIDE_ASPECT_RATIO;
+        }
+
+        struct Vertex
+        {
+            be<float> x;
+            be<float> y;
+            be<float> z;
+            be<float> u;
+            be<float> v;
+        };
+
+        auto vertex = reinterpret_cast<Vertex*>(g_memory.base + r6.u32);
+
+        for (size_t i = 0; i < 6; i++)
+        {
+            vertex[i].u = (vertex[i].u - 0.5f) * scaleX + 0.5f;
+            vertex[i].v = (vertex[i].v - 0.5f) * scaleY + 0.5f;
+        }
+    }
 }
