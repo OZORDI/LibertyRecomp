@@ -304,7 +304,7 @@ bool WorldMapDeadzoneMidAsmHook(PPCRegister& pPadState)
 {
     auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
 
-    if (IsLeftStickThreshold(pGuestPadState))
+    if (IsDPadThreshold(pGuestPadState) || IsLeftStickThreshold(pGuestPadState))
     {
         g_worldMapCursorVelocityX = 0;
         g_worldMapCursorVelocityY = 0;
