@@ -29,6 +29,7 @@
 #include <res/images/installer/miles_electric_icon.dds.h>
 #include <res/images/installer/arrow_circle.dds.h>
 #include <res/images/installer/pulse_install.dds.h>
+#include <res/credits.h>
 
 // One Shot Animations Constants
 static constexpr double SCANLINES_ANIMATION_TIME = 0.0;
@@ -151,6 +152,7 @@ static int g_currentCursorIndex = -1;
 static int g_currentCursorDefault = 0;
 static bool g_currentCursorAccepted = false;
 static std::vector<std::pair<ImVec2, ImVec2>> g_currentCursorRects;
+static std::string g_creditsStr;
 
 class SDLEventListenerForInstaller : public SDLEventListener
 {
@@ -305,11 +307,8 @@ public:
             g_currentCursorIndex = newCursorIndex;
         }
     }
-};
-
-static SDLEventListenerForInstaller g_eventListener;
-
-const char CREDITS_TEXT[] = "Skyth, Hyper, Darío, Sajid, RadiantDerg, PTKay, DeaThProj, NextinHKRY, M&M, LadyLunanova";
+}
+g_sdlEventListenerForInstaller;
 
 static std::string& GetWizardText(WizardPage page)
 {
@@ -341,7 +340,7 @@ static const int WIZARD_INSTALL_TEXTURE_INDEX[] =
 };
 
 // These are ordered from bottom to top in a 3x2 grid.
-const char *LANGUAGE_TEXT[] =
+const char* LANGUAGE_TEXT[] =
 {
     "FRANÇAIS", // French
     "DEUTSCH", // German
@@ -710,7 +709,7 @@ static void DrawDescriptionContainer()
             hedgeDevStr
         );
 
-        auto marqueeTextSize = g_seuratFont->CalcTextSizeA(fontSize, FLT_MAX, 0, CREDITS_TEXT);
+        auto marqueeTextSize = g_seuratFont->CalcTextSizeA(fontSize, FLT_MAX, 0, g_creditsStr.c_str());
         auto marqueeTextMarginX = Scale(5);
         auto marqueeTextMarginY = Scale(15);
 
@@ -719,7 +718,7 @@ static void DrawDescriptionContainer()
         ImVec2 textMax = { g_aspectRatioOffsetX + Scale(CONTAINER_X) + Scale(CONTAINER_WIDTH), g_aspectRatioOffsetY + Scale(CONTAINER_Y) + Scale(CONTAINER_HEIGHT) };
 
         SetMarqueeFade(textMin, textMax, Scale(32));
-        DrawTextWithMarquee(g_seuratFont, fontSize, textPos, textMin, textMax, colWhite, CREDITS_TEXT, g_installerEndTime, 0.9, Scale(200));
+        DrawTextWithMarquee(g_seuratFont, fontSize, textPos, textMin, textMax, colWhite, g_creditsStr.c_str(), g_installerEndTime, 0.9, Scale(200));
         ResetMarqueeFade();
     }
 
@@ -1470,6 +1469,12 @@ void InstallerWizard::Init()
     g_arrowCircle = LOAD_ZSTD_TEXTURE(g_arrow_circle);
     g_pulseInstall = LOAD_ZSTD_TEXTURE(g_pulse_install);
     g_upHedgeDev = LOAD_ZSTD_TEXTURE(g_hedgedev);
+
+    for (int i = 0; i < g_creditsSize; i++)
+    {
+        g_creditsStr += g_credits[i];
+        g_creditsStr += "   ";
+    }
 }
 
 void InstallerWizard::Draw()
