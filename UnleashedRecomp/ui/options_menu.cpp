@@ -43,7 +43,7 @@ static constexpr double CONTAINER_FULL_DURATION = CONTAINER_BACKGROUND_TIME + CO
 static constexpr double CONTAINER_CATEGORY_TIME = (CONTAINER_INNER_TIME + CONTAINER_BACKGROUND_TIME) / 2.0;
 static constexpr double CONTAINER_CATEGORY_DURATION = 12.0;
 
-static constexpr float CONTAINER_POS_Y = 118.0f;
+static constexpr float CONTAINER_POS_Y = 117.0f;
 
 static constexpr float SETTINGS_WIDE_GRID_COUNT = 90.0f;
 static constexpr float INFO_WIDE_GRID_COUNT = 42.0f;
@@ -100,7 +100,6 @@ static void DrawScanlineBars()
     constexpr uint32_t COLOR1 = IM_COL32(203, 255, 0, 55);
     constexpr uint32_t FADE_COLOR0 = IM_COL32(0, 0, 0, 255);
     constexpr uint32_t FADE_COLOR1 = IM_COL32(0, 0, 0, 0);
-    constexpr uint32_t OUTLINE_COLOR = IM_COL32(115, 178, 104, 255);
 
     float height = Scale(105.0f);
 
@@ -146,15 +145,20 @@ static void DrawScanlineBars()
     );
 
     // Bottom bar
+    ImVec2 max{ 0.0f, res.y - height };
+    SetProceduralOrigin(max);
+
     drawList->AddRectFilledMultiColor
     (
         { res.x, res.y },
-        { 0.0f, res.y - height },
+        max,
         COLOR0,
         COLOR0,
         COLOR1,
         COLOR1
     );
+
+    ResetProceduralOrigin();
 
     SetShaderModifier(IMGUI_SHADER_MODIFIER_NONE);
 
@@ -177,23 +181,40 @@ static void DrawScanlineBars()
         IMGUI_SHADER_MODIFIER_TITLE_BEVEL
     );
 
+    auto drawLine = [&](bool top)
+        {
+            float y = top ? height : (res.y - height);
+
+            constexpr uint32_t TOP_COLOR0 = IM_COL32(222, 255, 189, 7);
+            constexpr uint32_t TOP_COLOR1 = IM_COL32(222, 255, 189, 65);
+            constexpr uint32_t BOTTOM_COLOR0 = IM_COL32(173, 255, 156, 65);
+            constexpr uint32_t BOTTOM_COLOR1 = IM_COL32(173, 255, 156, 7);
+
+            drawList->AddRectFilledMultiColor(
+                { 0.0f, y - Scale(2.0f) },
+                { res.x, y }, 
+                top ? TOP_COLOR0 : BOTTOM_COLOR1,
+                top ? TOP_COLOR0 : BOTTOM_COLOR1, 
+                top ? TOP_COLOR1 : BOTTOM_COLOR0,
+                top ? TOP_COLOR1 : BOTTOM_COLOR0);
+
+            drawList->AddRectFilledMultiColor(
+                { 0.0f, y + Scale(1.0f) }, 
+                { res.x, y + Scale(3.0f) }, 
+                top ? BOTTOM_COLOR0 : TOP_COLOR1, 
+                top ? BOTTOM_COLOR0 : TOP_COLOR1,
+                top ? BOTTOM_COLOR1 : TOP_COLOR0, 
+                top ? BOTTOM_COLOR1 : TOP_COLOR0);
+
+            constexpr uint32_t CENTER_COLOR = IM_COL32(115, 178, 104, 255);
+            drawList->AddRectFilled({ 0.0f, y }, { res.x, y + Scale(1.0f) }, CENTER_COLOR);
+        };
+
     // Top bar line
-    drawList->AddLine
-    (
-        { 0.0f, height },
-        { res.x, height },
-        OUTLINE_COLOR,
-        Scale(1)
-    );
+    drawLine(true);
 
     // Bottom bar line
-    drawList->AddLine
-    (
-        { 0.0f, res.y - height },
-        { res.x, res.y - height },
-        OUTLINE_COLOR,
-        Scale(1)
-    );
+    drawLine(false);
 
     DrawVersionString(g_newRodinFont);
 }
@@ -1229,18 +1250,19 @@ void OptionsMenu::Draw()
         float infoGridCount = floor(Lerp(INFO_NARROW_GRID_COUNT, INFO_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
         float totalGridCount = settingsGridCount + paddingGridCount + infoGridCount;
 
-        float offsetX = (1280.0f - ((GRID_SIZE * totalGridCount) - 1)) / 2.0f;
+        float minX = round(g_aspectRatioOffsetX + Scale((1280.0f - (GRID_SIZE * totalGridCount)) / 2.0f));
+        float maxX = res.x - minX;
         float minY = round(g_aspectRatioOffsetY + Scale(CONTAINER_POS_Y));
         float maxY = round(g_aspectRatioOffsetY + Scale((720.0f - CONTAINER_POS_Y + 1.0f)));
 
         DrawSettingsPanel(
-            { round(g_aspectRatioOffsetX + Scale(offsetX)), minY },
-            { round(g_aspectRatioOffsetX + Scale(offsetX + settingsGridCount * GRID_SIZE)), maxY }
+            { minX, minY },
+            { minX + Scale(settingsGridCount * GRID_SIZE), maxY }
         );
 
         DrawInfoPanel(
-            { round(g_aspectRatioOffsetX + Scale(offsetX + (settingsGridCount + paddingGridCount) * GRID_SIZE)), minY },
-            { round(g_aspectRatioOffsetX + Scale(offsetX + totalGridCount * GRID_SIZE)), maxY }
+            { maxX - Scale(infoGridCount * GRID_SIZE) - 1.0f, minY },
+            { maxX - 1.0f, maxY }
         );
 
         if (g_isStage)
