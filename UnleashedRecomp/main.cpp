@@ -12,9 +12,12 @@
 #include <hid/hid.h>
 #include <user/config.h>
 #include <user/paths.h>
+#include <user/registry.h>
 #include <kernel/xdbf.h>
 #include <install/installer.h>
 #include <os/logger.h>
+#include <os/process.h>
+#include <os/registry.h>
 #include <ui/installer_wizard.h>
 #include <mod/mod_loader.h>
 
@@ -143,6 +146,9 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
     timeBeginPeriod(1);
 #endif
+
+    if (!os::registry::Init())
+        LOGN_WARNING("OS doesn't support registry");
 
     os::logger::Init();
 

@@ -8,6 +8,7 @@
 #include <ui/game_window.h>
 #include <user/config.h>
 #include <user/paths.h>
+#include <user/registry.h>
 
 void App::Restart(std::vector<std::string> restartArgs)
 {
@@ -33,6 +34,7 @@ PPC_FUNC(sub_824EB490)
     App::s_isInit = true;
     App::s_isMissingDLC = !Installer::checkAllDLC(GetGamePath());
     App::s_language = Config::Language;
+    Registry::Save();
 
     __imp__sub_824EB490(ctx, base);
 }
