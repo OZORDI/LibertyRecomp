@@ -588,7 +588,7 @@ static void DrawScanlineBars()
     {
         // Breathing animation
         static auto breatheStart = ImGui::GetTime();
-        breatheMotion = BREATHE_MOTION(breatheStart, 1.5f);
+        breatheMotion = BREATHE_MOTION(1.0f, 0.55f, breatheStart, 1.5f);
     }
 
     DrawTextWithOutline

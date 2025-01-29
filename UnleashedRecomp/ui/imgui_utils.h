@@ -15,7 +15,7 @@
 #define CENTRE_TEXT_HORZ(min, max, textSize) min.x + ((max.x - min.x) - textSize.x) / 2
 #define CENTRE_TEXT_VERT(min, max, textSize) min.y + ((max.y - min.y) - textSize.y) / 2
 
-#define BREATHE_MOTION(start, rate) Lerp(1.0f, 0.55f, (sin((ImGui::GetTime() - start) * (2.0f * M_PI / rate)) + 1.0f) / 2.0f)
+#define BREATHE_MOTION(start, end, time, rate) Lerp(start, end, (sin((ImGui::GetTime() - time) * (2.0f * M_PI / rate)) + 1.0f) / 2.0f)
 
 inline void SetGradient(const ImVec2& min, const ImVec2& max, ImU32 top, ImU32 bottom)
 {

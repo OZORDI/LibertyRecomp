@@ -81,7 +81,7 @@ static void DrawSelectionContainer(ImVec2 min, ImVec2 max)
     auto drawList = ImGui::GetForegroundDrawList();
 
     static auto breatheStart = ImGui::GetTime();
-    auto alpha = BREATHE_MOTION(breatheStart, 0.92f);
+    auto alpha = BREATHE_MOTION(1.0f, 0.65f, breatheStart, 0.92f);
     auto colour = IM_COL32(255, 255, 255, 255 * alpha);
 
     auto commonWidth = Scale(11);
