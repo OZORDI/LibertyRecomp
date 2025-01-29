@@ -147,9 +147,8 @@ public:
             }
         }
     }
-};
-
-static SDLEventListenerForMessageWindow g_eventListener;
+}
+g_sdlEventListenerForMessageWindow;
 
 bool DrawContainer(float appearTime, ImVec2 centre, ImVec2 max, bool isForeground = true)
 {
@@ -382,12 +381,15 @@ void MessageWindow::Draw()
                     }
 
                     if (scrollUp || scrollDown)
+                    {
                         Game_PlaySound("sys_actstg_pausecursor");
+                        g_joypadAxis = {};
+                    }
 
                     g_upWasHeld = upIsHeld;
                     g_downWasHeld = downIsHeld;
 
-                    if (isController)
+                    if (isController || (isKeyboard && App::s_isInit))
                     {
                         std::array<Button, 2> buttons =
                         {
@@ -397,7 +399,7 @@ void MessageWindow::Draw()
 
                         ButtonGuide::Open(buttons);
                     }
-                    else if (!App::s_isInit) // Only display keyboard prompt during installer.
+                    else // Only display keyboard prompt during installer.
                     {
                         ButtonGuide::Open(Button(Localise("Common_Select"), EButtonIcon::Enter));
                     }
