@@ -93,7 +93,7 @@ static void PlayEmbeddedSound(EmbeddedSound s)
 
 void EmbeddedPlayer::Init() 
 {
-    Mix_OpenAudio(XAUDIO_SAMPLES_HZ, AUDIO_F32SYS, XAUDIO_NUM_CHANNELS, 256);
+    Mix_OpenAudio(XAUDIO_SAMPLES_HZ, AUDIO_F32SYS, 2, 256);
 
     s_isActive = true;
 }
