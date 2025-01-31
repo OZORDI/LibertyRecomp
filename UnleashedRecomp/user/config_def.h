@@ -81,7 +81,7 @@ CONFIG_DEFINE_HIDDEN("Exports", bool, DisableDLCIcon, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, DisableDWMRoundedCorners, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, FixUnleashOutOfControlDrain, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, HomingAttackOnBoost, true);
+CONFIG_DEFINE_HIDDEN("Exports", bool, HUDToggleHotkey, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, SaveScoreAtCheckpoints, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, SkipIntroLogos, false);
 CONFIG_DEFINE_HIDDEN("Exports", bool, UseOfficialTitleOnTitleBar, false);
-CONFIG_DEFINE_HIDDEN("Exports", bool, HUDToggleHotkey, false);

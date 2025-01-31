@@ -1430,7 +1430,7 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
 static void SetOptionsMenuVisible(bool isVisible)
 {
     OptionsMenu::s_isVisible = isVisible;
-    *(bool*)g_memory.Translate(0x8328BB26) = !isVisible;
+    *SWA::SGlobals::ms_IsRenderHud = !isVisible;
 }
 
 static bool DrawMilesElectric()
