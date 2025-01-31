@@ -1480,6 +1480,31 @@ static void BeginCommandList()
     commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 3);
 }
 
+template<typename T>
+static void ApplyLowEndDefault(ConfigDef<T> &configDef, T newDefault, bool &changed)
+{
+    if (configDef.IsDefaultValue() && !configDef.IsLoadedFromConfig)
+    {
+        configDef = newDefault;
+        changed = true;
+    }
+}
+
+static void ApplyLowEndDefaults()
+{
+    bool changed = false;
+
+    ApplyLowEndDefault(Config::AntiAliasing, EAntiAliasing::MSAA2x, changed);
+    ApplyLowEndDefault(Config::ShadowResolution, EShadowResolution::Original, changed);
+    ApplyLowEndDefault(Config::TransparencyAntiAliasing, false, changed);
+    ApplyLowEndDefault(Config::GITextureFiltering, EGITextureFiltering::Bilinear, changed);
+
+    if (changed) 
+    {
+        Config::Save();
+    }
+}
+
 bool Video::CreateHostDevice(const char *sdlVideoDriver)
 {
     for (uint32_t i = 0; i < 16; i++)
@@ -1527,9 +1552,21 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
         return false;
     }
 
+    g_capabilities = g_device->getCapabilities();
+
     LoadEmbeddedResources();
 
-    g_capabilities = g_device->getCapabilities();
+    constexpr uint64_t LowEndMemoryLimit = 2048ULL * 1024ULL * 1024ULL;
+    RenderDeviceDescription deviceDescription = g_device->getDescription();
+    bool lowEndType = deviceDescription.type != RenderDeviceType::UNKNOWN && deviceDescription.type != RenderDeviceType::DISCRETE;
+    bool lowEndMemory = deviceDescription.dedicatedVideoMemory < LowEndMemoryLimit;
+    bool lowEndUMA = deviceDescription.type == RenderDeviceType::UNKNOWN && g_capabilities.uma;
+    if (lowEndType || lowEndMemory || lowEndUMA)
+    {
+        // Switch to low end defaults if a non-discrete GPU was detected or a low amount of VRAM was detected.
+        // Checking for UMA on D3D12 seems to be a reliable way to detect integrated GPUs.
+        ApplyLowEndDefaults();
+    }
 
     g_queue = g_device->createCommandQueue(RenderCommandListType::DIRECT);
 
@@ -2032,6 +2069,23 @@ static Profiler g_renderDirectorProfiler;
 static bool g_profilerVisible;
 static bool g_profilerWasToggled;
 
+static const char *DeviceTypeName(RenderDeviceType type)
+{
+    switch (type) 
+    {
+    case RenderDeviceType::INTEGRATED:
+        return "Integrated";
+    case RenderDeviceType::DISCRETE:
+        return "Discrete";
+    case RenderDeviceType::VIRTUAL:
+        return "Virtual";
+    case RenderDeviceType::CPU:
+        return "CPU";
+    default:
+        return "Unknown";
+    }
+}
+
 static void DrawProfiler()
 {
     bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1] != 0;
@@ -2095,11 +2149,14 @@ static void DrawProfiler()
 
         ImGui::Text("Present Wait: %s", g_capabilities.presentWait ? "Supported" : "Unsupported");
         ImGui::Text("Triangle Fan: %s", g_capabilities.triangleFan ? "Supported" : "Unsupported");
+        ImGui::Text("Dynamic Depth Bias: %s", g_capabilities.dynamicDepthBias ? "Supported" : "Unsupported");
         ImGui::NewLine();
 
         ImGui::Text("API: %s", g_vulkan ? "Vulkan" : "D3D12");
         ImGui::Text("Device: %s", g_device->getDescription().name.c_str());
+        ImGui::Text("Device Type: %s", DeviceTypeName(g_device->getDescription().type));
         ImGui::Text("VRAM: %.2f MiB", (double)(g_device->getDescription().dedicatedVideoMemory) / (1024.0 * 1024.0));
+        ImGui::Text("UMA: %s", g_capabilities.uma ? "Supported" : "Unsupported");
 
         const char* sdlVideoDriver = SDL_GetCurrentVideoDriver();
         if (sdlVideoDriver != nullptr)
