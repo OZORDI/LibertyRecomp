@@ -40,6 +40,8 @@
 #ifdef UNLEASHED_RECOMP_D3D12
 #include "shader/blend_color_alpha_ps.hlsl.dxil.h"
 #include "shader/copy_vs.hlsl.dxil.h"
+#include "shader/copy_color_ps.hlsl.dxil.h"
+#include "shader/copy_depth_ps.hlsl.dxil.h"
 #include "shader/csd_filter_ps.hlsl.dxil.h"
 #include "shader/csd_no_tex_vs.hlsl.dxil.h"
 #include "shader/csd_vs.hlsl.dxil.h"
@@ -53,6 +55,9 @@
 #include "shader/imgui_vs.hlsl.dxil.h"
 #include "shader/movie_ps.hlsl.dxil.h"
 #include "shader/movie_vs.hlsl.dxil.h"
+#include "shader/resolve_msaa_color_2x.hlsl.dxil.h"
+#include "shader/resolve_msaa_color_4x.hlsl.dxil.h"
+#include "shader/resolve_msaa_color_8x.hlsl.dxil.h"
 #include "shader/resolve_msaa_depth_2x.hlsl.dxil.h"
 #include "shader/resolve_msaa_depth_4x.hlsl.dxil.h"
 #include "shader/resolve_msaa_depth_8x.hlsl.dxil.h"
@@ -60,6 +65,8 @@
 
 #include "shader/blend_color_alpha_ps.hlsl.spirv.h"
 #include "shader/copy_vs.hlsl.spirv.h"
+#include "shader/copy_color_ps.hlsl.spirv.h"
+#include "shader/copy_depth_ps.hlsl.spirv.h"
 #include "shader/csd_filter_ps.hlsl.spirv.h"
 #include "shader/csd_no_tex_vs.hlsl.spirv.h"
 #include "shader/csd_vs.hlsl.spirv.h"
@@ -73,6 +80,9 @@
 #include "shader/imgui_vs.hlsl.spirv.h"
 #include "shader/movie_ps.hlsl.spirv.h"
 #include "shader/movie_vs.hlsl.spirv.h"
+#include "shader/resolve_msaa_color_2x.hlsl.spirv.h"
+#include "shader/resolve_msaa_color_4x.hlsl.spirv.h"
+#include "shader/resolve_msaa_color_8x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_2x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_4x.hlsl.spirv.h"
 #include "shader/resolve_msaa_depth_8x.hlsl.spirv.h"
@@ -136,6 +146,14 @@ struct PipelineState
 };
 #pragma pack(pop)
 
+struct UploadAllocation
+{
+    const RenderBuffer* buffer;
+    uint64_t offset;
+    uint8_t* memory;
+    uint64_t deviceAddress;
+};
+
 struct SharedConstants
 {
     uint32_t texture2DIndices[16]{};
@@ -158,6 +176,8 @@ static RenderViewport g_viewport(0.0f, 0.0f, 1280.0f, 720.0f);
 static PipelineState g_pipelineState;
 static int32_t g_depthBias;
 static float g_slopeScaledDepthBias;
+static UploadAllocation g_vertexShaderConstants;
+static UploadAllocation g_pixelShaderConstants;
 static SharedConstants g_sharedConstants;
 static GuestTexture* g_textures[16];
 static RenderSamplerDesc g_samplerDescs[16];
@@ -214,6 +234,9 @@ static bool g_vulkan = false;
 #else
 static constexpr bool g_vulkan = true;
 #endif
+
+static constexpr bool g_hardwareResolve = true;
+static constexpr bool g_hardwareDepthResolve = true;
 
 static std::unique_ptr<RenderInterface> g_interface;
 static std::unique_ptr<RenderDevice> g_device;
@@ -378,14 +401,6 @@ struct UploadBuffer
     std::unique_ptr<RenderBuffer> buffer;
     uint8_t* memory = nullptr;
     uint64_t deviceAddress = 0;
-};
-
-struct UploadAllocation
-{
-    const RenderBuffer* buffer;
-    uint64_t offset;
-    uint8_t* memory;
-    uint64_t deviceAddress;
 };
 
 struct UploadAllocator
@@ -1139,6 +1154,14 @@ static const std::pair<GuestRenderState, PPCFunc*> g_setRenderStateFunctions[] =
     { D3DRS_COLORWRITEENABLE, HostToGuestFunction<SetRenderState<D3DRS_COLORWRITEENABLE>> }
 };
 
+static std::unique_ptr<RenderShader> g_copyShader;
+
+static std::unique_ptr<RenderShader> g_copyColorShader;
+static ankerl::unordered_dense::map<RenderFormat, std::unique_ptr<RenderPipeline>> g_copyColorPipelines;
+static std::unique_ptr<RenderPipeline> g_copyDepthPipeline;
+
+static std::unique_ptr<RenderShader> g_resolveMsaaColorShaders[3];
+static ankerl::unordered_dense::map<RenderFormat, std::array<std::unique_ptr<RenderPipeline>, 3>> g_resolveMsaaColorPipelines;
 static std::unique_ptr<RenderPipeline> g_resolveMsaaDepthPipelines[3];
 
 enum
@@ -1462,6 +1485,9 @@ static void BeginCommandList()
 
     g_backBuffer->layout = RenderTextureLayout::UNKNOWN;
 
+    g_vertexShaderConstants = {};
+    g_pixelShaderConstants = {};
+
     for (size_t i = 0; i < 16; i++)
     {
         g_sharedConstants.texture2DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D;
@@ -1711,7 +1737,23 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
     
     g_pipelineLayout = pipelineLayoutBuilder.create(g_device.get());
 
-    auto copyShader = CREATE_SHADER(copy_vs);
+    g_copyShader = CREATE_SHADER(copy_vs);
+    g_copyColorShader = CREATE_SHADER(copy_color_ps);
+    auto copyDepthShader = CREATE_SHADER(copy_depth_ps);
+
+    RenderGraphicsPipelineDesc desc;
+    desc.pipelineLayout = g_pipelineLayout.get();
+    desc.vertexShader = g_copyShader.get();
+    desc.pixelShader = copyDepthShader.get();
+    desc.depthFunction = RenderComparisonFunction::ALWAYS;
+    desc.depthEnabled = true;
+    desc.depthWriteEnabled = true;
+    desc.depthTargetFormat = RenderFormat::D32_FLOAT;
+    g_copyDepthPipeline = g_device->createGraphicsPipeline(desc);
+
+    g_resolveMsaaColorShaders[0] = CREATE_SHADER(resolve_msaa_color_2x);
+    g_resolveMsaaColorShaders[1] = CREATE_SHADER(resolve_msaa_color_4x);
+    g_resolveMsaaColorShaders[2] = CREATE_SHADER(resolve_msaa_color_8x);
 
     for (size_t i = 0; i < std::size(g_resolveMsaaDepthPipelines); i++)
     {
@@ -1729,9 +1771,9 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
             break;
         }
 
-        RenderGraphicsPipelineDesc desc;
+        desc = {};
         desc.pipelineLayout = g_pipelineLayout.get();
-        desc.vertexShader = copyShader.get();
+        desc.vertexShader = g_copyShader.get();
         desc.pixelShader = pixelShader.get();
         desc.depthFunction = RenderComparisonFunction::ALWAYS;
         desc.depthEnabled = true;
@@ -1758,9 +1800,9 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
 
     auto gammaCorrectionShader = CREATE_SHADER(gamma_correction_ps);
 
-    RenderGraphicsPipelineDesc desc;
+    desc = {};
     desc.pipelineLayout = g_pipelineLayout.get();
-    desc.vertexShader = copyShader.get();
+    desc.vertexShader = g_copyShader.get();
     desc.pixelShader = gammaCorrectionShader.get();
     desc.renderTargetFormat[0] = BACKBUFFER_FORMAT;
     desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
@@ -2490,6 +2532,15 @@ void Video::Present()
     g_presentProfiler.Reset();
 }
 
+static void Present(GuestDevice* device)
+{
+    Video::Present();
+
+    // Invalidate vertex/pixel shader constants.
+    device->dirtyFlags[0] = ~0;
+    device->dirtyFlags[1] = ~0;
+}
+
 void Video::StartPipelinePrecompilation()
 {
     g_shouldPrecompilePipelines = true;
@@ -2714,7 +2765,13 @@ static GuestTexture* CreateTexture(uint32_t width, uint32_t height, uint32_t dep
     desc.mipLevels = levels;
     desc.arraySize = 1;
     desc.format = ConvertFormat(format);
-    desc.flags = (desc.format == RenderFormat::D32_FLOAT) ? RenderTextureFlag::DEPTH_TARGET : RenderTextureFlag::NONE;
+
+    if (desc.format == RenderFormat::D32_FLOAT)
+        desc.flags = RenderTextureFlag::DEPTH_TARGET;
+    else if (usage != 0)
+        desc.flags = RenderTextureFlag::RENDER_TARGET;
+    else
+        desc.flags = RenderTextureFlag::NONE;
 
     texture->textureHolder = g_device->createTexture(desc);
     texture->texture = texture->textureHolder.get();
@@ -2974,24 +3031,25 @@ static bool PopulateBarriersForStretchRect(GuestSurface* renderTarget, GuestSurf
 
             RenderTextureLayout srcLayout;
             RenderTextureLayout dstLayout;
+            bool shaderResolve = true;
 
-            if (multiSampling)
+            if (multiSampling && g_hardwareResolve)
             {
-                if (surface == depthStencil)
-                {
-                    srcLayout = RenderTextureLayout::SHADER_READ;
-                    dstLayout = RenderTextureLayout::DEPTH_WRITE;
-                }
-                else
+                // Hardware depth resolve is only supported on D3D12 when programmable sample positions are available.
+                bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
+
+                if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
                 {
                     srcLayout = RenderTextureLayout::RESOLVE_SOURCE;
                     dstLayout = RenderTextureLayout::RESOLVE_DEST;
+                    shaderResolve = false;
                 }
             }
-            else
+            
+            if (shaderResolve)
             {
-                srcLayout = RenderTextureLayout::COPY_SOURCE;
-                dstLayout = RenderTextureLayout::COPY_DEST;
+                srcLayout = RenderTextureLayout::SHADER_READ;
+                dstLayout = (surface->format == RenderFormat::D32_FLOAT ? RenderTextureLayout::DEPTH_WRITE : RenderTextureLayout::COLOR_WRITE);
             }
 
             AddBarrier(surface, srcLayout);
@@ -3018,9 +3076,28 @@ static void ExecutePendingStretchRectCommands(GuestSurface* renderTarget, GuestS
 
             for (const auto texture : surface->destinationTextures)
             {
-                if (multiSampling)
+                bool shaderResolve = true;
+
+                if (multiSampling && g_hardwareResolve)
                 {
-                    if (surface == depthStencil)
+                    bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
+
+                    if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
+                    {
+                        if (surface->format == RenderFormat::D32_FLOAT)
+                            commandList->resolveTextureRegion(texture->texture, 0, 0, surface->texture, nullptr, RenderResolveMode::MIN);
+                        else
+                            commandList->resolveTexture(texture->texture, surface->texture);
+
+                        shaderResolve = false;
+                    }
+                }
+
+                if (shaderResolve)
+                {
+                    RenderPipeline* pipeline = nullptr;
+
+                    if (multiSampling)
                     {
                         uint32_t pipelineIndex = 0;
 
@@ -3040,44 +3117,92 @@ static void ExecutePendingStretchRectCommands(GuestSurface* renderTarget, GuestS
                             break;
                         }
 
-                        if (texture->framebuffer == nullptr)
+                        if (texture->format == RenderFormat::D32_FLOAT)
+                        {
+                            pipeline = g_resolveMsaaDepthPipelines[pipelineIndex].get();
+                        }
+                        else
+                        {
+                            auto& resolveMsaaColorPipeline = g_resolveMsaaColorPipelines[surface->format][pipelineIndex];
+                            if (resolveMsaaColorPipeline == nullptr)
+                            {
+                                RenderGraphicsPipelineDesc desc;
+                                desc.pipelineLayout = g_pipelineLayout.get();
+                                desc.vertexShader = g_copyShader.get();
+                                desc.pixelShader = g_resolveMsaaColorShaders[pipelineIndex].get();
+                                desc.renderTargetFormat[0] = texture->format;
+                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+                                desc.renderTargetCount = 1;
+                                resolveMsaaColorPipeline = g_device->createGraphicsPipeline(desc);
+                            }
+
+                            pipeline = resolveMsaaColorPipeline.get();
+                        }
+                    }
+                    else
+                    {
+                        if (texture->format == RenderFormat::D32_FLOAT)
+                        {
+                            pipeline = g_copyDepthPipeline.get();
+                        }
+                        else
+                        {
+                            auto& copyColorPipeline = g_copyColorPipelines[surface->format];
+                            if (copyColorPipeline == nullptr)
+                            {
+                                RenderGraphicsPipelineDesc desc;
+                                desc.pipelineLayout = g_pipelineLayout.get();
+                                desc.vertexShader = g_copyShader.get();
+                                desc.pixelShader = g_copyColorShader.get();
+                                desc.renderTargetFormat[0] = texture->format;
+                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+                                desc.renderTargetCount = 1;
+                                copyColorPipeline = g_device->createGraphicsPipeline(desc);
+                            }
+
+                            pipeline = copyColorPipeline.get();
+                        }
+                    }
+
+                    if (texture->framebuffer == nullptr)
+                    {
+                        if (texture->format == RenderFormat::D32_FLOAT)
                         {
                             RenderFramebufferDesc desc;
                             desc.depthAttachment = texture->texture;
                             texture->framebuffer = g_device->createFramebuffer(desc);
                         }
-
-                        if (g_framebuffer != texture->framebuffer.get())
+                        else
                         {
-                            commandList->setFramebuffer(texture->framebuffer.get());
-                            g_framebuffer = texture->framebuffer.get();
-                        }
-
-                        commandList->setPipeline(g_resolveMsaaDepthPipelines[pipelineIndex].get());
-                        commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
-                        commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
-                        commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
-                        commandList->drawInstanced(6, 1, 0, 0);
-
-                        g_dirtyStates.renderTargetAndDepthStencil = true;
-                        g_dirtyStates.viewport = true;
-                        g_dirtyStates.pipelineState = true;
-                        g_dirtyStates.scissorRect = true;
-
-                        if (g_vulkan)
-                        {
-                            g_dirtyStates.depthBias = true; // Static depth bias in MSAA pipeline invalidates dynamic depth bias.
-                            g_dirtyStates.vertexShaderConstants = true;
+                            RenderFramebufferDesc desc;
+                            desc.colorAttachments = const_cast<const RenderTexture**>(&texture->texture);
+                            desc.colorAttachmentsCount = 1;
+                            texture->framebuffer = g_device->createFramebuffer(desc);
                         }
                     }
-                    else
+
+                    if (g_framebuffer != texture->framebuffer.get())
                     {
-                        commandList->resolveTexture(texture->texture, surface->texture);
+                        commandList->setFramebuffer(texture->framebuffer.get());
+                        g_framebuffer = texture->framebuffer.get();
                     }
-                }
-                else
-                {
-                    commandList->copyTexture(texture->texture, surface->texture);
+
+                    commandList->setPipeline(pipeline);
+                    commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
+                    commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
+                    commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
+                    commandList->drawInstanced(6, 1, 0, 0);
+
+                    g_dirtyStates.renderTargetAndDepthStencil = true;
+                    g_dirtyStates.viewport = true;
+                    g_dirtyStates.pipelineState = true;
+                    g_dirtyStates.scissorRect = true;
+
+                    if (g_vulkan)
+                    {
+                        g_dirtyStates.vertexShaderConstants = true; // The push constant call invalidates vertex shader constants.
+                        g_dirtyStates.depthBias = true; // Static depth bias in copy pipeline invalidates dynamic depth bias.
+                    }
                 }
 
                 texture->sourceSurface = nullptr;
@@ -3841,7 +3966,7 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
         }
     }
 
-    if (g_dirtyStates.vertexShaderConstants || device->dirtyFlags[0] != 0)
+    if (device->dirtyFlags[0] != 0)
     {
         auto& cmd = queue.enqueue();
         cmd.type = RenderCommandType::SetVertexShaderConstants;
@@ -3850,7 +3975,7 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
         device->dirtyFlags[0] = 0;
     }
 
-    if (g_dirtyStates.pixelShaderConstants || device->dirtyFlags[1] != 0)
+    if (device->dirtyFlags[1] != 0)
     {
         auto& cmd = queue.enqueue();
         cmd.type = RenderCommandType::SetPixelShaderConstants;
@@ -3915,12 +4040,14 @@ static void ProcSetSamplerState(const RenderCommand& cmd)
 
 static void ProcSetVertexShaderConstants(const RenderCommand& cmd)
 {
-    SetRootDescriptor(cmd.setVertexShaderConstants.allocation, 0);
+    g_vertexShaderConstants = cmd.setVertexShaderConstants.allocation;
+    g_dirtyStates.vertexShaderConstants = true;
 }
 
 static void ProcSetPixelShaderConstants(const RenderCommand& cmd)
 {
-    SetRootDescriptor(cmd.setPixelShaderConstants.allocation, 1);
+    g_pixelShaderConstants = cmd.setPixelShaderConstants.allocation;
+    g_dirtyStates.pixelShaderConstants = true;
 }
 
 static void ProcAddPipeline(const RenderCommand& cmd)
@@ -4009,6 +4136,12 @@ static void FlushRenderStateForRenderThread()
 
     if (g_dirtyStates.depthBias && g_capabilities.dynamicDepthBias)
         commandList->setDepthBias(g_depthBias, 0.0f, g_slopeScaledDepthBias);
+
+    if (g_dirtyStates.vertexShaderConstants)
+        SetRootDescriptor(g_vertexShaderConstants, 0);
+
+    if (g_dirtyStates.pixelShaderConstants)
+        SetRootDescriptor(g_pixelShaderConstants, 1);
 
     if (g_dirtyStates.sharedConstants)
     {
@@ -7001,7 +7134,7 @@ GUEST_FUNCTION_HOOK(sub_82BE96F0, GetSurfaceDesc);
 GUEST_FUNCTION_HOOK(sub_82BE04B0, GetVertexDeclaration);
 GUEST_FUNCTION_HOOK(sub_82BE0530, HashVertexDeclaration);
 
-GUEST_FUNCTION_HOOK(sub_82BDA8C0, Video::Present);
+GUEST_FUNCTION_HOOK(sub_82BDA8C0, Present);
 GUEST_FUNCTION_HOOK(sub_82BDD330, GetBackBuffer);
 
 GUEST_FUNCTION_HOOK(sub_82BE9498, CreateTexture);
