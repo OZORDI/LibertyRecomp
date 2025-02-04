@@ -165,11 +165,7 @@ int GetThreadPriorityImpl(GuestThreadHandle* hThread)
 
 uint32_t SetThreadIdealProcessorImpl(GuestThreadHandle* hThread, uint32_t dwIdealProcessor)
 {
-#ifdef _WIN32
-    return SetThreadIdealProcessor(hThread == GetKernelObject(CURRENT_THREAD_HANDLE) ? GetCurrentThread() : hThread->thread.native_handle(), dwIdealProcessor);
-#else
     return 0;
-#endif
 }
 
 GUEST_FUNCTION_HOOK(sub_82DFA2E8, SetThreadNameImpl);
