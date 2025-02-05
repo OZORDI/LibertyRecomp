@@ -38,7 +38,8 @@ std::unordered_map<EButtonIcon, float> g_iconWidths =
     { EButtonIcon::Start, 40 },
     { EButtonIcon::Back, 40 },
     { EButtonIcon::LMB, 40 },
-    { EButtonIcon::Enter, 40 }
+    { EButtonIcon::Enter, 40 },
+    { EButtonIcon::Escape, 40 },
 };
 
 std::unordered_map<EButtonIcon, float> g_iconHeights =
@@ -56,7 +57,8 @@ std::unordered_map<EButtonIcon, float> g_iconHeights =
     { EButtonIcon::Start, 40 },
     { EButtonIcon::Back, 40 },
     { EButtonIcon::LMB, 40 },
-    { EButtonIcon::Enter, 40 }
+    { EButtonIcon::Enter, 40 },
+    { EButtonIcon::Escape, 40 },
 };
 
 std::tuple<std::tuple<ImVec2, ImVec2>, GuestTexture*> GetButtonIcon(EButtonIcon icon)
@@ -124,12 +126,17 @@ std::tuple<std::tuple<ImVec2, ImVec2>, GuestTexture*> GetButtonIcon(EButtonIcon 
             break;
 
         case EButtonIcon::LMB:
-            btn = PIXELS_TO_UV_COORDS(256, 128, 0, 0, 128, 128);
+            btn = PIXELS_TO_UV_COORDS(384, 128, 0, 0, 128, 128);
             texture = g_upKBMIcons.get();
             break;
 
         case EButtonIcon::Enter:
-            btn = PIXELS_TO_UV_COORDS(256, 128, 128, 0, 128, 128);
+            btn = PIXELS_TO_UV_COORDS(384, 128, 128, 0, 128, 128);
+            texture = g_upKBMIcons.get();
+            break;
+
+        case EButtonIcon::Escape:
+            btn = PIXELS_TO_UV_COORDS(384, 128, 256, 0, 128, 128);
             texture = g_upKBMIcons.get();
             break;
     }
