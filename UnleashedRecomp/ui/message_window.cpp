@@ -22,7 +22,9 @@ static bool g_isAwaitingResult = false;
 static bool g_isClosing = false;
 static bool g_isControlsVisible = false;
 
+static double g_rowSelectionTime;
 static int g_selectedRowIndex;
+static int g_prevSelectedRowIndex;
 static int g_foregroundCount;
 
 static bool g_upWasHeld;
@@ -208,7 +210,13 @@ void DrawButton(int rowIndex, float yOffset, float width, float height, std::str
     bool isSelected = rowIndex == g_selectedRowIndex;
 
     if (isSelected)
-        DrawSelectionContainer(min, max, true);
+    {
+        auto prevItemOffset = (g_prevSelectedRowIndex - g_selectedRowIndex) * height;
+        auto animRatio = std::clamp((ImGui::GetTime() - g_rowSelectionTime) * 60.0 / 8.0, 0.0, 1.0);
+        prevItemOffset *= pow(1.0 - animRatio, 3.0);
+
+        DrawSelectionContainer({ min.x, min.y + prevItemOffset }, { max.x, max.y + prevItemOffset }, true);
+    }
 
     auto fontSize = Scale(28);
     auto textSize = g_fntSeurat->CalcTextSizeA(fontSize, FLT_MAX, 0, text.c_str());
@@ -375,6 +383,8 @@ void MessageWindow::Draw()
                     bool scrollUp = !g_upWasHeld && upIsHeld;
                     bool scrollDown = !g_downWasHeld && downIsHeld;
 
+                    auto prevSelectedRowIndex = g_selectedRowIndex;
+
                     if (scrollUp)
                     {
                         --g_selectedRowIndex;
@@ -391,14 +401,17 @@ void MessageWindow::Draw()
                     if (scrollUp || scrollDown)
                     {
                         Game_PlaySound("sys_actstg_pausecursor");
+                        g_rowSelectionTime = ImGui::GetTime();
+                        g_prevSelectedRowIndex = prevSelectedRowIndex;
                         g_joypadAxis.y = 0;
                     }
 
                     g_upWasHeld = upIsHeld;
                     g_downWasHeld = downIsHeld;
 
-                    EButtonIcon selectIcon = EButtonIcon::A;
-                    EButtonIcon backIcon = EButtonIcon::B;
+                    auto selectIcon = EButtonIcon::A;
+                    auto backIcon = EButtonIcon::B;
+
                     if (isController || isKeyboard)
                     {
                         if (isKeyboard && !App::s_isInit)
