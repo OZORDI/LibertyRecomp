@@ -67,6 +67,20 @@ void AchievementManager::Unlock(uint16_t id)
         AchievementOverlay::Open(id);
 }
 
+void AchievementManager::UnlockAll()
+{
+    for (uint16_t i = 24; i <= 83; i++)
+    {
+        if (i == 30)
+            i = 31;
+
+        if (i == 55)
+            i = 64;
+
+        AchievementManager::Unlock(i);
+    }
+}
+
 void AchievementManager::Reset()
 {
     Data = {};
