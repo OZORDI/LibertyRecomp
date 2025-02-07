@@ -146,20 +146,6 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
             break;
     }
 
-    if (!GameWindow::IsFullscreen())
-    {
-        if (event->type == SDL_CONTROLLERBUTTONDOWN || event->type == SDL_CONTROLLERBUTTONUP || event->type == SDL_CONTROLLERAXISMOTION)
-        {
-            // Hide mouse cursor when controller input is detected.
-            SDL_ShowCursor(SDL_DISABLE);
-        }
-        else if (event->type == SDL_MOUSEMOTION)
-        {
-            // Restore mouse cursor when mouse input is detected.
-            SDL_ShowCursor(SDL_ENABLE);
-        }
-    }
-
     return 0;
 }
 

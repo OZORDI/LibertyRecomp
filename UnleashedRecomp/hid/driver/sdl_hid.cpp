@@ -239,12 +239,16 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             if (event->type == SDL_CONTROLLERAXISMOTION)
             {
                 if (abs(event->caxis.value) > 8000)
+                {
+                    SDL_ShowCursor(SDL_DISABLE);
                     SetControllerInputDevice(controller);
+                }
 
                 controller->PollAxis();
             }
             else
             {
+                SDL_ShowCursor(SDL_DISABLE);
                 SetControllerInputDevice(controller);
 
                 controller->Poll();
@@ -261,8 +265,14 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
         case SDL_MOUSEMOTION:
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
+        {
+            if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
+                SDL_ShowCursor(SDL_ENABLE);
+
             hid::g_inputDevice = hid::EInputDevice::Mouse;
+
             break;
+        }
 
         case SDL_WINDOWEVENT:
         {
