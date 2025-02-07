@@ -1521,6 +1521,13 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
         
             scrollOffset = std::clamp(scrollOffset, 0.0f, scrollMax);
         }
+        else
+        {
+            isScrolling = false;
+            scrollOffset = 0.0f;
+            scrollTimer = 0.0f;
+            scrollDirection = 1.0f;
+        }
 
         SetVerticalMarqueeFade(clipRectMin, clipRectMax, Scale(24), Lerp(Scale(24), 0.0f, scrollOffset / scrollMax));
 
