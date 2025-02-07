@@ -27,11 +27,11 @@
 CONFIG_DEFINE_LOCALE(Language)
 {
     { ELanguage::English,  { "Language", "Change the language used for text and logos." } },
-    { ELanguage::Japanese, { "言語", "[PLACEHOLDER]" } },
-    { ELanguage::German,   { "Sprache", "[PLACEHOLDER]" } },
-    { ELanguage::French,   { "Langue", "[PLACEHOLDER]" } },
-    { ELanguage::Spanish,  { "Idioma", "[PLACEHOLDER]" } },
-    { ELanguage::Italian,  { "Lingua", "[PLACEHOLDER]" } }
+    { ELanguage::Japanese, { "言語", "" } },
+    { ELanguage::German,   { "Sprache", "" } },
+    { ELanguage::French,   { "Langue", "" } },
+    { ELanguage::Spanish,  { "Idioma", "" } },
+    { ELanguage::Italian,  { "Lingua", "" } }
 };
 
 CONFIG_DEFINE_ENUM_LOCALE(ELanguage)
@@ -308,9 +308,7 @@ CONFIG_DEFINE_ENUM_LOCALE(EShadowResolution)
     {
         ELanguage::English,
         {
-            { EShadowResolution::Original, { "ORIGINAL", "Original: the game will automatically determine the resolution of the shadows." } },
-            { EShadowResolution::x4096,    { "4096", "High resolutions can degrade performance significantly on lower end hardware." } },
-            { EShadowResolution::x8192,    { "8192", "High resolutions can degrade performance significantly on lower end hardware." } },
+            { EShadowResolution::Original, { "ORIGINAL", "Original: the game will automatically determine the resolution of the shadows." } }
         }
     }
 };
@@ -355,7 +353,7 @@ CONFIG_DEFINE_LOCALE(XboxColorCorrection)
 
 CONFIG_DEFINE_LOCALE(CutsceneAspectRatio)
 {
-    { ELanguage::English, { "Cutscene Aspect Ratio", "" } }
+    { ELanguage::English, { "Cutscene Aspect Ratio", "Change the aspect ratio of the real-time cutscenes." } }
 };
 
 CONFIG_DEFINE_ENUM_LOCALE(ECutsceneAspectRatio)
@@ -363,8 +361,8 @@ CONFIG_DEFINE_ENUM_LOCALE(ECutsceneAspectRatio)
     {
         ELanguage::English,
         {
-            { ECutsceneAspectRatio::Original, { "ORIGINAL", "" } },
-            { ECutsceneAspectRatio::Unlocked, { "UNLOCKED", "" } },
+            { ECutsceneAspectRatio::Original, { "ORIGINAL", "Original: locks cutscenes to their original 16:9 aspect ratio." } },
+            { ECutsceneAspectRatio::Unlocked, { "UNLOCKED", "Unlocked: allows cutscenes to adjust their aspect ratio to the window size.\n\nWARNING: this will introduce visual oddities past the original 16:9 aspect ratio." } },
         }
     }
 };
