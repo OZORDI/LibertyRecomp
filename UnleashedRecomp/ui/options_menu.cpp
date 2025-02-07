@@ -1559,6 +1559,7 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
             isScrolling = false;
             scrollOffset = 0.0f;
             scrollTimer = 0.0f;
+            scrollDirection = 1.0f;
         }
     }
 
