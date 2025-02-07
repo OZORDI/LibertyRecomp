@@ -34,6 +34,7 @@ public:
     static bool IsFullscreen();
     static bool SetFullscreen(bool isEnabled);
     static void SetFullscreenCursorVisibility(bool isVisible);
+    static void SetResizable(bool isResizable);
     static bool IsMaximised();
     static EWindowState SetMaximised(bool isEnabled);
     static SDL_Rect GetDimensions();
