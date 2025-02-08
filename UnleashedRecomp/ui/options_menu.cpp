@@ -1484,7 +1484,10 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
                 }
                 else if (isManualScrolling && fabs(vert) <= 0.25f)
                 {
+                    isScrolling = false;
                     isManualScrolling = false;
+                    scrollTimer = 0.0f;
+                    scrollDirection = vert > 0.0f ? 1.0f : -1.0f;
                 }
             }
         
