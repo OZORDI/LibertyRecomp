@@ -1339,7 +1339,7 @@ static void DrawConfigOptions()
     // Draw scroll bar
     if (rowCount > visibleRowCount)
     {
-        float totalHeight = (clipRectMax.y - clipRectMin.y);
+        float totalHeight = (clipRectMax.y - clipRectMin.y) - Scale(2.0f);
         float heightRatio = float(visibleRowCount) / float(rowCount);
 
         float offsetRatio = float(g_firstVisibleRowIndex) / float(rowCount);
@@ -1351,7 +1351,7 @@ static void DrawConfigOptions()
         drawList->AddRectFilled
         (
             { clipRectMax.x, minY },
-            { clipRectMax.x + gridSize, minY + totalHeight * heightRatio },
+            { clipRectMax.x + gridSize - Scale(1.0f), minY + totalHeight * heightRatio},
             IM_COL32(0, 128, 0, 255)
         );
     }
