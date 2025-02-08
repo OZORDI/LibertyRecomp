@@ -273,7 +273,7 @@ PPC_FUNC(sub_8258B558)
                         ctx.f1.f64 = offsetX + g_aspectRatioNarrowScale * 140.0f;
                         ctx.f2.f64 = offsetY;
 
-                        if (Config::UIScaleMode == EUIScaleMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+                        if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
                             ctx.f1.f64 += g_aspectRatioOffsetX / g_aspectRatioScale;
 
                         sub_830BB3D0(ctx, base);
@@ -295,7 +295,7 @@ PPC_FUNC(sub_8258B558)
             if (textBox != NULL)
             {
                 float value = 708.0f + g_aspectRatioNarrowScale * 140.0f;
-                if (Config::UIScaleMode == EUIScaleMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+                if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
                     value += g_aspectRatioOffsetX / g_aspectRatioScale;
 
                 PPC_STORE_U32(textBox + 0x38, reinterpret_cast<uint32_t&>(value));
@@ -917,7 +917,7 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
         return;
     }
 
-    if (Config::UIScaleMode == EUIScaleMode::Centre)
+    if (Config::UIAlignmentMode == EUIAlignmentMode::Centre)
     {
         if (g_aspectRatio >= WIDE_ASPECT_RATIO)
             modifier.flags &= ~(ALIGN_LEFT | ALIGN_RIGHT);
@@ -1274,12 +1274,12 @@ static double ComputeObjGetItemX(uint32_t type)
 
         double scaleOffset = (1280.0 * (1.0 - g_aspectRatioGameplayScale)) * g_aspectRatioScale;
 
-        if (Config::UIScaleMode == EUIScaleMode::Edge)
+        if (Config::UIAlignmentMode == EUIAlignmentMode::Edge)
         {
             if (type != 47) // Medal
                 x += g_aspectRatioOffsetX * 2.0 + scaleOffset;
         }
-        else if (Config::UIScaleMode == EUIScaleMode::Centre)
+        else if (Config::UIAlignmentMode == EUIAlignmentMode::Centre)
         {
             x += g_aspectRatioOffsetX + scaleOffset;
         }

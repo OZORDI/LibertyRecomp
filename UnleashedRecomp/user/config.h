@@ -138,7 +138,7 @@ enum class ECutsceneAspectRatio : uint32_t
     Unlocked
 };
 
-enum class EUIScaleMode : uint32_t
+enum class EUIAlignmentMode : uint32_t
 {
     Edge,
     Centre

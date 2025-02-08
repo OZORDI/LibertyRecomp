@@ -39,7 +39,7 @@
 #include <res/images/options_menu/thumbnails/time_of_day_transition_playstation.dds.h>
 #include <res/images/options_menu/thumbnails/transparency_antialiasing_false.dds.h>
 #include <res/images/options_menu/thumbnails/transparency_antialiasing_true.dds.h>
-#include <res/images/options_menu/thumbnails/ui_scale_mode.dds.h>
+#include <res/images/options_menu/thumbnails/ui_alignment_mode.dds.h>
 #include <res/images/options_menu/thumbnails/vertical_camera.dds.h>
 #include <res/images/options_menu/thumbnails/voice_language.dds.h>
 #include <res/images/options_menu/thumbnails/vibration.dds.h>
@@ -112,7 +112,7 @@ void LoadThumbnails()
     g_motionBlurThumbnails[EMotionBlur::Enhanced] = LOAD_ZSTD_TEXTURE(g_motion_blur_enhanced);
 
     g_configThumbnails[&Config::XboxColorCorrection] = LOAD_ZSTD_TEXTURE(g_xbox_color_correction);
-    g_configThumbnails[&Config::UIScaleMode] = LOAD_ZSTD_TEXTURE(g_ui_scale_mode);
+    g_configThumbnails[&Config::UIAlignmentMode] = LOAD_ZSTD_TEXTURE(g_ui_alignment_mode);
 }
 
 template<typename T>

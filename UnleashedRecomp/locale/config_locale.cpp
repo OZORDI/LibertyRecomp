@@ -367,18 +367,18 @@ CONFIG_DEFINE_ENUM_LOCALE(ECutsceneAspectRatio)
     }
 };
 
-CONFIG_DEFINE_LOCALE(UIScaleMode)
+CONFIG_DEFINE_LOCALE(UIAlignmentMode)
 {
-    { ELanguage::English, { "UI Scale Mode", "Change how the UI scales to the display." } }
+    { ELanguage::English, { "UI Alignment Mode", "Change how the UI aligns with the display." } }
 };
 
-CONFIG_DEFINE_ENUM_LOCALE(EUIScaleMode)
+CONFIG_DEFINE_ENUM_LOCALE(EUIAlignmentMode)
 {
     {
         ELanguage::English,
         {
-            { EUIScaleMode::Edge,    { "EDGE", "Edge: the UI will anchor to the edges of the display." } },
-            { EUIScaleMode::Centre,  { "CENTER", "Center: the UI will anchor to the center of the display." } },
+            { EUIAlignmentMode::Edge,    { "EDGE", "Edge: the UI will align with the edges of the display." } },
+            { EUIAlignmentMode::Centre,  { "CENTER", "Center: the UI will align with the center of the display." } },
         }
     }
 };

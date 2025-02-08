@@ -376,11 +376,11 @@ CONFIG_DEFINE_ENUM_TEMPLATE(ECutsceneAspectRatio)
     { "Unlocked", ECutsceneAspectRatio::Unlocked }
 };
 
-CONFIG_DEFINE_ENUM_TEMPLATE(EUIScaleMode)
+CONFIG_DEFINE_ENUM_TEMPLATE(EUIAlignmentMode)
 {
-    { "Edge",    EUIScaleMode::Edge },
-    { "Centre",  EUIScaleMode::Centre },
-    { "Center",  EUIScaleMode::Centre }
+    { "Edge",    EUIAlignmentMode::Edge },
+    { "Centre",  EUIAlignmentMode::Centre },
+    { "Center",  EUIAlignmentMode::Centre }
 };
 
 #undef  CONFIG_DEFINE
