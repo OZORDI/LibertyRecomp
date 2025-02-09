@@ -24,6 +24,9 @@ void CHudPauseAddOptionsItemMidAsmHook(PPCRegister& pThis)
 
 bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
 {
+    if (App::s_isLoading)
+        return true;
+
     auto pHudPause = (SWA::CHudPause*)g_memory.Translate(pThis);
     auto cursorIndex = *(be<uint32_t>*)g_memory.Translate(4 * (*(be<uint32_t>*)g_memory.Translate(pThis + 0x19C) + 0x68) + pThis);
 
@@ -116,6 +119,12 @@ bool CHudPauseMiscInjectOptionsMidAsmHook(PPCRegister& pThis)
 PPC_FUNC_IMPL(__imp__sub_824B0930);
 PPC_FUNC(sub_824B0930)
 {
+    if (App::s_isLoading)
+    {
+        __imp__sub_824B0930(ctx, base);
+        return;
+    }
+
     auto pHudPause = (SWA::CHudPause*)g_memory.Translate(ctx.r3.u32);
     auto pInputState = SWA::CInputState::GetInstance();
 

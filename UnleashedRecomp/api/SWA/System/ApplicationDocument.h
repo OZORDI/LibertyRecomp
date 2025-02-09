@@ -71,7 +71,8 @@ namespace SWA
             boost::shared_ptr<Hedgehog::Mirage::CMatrixNode> m_spMatrixNodeRoot;
             SWA_INSERT_PADDING(0x14);
             CGammaController m_GammaController;
-            SWA_INSERT_PADDING(0x1C);
+            boost::shared_ptr<CLoading> m_spLoading;
+            SWA_INSERT_PADDING(0x14);
             boost::shared_ptr<Achievement::CManager> m_spAchievementManager;
             boost::shared_ptr<CDatabaseTree> m_spDatabaseTree;
             Hedgehog::Base::CSharedString m_Field10C;
@@ -104,6 +105,7 @@ namespace SWA
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_Field74, 0x74);
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_spMatrixNodeRoot, 0x84);
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_GammaController, 0xA0);
+    SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_spLoading, 0xE0);
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_spAchievementManager, 0xFC);
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_spDatabaseTree, 0x104);
     SWA_ASSERT_OFFSETOF(CApplicationDocument::CMember, m_Field10C, 0x10C);
