@@ -1624,6 +1624,8 @@ static void ApplyLowEndDefault(ConfigDef<T> &configDef, T newDefault, bool &chan
         configDef = newDefault;
         changed = true;
     }
+    
+    configDef.DefaultValue = newDefault;
 }
 
 static void ApplyLowEndDefaults()
