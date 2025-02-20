@@ -62,7 +62,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "SYSTEM" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "SISTEMA" }
         }
     },
     {
@@ -73,7 +73,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "EINGABE" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "COMANDI" }
         }
     },
     {
@@ -84,7 +84,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "AUDIO" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "AUDIO" }
         }
     },
     {
@@ -95,7 +95,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "VIDEO" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "VIDEO" }
         }
     },
     {
@@ -107,7 +107,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "MAX" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "MAX" }
         }
     },
     {
@@ -118,7 +118,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Fenstergröße" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Dimensioni della finestra" }
         }
     },
     {
@@ -129,7 +129,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Passe die Fenstergröße des Spiels im Fenstermodus an." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Regola la dimensione della finestra del gioco in modalità finestra." }
         }
     },
     {
@@ -141,7 +141,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option ist an dieser Stelle nicht verfügbar." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non può essere modificata in questo momento." }
         }
     },
     {
@@ -153,7 +153,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option ist im Vollbildmodus nicht verfügbar." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non è disponibile in modalità schermo pieno." }
         }
     },
     {
@@ -165,7 +165,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option ist im Fenstermodus nicht verfügbar." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non è disponibile in modalità finestra." }
         }
     },
     {
@@ -177,7 +177,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option ist mit der momentanen Hardwarekonfiguration nicht verfügbar." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non è disponibile con l'hardware in tuo possesso." }
         }
     },
     {
@@ -189,7 +189,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option ist ohne MSAA nicht verfügbar." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non è disponibile senza MSAA." }
         }
     },
     {
@@ -201,7 +201,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Diese Option wird von diesem Betriebssystem nicht unterstützt." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Questa opzione non è disponibile con il tuo sistema operativo." }
         }
     },
     {
@@ -213,7 +213,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Das Spiel wird jetzt neu starten." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Il gioco verrà riavviato." }
         }
     },
     {
@@ -225,7 +225,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Erfolge" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Obiettivi" }
         }
     },
     {
@@ -237,7 +237,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "ERFOLGE" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "OBIETTIVI" }
         }
     },
     {
@@ -248,7 +248,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Erfolg Freigeschaltet!" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Obiettivo sbloccato!" }
         }
     },
     {
@@ -303,7 +303,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Füge die Quellen für das Spiel und dessen Update hinzu." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Aggiungi le fonti per il gioco e per il suo file d'aggiornamento." }
         }
     },
     {
@@ -314,7 +314,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Füge die Quellen für die Erweiterungen des Spiels hinzu." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Aggiungi le fonti per i DLC." }
         }
     },
     {
@@ -347,7 +347,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Installation abgeschlossen!\nDieses Projekt wird präsentiert von:" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Installazione completata!\nQuesto progetto è stato creato da:" }
         }
     },
     {
@@ -435,7 +435,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "ERNEUT VERSUCHEN" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "RIPROVA" }
         }
     },
     {
@@ -493,7 +493,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Wähle einen digitalen Dump von dem Spiel.\n\nDie Dateien können über die Festplatte deiner\nXbox 360 erlangt werden.\nFolge hierfür den Anweisungen auf der GitHub Seite.\n\nUm einen Ordner mit unmodifizierten Spieldateien auszuwählen, benutze die \"Ordner Hinzufügen\" Option stattdessen." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Seleziona una copia digitale\ncon i contenuti del gioco.\n\nQuesti file possono essere ottenuti\ndall'hard drive della tua Xbox 360\nseguendo le istruzioni\nsulla pagina GitHub.\n\nPer selezionare una cartella\ncon file estratti e non modificati\nusa l'opzione \"Aggiungi cartella\"." }
         }
     },
     {
@@ -505,7 +505,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Wähle einen Ordner, der unmodifizierte Dateien, die vom Spiel extrahiert wurden enthält.\n\nDie Dateien können über die Festplatte deiner\nXbox 360 erlangt werden.\nFolge hierfür den Anweisungen auf der GitHub Seite.\n\nUm einen digitalen Dump auszuwählen, benutze die \"Datei Hinzufügen\" Option stattdessen." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Seleziona una cartella che contiene\ni file non modificati che sono stati\nestratti dal gioco.\n\nQuesti file possono essere ottenuti\ndall'hard drive della tua Xbox 360\nseguendo le istruzioni\nsulla pagina GitHub.\n\nPer selezionare una copia digitale\nusa l'opzione \"Aggiungi file\"." }
         }
     },
     {
@@ -565,7 +565,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Installation verlassen?" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Sicuro di voler uscire?" }
         }
     },
     {
@@ -577,7 +577,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Bist du dir sicher, dass du die Installation abbrechen möchtest?" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Sicuro di voler annullare l'installazione?" }
         }
     },
     {
@@ -589,7 +589,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Spiel verlassen?" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "Sei sicuro di voler uscire?" }
+            { ELanguage::Italian,  "Sicuro di voler uscire ?" }
         }
     },
     {
@@ -616,7 +616,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Die Erfolgsdaten sind möglicherweise\nfehlerhaft und können nicht\ngeladen werden.\n\nDurch das Fortfahren werden\ndeine bisherigen Erfolgsdaten gelöscht." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "I file degli obiettivi sembrano danneggiati\ne non possono essere caricati.\n\nSe prosegui da questo punto\ni tuoi obiettivi verranno cancellati." }
         }
     },
     {
@@ -629,7 +629,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Die Erfolgsdaten konnten nicht geladen werden.\nDeine Erfolge werden nicht gespeichert." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "I file degli obiettivi non possono essere caricati.\nI tuoi obiettivi non verranno salvati." }
         }
     },
     {
@@ -640,7 +640,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Ein Update ist verfügbar!\n\nMöchtest du die Release-Seite\nbesuchen um es herunterzuladen?" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "È disponibile un aggiornamento!\n\nVuoi visitare la pagina releases\nper scaricarlo?" }
         }
     },
     {
@@ -651,7 +651,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Es ist nicht möglich, ein D3D12 (Windows) oder Vulkan-Backend zu erstellen.\n\nBitte stelle sicher, dass:\n\n- Dein System die Mindestanforderungen erfüllt.\n- Deine GPU-Treiber auf dem neuesten Stand sind.\n- Dein Betriebssystem auf der neuesten verfügbaren Version ist." },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Impossibile creare un backend D3D12 (Windows) o Vulkan.\n\nAssicurati che:\n\n- Il tuo sistema soddisfi i requisiti minimi.\n- I driver della scheda grafica siano aggiornati.\n- Il tuo sistema operativo sia aggiornato." }
         }
     },
     {
@@ -706,7 +706,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Weiter" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "Continua" }
+            { ELanguage::Italian,  "Avanti" }
         }
     },
     {
@@ -739,7 +739,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Verlassen" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Esci" }
         }
     },
     {
@@ -750,7 +750,7 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
             { ELanguage::German,   "Abbrechen" },
             { ELanguage::French,   "" },
             { ELanguage::Spanish,  "" },
-            { ELanguage::Italian,  "" }
+            { ELanguage::Italian,  "Annulla" }
         }
     },
     {
