@@ -736,6 +736,14 @@ static void DrawDescriptionContainer()
     }
     else if (g_currentPage == WizardPage::InstallFailed)
     {
+        // Japanese needs text to be brought in by a normal width space
+        // as it allows for text to begin further than others for
+        // special characters.
+        if (Config::Language == ELanguage::Japanese)
+        {
+            strncat(descriptionText, " ", 1);
+        }
+
         strncat(descriptionText, g_installerErrorMessage.c_str(), sizeof(descriptionText) - 1);
     }
 
@@ -769,6 +777,8 @@ static void DrawDescriptionContainer()
 
         textX += annotationFontSize;
         textY += annotationFontSize;
+
+        lineWidth += annotationFontSize;
     }
 
     drawList->PushClipRect(clipRectMin, clipRectMax, false);
@@ -788,7 +798,9 @@ static void DrawDescriptionContainer()
         [=](const char* str, float size, ImVec2 pos)
         {
             DrawTextBasic(g_seuratFont, size, pos, IM_COL32(255, 255, 255, 255 * textAlpha), str);
-        }
+        },
+        false,
+        Config::Language == ELanguage::Japanese
     );
 
     drawList->PopClipRect();

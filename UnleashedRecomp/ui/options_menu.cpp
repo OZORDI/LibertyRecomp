@@ -1497,6 +1497,7 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
 
         auto textX = clipRectMin.x - Scale(0.5f);
         auto textY = thumbnailMax.y + offsetY;
+        float lineWidth = clipRectMax.x - clipRectMin.x;
 
         if (Config::Language == ELanguage::Japanese)
         {
@@ -1511,9 +1512,13 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
             clipRectMax.x += annotationFontSize;
 
             textY += annotationFontSize;
+            
+            // Dirty hack to disallow clipping on Japanese text
+            // whilst allowing annotations to go over the border
+            lineWidth -= annotationFontSize;
         }
 
-        auto textSize = MeasureCentredParagraph(g_seuratFont, fontSize, clipRectMax.x - clipRectMin.x, 5.0f, desc.c_str());
+        auto textSize = MeasureCentredParagraph(g_seuratFont, fontSize, lineWidth, 5.0f, desc.c_str());
 
         drawList->PushClipRect(clipRectMin, clipRectMax, false);
 
@@ -1589,7 +1594,7 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
         (
             g_seuratFont,
             fontSize,
-            clipRectMax.x - clipRectMin.x,
+            lineWidth,
             { textX, textY - scrollOffset },
             5.0f,
             desc.c_str(),
