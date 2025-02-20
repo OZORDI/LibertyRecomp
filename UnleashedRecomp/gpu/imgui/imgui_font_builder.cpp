@@ -220,6 +220,8 @@ static bool FontBuilder_Build(ImFontAtlas* atlas)
 
     for (size_t i = 0; i < atlas->ConfigData.size(); i++)
     {
+        double spaceAdvance = 0.0;
+
         auto& config = atlas->ConfigData[i];
         bool increaseSpacing = strstr(config.Name, "Seurat") != nullptr;
 
@@ -232,8 +234,15 @@ static bool FontBuilder_Build(ImFontAtlas* atlas)
             glyph.getQuadAtlasBounds(u0, v0, u1, v1);
 
             double advance = glyph.getAdvance();
-            if (increaseSpacing && glyph.getCodepoint() == ' ')
-                advance *= 1.5;
+            if (glyph.getCodepoint() == ' ')
+            {
+                if (increaseSpacing)
+                {
+                    advance *= 1.5;
+                }
+
+                spaceAdvance = advance;
+            }
 
             config.DstFont->AddGlyph(
                 &config,
@@ -247,20 +256,40 @@ static bool FontBuilder_Build(ImFontAtlas* atlas)
                 u1 / packer.width, 
                 v0 / packer.height, 
                 advance);
-
-            config.DstFont->AddGlyph(
-                &config,
-                0x200B,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f);
         }
+        
+        // Used as a zero-width helper for automatic line breaks.
+        // This is useful for languages like Japanese to separate 'words'
+        // so that they don't get split mid-kana by the automatic splitter.
+        config.DstFont->AddGlyph(
+            &config,
+            0x200B,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f);
+
+        // A duplicate of the normal width space character.
+        // Overrides the unicode Four-Per-Em Space character.
+        // This can be used to add visual spacers that are ignored
+        // by the automatic line splitting logic.
+        config.DstFont->AddGlyph(
+            &config,
+            0x2005,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            spaceAdvance);
 
         config.DstFont->BuildLookupTable();
     }
