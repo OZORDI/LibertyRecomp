@@ -48,7 +48,7 @@ Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic U
 
     - Xbox 360 (modifications not necessary)
     - Xbox 360 Hard Drive (20 GB minimum)
-    - Xbox 360 Hard Drive Transfer Kit (or a compatible SATA to USB adapter)
+    - Xbox 360 Hard Drive Transfer Cable (or a compatible SATA to USB adapter)
     - Sonic Unleashed for Xbox 360 (US or EU, **JP is not supported**)
         - Retail Disc or Digital Copy (can be purchased and downloaded from the [Xbox Store](https://www.xbox.com/en-US/games/store/sonic-unleashed/c098fgnmts8f)).
         - Title Update required.
@@ -138,7 +138,9 @@ Support for the D-Pad has been added to various parts of the game, allowing the 
 If you have a DualShock 4 or DualSense controller, the LED will dynamically change color depending on the game context and support for the touchpad has been added to the World Map, allowing you to spin the planet freely!
 
 > [!NOTE]
-> LED and touchpad support for the DualShock 4 and DualSense may be limited on Linux.
+> LED and touchpad support for the DualShock 4 and DualSense controllers may be limited when using third-party input translation layers (such as DS4Windows or Steam Input).
+>
+> Support for both features may also be limited on Linux.
 
 ### Low Input Latency
 
@@ -374,6 +376,9 @@ Some of the game's more demanding sections require strong CPU single-thread perf
 
 Linux has an unexpected advantage when it comes to CPU performance, showing improvements in CPU-bound scenarios. It's currently speculated that this could be due to the heavy amount of thread synchronization the game performs, an operation that is likely to be more performant on Linux's CPU scheduler than on Windows' scheduler. If you wish to gain some additional performance, playing on Linux instead of Windows could yield better results.
 
+> [!WARNING]
+> Using external frame rate limiters or performance overlays may degrade performance or have negative consequences.
+
 ### Can I install the game with a PlayStation 3 copy?
 
 **You cannot use the files from the PlayStation 3 version of the game.** Supporting these files would require an entirely new recompilation, as they have proprietary formatting that only works on PS3 and the code for these formats is only present in that version. All significant differences present in the PS3 version of the game have been included in this project as options.
@@ -381,6 +386,10 @@ Linux has an unexpected advantage when it comes to CPU performance, showing impr
 ### Can I install the game with a Japanese copy?
 
 The Japanese version of Sonic Unleashed has some minor differences in both file structure and content that make this version of the game incompatible with the international release. Furthermore, the US and EU versions of the game already support Japanese. Supporting this version would only cause mod compatibility issues in the future, so it is unlikely to be added to the update roadmap as it would also require its own recompilation.
+
+### Why is the game detecting my PlayStation controller as an Xbox controller?
+
+If you're using a third-party input translation layer (such as DS4Windows or Steam Input), it is recommended that you disable these for full controller support.
 
 ### Will macOS be supported?
 
