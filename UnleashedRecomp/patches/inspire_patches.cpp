@@ -38,40 +38,40 @@ static bool g_loadedMouthExplosionAnimation;
 static bool g_hideMorphModels;
 
 // SWA::Inspire::CScene
-PPC_FUNC_IMPL(__imp__sub_82B98D80);
-PPC_FUNC(sub_82B98D80)
-{
-    __imp__sub_82B98D80(ctx, base);
+// PPC_FUNC_IMPL(__imp__sub_82B98D80);
+// PPC_FUNC(sub_82B98D80)
+// {
+//     __imp__sub_82B98D80(ctx, base);
 
-    g_pScene = (SWA::Inspire::CScene*)g_memory.Translate(ctx.r3.u32);
-    g_isFirstFrameChecked = false;
-    g_eventDispatchCount = 0;
-}
+//     g_pScene = (SWA::Inspire::CScene*)g_memory.Translate(ctx.r3.u32);
+//     g_isFirstFrameChecked = false;
+//     g_eventDispatchCount = 0;
+// }
 
-// ~SWA::Inspire::CScene
-PPC_FUNC_IMPL(__imp__sub_82B98D30);
-PPC_FUNC(sub_82B98D30)
-{
-    __imp__sub_82B98D30(ctx, base);
+// // ~SWA::Inspire::CScene
+// PPC_FUNC_IMPL(__imp__sub_82B98D30);
+// PPC_FUNC(sub_82B98D30)
+// {
+//     __imp__sub_82B98D30(ctx, base);
 
-    g_pScene = nullptr;
-    InspirePatches::s_sceneName.clear();
+//     g_pScene = nullptr;
+//     InspirePatches::s_sceneName.clear();
 
-    SDL_User_EvilSonic(App::s_isWerehog);
+//     SDL_User_EvilSonic(App::s_isWerehog);
 
-    g_loadedMouthExplosionAnimation = false;
-    g_hideMorphModels = false;
-}
+//     g_loadedMouthExplosionAnimation = false;
+//     g_hideMorphModels = false;
+// }
 
-PPC_FUNC_IMPL(__imp__sub_82B9BA98);
-PPC_FUNC(sub_82B9BA98)
-{
-    auto sceneName = (Hedgehog::Base::CSharedString*)g_memory.Translate(ctx.r5.u32);
+// PPC_FUNC_IMPL(__imp__sub_82B9BA98);
+// PPC_FUNC(sub_82B9BA98)
+// {
+//     auto sceneName = (Hedgehog::Base::CSharedString*)g_memory.Translate(ctx.r5.u32);
 
-    InspirePatches::s_sceneName = sceneName->c_str();
+//     InspirePatches::s_sceneName = sceneName->c_str();
 
-    __imp__sub_82B9BA98(ctx, base);
-}
+//     __imp__sub_82B9BA98(ctx, base);
+// }
 
 void AnimationDataMakeMidAsmHook(PPCRegister& r31, PPCRegister& r29, PPCRegister& r28)
 {
@@ -86,12 +86,12 @@ void AnimationDataMakeMidAsmHook(PPCRegister& r31, PPCRegister& r29, PPCRegister
 }
 
 // Hedgehog::Mirage::CSingleMorphElement::Render
-PPC_FUNC_IMPL(__imp__sub_82E32048);
-PPC_FUNC(sub_82E32048)
-{
-    if (!g_hideMorphModels)
-        __imp__sub_82E32048(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_82E32048);
+// PPC_FUNC(sub_82E32048)
+// {
+//     if (!g_hideMorphModels)
+//         __imp__sub_82E32048(ctx, base);
+// }
 
 void InspirePatches::DrawDebug()
 {

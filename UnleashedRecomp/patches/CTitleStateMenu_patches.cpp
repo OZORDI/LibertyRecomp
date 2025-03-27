@@ -49,68 +49,68 @@ static bool ProcessInstallMessage()
 }
 
 // SWA::CTitleStateMenu::Update
-PPC_FUNC_IMPL(__imp__sub_825882B8);
-PPC_FUNC(sub_825882B8)
-{
-    auto pTitleStateMenu = (SWA::CTitleStateMenu*)g_memory.Translate(ctx.r3.u32);
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
+// PPC_FUNC_IMPL(__imp__sub_825882B8);
+// PPC_FUNC(sub_825882B8)
+// {
+//     auto pTitleStateMenu = (SWA::CTitleStateMenu*)g_memory.Translate(ctx.r3.u32);
+//     auto pGameDocument = SWA::CGameDocument::GetInstance();
 
-    auto pInputState = SWA::CInputState::GetInstance();
-    auto& pPadState = pInputState->GetPadState();
-    auto isAccepted = pPadState.IsTapped(SWA::eKeyState_A) || pPadState.IsTapped(SWA::eKeyState_Start);
+//     auto pInputState = SWA::CInputState::GetInstance();
+//     auto& pPadState = pInputState->GetPadState();
+//     auto isAccepted = pPadState.IsTapped(SWA::eKeyState_A) || pPadState.IsTapped(SWA::eKeyState_Start);
 
-    auto pContext = pTitleStateMenu->GetContextBase<SWA::CTitleStateMenu::CTitleStateMenuContext>();
-    auto isNewGameIndex = pContext->m_pTitleMenu->m_CursorIndex == 0;
-    auto isOptionsIndex = pContext->m_pTitleMenu->m_CursorIndex == 2;
-    auto isInstallIndex = pContext->m_pTitleMenu->m_CursorIndex == 3;
+//     auto pContext = pTitleStateMenu->GetContextBase<SWA::CTitleStateMenu::CTitleStateMenuContext>();
+//     auto isNewGameIndex = pContext->m_pTitleMenu->m_CursorIndex == 0;
+//     auto isOptionsIndex = pContext->m_pTitleMenu->m_CursorIndex == 2;
+//     auto isInstallIndex = pContext->m_pTitleMenu->m_CursorIndex == 3;
 
-    // Always default to New Game with corrupted save data.
-    if (App::s_isSaveDataCorrupt && pContext->m_pTitleMenu->m_CursorIndex == 1)
-        pContext->m_pTitleMenu->m_CursorIndex = 0;
+//     // Always default to New Game with corrupted save data.
+//     if (App::s_isSaveDataCorrupt && pContext->m_pTitleMenu->m_CursorIndex == 1)
+//         pContext->m_pTitleMenu->m_CursorIndex = 0;
 
-    if (isNewGameIndex && isAccepted)
-    {
-        if (pContext->m_pTitleMenu->m_IsDeleteCheckMessageOpen &&
-            pGameDocument->m_pMember->m_pGeneralWindow->m_SelectedIndex == 1)
-        {
-            LOGN("Resetting achievements...");
+//     if (isNewGameIndex && isAccepted)
+//     {
+//         if (pContext->m_pTitleMenu->m_IsDeleteCheckMessageOpen &&
+//             pGameDocument->m_pMember->m_pGeneralWindow->m_SelectedIndex == 1)
+//         {
+//             LOGN("Resetting achievements...");
 
-            AchievementManager::Reset();
-        }
-    }
-    else if (!OptionsMenu::s_isVisible && isOptionsIndex)
-    {
-        if (OptionsMenu::s_isRestartRequired)
-        {
-            static int result = -1;
+//             AchievementManager::Reset();
+//         }
+//     }
+//     else if (!OptionsMenu::s_isVisible && isOptionsIndex)
+//     {
+//         if (OptionsMenu::s_isRestartRequired)
+//         {
+//             static int result = -1;
 
-            if (MessageWindow::Open(Localise("Options_Message_Restart"), &result) == MSG_CLOSED)
-                Fader::FadeOut(1, []() { App::Restart(); });
-        }
-        else if (isAccepted)
-        {
-            Game_PlaySound("sys_worldmap_window");
-            Game_PlaySound("sys_worldmap_decide");
-            OptionsMenu::Open();
-        }
-    }
-    else if (isInstallIndex && isAccepted)
-    {
-        g_installMessageOpen = true;
-    }
+//             if (MessageWindow::Open(Localise("Options_Message_Restart"), &result) == MSG_CLOSED)
+//                 Fader::FadeOut(1, []() { App::Restart(); });
+//         }
+//         else if (isAccepted)
+//         {
+//             Game_PlaySound("sys_worldmap_window");
+//             Game_PlaySound("sys_worldmap_decide");
+//             OptionsMenu::Open();
+//         }
+//     }
+//     else if (isInstallIndex && isAccepted)
+//     {
+//         g_installMessageOpen = true;
+//     }
 
-    if (!OptionsMenu::s_isVisible && !OptionsMenu::s_isRestartRequired && !ProcessInstallMessage())
-        __imp__sub_825882B8(ctx, base);
+//     if (!OptionsMenu::s_isVisible && !OptionsMenu::s_isRestartRequired && !ProcessInstallMessage())
+//         __imp__sub_825882B8(ctx, base);
 
-    if (isOptionsIndex)
-    {
-        if (OptionsMenu::CanClose() && pPadState.IsTapped(SWA::eKeyState_B))
-        {
-            Game_PlaySound("sys_worldmap_cansel");
-            OptionsMenu::Close();
-        }
-    }
-}
+//     if (isOptionsIndex)
+//     {
+//         if (OptionsMenu::CanClose() && pPadState.IsTapped(SWA::eKeyState_B))
+//         {
+//             Game_PlaySound("sys_worldmap_cansel");
+//             OptionsMenu::Close();
+//         }
+//     }
+// }
 
 void TitleMenuRemoveContinueOnCorruptSaveMidAsmHook(PPCRegister& r3)
 {

@@ -85,12 +85,12 @@ void AchievementOverlay::Init()
 // Loading thread does not update this object.
 static bool g_soundAdministratorUpdated;
 
-PPC_FUNC_IMPL(__imp__sub_82B43480);
-PPC_FUNC(sub_82B43480)
-{
-    g_soundAdministratorUpdated = true;
-    __imp__sub_82B43480(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_82B43480);
+// PPC_FUNC(sub_82B43480)
+// {
+//     g_soundAdministratorUpdated = true;
+//     __imp__sub_82B43480(ctx, base);
+// }
 
 // Dequeue achievements only in the main thread. This is also extra thread safety.
 static std::thread::id g_mainThreadId = std::this_thread::get_id();

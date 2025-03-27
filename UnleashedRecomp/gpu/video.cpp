@@ -3,6 +3,7 @@
 #include "imgui/imgui_common.h"
 #include "imgui/imgui_snapshot.h"
 #include "imgui/imgui_font_builder.h"
+#include "rhi/plume_render_interface_types.h"
 
 #include <app.h>
 #include <bc_diff.h>
@@ -730,12 +731,12 @@ static void DestructTempResources()
 
 static std::thread::id g_presentThreadId = std::this_thread::get_id();
 
-PPC_FUNC_IMPL(__imp__sub_824ECA00);
-PPC_FUNC(sub_824ECA00)
-{
-    g_presentThreadId = std::this_thread::get_id();
-    __imp__sub_824ECA00(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_824ECA00);
+// PPC_FUNC(sub_824ECA00)
+// {
+//     g_presentThreadId = std::this_thread::get_id();
+//     __imp__sub_824ECA00(ctx, base);
+// }
 
 static ankerl::unordered_dense::map<RenderTexture*, RenderTextureLayout> g_barrierMap;
 
@@ -1949,6 +1950,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
     g_gammaCorrectionPipeline = g_device->createGraphicsPipeline(desc);
 
     g_backBuffer = g_userHeap.AllocPhysical<GuestSurface>(ResourceType::RenderTarget);
+    printf("g_backBuffer: %x\n", g_backBuffer);
     g_backBuffer->width = 1280;
     g_backBuffer->height = 720;
     g_backBuffer->format = BACKBUFFER_FORMAT;
@@ -1994,17 +1996,18 @@ void Video::WaitForGPU()
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
+    printf("CreateDevice call %d %d %d %d %d %x\n", a1, a2, a3, a4, a5, a6);
     g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture *>();
 
-    for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
-    {
-        // huh?
-        if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
-            continue;
+    // for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
+    // {
+    //     // huh?
+    //     if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
+    //         continue;
 
-        g_xdbfTextureCache[achievement.ID] =
-            LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize).release();
-    }
+    //     g_xdbfTextureCache[achievement.ID] =
+    //         LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize).release();
+    // }
 
     auto device = g_userHeap.AllocPhysical<GuestDevice>();
     memset(device, 0, sizeof(*device));
@@ -2023,14 +2026,15 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
         device->setRenderStateFunctions[state / 4] = functionOffset;
     }
 
-    for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
-        device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x8330F3DC + i * 0xC));
+    // for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
+    //     device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x8330F3DC + i * 0xC));
 
     device->viewport.width = 1280.0f;
     device->viewport.height = 720.0f;
     device->viewport.maxZ = 1.0f;
 
     *a6 = g_memory.MapVirtual(device);
+    // printf("CreateDevice call end %x\n", a6);
 
     return 0;
 }
@@ -2875,6 +2879,7 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 
 static GuestSurface* GetBackBuffer() 
 {
+    printf("GetBackBuffer\n");
     g_backBuffer->AddRef();
     return g_backBuffer;
 }
@@ -2935,10 +2940,14 @@ static RenderFormat ConvertFormat(uint32_t format)
     {
     case D3DFMT_A16B16G16R16F:
     case D3DFMT_A16B16G16R16F_2:
+    case D3DFMT_A16B16G16R16F_EXPAND:
         return RenderFormat::R16G16B16A16_FLOAT;
+    case D3DFMT_LIN_A8R8G8B8:
+        return RenderFormat::B8G8R8A8_UNORM;
     case D3DFMT_A8B8G8R8:
     case D3DFMT_A8R8G8B8:
     case D3DFMT_X8R8G8B8:
+    case D3DFMT_LE_X8R8G8B8:
         return RenderFormat::R8G8B8A8_UNORM;
     case D3DFMT_D24FS8:
     case D3DFMT_D24S8:
@@ -2950,10 +2959,16 @@ static RenderFormat ConvertFormat(uint32_t format)
         return RenderFormat::R16_UINT;
     case D3DFMT_INDEX32:
         return RenderFormat::R32_UINT;
+    case D3DFMT_A8:
     case D3DFMT_L8:
     case D3DFMT_L8_2:
         return RenderFormat::R8_UNORM;
+    case D3DFMT_DXT1:
+        return RenderFormat::BC1_UNORM;
+    case D3DFMT_DXT5:
+        return RenderFormat::BC3_UNORM;
     default:
+        printf("RenderFormat: %x\n", format);
         assert(false && "Unknown format");
         return RenderFormat::R16G16B16A16_FLOAT;
     }
@@ -3128,38 +3143,38 @@ static void SetSurface(uint32_t index, GuestSurface* surface);
 
 static void ProcStretchRect(const RenderCommand& cmd)
 {
-    const auto& args = cmd.stretchRect;
+    // const auto& args = cmd.stretchRect;
 
-    const bool isDepthStencil = (args.flags & 0x4) != 0;
-    const auto surface = isDepthStencil ? g_depthStencil : g_renderTarget;
+    // const bool isDepthStencil = (args.flags & 0x4) != 0;
+    // const auto surface = isDepthStencil ? g_depthStencil : g_renderTarget;
 
-    // Erase previous pending command so it doesn't cause the texture to be overriden.
-    if (args.texture->sourceSurface != nullptr)
-        args.texture->sourceSurface->destinationTextures.erase(args.texture);
+    // // Erase previous pending command so it doesn't cause the texture to be overriden.
+    // if (args.texture->sourceSurface != nullptr)
+    //     args.texture->sourceSurface->destinationTextures.erase(args.texture);
 
-    args.texture->sourceSurface = surface;
-    surface->destinationTextures.emplace(args.texture);
+    // args.texture->sourceSurface = surface;
+    // surface->destinationTextures.emplace(args.texture);
 
-    // If the texture is assigned to any slots, set it again. This'll also push the barrier.
-    for (uint32_t i = 0; i < std::size(g_textures); i++)
-    {
-        if (g_textures[i] == args.texture)
-        {
-            // Set the original texture for MSAA textures as they always get resolved.
-            if (surface->sampleCount != RenderSampleCount::COUNT_1)
-            {
-                SetTextureInRenderThread(i, args.texture);
-                g_pendingMsaaResolves.emplace(surface);
-            }
-            else
-            {
-                SetSurface(i, surface);
-            }
-        }
-    }
+    // // If the texture is assigned to any slots, set it again. This'll also push the barrier.
+    // for (uint32_t i = 0; i < std::size(g_textures); i++)
+    // {
+    //     if (g_textures[i] == args.texture)
+    //     {
+    //         // Set the original texture for MSAA textures as they always get resolved.
+    //         if (surface->sampleCount != RenderSampleCount::COUNT_1)
+    //         {
+    //             SetTextureInRenderThread(i, args.texture);
+    //             g_pendingMsaaResolves.emplace(surface);
+    //         }
+    //         else
+    //         {
+    //             SetSurface(i, surface);
+    //         }
+    //     }
+    // }
 
-    // Remember to clear later.
-    g_pendingSurfaceCopies.emplace(surface);
+    // // Remember to clear later.
+    // g_pendingSurfaceCopies.emplace(surface);
 }
 
 static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
@@ -3187,6 +3202,7 @@ static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
 
 static void SetRenderTarget(GuestDevice* device, uint32_t index, GuestSurface* renderTarget) 
 {
+    printf("SetRenderTarget\n");
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetRenderTarget;
     cmd.setRenderTarget.renderTarget = renderTarget;
@@ -3260,8 +3276,8 @@ static bool PopulateBarriersForStretchRect(GuestSurface* renderTarget, GuestSurf
 
             AddBarrier(surface, srcLayout);
 
-            for (const auto texture : surface->destinationTextures)
-                AddBarrier(texture, dstLayout);
+            // for (const auto texture : surface->destinationTextures)
+            //     AddBarrier(texture, dstLayout);
 
             addedAny = true;
         }
@@ -3280,148 +3296,148 @@ static void ExecutePendingStretchRectCommands(GuestSurface* renderTarget, GuestS
         {
             const bool multiSampling = surface->sampleCount != RenderSampleCount::COUNT_1;
 
-            for (const auto texture : surface->destinationTextures)
-            {
-                bool shaderResolve = true;
+            // for (const auto texture : surface->destinationTextures)
+            // {
+            //     bool shaderResolve = true;
 
-                if (multiSampling && g_hardwareResolve)
-                {
-                    bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
+            //     if (multiSampling && g_hardwareResolve)
+            //     {
+            //         bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
 
-                    if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
-                    {
-                        if (surface->format == RenderFormat::D32_FLOAT)
-                            commandList->resolveTextureRegion(texture->texture, 0, 0, surface->texture, nullptr, RenderResolveMode::MIN);
-                        else
-                            commandList->resolveTexture(texture->texture, surface->texture);
+            //         if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
+            //         {
+            //             if (surface->format == RenderFormat::D32_FLOAT)
+            //                 commandList->resolveTextureRegion(texture->texture, 0, 0, surface->texture, nullptr, RenderResolveMode::MIN);
+            //             else
+            //                 commandList->resolveTexture(texture->texture, surface->texture);
 
-                        shaderResolve = false;
-                    }
-                }
+            //             shaderResolve = false;
+            //         }
+            //     }
 
-                if (shaderResolve)
-                {
-                    RenderPipeline* pipeline = nullptr;
+            //     if (shaderResolve)
+            //     {
+            //         RenderPipeline* pipeline = nullptr;
 
-                    if (multiSampling)
-                    {
-                        uint32_t pipelineIndex = 0;
+            //         if (multiSampling)
+            //         {
+            //             uint32_t pipelineIndex = 0;
 
-                        switch (surface->sampleCount)
-                        {
-                        case RenderSampleCount::COUNT_2:
-                            pipelineIndex = 0;
-                            break;
-                        case RenderSampleCount::COUNT_4:
-                            pipelineIndex = 1;
-                            break;
-                        case RenderSampleCount::COUNT_8:
-                            pipelineIndex = 2;
-                            break;
-                        default:
-                            assert(false && "Unsupported MSAA sample count");
-                            break;
-                        }
+            //             switch (surface->sampleCount)
+            //             {
+            //             case RenderSampleCount::COUNT_2:
+            //                 pipelineIndex = 0;
+            //                 break;
+            //             case RenderSampleCount::COUNT_4:
+            //                 pipelineIndex = 1;
+            //                 break;
+            //             case RenderSampleCount::COUNT_8:
+            //                 pipelineIndex = 2;
+            //                 break;
+            //             default:
+            //                 assert(false && "Unsupported MSAA sample count");
+            //                 break;
+            //             }
 
-                        if (texture->format == RenderFormat::D32_FLOAT)
-                        {
-                            pipeline = g_resolveMsaaDepthPipelines[pipelineIndex].get();
-                        }
-                        else
-                        {
-                            auto& resolveMsaaColorPipeline = g_resolveMsaaColorPipelines[surface->format][pipelineIndex];
-                            if (resolveMsaaColorPipeline == nullptr)
-                            {
-                                RenderGraphicsPipelineDesc desc;
-                                desc.pipelineLayout = g_pipelineLayout.get();
-                                desc.vertexShader = g_copyShader.get();
-                                desc.pixelShader = g_resolveMsaaColorShaders[pipelineIndex].get();
-                                desc.renderTargetFormat[0] = texture->format;
-                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
-                                desc.renderTargetCount = 1;
-                                resolveMsaaColorPipeline = g_device->createGraphicsPipeline(desc);
-                            }
+            //             if (texture->format == RenderFormat::D32_FLOAT)
+            //             {
+            //                 pipeline = g_resolveMsaaDepthPipelines[pipelineIndex].get();
+            //             }
+            //             else
+            //             {
+            //                 auto& resolveMsaaColorPipeline = g_resolveMsaaColorPipelines[surface->format][pipelineIndex];
+            //                 if (resolveMsaaColorPipeline == nullptr)
+            //                 {
+            //                     RenderGraphicsPipelineDesc desc;
+            //                     desc.pipelineLayout = g_pipelineLayout.get();
+            //                     desc.vertexShader = g_copyShader.get();
+            //                     desc.pixelShader = g_resolveMsaaColorShaders[pipelineIndex].get();
+            //                     desc.renderTargetFormat[0] = texture->format;
+            //                     desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+            //                     desc.renderTargetCount = 1;
+            //                     resolveMsaaColorPipeline = g_device->createGraphicsPipeline(desc);
+            //                 }
 
-                            pipeline = resolveMsaaColorPipeline.get();
-                        }
-                    }
-                    else
-                    {
-                        if (texture->format == RenderFormat::D32_FLOAT)
-                        {
-                            pipeline = g_copyDepthPipeline.get();
-                        }
-                        else
-                        {
-                            auto& copyColorPipeline = g_copyColorPipelines[surface->format];
-                            if (copyColorPipeline == nullptr)
-                            {
-                                RenderGraphicsPipelineDesc desc;
-                                desc.pipelineLayout = g_pipelineLayout.get();
-                                desc.vertexShader = g_copyShader.get();
-                                desc.pixelShader = g_copyColorShader.get();
-                                desc.renderTargetFormat[0] = texture->format;
-                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
-                                desc.renderTargetCount = 1;
-                                copyColorPipeline = g_device->createGraphicsPipeline(desc);
-                            }
+            //                 pipeline = resolveMsaaColorPipeline.get();
+            //             }
+            //         }
+            //         else
+            //         {
+            //             if (texture->format == RenderFormat::D32_FLOAT)
+            //             {
+            //                 pipeline = g_copyDepthPipeline.get();
+            //             }
+            //             else
+            //             {
+            //                 auto& copyColorPipeline = g_copyColorPipelines[surface->format];
+            //                 if (copyColorPipeline == nullptr)
+            //                 {
+            //                     RenderGraphicsPipelineDesc desc;
+            //                     desc.pipelineLayout = g_pipelineLayout.get();
+            //                     desc.vertexShader = g_copyShader.get();
+            //                     desc.pixelShader = g_copyColorShader.get();
+            //                     desc.renderTargetFormat[0] = texture->format;
+            //                     desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+            //                     desc.renderTargetCount = 1;
+            //                     copyColorPipeline = g_device->createGraphicsPipeline(desc);
+            //                 }
 
-                            pipeline = copyColorPipeline.get();
-                        }
-                    }
+            //                 pipeline = copyColorPipeline.get();
+            //             }
+            //         }
 
-                    if (texture->framebuffer == nullptr)
-                    {
-                        if (texture->format == RenderFormat::D32_FLOAT)
-                        {
-                            RenderFramebufferDesc desc;
-                            desc.depthAttachment = texture->texture;
-                            texture->framebuffer = g_device->createFramebuffer(desc);
-                        }
-                        else
-                        {
-                            RenderFramebufferDesc desc;
-                            desc.colorAttachments = const_cast<const RenderTexture**>(&texture->texture);
-                            desc.colorAttachmentsCount = 1;
-                            texture->framebuffer = g_device->createFramebuffer(desc);
-                        }
-                    }
+            //         if (texture->framebuffer == nullptr)
+            //         {
+            //             if (texture->format == RenderFormat::D32_FLOAT)
+            //             {
+            //                 RenderFramebufferDesc desc;
+            //                 desc.depthAttachment = texture->texture;
+            //                 texture->framebuffer = g_device->createFramebuffer(desc);
+            //             }
+            //             else
+            //             {
+            //                 RenderFramebufferDesc desc;
+            //                 desc.colorAttachments = const_cast<const RenderTexture**>(&texture->texture);
+            //                 desc.colorAttachmentsCount = 1;
+            //                 texture->framebuffer = g_device->createFramebuffer(desc);
+            //             }
+            //         }
 
-                    if (g_framebuffer != texture->framebuffer.get())
-                    {
-                        commandList->setFramebuffer(texture->framebuffer.get());
-                        g_framebuffer = texture->framebuffer.get();
-                    }
+            //         if (g_framebuffer != texture->framebuffer.get())
+            //         {
+            //             commandList->setFramebuffer(texture->framebuffer.get());
+            //             g_framebuffer = texture->framebuffer.get();
+            //         }
 
-                    commandList->setPipeline(pipeline);
-                    commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
-                    commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
-                    commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
-                    commandList->drawInstanced(6, 1, 0, 0);
+            //         commandList->setPipeline(pipeline);
+            //         commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
+            //         commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
+            //         commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
+            //         commandList->drawInstanced(6, 1, 0, 0);
 
-                    g_dirtyStates.renderTargetAndDepthStencil = true;
-                    g_dirtyStates.viewport = true;
-                    g_dirtyStates.pipelineState = true;
-                    g_dirtyStates.scissorRect = true;
+            //         g_dirtyStates.renderTargetAndDepthStencil = true;
+            //         g_dirtyStates.viewport = true;
+            //         g_dirtyStates.pipelineState = true;
+            //         g_dirtyStates.scissorRect = true;
 
-                    if (g_vulkan)
-                    {
-                        g_dirtyStates.vertexShaderConstants = true; // The push constant call invalidates vertex shader constants.
-                        g_dirtyStates.depthBias = true; // Static depth bias in copy pipeline invalidates dynamic depth bias.
-                    }
-                }
+            //         if (g_vulkan)
+            //         {
+            //             g_dirtyStates.vertexShaderConstants = true; // The push constant call invalidates vertex shader constants.
+            //             g_dirtyStates.depthBias = true; // Static depth bias in copy pipeline invalidates dynamic depth bias.
+            //         }
+            //     }
 
-                texture->sourceSurface = nullptr;
+            //     texture->sourceSurface = nullptr;
 
-                // Check if any texture slots had this texture assigned, and make it point back at the original texture.
-                for (uint32_t i = 0; i < std::size(g_textures); i++)
-                {
-                    if (g_textures[i] == texture)
-                        SetTextureInRenderThread(i, texture);
-                }
-            }
+            //     // Check if any texture slots had this texture assigned, and make it point back at the original texture.
+            //     for (uint32_t i = 0; i < std::size(g_textures); i++)
+            //     {
+            //         if (g_textures[i] == texture)
+            //             SetTextureInRenderThread(i, texture);
+            //     }
+            // }
 
-            surface->destinationTextures.clear();
+            // surface->destinationTextures.clear();
         }
     }
 }
@@ -3459,63 +3475,63 @@ static void ProcExecutePendingStretchRectCommands(const RenderCommand& cmd)
 
 static void SetFramebuffer(GuestSurface* renderTarget, GuestSurface* depthStencil, bool settingForClear)
 {
-    if (settingForClear || g_dirtyStates.renderTargetAndDepthStencil)
-    {
-        GuestSurface* framebufferContainer = nullptr;
-        RenderTexture* framebufferKey = nullptr;
+    // if (settingForClear || g_dirtyStates.renderTargetAndDepthStencil)
+    // {
+    //     GuestSurface* framebufferContainer = nullptr;
+    //     RenderTexture* framebufferKey = nullptr;
 
-        if (renderTarget != nullptr && depthStencil != nullptr)
-        {
-            framebufferContainer = depthStencil; // Backbuffer texture changes per frame so we can't use the depth stencil as the key.
-            framebufferKey = renderTarget->texture;
-        }
-        else if (renderTarget != nullptr && depthStencil == nullptr)
-        {
-            framebufferContainer = renderTarget;
-            framebufferKey = renderTarget->texture; // Backbuffer texture changes per frame so we can't assume nullptr for it.
-        }
-        else if (renderTarget == nullptr && depthStencil != nullptr)
-        {
-            framebufferContainer = depthStencil;
-            framebufferKey = nullptr;
-        }
+    //     if (renderTarget != nullptr && depthStencil != nullptr)
+    //     {
+    //         framebufferContainer = depthStencil; // Backbuffer texture changes per frame so we can't use the depth stencil as the key.
+    //         framebufferKey = renderTarget->texture;
+    //     }
+    //     else if (renderTarget != nullptr && depthStencil == nullptr)
+    //     {
+    //         framebufferContainer = renderTarget;
+    //         framebufferKey = renderTarget->texture; // Backbuffer texture changes per frame so we can't assume nullptr for it.
+    //     }
+    //     else if (renderTarget == nullptr && depthStencil != nullptr)
+    //     {
+    //         framebufferContainer = depthStencil;
+    //         framebufferKey = nullptr;
+    //     }
 
-        auto& commandList = g_commandLists[g_frame];
+    //     auto& commandList = g_commandLists[g_frame];
 
-        if (framebufferContainer != nullptr)
-        {
-            auto& framebuffer = framebufferContainer->framebuffers[framebufferKey];
+    //     if (framebufferContainer != nullptr)
+    //     {
+    //         auto& framebuffer = framebufferContainer->framebuffers[framebufferKey];
 
-            if (framebuffer == nullptr)
-            {
-                RenderFramebufferDesc desc;
+    //         if (framebuffer == nullptr)
+    //         {
+    //             RenderFramebufferDesc desc;
 
-                if (renderTarget != nullptr)
-                {
-                    desc.colorAttachments = const_cast<const RenderTexture**>(&renderTarget->texture);
-                    desc.colorAttachmentsCount = 1;
-                }
+    //             if (renderTarget != nullptr)
+    //             {
+    //                 desc.colorAttachments = const_cast<const RenderTexture**>(&renderTarget->texture);
+    //                 desc.colorAttachmentsCount = 1;
+    //             }
 
-                if (depthStencil != nullptr)
-                    desc.depthAttachment = depthStencil->texture;
+    //             if (depthStencil != nullptr)
+    //                 desc.depthAttachment = depthStencil->texture;
 
-                framebuffer = g_device->createFramebuffer(desc);
-            }
+    //             framebuffer = g_device->createFramebuffer(desc);
+    //         }
 
-            if (g_framebuffer != framebuffer.get())
-            {
-                commandList->setFramebuffer(framebuffer.get());
-                g_framebuffer = framebuffer.get();
-            }
-        }
-        else if (g_framebuffer != nullptr)
-        {
-            commandList->setFramebuffer(nullptr);
-            g_framebuffer = nullptr;
-        }
+    //         if (g_framebuffer != framebuffer.get())
+    //         {
+    //             commandList->setFramebuffer(framebuffer.get());
+    //             g_framebuffer = framebuffer.get();
+    //         }
+    //     }
+    //     else if (g_framebuffer != nullptr)
+    //     {
+    //         commandList->setFramebuffer(nullptr);
+    //         g_framebuffer = nullptr;
+    //     }
 
-        g_dirtyStates.renderTargetAndDepthStencil = settingForClear;
-    }
+    //     g_dirtyStates.renderTargetAndDepthStencil = settingForClear;
+    // }
 }
 
 static void Clear(GuestDevice* device, uint32_t flags, uint32_t, be<float>* color, double z) 
@@ -3533,41 +3549,41 @@ static void Clear(GuestDevice* device, uint32_t flags, uint32_t, be<float>* colo
 
 static void ProcClear(const RenderCommand& cmd)
 {
-    const auto& args = cmd.clear;
+    // const auto& args = cmd.clear;
 
-    if (PopulateBarriersForStretchRect(g_renderTarget, g_depthStencil))
-    {
-        FlushBarriers();
-        ExecutePendingStretchRectCommands(g_renderTarget, g_depthStencil);
-    }
+    // if (PopulateBarriersForStretchRect(g_renderTarget, g_depthStencil))
+    // {
+    //     FlushBarriers();
+    //     ExecutePendingStretchRectCommands(g_renderTarget, g_depthStencil);
+    // }
 
-    AddBarrier(g_renderTarget, RenderTextureLayout::COLOR_WRITE);
-    AddBarrier(g_depthStencil, RenderTextureLayout::DEPTH_WRITE);
-    FlushBarriers();
+    // AddBarrier(g_renderTarget, RenderTextureLayout::COLOR_WRITE);
+    // AddBarrier(g_depthStencil, RenderTextureLayout::DEPTH_WRITE);
+    // FlushBarriers();
 
-    bool canClearInOnePass = (g_renderTarget == nullptr) || (g_depthStencil == nullptr) ||
-        (g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
+    // bool canClearInOnePass = (g_renderTarget == nullptr) || (g_depthStencil == nullptr) ||
+    //     (g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
 
-    if (canClearInOnePass)
-        SetFramebuffer(g_renderTarget, g_depthStencil, true);
+    // if (canClearInOnePass)
+    //     SetFramebuffer(g_renderTarget, g_depthStencil, true);
 
-    auto& commandList = g_commandLists[g_frame];
+    // auto& commandList = g_commandLists[g_frame];
 
-    if (g_renderTarget != nullptr && (args.flags & D3DCLEAR_TARGET) != 0)
-    {
-        if (!canClearInOnePass)
-            SetFramebuffer(g_renderTarget, nullptr, true);
+    // if (g_renderTarget != nullptr && (args.flags & D3DCLEAR_TARGET) != 0)
+    // {
+    //     if (!canClearInOnePass)
+    //         SetFramebuffer(g_renderTarget, nullptr, true);
 
-        commandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
-    }
+    //     commandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
+    // }
 
-    if (g_depthStencil != nullptr && (args.flags & D3DCLEAR_ZBUFFER) != 0)
-    {
-        if (!canClearInOnePass)
-            SetFramebuffer(nullptr, g_depthStencil, true);
+    // if (g_depthStencil != nullptr && (args.flags & D3DCLEAR_ZBUFFER) != 0)
+    // {
+    //     if (!canClearInOnePass)
+    //         SetFramebuffer(nullptr, g_depthStencil, true);
 
-        commandList->clearDepth(true, args.z);
-    }
+    //     commandList->clearDepth(true, args.z);
+    // }
 }
 
 static void SetViewport(GuestDevice* device, GuestViewport* viewport)
@@ -5721,12 +5737,12 @@ static void SetResolution(be<uint32_t>* device)
 
 // The game does some weird stuff to render targets if they are above 
 // 1024x1024 resolution, setting this bool at address 20 seems to avoid all that.
-PPC_FUNC(sub_82E9F048)
-{
-    PPC_STORE_U8(ctx.r4.u32 + 20, 1);
-    PPC_STORE_U32(ctx.r4.u32 + 44, PPC_LOAD_U32(ctx.r4.u32 + 8)); // Width
-    PPC_STORE_U32(ctx.r4.u32 + 48, PPC_LOAD_U32(ctx.r4.u32 + 12)); // Height
-}
+// PPC_FUNC(sub_82E9F048)
+// {
+//     PPC_STORE_U8(ctx.r4.u32 + 20, 1);
+//     PPC_STORE_U32(ctx.r4.u32 + 44, PPC_LOAD_U32(ctx.r4.u32 + 8)); // Width
+//     PPC_STORE_U32(ctx.r4.u32 + 48, PPC_LOAD_U32(ctx.r4.u32 + 12)); // Height
+// }
 
 static GuestShader* g_movieVertexShader;
 static GuestShader* g_moviePixelShader;
@@ -5776,175 +5792,175 @@ static PPCRegister g_r4;
 static PPCRegister g_r5;
 
 // CRenderDirectorFxPipeline::Initialize
-PPC_FUNC_IMPL(__imp__sub_8258C8A0);
-PPC_FUNC(sub_8258C8A0)
-{
-    g_r4 = ctx.r4;
-    g_r5 = ctx.r5;
-    __imp__sub_8258C8A0(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_8258C8A0);
+// PPC_FUNC(sub_8258C8A0)
+// {
+//     g_r4 = ctx.r4;
+//     g_r5 = ctx.r5;
+//     __imp__sub_8258C8A0(ctx, base);
+// }
 
 // CRenderDirectorFxPipeline::Update
-PPC_FUNC_IMPL(__imp__sub_8258CAE0);
-PPC_FUNC(sub_8258CAE0)
-{
-    if (g_needsResize)
-    {
-        // Backup job values. These get modified by cutscenes, 
-        // and resizing will cause the values to be forgotten.
-        auto traverseFxJobs = [&]<typename TCallback>(const TCallback& callback)
-        {
-            uint32_t scheduler = PPC_LOAD_U32(ctx.r3.u32 + 0xE0);
-            if (scheduler != NULL)
-            {
-                uint32_t member = PPC_LOAD_U32(scheduler + 0x8);
-                if (member != NULL)
-                {
-                    for (uint32_t it = PPC_LOAD_U32(member + 0x24); it != PPC_LOAD_U32(member + 0x28); it += 8)
-                    {
-                        uint32_t job = PPC_LOAD_U32(it);
-                        if (job != NULL)
-                            callback(job);
-                    }
-                }
-            }
-        };
+// PPC_FUNC_IMPL(__imp__sub_8258CAE0);
+// PPC_FUNC(sub_8258CAE0)
+// {
+//     if (g_needsResize)
+//     {
+//         // Backup job values. These get modified by cutscenes, 
+//         // and resizing will cause the values to be forgotten.
+//         auto traverseFxJobs = [&]<typename TCallback>(const TCallback& callback)
+//         {
+//             uint32_t scheduler = PPC_LOAD_U32(ctx.r3.u32 + 0xE0);
+//             if (scheduler != NULL)
+//             {
+//                 uint32_t member = PPC_LOAD_U32(scheduler + 0x8);
+//                 if (member != NULL)
+//                 {
+//                     for (uint32_t it = PPC_LOAD_U32(member + 0x24); it != PPC_LOAD_U32(member + 0x28); it += 8)
+//                     {
+//                         uint32_t job = PPC_LOAD_U32(it);
+//                         if (job != NULL)
+//                             callback(job);
+//                     }
+//                 }
+//             }
+//         };
 
-        union JobValues
-        {
-            struct
-            {
-                uint8_t field50[0x18];
-                uint8_t field88;
-            } fade;
+//         union JobValues
+//         {
+//             struct
+//             {
+//                 uint8_t field50[0x18];
+//                 uint8_t field88;
+//             } fade;
 
-            struct
-            {
-                uint8_t camera[0x120];
-                uint8_t field44;
-                uint8_t fieldA0;
-            } shadowMap;
-        };
+//             struct
+//             {
+//                 uint8_t camera[0x120];
+//                 uint8_t field44;
+//                 uint8_t fieldA0;
+//             } shadowMap;
+//         };
 
-        std::map<uint32_t, JobValues> jobValuesMap;
-        traverseFxJobs([&](uint32_t job)
-            {
-                uint32_t vfTable = PPC_LOAD_U32(job);
+//         std::map<uint32_t, JobValues> jobValuesMap;
+//         traverseFxJobs([&](uint32_t job)
+//             {
+//                 uint32_t vfTable = PPC_LOAD_U32(job);
 
-                if (vfTable == 0x820CA6F8) // SWA::CFxFade
-                {
-                    // NOTE: Intentionally not storing shared pointers here. 
-                    // Game sends messages that assign these every frame already.
-                    JobValues jobValues{};
+//                 if (vfTable == 0x820CA6F8) // SWA::CFxFade
+//                 {
+//                     // NOTE: Intentionally not storing shared pointers here. 
+//                     // Game sends messages that assign these every frame already.
+//                     JobValues jobValues{};
 
-                    memcpy(jobValues.fade.field50, base + job + 0x50, sizeof(jobValues.fade.field50));
-                    jobValues.fade.field88 = PPC_LOAD_U8(job + 0x88);
+//                     memcpy(jobValues.fade.field50, base + job + 0x50, sizeof(jobValues.fade.field50));
+//                     jobValues.fade.field88 = PPC_LOAD_U8(job + 0x88);
 
-                    jobValuesMap.emplace(PPC_LOAD_U32(job + 0x48), jobValues);
-                }
-                else if (vfTable == 0x820CAC5C) // SWA::CFxShadowMap
-                {
-                    for (uint32_t it = PPC_LOAD_U32(job + 0x88); it != PPC_LOAD_U32(job + 0x8C); it += 8)
-                    {
-                        uint32_t camera = PPC_LOAD_U32(it);
-                        if (camera != NULL && PPC_LOAD_U32(camera) == 0x820BF83C) // SWA::CShadowMapCameraLiSPSM
-                        {
-                            JobValues jobValues{};
+//                     jobValuesMap.emplace(PPC_LOAD_U32(job + 0x48), jobValues);
+//                 }
+//                 else if (vfTable == 0x820CAC5C) // SWA::CFxShadowMap
+//                 {
+//                     for (uint32_t it = PPC_LOAD_U32(job + 0x88); it != PPC_LOAD_U32(job + 0x8C); it += 8)
+//                     {
+//                         uint32_t camera = PPC_LOAD_U32(it);
+//                         if (camera != NULL && PPC_LOAD_U32(camera) == 0x820BF83C) // SWA::CShadowMapCameraLiSPSM
+//                         {
+//                             JobValues jobValues{};
 
-                            memcpy(jobValues.shadowMap.camera, base + camera, sizeof(jobValues.shadowMap.camera));
-                            jobValues.shadowMap.field44 = PPC_LOAD_U8(job + 0x44);
-                            jobValues.shadowMap.fieldA0 = PPC_LOAD_U8(job + 0xA0);
+//                             memcpy(jobValues.shadowMap.camera, base + camera, sizeof(jobValues.shadowMap.camera));
+//                             jobValues.shadowMap.field44 = PPC_LOAD_U8(job + 0x44);
+//                             jobValues.shadowMap.fieldA0 = PPC_LOAD_U8(job + 0xA0);
 
-                            jobValuesMap.emplace(vfTable, jobValues);
-                            break;
-                        }
-                    }
-                }
-            });
+//                             jobValuesMap.emplace(vfTable, jobValues);
+//                             break;
+//                         }
+//                     }
+//                 }
+//             });
 
-        auto r3 = ctx.r3;
-        ctx.r4 = g_r4;
-        ctx.r5 = g_r5;
-        __imp__sub_8258C8A0(ctx, base);
-        ctx.r3 = r3;
+//         auto r3 = ctx.r3;
+//         ctx.r4 = g_r4;
+//         ctx.r5 = g_r5;
+//         __imp__sub_8258C8A0(ctx, base);
+//         ctx.r3 = r3;
 
-        // Restore job values.
-        traverseFxJobs([&](uint32_t job)
-            {
-                uint32_t vfTable = PPC_LOAD_U32(job);
+//         // Restore job values.
+//         traverseFxJobs([&](uint32_t job)
+//             {
+//                 uint32_t vfTable = PPC_LOAD_U32(job);
 
-                if (vfTable == 0x820CA6F8) // SWA::CFxFade
-                {
-                    auto findResult = jobValuesMap.find(PPC_LOAD_U32(job + 0x48));
-                    if (findResult != jobValuesMap.end()) // May NOT actually be found.
-                    {
-                        memcpy(base + job + 0x50, findResult->second.fade.field50, sizeof(findResult->second.fade.field50));
-                        PPC_STORE_U8(job + 0x88, findResult->second.fade.field88);
-                    }
-                }
-                else if (vfTable == 0x820CAC5C) // SWA::CFxShadowMap
-                {
-                    auto findResult = jobValuesMap.find(vfTable);
-                    if (findResult != jobValuesMap.end()) // Would be weird if this one wasn't found.
-                    {
-                        for (uint32_t it = PPC_LOAD_U32(job + 0x88); it != PPC_LOAD_U32(job + 0x8C); it += 8)
-                        {
-                            uint32_t camera = PPC_LOAD_U32(it);
-                            if (camera != NULL && PPC_LOAD_U32(camera) == 0x820BF83C) // SWA::CShadowMapCameraLiSPSM
-                            {
-                                memcpy(base + camera, findResult->second.shadowMap.camera, sizeof(findResult->second.shadowMap.camera));
-                                PPC_STORE_U32(job + 0x80, camera);
-                                PPC_STORE_U8(job + 0x44, findResult->second.shadowMap.field44);
-                                PPC_STORE_U8(job + 0xA0, findResult->second.shadowMap.fieldA0);
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
+//                 if (vfTable == 0x820CA6F8) // SWA::CFxFade
+//                 {
+//                     auto findResult = jobValuesMap.find(PPC_LOAD_U32(job + 0x48));
+//                     if (findResult != jobValuesMap.end()) // May NOT actually be found.
+//                     {
+//                         memcpy(base + job + 0x50, findResult->second.fade.field50, sizeof(findResult->second.fade.field50));
+//                         PPC_STORE_U8(job + 0x88, findResult->second.fade.field88);
+//                     }
+//                 }
+//                 else if (vfTable == 0x820CAC5C) // SWA::CFxShadowMap
+//                 {
+//                     auto findResult = jobValuesMap.find(vfTable);
+//                     if (findResult != jobValuesMap.end()) // Would be weird if this one wasn't found.
+//                     {
+//                         for (uint32_t it = PPC_LOAD_U32(job + 0x88); it != PPC_LOAD_U32(job + 0x8C); it += 8)
+//                         {
+//                             uint32_t camera = PPC_LOAD_U32(it);
+//                             if (camera != NULL && PPC_LOAD_U32(camera) == 0x820BF83C) // SWA::CShadowMapCameraLiSPSM
+//                             {
+//                                 memcpy(base + camera, findResult->second.shadowMap.camera, sizeof(findResult->second.shadowMap.camera));
+//                                 PPC_STORE_U32(job + 0x80, camera);
+//                                 PPC_STORE_U8(job + 0x44, findResult->second.shadowMap.field44);
+//                                 PPC_STORE_U8(job + 0xA0, findResult->second.shadowMap.fieldA0);
+//                                 break;
+//                             }
+//                         }
+//                     }
+//                 }
+//             });
 
-        g_needsResize = false;
-    }
+//         g_needsResize = false;
+//     }
 
-    __imp__sub_8258CAE0(ctx, base);
-}
+//     __imp__sub_8258CAE0(ctx, base);
+// }
 
-PPC_FUNC_IMPL(__imp__sub_824EB5B0);
-PPC_FUNC(sub_824EB5B0)
-{
-    g_updateDirectorProfiler.Begin();
-    __imp__sub_824EB5B0(ctx, base);
-    g_updateDirectorProfiler.End();
-}
+// PPC_FUNC_IMPL(__imp__sub_824EB5B0);
+// PPC_FUNC(sub_824EB5B0)
+// {
+//     g_updateDirectorProfiler.Begin();
+//     __imp__sub_824EB5B0(ctx, base);
+//     g_updateDirectorProfiler.End();
+// }
 
-PPC_FUNC_IMPL(__imp__sub_824EB290);
-PPC_FUNC(sub_824EB290)
-{
-    g_renderDirectorProfiler.Begin();
-    __imp__sub_824EB290(ctx, base);
-    g_renderDirectorProfiler.End();
-}
+// PPC_FUNC_IMPL(__imp__sub_824EB290);
+// PPC_FUNC(sub_824EB290)
+// {
+//     g_renderDirectorProfiler.Begin();
+//     __imp__sub_824EB290(ctx, base);
+//     g_renderDirectorProfiler.End();
+// }
 
 // World map disables VERT+, so scaling by width does not work for it.
 static uint32_t g_forceCheckHeightForPostProcessFix;
 
 // SWA::CWorldMapCamera::CWorldMapCamera
-PPC_FUNC_IMPL(__imp__sub_824860E0);
-PPC_FUNC(sub_824860E0)
-{
-    ++g_forceCheckHeightForPostProcessFix;
-    __imp__sub_824860E0(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_824860E0);
+// PPC_FUNC(sub_824860E0)
+// {
+//     ++g_forceCheckHeightForPostProcessFix;
+//     __imp__sub_824860E0(ctx, base);
+// }
 
 // SWA::CCameraController::~CCameraController
-PPC_FUNC_IMPL(__imp__sub_824831D0);
-PPC_FUNC(sub_824831D0)
-{
-    if (PPC_LOAD_U32(ctx.r3.u32) == 0x8202BF1C) // SWA::CWorldMapCamera
-        --g_forceCheckHeightForPostProcessFix;
+// PPC_FUNC_IMPL(__imp__sub_824831D0);
+// PPC_FUNC(sub_824831D0)
+// {
+//     if (PPC_LOAD_U32(ctx.r3.u32) == 0x8202BF1C) // SWA::CWorldMapCamera
+//         --g_forceCheckHeightForPostProcessFix;
 
-    __imp__sub_824831D0(ctx, base);
-}
+//     __imp__sub_824831D0(ctx, base);
+// }
 
 void PostProcessResolutionFix(PPCRegister& r4, PPCRegister& f1, PPCRegister& f2)
 {
@@ -6757,67 +6773,67 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
 static std::thread::id g_mainThreadId = std::this_thread::get_id();
 
 // SWA::CGameModeStage::ExitLoading
-PPC_FUNC_IMPL(__imp__sub_825369A0);
-PPC_FUNC(sub_825369A0)
-{
-    assert(std::this_thread::get_id() == g_mainThreadId);
+// PPC_FUNC_IMPL(__imp__sub_825369A0);
+// PPC_FUNC(sub_825369A0)
+// {
+//     assert(std::this_thread::get_id() == g_mainThreadId);
 
-    // Wait for pipeline compilations to finish.
-    uint32_t value;
-    while ((value = g_compilingPipelineTaskCount.load()) != 0)
-    {
-        // Pump SDL events to prevent the OS
-        // from thinking the process is unresponsive.
-        SDL_PumpEvents();
-        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+//     // Wait for pipeline compilations to finish.
+//     uint32_t value;
+//     while ((value = g_compilingPipelineTaskCount.load()) != 0)
+//     {
+//         // Pump SDL events to prevent the OS
+//         // from thinking the process is unresponsive.
+//         SDL_PumpEvents();
+//         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
-        g_compilingPipelineTaskCount.wait(value);
-    }
+//         g_compilingPipelineTaskCount.wait(value);
+//     }
 
-    __imp__sub_825369A0(ctx, base);
-}
+//     __imp__sub_825369A0(ctx, base);
+// }
 
 // CModelData::CheckMadeAll
-PPC_FUNC_IMPL(__imp__sub_82E2EFB0);
-PPC_FUNC(sub_82E2EFB0)
-{   
-    if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
-    {
-        ctx.r3.u64 = 0;
-    }
-    else
-    {
-        __imp__sub_82E2EFB0(ctx, base);
-    }
-}
+// PPC_FUNC_IMPL(__imp__sub_82E2EFB0);
+// PPC_FUNC(sub_82E2EFB0)
+// {   
+//     if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
+//     {
+//         ctx.r3.u64 = 0;
+//     }
+//     else
+//     {
+//         __imp__sub_82E2EFB0(ctx, base);
+//     }
+// }
 
 // CTerrainModelData::CheckMadeAll
-PPC_FUNC_IMPL(__imp__sub_82E243D8);
-PPC_FUNC(sub_82E243D8)
-{   
-    if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
-    {
-        ctx.r3.u64 = 0;
-    }
-    else
-    {
-        __imp__sub_82E243D8(ctx, base);
-    }
-}
+// PPC_FUNC_IMPL(__imp__sub_82E243D8);
+// PPC_FUNC(sub_82E243D8)
+// {   
+//     if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
+//     {
+//         ctx.r3.u64 = 0;
+//     }
+//     else
+//     {
+//         __imp__sub_82E243D8(ctx, base);
+//     }
+// }
 
 // CParticleMaterial::CheckMadeAll
-PPC_FUNC_IMPL(__imp__sub_82E87598);
-PPC_FUNC(sub_82E87598)
-{   
-    if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
-    {
-        ctx.r3.u64 = 0;
-    }
-    else
-    {
-        __imp__sub_82E87598(ctx, base);
-    }
-}
+// PPC_FUNC_IMPL(__imp__sub_82E87598);
+// PPC_FUNC(sub_82E87598)
+// {   
+//     if (reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32)->m_Flags & eDatabaseDataFlags_CompilingPipelines)
+//     {
+//         ctx.r3.u64 = 0;
+//     }
+//     else
+//     {
+//         __imp__sub_82E87598(ctx, base);
+//     }
+// }
 
 void GetDatabaseDataMidAsmHook(PPCRegister& r1, PPCRegister& r4)
 {
@@ -7194,21 +7210,21 @@ static std::thread g_pipelineTaskConsumerThread(PipelineTaskConsumerThread);
 
 #ifdef ASYNC_PSO_DEBUG
 
-PPC_FUNC_IMPL(__imp__sub_82E33330);
-PPC_FUNC(sub_82E33330)
-{
-    auto vertexShaderCode = reinterpret_cast<Hedgehog::Mirage::CVertexShaderCodeData*>(g_memory.Translate(ctx.r4.u32));
-    __imp__sub_82E33330(ctx, base);
-    reinterpret_cast<GuestShader*>(vertexShaderCode->m_pD3DVertexShader.get())->name = vertexShaderCode->m_TypeAndName.c_str() + 3;
-}
+// PPC_FUNC_IMPL(__imp__sub_82E33330);
+// PPC_FUNC(sub_82E33330)
+// {
+//     auto vertexShaderCode = reinterpret_cast<Hedgehog::Mirage::CVertexShaderCodeData*>(g_memory.Translate(ctx.r4.u32));
+//     __imp__sub_82E33330(ctx, base);
+//     reinterpret_cast<GuestShader*>(vertexShaderCode->m_pD3DVertexShader.get())->name = vertexShaderCode->m_TypeAndName.c_str() + 3;
+// }
 
-PPC_FUNC_IMPL(__imp__sub_82E328D8);
-PPC_FUNC(sub_82E328D8)
-{
-    auto pixelShaderCode = reinterpret_cast<Hedgehog::Mirage::CPixelShaderCodeData*>(g_memory.Translate(ctx.r4.u32));
-    __imp__sub_82E328D8(ctx, base);
-    reinterpret_cast<GuestShader*>(pixelShaderCode->m_pD3DPixelShader.get())->name = pixelShaderCode->m_TypeAndName.c_str() + 2;
-}
+// PPC_FUNC_IMPL(__imp__sub_82E328D8);
+// PPC_FUNC(sub_82E328D8)
+// {
+//     auto pixelShaderCode = reinterpret_cast<Hedgehog::Mirage::CPixelShaderCodeData*>(g_memory.Translate(ctx.r4.u32));
+//     __imp__sub_82E328D8(ctx, base);
+//     reinterpret_cast<GuestShader*>(pixelShaderCode->m_pD3DPixelShader.get())->name = pixelShaderCode->m_TypeAndName.c_str() + 2;
+// }
 
 #endif
 
@@ -7368,21 +7384,21 @@ void VideoConfigValueChangedCallback(IConfigDef* config)
 }
 
 // SWA::CCsdTexListMirage::SetFilter
-PPC_FUNC_IMPL(__imp__sub_825E4300);
-PPC_FUNC(sub_825E4300)
-{
-    g_csdFilterState = ctx.r5.u32 == 0 ? CsdFilterState::On : CsdFilterState::Off;
-    ctx.r5.u32 = 1;
-    __imp__sub_825E4300(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_825E4300);
+// PPC_FUNC(sub_825E4300)
+// {
+//     g_csdFilterState = ctx.r5.u32 == 0 ? CsdFilterState::On : CsdFilterState::Off;
+//     ctx.r5.u32 = 1;
+//     __imp__sub_825E4300(ctx, base);
+// }
 
 // SWA::CCsdPlatformMirage::EndScene
-PPC_FUNC_IMPL(__imp__sub_825E2F78);
-PPC_FUNC(sub_825E2F78)
-{
-    g_csdFilterState = CsdFilterState::Unknown;
-    __imp__sub_825E2F78(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_825E2F78);
+// PPC_FUNC(sub_825E2F78)
+// {
+//     g_csdFilterState = CsdFilterState::Unknown;
+//     __imp__sub_825E2F78(ctx, base);
+// }
 
 // Game shares surfaces with identical descriptions. We don't want to share shadow maps,
 // so we can set its format to a depth format that still resolves to the same type in recomp,
@@ -7478,60 +7494,60 @@ struct MeshResource
 static std::vector<uint16_t*> g_newIndicesToFree;
 
 // Hedgehog::Mirage::CMeshData::Make
-PPC_FUNC_IMPL(__imp__sub_82E44AF8);
-PPC_FUNC(sub_82E44AF8)
-{
-    uint16_t* newIndicesToFree = nullptr;
+// PPC_FUNC_IMPL(__imp__sub_82E44AF8);
+// PPC_FUNC(sub_82E44AF8)
+// {
+//     uint16_t* newIndicesToFree = nullptr;
 
-    auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
-    if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
-    {
-        auto meshResource = reinterpret_cast<MeshResource*>(base + ctx.r4.u32);
+//     auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
+//     if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
+//     {
+//         auto meshResource = reinterpret_cast<MeshResource*>(base + ctx.r4.u32);
 
-        if (meshResource->indexCount != 0)
-        {
-            uint16_t* newIndices;
-            uint32_t newIndexCount;
+//         if (meshResource->indexCount != 0)
+//         {
+//             uint16_t* newIndices;
+//             uint32_t newIndexCount;
 
-            ConvertToDegenerateTriangles(
-                reinterpret_cast<uint16_t*>(base + meshResource->indices),
-                meshResource->indexCount,
-                newIndices,
-                newIndexCount);
+//             ConvertToDegenerateTriangles(
+//                 reinterpret_cast<uint16_t*>(base + meshResource->indices),
+//                 meshResource->indexCount,
+//                 newIndices,
+//                 newIndexCount);
 
-            meshResource->indexCount = newIndexCount;
-            meshResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
+//             meshResource->indexCount = newIndexCount;
+//             meshResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
 
-            if (PPC_LOAD_U32(0x83396E98) != NULL)
-            {
-                // If index buffers are getting merged, new indices need to survive until the merge happens.
-                g_newIndicesToFree.push_back(newIndices);
-            }
-            else 
-            {
-                // Otherwise, we can free it immediately.
-                newIndicesToFree = newIndices;
-            }
-        }
-    }
+//             if (PPC_LOAD_U32(0x83396E98) != NULL)
+//             {
+//                 // If index buffers are getting merged, new indices need to survive until the merge happens.
+//                 g_newIndicesToFree.push_back(newIndices);
+//             }
+//             else 
+//             {
+//                 // Otherwise, we can free it immediately.
+//                 newIndicesToFree = newIndices;
+//             }
+//         }
+//     }
 
-    __imp__sub_82E44AF8(ctx, base);
+//     __imp__sub_82E44AF8(ctx, base);
 
-    if (newIndicesToFree != nullptr)
-        g_userHeap.Free(newIndicesToFree);
-}
+//     if (newIndicesToFree != nullptr)
+//         g_userHeap.Free(newIndicesToFree);
+// }
 
 // Hedgehog::Mirage::CShareVertexBuffer::Reset
-PPC_FUNC_IMPL(__imp__sub_82E250D0);
-PPC_FUNC(sub_82E250D0)
-{
-    __imp__sub_82E250D0(ctx, base);
+// PPC_FUNC_IMPL(__imp__sub_82E250D0);
+// PPC_FUNC(sub_82E250D0)
+// {
+//     __imp__sub_82E250D0(ctx, base);
 
-    for (auto newIndicesToFree : g_newIndicesToFree)
-        g_userHeap.Free(newIndicesToFree);
+//     for (auto newIndicesToFree : g_newIndicesToFree)
+//         g_userHeap.Free(newIndicesToFree);
 
-    g_newIndicesToFree.clear();
-}
+//     g_newIndicesToFree.clear();
+// }
 
 struct LightAndIndexBufferResourceV1
 {
@@ -7541,36 +7557,36 @@ struct LightAndIndexBufferResourceV1
 };
 
 // Hedgehog::Mirage::CLightAndIndexBufferData::MakeV1
-PPC_FUNC_IMPL(__imp__sub_82E3AFC8);
-PPC_FUNC(sub_82E3AFC8)
-{
-    uint16_t* newIndices = nullptr;
+// PPC_FUNC_IMPL(__imp__sub_82E3AFC8);
+// PPC_FUNC(sub_82E3AFC8)
+// {
+//     uint16_t* newIndices = nullptr;
 
-    auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
-    if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
-    {
-        auto lightAndIndexBufferResource = reinterpret_cast<LightAndIndexBufferResourceV1*>(base + ctx.r4.u32);
+//     auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
+//     if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
+//     {
+//         auto lightAndIndexBufferResource = reinterpret_cast<LightAndIndexBufferResourceV1*>(base + ctx.r4.u32);
 
-        if (lightAndIndexBufferResource->indexCount != 0)
-        {
-            uint32_t newIndexCount;
+//         if (lightAndIndexBufferResource->indexCount != 0)
+//         {
+//             uint32_t newIndexCount;
 
-            ConvertToDegenerateTriangles(
-                reinterpret_cast<uint16_t*>(base + lightAndIndexBufferResource->indices),
-                lightAndIndexBufferResource->indexCount,
-                newIndices,
-                newIndexCount);
+//             ConvertToDegenerateTriangles(
+//                 reinterpret_cast<uint16_t*>(base + lightAndIndexBufferResource->indices),
+//                 lightAndIndexBufferResource->indexCount,
+//                 newIndices,
+//                 newIndexCount);
 
-            lightAndIndexBufferResource->indexCount = newIndexCount;
-            lightAndIndexBufferResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
-        }
-    }
+//             lightAndIndexBufferResource->indexCount = newIndexCount;
+//             lightAndIndexBufferResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
+//         }
+//     }
 
-    __imp__sub_82E3AFC8(ctx, base);
+//     __imp__sub_82E3AFC8(ctx, base);
 
-    if (newIndices != nullptr)
-        g_userHeap.Free(newIndices);
-}
+//     if (newIndices != nullptr)
+//         g_userHeap.Free(newIndices);
+// }
 
 struct LightAndIndexBufferResourceV5
 {
@@ -7580,119 +7596,200 @@ struct LightAndIndexBufferResourceV5
 };
 
 // Hedgehog::Mirage::CLightAndIndexBufferData::MakeV5
-PPC_FUNC_IMPL(__imp__sub_82E3B1C0);
-PPC_FUNC(sub_82E3B1C0)
-{
-    uint16_t* newIndices = nullptr;
+// PPC_FUNC_IMPL(__imp__sub_82E3B1C0);
+// PPC_FUNC(sub_82E3B1C0)
+// {
+//     uint16_t* newIndices = nullptr;
 
-    auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
-    if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
-    {
-        auto lightAndIndexBufferResource = reinterpret_cast<LightAndIndexBufferResourceV5*>(base + ctx.r4.u32);
+//     auto databaseData = reinterpret_cast<Hedgehog::Database::CDatabaseData*>(base + ctx.r3.u32);
+//     if (g_triangleStripWorkaround && !databaseData->IsMadeOne())
+//     {
+//         auto lightAndIndexBufferResource = reinterpret_cast<LightAndIndexBufferResourceV5*>(base + ctx.r4.u32);
 
-        if (lightAndIndexBufferResource->indexCount != 0)
-        {
-            uint32_t newIndexCount;
+//         if (lightAndIndexBufferResource->indexCount != 0)
+//         {
+//             uint32_t newIndexCount;
 
-            ConvertToDegenerateTriangles(
-                reinterpret_cast<uint16_t*>(base + lightAndIndexBufferResource->indices),
-                lightAndIndexBufferResource->indexCount,
-                newIndices,
-                newIndexCount);
+//             ConvertToDegenerateTriangles(
+//                 reinterpret_cast<uint16_t*>(base + lightAndIndexBufferResource->indices),
+//                 lightAndIndexBufferResource->indexCount,
+//                 newIndices,
+//                 newIndexCount);
 
-            lightAndIndexBufferResource->indexCount = newIndexCount;
-            lightAndIndexBufferResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
-        }
-    }
+//             lightAndIndexBufferResource->indexCount = newIndexCount;
+//             lightAndIndexBufferResource->indices = static_cast<uint32_t>(reinterpret_cast<uint8_t*>(newIndices) - base);
+//         }
+//     }
 
-    __imp__sub_82E3B1C0(ctx, base);
+//     __imp__sub_82E3B1C0(ctx, base);
 
-    if (newIndices != nullptr)
-        g_userHeap.Free(newIndices);
-}
+//     if (newIndices != nullptr)
+//         g_userHeap.Free(newIndices);
+// }
 
-GUEST_FUNCTION_HOOK(sub_82BD99B0, CreateDevice);
+// PPC_FUNC_IMPL(__imp__sub_8253EC98);
+// PPC_FUNC(sub_8253EC98)
+// {
+//     printf("CreateDevice call\n");
 
-GUEST_FUNCTION_HOOK(sub_82BE6230, DestructResource);
+//     __imp__sub_8253EC98(ctx, base);
+// }
+GUEST_FUNCTION_HOOK(sub_8253EC98, CreateDevice); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BE9300, LockTextureRect);
-GUEST_FUNCTION_HOOK(sub_82BE7780, UnlockTextureRect);
+GUEST_FUNCTION_HOOK(sub_8253AE98, DestructResource); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BE6B98, LockVertexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE6BE8, UnlockVertexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE61D0, GetVertexBufferDesc);
+GUEST_FUNCTION_HOOK(sub_8253A740, LockTextureRect); // replaced
+GUEST_FUNCTION_HOOK(sub_82538D30, UnlockTextureRect); // GUEST_FUNCTION_HOOK(sub_82BE7780, UnlockTextureRect);
 
-GUEST_FUNCTION_HOOK(sub_82BE6CA8, LockIndexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE6CF0, UnlockIndexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE6200, GetIndexBufferDesc);
+GUEST_FUNCTION_HOOK(sub_8253B5D0, LockVertexBuffer); // replaced
+GUEST_FUNCTION_HOOK(sub_8253B630, UnlockVertexBuffer); // replaced
+// // GUEST_FUNCTION_HOOK(sub_82BE61D0, GetVertexBufferDesc);
 
-GUEST_FUNCTION_HOOK(sub_82BE96F0, GetSurfaceDesc);
+GUEST_FUNCTION_HOOK(sub_8253B6F0, LockIndexBuffer); // replaced
+GUEST_FUNCTION_HOOK(sub_8253B750, UnlockIndexBuffer); // replaced
+// // GUEST_FUNCTION_HOOK(sub_82BE6200, GetIndexBufferDesc);
 
-GUEST_FUNCTION_HOOK(sub_82BE04B0, GetVertexDeclaration);
-GUEST_FUNCTION_HOOK(sub_82BE0530, HashVertexDeclaration);
+GUEST_FUNCTION_HOOK(sub_8253AB20, GetSurfaceDesc); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BDA8C0, Video::Present);
-GUEST_FUNCTION_HOOK(sub_82BDD330, GetBackBuffer);
+GUEST_FUNCTION_HOOK(sub_825471F8, GetVertexDeclaration); // replaced
+// // GUEST_FUNCTION_HOOK(sub_82BE0530, HashVertexDeclaration);
 
-GUEST_FUNCTION_HOOK(sub_82BE9498, CreateTexture);
-GUEST_FUNCTION_HOOK(sub_82BE6AD0, CreateVertexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE6BF8, CreateIndexBuffer);
-GUEST_FUNCTION_HOOK(sub_82BE95B8, CreateSurface);
+GUEST_FUNCTION_HOOK(sub_82558CD0, Video::Present);
+GUEST_FUNCTION_HOOK(sub_82543B58, GetBackBuffer);
 
-GUEST_FUNCTION_HOOK(sub_82BF6400, StretchRect);
+GUEST_FUNCTION_HOOK(sub_8253A8D8, CreateTexture); // replaced
+GUEST_FUNCTION_HOOK(sub_8253B508, CreateVertexBuffer); // replaced
+GUEST_FUNCTION_HOOK(sub_8253B640, CreateIndexBuffer); // replaced
+GUEST_FUNCTION_HOOK(sub_826F9AA0, CreateSurface); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BDD9F0, SetRenderTarget);
-GUEST_FUNCTION_HOOK(sub_82BDDD38, SetDepthStencilSurface);
+GUEST_FUNCTION_HOOK(sub_825575B8, StretchRect); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BFE4C8, Clear);
+GUEST_FUNCTION_HOOK(sub_82543EE0, SetRenderTarget); // replaced
+GUEST_FUNCTION_HOOK(sub_825444F0, SetRenderTarget); // replaced
+GUEST_FUNCTION_HOOK(sub_82544210, SetDepthStencilSurface); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BDD8C0, SetViewport);
+GUEST_FUNCTION_HOOK(sub_82555B30, Clear);
 
-GUEST_FUNCTION_HOOK(sub_82BE9818, SetTexture);
-GUEST_FUNCTION_HOOK(sub_82BDCFB0, SetScissorRect);
+GUEST_FUNCTION_HOOK(sub_825436F0, SetViewport); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BE5900, DrawPrimitive);
-GUEST_FUNCTION_HOOK(sub_82BE5CF0, DrawIndexedPrimitive);
-GUEST_FUNCTION_HOOK(sub_82BE52F8, DrawPrimitiveUP);
+GUEST_FUNCTION_HOOK(sub_8253AC40, SetTexture); // replaced
+GUEST_FUNCTION_HOOK(sub_82543628, SetScissorRect); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BE0428, CreateVertexDeclaration);
-GUEST_FUNCTION_HOOK(sub_82BE02E0, SetVertexDeclaration);
+GUEST_FUNCTION_HOOK(sub_826FEC28, DrawPrimitive); // replaced
+GUEST_FUNCTION_HOOK(sub_826FF030, DrawIndexedPrimitive); // replaced
+// // GUEST_FUNCTION_HOOK(sub_82BE52F8, DrawPrimitiveUP);
 
-GUEST_FUNCTION_HOOK(sub_82BE1A80, CreateVertexShader);
-GUEST_FUNCTION_HOOK(sub_82BE0110, SetVertexShader);
+// // GUEST_FUNCTION_HOOK(sub_82BE0428, CreateVertexDeclaration); // TODO
+GUEST_FUNCTION_HOOK(sub_825470F8, SetVertexDeclaration); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BDD0F8, SetStreamSource);
-GUEST_FUNCTION_HOOK(sub_82BDD218, SetIndices);
+GUEST_FUNCTION_HOOK(sub_82548700, CreateVertexShader); // replaced
+GUEST_FUNCTION_HOOK(sub_82546EE0, SetVertexShader); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BE1990, CreatePixelShader);
-GUEST_FUNCTION_HOOK(sub_82BDFE58, SetPixelShader);
+GUEST_FUNCTION_HOOK(sub_82543918, SetStreamSource); // replaced
+GUEST_FUNCTION_HOOK(sub_82543AC8, SetIndices); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82C003B8, D3DXFillTexture);
-GUEST_FUNCTION_HOOK(sub_82C00910, D3DXFillVolumeTexture);
+GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader); // replaced
+GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
 
-GUEST_FUNCTION_HOOK(sub_82E43FC8, MakePictureData);
+// // GUEST_FUNCTION_HOOK(sub_82C003B8, D3DXFillTexture);
+// // GUEST_FUNCTION_HOOK(sub_82C00910, D3DXFillVolumeTexture);
 
-GUEST_FUNCTION_HOOK(sub_82E9EE38, SetResolution);
+// // GUEST_FUNCTION_HOOK(sub_82E43FC8, MakePictureData);
 
-GUEST_FUNCTION_HOOK(sub_82AE2BF8, ScreenShaderInit);
+// // GUEST_FUNCTION_HOOK(sub_82E9EE38, SetResolution);
 
-// This is a buggy function that recreates framebuffers
-// if the inverse capture ratio is not 2.0, but the parameter
-// is completely unused and not stored, so it ends up
-// recreating framebuffers every single frame instead.
-GUEST_FUNCTION_STUB(sub_82BAAD38);
+// // GUEST_FUNCTION_HOOK(sub_82AE2BF8, ScreenShaderInit);
 
-GUEST_FUNCTION_STUB(sub_822C15D8);
-GUEST_FUNCTION_STUB(sub_822C1810);
-GUEST_FUNCTION_STUB(sub_82BD97A8);
-GUEST_FUNCTION_STUB(sub_82BD97E8);
-GUEST_FUNCTION_STUB(sub_82BDD370); // SetGammaRamp
-GUEST_FUNCTION_STUB(sub_82BE05B8);
-GUEST_FUNCTION_STUB(sub_82BE9C98);
-GUEST_FUNCTION_STUB(sub_82BEA308);
-GUEST_FUNCTION_STUB(sub_82CD5D68);
-GUEST_FUNCTION_STUB(sub_82BE9B28);
-GUEST_FUNCTION_STUB(sub_82BEA018);
-GUEST_FUNCTION_STUB(sub_82BEA7C0);
-GUEST_FUNCTION_STUB(sub_82BFFF88); // D3DXFilterTexture
-GUEST_FUNCTION_STUB(sub_82BD96D0);
+// // This is a buggy function that recreates framebuffers
+// // if the inverse capture ratio is not 2.0, but the parameter
+// // is completely unused and not stored, so it ends up
+// // recreating framebuffers every single frame instead.
+// // GUEST_FUNCTION_STUB(sub_82BAAD38);
+
+// // GUEST_FUNCTION_STUB(sub_822C15D8);
+// // GUEST_FUNCTION_STUB(sub_822C1810);
+// // GUEST_FUNCTION_STUB(sub_82BD97A8);
+// // GUEST_FUNCTION_STUB(sub_82BD97E8);
+// // GUEST_FUNCTION_STUB(sub_82BDD370); // SetGammaRamp
+GUEST_FUNCTION_STUB(sub_8253EB78); // // GUEST_FUNCTION_STUB(sub_82BE05B8);
+GUEST_FUNCTION_STUB(sub_82558F88); // GUEST_FUNCTION_STUB(sub_82BE9C98);
+GUEST_FUNCTION_STUB(sub_82559480); // GUEST_FUNCTION_STUB(sub_82BEA308);
+GUEST_FUNCTION_STUB(sub_8272F6B8); // GUEST_FUNCTION_STUB(sub_82CD5D68);
+GUEST_FUNCTION_STUB(sub_82558E00); // GUEST_FUNCTION_STUB(sub_82BE9B28);
+GUEST_FUNCTION_STUB(sub_82559928); // GUEST_FUNCTION_STUB(sub_82BEA018);
+GUEST_FUNCTION_STUB(sub_82559C18); // GUEST_FUNCTION_STUB(sub_82BEA7C0);
+GUEST_FUNCTION_STUB(sub_82700C18); // GUEST_FUNCTION_STUB(sub_82BFFF88); // D3DXFilterTexture
+GUEST_FUNCTION_STUB(sub_8253EAE0);// GUEST_FUNCTION_STUB(sub_82BD96D0);
+
+
+
+GUEST_FUNCTION_STUB(sub_828B5050);
+GUEST_FUNCTION_STUB(sub_8266F1E8);
+GUEST_FUNCTION_STUB(sub_82667B10);
+GUEST_FUNCTION_STUB(sub_82668410);
+GUEST_FUNCTION_STUB(sub_828F5CF0);
+GUEST_FUNCTION_STUB(sub_8265E3D8);
+GUEST_FUNCTION_STUB(sub_825B19F0);
+GUEST_FUNCTION_STUB(sub_8253F5B8);
+// sub_82731038
+// 
+GUEST_FUNCTION_STUB(sub_826FE108);
+GUEST_FUNCTION_STUB(sub_82592388);
+GUEST_FUNCTION_STUB(sub_825B1A28);
+GUEST_FUNCTION_STUB(sub_82659A88);
+GUEST_FUNCTION_STUB(sub_82665048);
+// GUEST_FUNCTION_STUB(sub_8253DA28);
+// GUEST_FUNCTION_STUB(sub_82734638);
+GUEST_FUNCTION_STUB(sub_828FF190);
+GUEST_FUNCTION_STUB(sub_8253E798); // flush
+// GUEST_FUNCTION_STUB(sub_8259B088);
+// GUEST_FUNCTION_STUB(sub_8289CF60);
+// GUEST_FUNCTION_STUB(sub_828B3DF8);
+// // GUEST_FUNCTION_STUB(sub_828B94B8);
+// // GUEST_FUNCTION_STUB(sub_82581E38);
+// // GUEST_FUNCTION_STUB(sub_82659610);
+// // GUEST_FUNCTION_STUB(sub_828B95B8);
+// // GUEST_FUNCTION_STUB(sub_826390D8);
+// GUEST_FUNCTION_STUB(sub_82637418);
+// GUEST_FUNCTION_STUB(sub_825E9738);
+// GUEST_FUNCTION_STUB(sub_82617570);
+// GUEST_FUNCTION_STUB(sub_8261A5B0);
+// GUEST_FUNCTION_STUB(sub_82629D00);
+// удалить
+// GUEST_FUNCTION_STUB(sub_82649AC0);
+// GUEST_FUNCTION_STUB(sub_8253B080);
+// GUEST_FUNCTION_STUB(sub_828B34D8);
+// GUEST_FUNCTION_STUB(sub_826339A8);
+// GUEST_FUNCTION_STUB(sub_82663988);
+// GUEST_FUNCTION_STUB(sub_82663288);
+// GUEST_FUNCTION_STUB(sub_825F0588);
+// GUEST_FUNCTION_STUB(sub_825F11C8);
+// GUEST_FUNCTION_STUB(sub_825F1398);
+// GUEST_FUNCTION_STUB(sub_82547278);
+// GUEST_FUNCTION_STUB(sub_825586B0);
+// GUEST_FUNCTION_STUB(sub_82648B68);
+// // // GUEST_FUNCTION_STUB(sub_825EB070);
+// // GUEST_FUNCTION_STUB(sub_824D7BC8);
+// // GUEST_FUNCTION_STUB(sub_824FADB8);
+// // GUEST_FUNCTION_STUB(sub_825866A8);
+// // GUEST_FUNCTION_STUB(sub_825E9E28);
+// // GUEST_FUNCTION_STUB(sub_82161AB8);
+// // GUEST_FUNCTION_STUB(sub_825B19F0);
+// GUEST_FUNCTION_STUB(sub_825B1A28);
+// // GUEST_FUNCTION_STUB(sub_82581D50);
+// // GUEST_FUNCTION_STUB(sub_82580E90);
+
+// GUEST_FUNCTION_STUB(sub_82653DD8);
+// GUEST_FUNCTION_STUB(sub_82619650);
+// GUEST_FUNCTION_STUB(sub_8262A140);
+// GUEST_FUNCTION_STUB(sub_825F9910);
+// GUEST_FUNCTION_STUB(sub_825FE718);
+// GUEST_FUNCTION_STUB(sub_826346B8);
+
+// что-то тут расскоментить надо будет
+
+// GUEST_FUNCTION_STUB(sub_828FC2A0);
+// GUEST_FUNCTION_STUB(sub_828FC008);
+// GUEST_FUNCTION_STUB(sub_82648DB0);
+
+GUEST_FUNCTION_STUB(sub_8259ABE8);

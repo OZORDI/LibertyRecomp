@@ -117,14 +117,14 @@ static bool ProcessUpdateAvailableMessage()
 void StorageDevicePromptMidAsmHook() {}
 
 // Save data validation hook.
-PPC_FUNC_IMPL(__imp__sub_822C55B0);
-PPC_FUNC(sub_822C55B0)
-{
-    App::s_isSaveDataCorrupt = true;
-    g_corruptSaveMessageOpen = true;
-    g_corruptSaveMessageOpen.wait(true);
-    ctx.r3.u32 = 0;
-}
+// PPC_FUNC_IMPL(__imp__sub_822C55B0);
+// PPC_FUNC(sub_822C55B0)
+// {
+//     App::s_isSaveDataCorrupt = true;
+//     g_corruptSaveMessageOpen = true;
+//     g_corruptSaveMessageOpen.wait(true);
+//     ctx.r3.u32 = 0;
+// }
 
 void PressStartSaveLoadThreadMidAsmHook()
 {
@@ -145,25 +145,25 @@ void PressStartSaveLoadThreadMidAsmHook()
 }
 
 // SWA::CTitleStateIntro::Update
-PPC_FUNC_IMPL(__imp__sub_82587E50);
-PPC_FUNC(sub_82587E50)
-{
-    auto pTitleStateIntro = (SWA::CTitleStateIntro*)g_memory.Translate(ctx.r3.u32);
-    auto pTime = (be<float>*)((uint8_t*)pTitleStateIntro->GetContextBase() + 0x10C);
+// PPC_FUNC_IMPL(__imp__sub_82587E50);
+// PPC_FUNC(sub_82587E50)
+// {
+//     auto pTitleStateIntro = (SWA::CTitleStateIntro*)g_memory.Translate(ctx.r3.u32);
+//     auto pTime = (be<float>*)((uint8_t*)pTitleStateIntro->GetContextBase() + 0x10C);
 
-    if (*SWA::SGlobals::ms_IsAutoSaveWarningShown)
-    {
-        __imp__sub_82587E50(ctx, base);
-    }
-    else if (!ProcessUpdateAvailableMessage() && !ProcessCorruptSaveMessage() && !ProcessCorruptAchievementsMessage() && !g_faderBegun)
-    {
-        if (auto pInputState = SWA::CInputState::GetInstance())
-        {
-            if (pInputState->GetPadState().IsTapped(SWA::eKeyState_B) && *pTime > 0.5f)
-                g_quitMessageOpen = true;
-        }
+//     if (*SWA::SGlobals::ms_IsAutoSaveWarningShown)
+//     {
+//         __imp__sub_82587E50(ctx, base);
+//     }
+//     else if (!ProcessUpdateAvailableMessage() && !ProcessCorruptSaveMessage() && !ProcessCorruptAchievementsMessage() && !g_faderBegun)
+//     {
+//         if (auto pInputState = SWA::CInputState::GetInstance())
+//         {
+//             if (pInputState->GetPadState().IsTapped(SWA::eKeyState_B) && *pTime > 0.5f)
+//                 g_quitMessageOpen = true;
+//         }
 
-        if (!ProcessQuitMessage())
-            __imp__sub_82587E50(ctx, base);
-    }
-}
+//         if (!ProcessQuitMessage())
+//             __imp__sub_82587E50(ctx, base);
+//     }
+// }

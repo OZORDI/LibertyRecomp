@@ -32,31 +32,46 @@ void GlobalMemoryStatusImpl(XLPMEMORYSTATUS lpMemoryStatus)
     lpMemoryStatus->dwAvailVirtual = 0x20000000;
 }
 
-GUEST_FUNCTION_HOOK(sub_831B0ED0, memcpy);
-GUEST_FUNCTION_HOOK(sub_831CCB98, memcpy);
-GUEST_FUNCTION_HOOK(sub_831CEAE0, memcpy);
-GUEST_FUNCTION_HOOK(sub_831CEE04, memcpy);
-GUEST_FUNCTION_HOOK(sub_831CF2D0, memcpy);
-GUEST_FUNCTION_HOOK(sub_831CF660, memcpy);
-GUEST_FUNCTION_HOOK(sub_831B1358, memcpy);
-GUEST_FUNCTION_HOOK(sub_831B5E00, memmove);
-GUEST_FUNCTION_HOOK(sub_831B0BA0, memset);
-GUEST_FUNCTION_HOOK(sub_831CCAA0, memset);
+int memcpy_s(void* dest, size_t dest_size, const void* src, size_t count) {
+    if (dest == nullptr || src == nullptr) {
+        return EINVAL;
+    }
+    if (dest_size < count) {
+        return ERANGE;
+    }
+
+    memcpy(dest, src, count);
+    return 0;
+}
+
+GUEST_FUNCTION_HOOK(sub_826DF680, memcpy);
+// // GUEST_FUNCTION_HOOK(sub_831CCB98, memcpy);
+// // GUEST_FUNCTION_HOOK(sub_831CEAE0, memcpy);
+// // GUEST_FUNCTION_HOOK(sub_831CEE04, memcpy);
+// // GUEST_FUNCTION_HOOK(sub_831CF2D0, memcpy);
+// // GUEST_FUNCTION_HOOK(sub_831CF660, memcpy);
+// GUEST_FUNCTION_HOOK(sub_826DFAA0, memcpy);
+GUEST_FUNCTION_HOOK(sub_826DE940, memmove);
+GUEST_FUNCTION_HOOK(sub_826DFD40, memset);
+GUEST_FUNCTION_HOOK(sub_826DEA00, memcpy_s);
+// // GUEST_FUNCTION_HOOK(sub_831CCAA0, memset);
 
 #ifdef _WIN32
-GUEST_FUNCTION_HOOK(sub_82BD4CA8, OutputDebugStringA);
+GUEST_FUNCTION_HOOK(sub_82537770, OutputDebugStringA);
 #else
-GUEST_FUNCTION_STUB(sub_82BD4CA8);
+GUEST_FUNCTION_STUB(sub_82537770);
 #endif
 
-GUEST_FUNCTION_HOOK(sub_82BD4AC8, QueryPerformanceCounterImpl);
-GUEST_FUNCTION_HOOK(sub_831CD040, QueryPerformanceFrequencyImpl);
-GUEST_FUNCTION_HOOK(sub_831CDAD0, GetTickCountImpl);
+GUEST_FUNCTION_HOOK(sub_826FCE58, QueryPerformanceCounterImpl); // replaced
+GUEST_FUNCTION_HOOK(sub_826FC3C8, QueryPerformanceFrequencyImpl); // repalced
+GUEST_FUNCTION_HOOK(sub_826FD790, GetTickCountImpl); // replaced
 
-GUEST_FUNCTION_HOOK(sub_82BD4BC0, GlobalMemoryStatusImpl);
+// GUEST_FUNCTION_HOOK(sub_826DC180, b); // replaced
+
+// GUEST_FUNCTION_HOOK(sub_82BD4BC0, GlobalMemoryStatusImpl);
 
 // sprintf
-PPC_FUNC(sub_82BD4AE8)
-{
-    sub_831B1630(ctx, base);
-}
+// PPC_FUNC(sub_82BD4AE8)
+// {
+//     sub_831B1630(ctx, base);
+// }

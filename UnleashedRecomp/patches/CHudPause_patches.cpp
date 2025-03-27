@@ -19,7 +19,7 @@ void CHudPauseAddOptionsItemMidAsmHook(PPCRegister& pThis)
     guest_stack_var<Hedgehog::Base::CSharedString> menu("TopMenu");
     guest_stack_var<Hedgehog::Base::CSharedString> name("option");
 
-    GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), name.get());
+    // GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), name.get());
 }
 
 bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
@@ -116,71 +116,71 @@ bool CHudPauseMiscInjectOptionsMidAsmHook(PPCRegister& pThis)
 }
 
 // SWA::CHudPause::Update
-PPC_FUNC_IMPL(__imp__sub_824B0930);
-PPC_FUNC(sub_824B0930)
-{
-    if (App::s_isLoading)
-    {
-        __imp__sub_824B0930(ctx, base);
-        return;
-    }
+// PPC_FUNC_IMPL(__imp__sub_824B0930);
+// PPC_FUNC(sub_824B0930)
+// {
+//     if (App::s_isLoading)
+//     {
+//         __imp__sub_824B0930(ctx, base);
+//         return;
+//     }
 
-    auto pHudPause = (SWA::CHudPause*)g_memory.Translate(ctx.r3.u32);
-    auto pInputState = SWA::CInputState::GetInstance();
+//     auto pHudPause = (SWA::CHudPause*)g_memory.Translate(ctx.r3.u32);
+//     auto pInputState = SWA::CInputState::GetInstance();
 
-    g_achievementMenuIntroTime += App::s_deltaTime;
+//     g_achievementMenuIntroTime += App::s_deltaTime;
 
-    if (g_isAchievementMenuOutro)
-    {
-        g_achievementMenuOutroTime += App::s_deltaTime;
+//     if (g_isAchievementMenuOutro)
+//     {
+//         g_achievementMenuOutroTime += App::s_deltaTime;
 
-        // Re-open pause menu after achievement menu closes with delay.
-        if (g_achievementMenuOutroTime >= g_achievementMenuOutroThreshold)
-        {
-            GuestToHostFunction<int>(sub_824AFD28, pHudPause, 0, 1, 0, 0);
+//         // Re-open pause menu after achievement menu closes with delay.
+//         if (g_achievementMenuOutroTime >= g_achievementMenuOutroThreshold)
+//         {
+//             // GuestToHostFunction<int>(sub_824AFD28, pHudPause, 0, 1, 0, 0);
 
-            g_achievementMenuOutroTime = 0;
-            g_isAchievementMenuOutro = false;
-        }
-    }
+//             g_achievementMenuOutroTime = 0;
+//             g_isAchievementMenuOutro = false;
+//         }
+//     }
 
-    if (AchievementMenu::s_isVisible)
-    {
-        // HACK: wait for transition to finish before restoring control.
-        if (g_achievementMenuIntroThreshold >= g_achievementMenuIntroTime)
-            __imp__sub_824B0930(ctx, base);
+//     if (AchievementMenu::s_isVisible)
+//     {
+//         // HACK: wait for transition to finish before restoring control.
+//         if (g_achievementMenuIntroThreshold >= g_achievementMenuIntroTime)
+//             __imp__sub_824B0930(ctx, base);
 
-        if (pInputState->GetPadState().IsTapped(SWA::eKeyState_B) && !g_isAchievementMenuOutro)
-        {
-            AchievementMenu::Close();
+//         if (pInputState->GetPadState().IsTapped(SWA::eKeyState_B) && !g_isAchievementMenuOutro)
+//         {
+//             AchievementMenu::Close();
 
-            g_isAchievementMenuOutro = true;
-        }
-    }
-    else if (OptionsMenu::s_isVisible && OptionsMenu::s_isPause)
-    {
-        if (OptionsMenu::CanClose() && pInputState->GetPadState().IsTapped(SWA::eKeyState_B))
-        {
-            OptionsMenu::Close();
-            GuestToHostFunction<int>(sub_824AFD28, pHudPause, 0, 0, 0, 1);
-            __imp__sub_824B0930(ctx, base);
-        }
-    }
-    else
-    {
-        g_achievementMenuIntroTime = 0;
+//             g_isAchievementMenuOutro = true;
+//         }
+//     }
+//     else if (OptionsMenu::s_isVisible && OptionsMenu::s_isPause)
+//     {
+//         if (OptionsMenu::CanClose() && pInputState->GetPadState().IsTapped(SWA::eKeyState_B))
+//         {
+//             OptionsMenu::Close();
+//             // GuestToHostFunction<int>(sub_824AFD28, pHudPause, 0, 0, 0, 1);
+//             __imp__sub_824B0930(ctx, base);
+//         }
+//     }
+//     else
+//     {
+//         g_achievementMenuIntroTime = 0;
 
-        if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
-        {
-            ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
-            g_isClosed = false;
-        }
-        else if (!g_isClosed)
-        {
-            ButtonGuide::Close();
-            g_isClosed = true;
-        }
+//         if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
+//         {
+//             ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
+//             g_isClosed = false;
+//         }
+//         else if (!g_isClosed)
+//         {
+//             ButtonGuide::Close();
+//             g_isClosed = true;
+//         }
 
-        __imp__sub_824B0930(ctx, base);
-    }
-}
+//         __imp__sub_824B0930(ctx, base);
+//     }
+// }

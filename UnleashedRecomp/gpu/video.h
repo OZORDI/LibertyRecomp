@@ -60,10 +60,10 @@ struct GuestDevice
         be<float> minZ;
         be<float> maxZ;
     } viewport;
-    uint8_t padding3180[0x2C80];
+    uint8_t padding3180[0x1E80];
 };
 
-static_assert(sizeof(GuestDevice) == 0x5E00);
+static_assert(sizeof(GuestDevice) == 0x5000);
 
 enum class ResourceType
 {
@@ -120,17 +120,23 @@ enum GuestFormat
 {
     D3DFMT_A16B16G16R16F = 0x1A22AB60,
     D3DFMT_A16B16G16R16F_2 = 0x1A2201BF,
+    D3DFMT_A16B16G16R16F_EXPAND = 0x1A22AB5D,
+    D3DFMT_DXT1 = 0x1A200152,
+    D3DFMT_DXT5 = 0x1A200154,
     D3DFMT_A8B8G8R8 = 0x1A200186,
     D3DFMT_A8R8G8B8 = 0x18280186,
+    D3DFMT_LIN_A8R8G8B8 = 0x18280086,
     D3DFMT_D24FS8 = 0x1A220197,
     D3DFMT_D24S8 = 0x2D200196,
     D3DFMT_G16R16F = 0x2D22AB9F,
     D3DFMT_G16R16F_2 = 0x2D20AB8D,
     D3DFMT_INDEX16 = 1,
     D3DFMT_INDEX32 = 6,
+    D3DFMT_A8 = 0x4900102,
     D3DFMT_L8 = 0x28000102,
     D3DFMT_L8_2 = 0x28000002,
     D3DFMT_X8R8G8B8 = 0x28280086,
+    D3DFMT_LE_X8R8G8B8 = 0x28280106,
     D3DFMT_UNKNOWN = 0xFFFFFFFF
 };
 

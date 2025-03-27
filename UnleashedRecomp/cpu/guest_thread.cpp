@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <stdafx.h>
 #include "guest_thread.h"
 #include <kernel/memory.h>
@@ -8,7 +9,7 @@
 constexpr size_t PCR_SIZE = 0xAB0;
 constexpr size_t TLS_SIZE = 0x100;
 constexpr size_t TEB_SIZE = 0x2E0;
-constexpr size_t STACK_SIZE = 0x40000;
+constexpr size_t STACK_SIZE = 0x80000;
 constexpr size_t TOTAL_SIZE = PCR_SIZE + TLS_SIZE + TEB_SIZE + STACK_SIZE;
 
 constexpr size_t TEB_OFFSET = PCR_SIZE + TLS_SIZE;
@@ -18,6 +19,7 @@ GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
     assert(thread == nullptr);
 
     thread = (uint8_t*)g_userHeap.Alloc(TOTAL_SIZE);
+    printf("TOTAL_SIZE: %x %x %d\n", thread, TOTAL_SIZE, TOTAL_SIZE);
     memset(thread, 0, TOTAL_SIZE);
 
     *(uint32_t*)thread = ByteSwap(g_memory.MapVirtual(thread + PCR_SIZE)); // tls pointer
@@ -59,7 +61,7 @@ GuestThreadHandle::~GuestThreadHandle()
 
 uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 {
-    assert(timeout == INFINITE);
+    // assert(timeout == INFINITE);
 
     if (thread.joinable())
         thread.join();
@@ -168,8 +170,8 @@ uint32_t SetThreadIdealProcessorImpl(GuestThreadHandle* hThread, uint32_t dwIdea
     return 0;
 }
 
-GUEST_FUNCTION_HOOK(sub_82DFA2E8, SetThreadNameImpl);
-GUEST_FUNCTION_HOOK(sub_82BD57A8, GetThreadPriorityImpl);
-GUEST_FUNCTION_HOOK(sub_82BD5910, SetThreadIdealProcessorImpl);
+// GUEST_FUNCTION_HOOK(sub_82DFA2E8, SetThreadNameImpl);
+// GUEST_FUNCTION_HOOK(sub_82BD57A8, GetThreadPriorityImpl);
+GUEST_FUNCTION_HOOK(sub_82537F80, SetThreadIdealProcessorImpl);
 
-GUEST_FUNCTION_STUB(sub_82BD58F8); // Some function that updates the TEB, don't really care since the field is not set
+// GUEST_FUNCTION_STUB(sub_82BD58F8); // Some function that updates the TEB, don't really care since the field is not set

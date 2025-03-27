@@ -158,24 +158,24 @@ void MakeCsdProjectMidAsmHook(PPCRegister& r3, PPCRegister& r29)
 }
 
 // Chao::CSD::CMemoryAlloc::Free
-PPC_FUNC_IMPL(__imp__sub_825E2E60);
-PPC_FUNC(sub_825E2E60)
-{
-    if (ctx.r4.u32 != NULL && PPC_LOAD_U32(ctx.r4.u32) == 0x4E594946 && PPC_LOAD_U32(ctx.r4.u32 + 0x20) == 0x6E43504A) // NYIF, nCPJ
-    {
-        uint32_t fileSize = PPC_LOAD_U32(ctx.r4.u32 + 0x14);
+// PPC_FUNC_IMPL(__imp__sub_825E2E60);
+// PPC_FUNC(sub_825E2E60)
+// {
+//     if (ctx.r4.u32 != NULL && PPC_LOAD_U32(ctx.r4.u32) == 0x4E594946 && PPC_LOAD_U32(ctx.r4.u32 + 0x20) == 0x6E43504A) // NYIF, nCPJ
+//     {
+//         uint32_t fileSize = PPC_LOAD_U32(ctx.r4.u32 + 0x14);
 
-        std::lock_guard lock(g_pathMutex);
-        const uint8_t* key = base + ctx.r4.u32;
+//         std::lock_guard lock(g_pathMutex);
+//         const uint8_t* key = base + ctx.r4.u32;
 
-        auto lower = g_paths.lower_bound(key);
-        auto upper = g_paths.lower_bound(key + fileSize);
+//         auto lower = g_paths.lower_bound(key);
+//         auto upper = g_paths.lower_bound(key + fileSize);
 
-        g_paths.erase(lower, upper);
-    }
+//         g_paths.erase(lower, upper);
+//     }
 
-    __imp__sub_825E2E60(ctx, base);
-}
+//     __imp__sub_825E2E60(ctx, base);
+// }
 
 static float ComputeScale(float aspectRatio)
 {
@@ -228,16 +228,16 @@ static void GetViewport(void* application, be<uint32_t>* width, be<uint32_t>* he
 GUEST_FUNCTION_HOOK(sub_82E169B8, GetViewport);
 
 // SWA::CGameDocument::ComputeScreenPosition
-PPC_FUNC_IMPL(__imp__sub_8250FC70);
-PPC_FUNC(sub_8250FC70)
-{
-    __imp__sub_8250FC70(ctx, base);
+// PPC_FUNC_IMPL(__imp__sub_8250FC70);
+// PPC_FUNC(sub_8250FC70)
+// {
+//     __imp__sub_8250FC70(ctx, base);
 
-    auto position = reinterpret_cast<be<float>*>(base + ctx.r3.u32);
+//     auto position = reinterpret_cast<be<float>*>(base + ctx.r3.u32);
 
-    position[0] = (position[0] / 1280.0f * Video::s_viewportWidth - g_aspectRatioOffsetX) / g_aspectRatioScale;
-    position[1] = (position[1] / 720.0f * Video::s_viewportHeight - g_aspectRatioOffsetY) / g_aspectRatioScale;
-}
+//     position[0] = (position[0] / 1280.0f * Video::s_viewportWidth - g_aspectRatioOffsetX) / g_aspectRatioScale;
+//     position[1] = (position[1] / 720.0f * Video::s_viewportHeight - g_aspectRatioOffsetY) / g_aspectRatioScale;
+// }
 
 void ComputeScreenPositionMidAsmHook(PPCRegister& f1, PPCRegister& f2)
 {
@@ -253,57 +253,57 @@ void WorldMapInfoMidAsmHook(PPCRegister& r4)
 }
 
 // SWA::CTitleStateWorldMap::Update
-PPC_FUNC_IMPL(__imp__sub_8258B558);
-PPC_FUNC(sub_8258B558)
-{
-    auto r3 = ctx.r3;
-    __imp__sub_8258B558(ctx, base);
+// PPC_FUNC_IMPL(__imp__sub_8258B558);
+// PPC_FUNC(sub_8258B558)
+// {
+//     auto r3 = ctx.r3;
+//     __imp__sub_8258B558(ctx, base);
 
-    uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
-    if (worldMapSimpleInfo != NULL)
-    {
-        auto setPosition = [&](uint32_t rcPtr, float offsetX = 0.0f, float offsetY = 0.0f)
-            {
-                uint32_t scene = PPC_LOAD_U32(rcPtr + 0x4);
-                if (scene != NULL)
-                {
-                    scene = PPC_LOAD_U32(scene + 0x4);
-                    if (scene != NULL)
-                    {
-                        ctx.r3.u32 = scene;
-                        ctx.f1.f64 = offsetX + g_aspectRatioNarrowScale * 140.0f;
-                        ctx.f2.f64 = offsetY;
+//     uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
+//     if (worldMapSimpleInfo != NULL)
+//     {
+//         auto setPosition = [&](uint32_t rcPtr, float offsetX = 0.0f, float offsetY = 0.0f)
+//             {
+//                 uint32_t scene = PPC_LOAD_U32(rcPtr + 0x4);
+//                 if (scene != NULL)
+//                 {
+//                     scene = PPC_LOAD_U32(scene + 0x4);
+//                     if (scene != NULL)
+//                     {
+//                         ctx.r3.u32 = scene;
+//                         ctx.f1.f64 = offsetX + g_aspectRatioNarrowScale * 140.0f;
+//                         ctx.f2.f64 = offsetY;
 
-                        if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
-                            ctx.f1.f64 += g_aspectRatioOffsetX / g_aspectRatioScale;
+//                         if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+//                             ctx.f1.f64 += g_aspectRatioOffsetX / g_aspectRatioScale;
 
-                        sub_830BB3D0(ctx, base);
-                    }
-                }
-            };
+//                         sub_830BB3D0(ctx, base);
+//                     }
+//                 }
+//             };
 
-        setPosition(worldMapSimpleInfo + 0x2C, 299.0f, -178.0f);
-        setPosition(worldMapSimpleInfo + 0x34);
-        setPosition(worldMapSimpleInfo + 0x4C);
+//         setPosition(worldMapSimpleInfo + 0x2C, 299.0f, -178.0f);
+//         setPosition(worldMapSimpleInfo + 0x34);
+//         setPosition(worldMapSimpleInfo + 0x4C);
 
-        for (uint32_t it = PPC_LOAD_U32(worldMapSimpleInfo + 0x20); it != PPC_LOAD_U32(worldMapSimpleInfo + 0x24); it += 8)
-            setPosition(it);
+//         for (uint32_t it = PPC_LOAD_U32(worldMapSimpleInfo + 0x20); it != PPC_LOAD_U32(worldMapSimpleInfo + 0x24); it += 8)
+//             setPosition(it);
 
-        uint32_t menuTextBox = PPC_LOAD_U32(worldMapSimpleInfo + 0x5C);
-        if (menuTextBox != NULL)
-        {
-            uint32_t textBox = PPC_LOAD_U32(menuTextBox + 0x4);
-            if (textBox != NULL)
-            {
-                float value = 708.0f + g_aspectRatioNarrowScale * 140.0f;
-                if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
-                    value += g_aspectRatioOffsetX / g_aspectRatioScale;
+//         uint32_t menuTextBox = PPC_LOAD_U32(worldMapSimpleInfo + 0x5C);
+//         if (menuTextBox != NULL)
+//         {
+//             uint32_t textBox = PPC_LOAD_U32(menuTextBox + 0x4);
+//             if (textBox != NULL)
+//             {
+//                 float value = 708.0f + g_aspectRatioNarrowScale * 140.0f;
+//                 if (Config::UIAlignmentMode == EUIAlignmentMode::Edge && g_aspectRatioNarrowScale >= 1.0f)
+//                     value += g_aspectRatioOffsetX / g_aspectRatioScale;
 
-                PPC_STORE_U32(textBox + 0x38, reinterpret_cast<uint32_t&>(value));
-            }
-        }
-    }
-}
+//                 PPC_STORE_U32(textBox + 0x38, reinterpret_cast<uint32_t&>(value));
+//             }
+//         }
+//     }
+// }
 
 enum
 {
@@ -824,83 +824,83 @@ static float g_scenePositionX;
 static float g_scenePositionY;
 
 // Chao::CSD::CScene::Render
-PPC_FUNC_IMPL(__imp__sub_830BC640);
-PPC_FUNC(sub_830BC640)
-{
-    g_scenePositionX = 0.0f;
-    g_scenePositionY = 0.0f;
+// PPC_FUNC_IMPL(__imp__sub_830BC640);
+// PPC_FUNC(sub_830BC640)
+// {
+//     g_scenePositionX = 0.0f;
+//     g_scenePositionY = 0.0f;
 
-    uint32_t motionPattern = PPC_LOAD_U32(ctx.r3.u32 + 0x98);
-    if (motionPattern != NULL)
-    {
-        uint32_t member = PPC_LOAD_U32(motionPattern + 0xC);
-        if (member != NULL)
-        {
-            uint32_t x = PPC_LOAD_U32(member + 0x2C);
-            uint32_t y = PPC_LOAD_U32(member + 0x30);
+//     uint32_t motionPattern = PPC_LOAD_U32(ctx.r3.u32 + 0x98);
+//     if (motionPattern != NULL)
+//     {
+//         uint32_t member = PPC_LOAD_U32(motionPattern + 0xC);
+//         if (member != NULL)
+//         {
+//             uint32_t x = PPC_LOAD_U32(member + 0x2C);
+//             uint32_t y = PPC_LOAD_U32(member + 0x30);
 
-            g_scenePositionX = 1280.0f * reinterpret_cast<float&>(x);
-            g_scenePositionY = 720.0f * reinterpret_cast<float&>(y);
-        }
-    }
+//             g_scenePositionX = 1280.0f * reinterpret_cast<float&>(x);
+//             g_scenePositionY = 720.0f * reinterpret_cast<float&>(y);
+//         }
+//     }
 
-    __imp__sub_830BC640(ctx, base);
-}
+//     __imp__sub_830BC640(ctx, base);
+// }
 
 // Chao::CSD::Scene::Render
-PPC_FUNC_IMPL(__imp__sub_830C6A00);
-PPC_FUNC(sub_830C6A00)
-{
-    g_sceneModifier = FindModifier(ctx.r3.u32);
+// PPC_FUNC_IMPL(__imp__sub_830C6A00);
+// PPC_FUNC(sub_830C6A00)
+// {
+//     g_sceneModifier = FindModifier(ctx.r3.u32);
 
-    if (g_sceneModifier.has_value())
-    {
-        if (!Config::ControlTutorial && (g_sceneModifier->flags & CONTROL_TUTORIAL) != 0)
-        {
-            return;
-        }
+//     if (g_sceneModifier.has_value())
+//     {
+//         if (!Config::ControlTutorial && (g_sceneModifier->flags & CONTROL_TUTORIAL) != 0)
+//         {
+//             return;
+//         }
 
-        // Tornado Defense bugs out when applying gameplay UI scaling.
-        // This seems consistent with base game behavior, because the UI
-        // is normally squashed, which was probably done to work around this.
-        if ((g_sceneModifier->flags & TORNADO_DEFENSE) != 0)
-        {
-            g_scenePositionX = 0.0f;
-            g_scenePositionY = 0.0f;
-        }
+//         // Tornado Defense bugs out when applying gameplay UI scaling.
+//         // This seems consistent with base game behavior, because the UI
+//         // is normally squashed, which was probably done to work around this.
+//         if ((g_sceneModifier->flags & TORNADO_DEFENSE) != 0)
+//         {
+//             g_scenePositionX = 0.0f;
+//             g_scenePositionY = 0.0f;
+//         }
 
-        if (g_aspectRatio > WIDE_ASPECT_RATIO && (g_sceneModifier->flags & (OFFSET_SCALE_LEFT | OFFSET_SCALE_RIGHT | CORNER_EXTRACT)) != 0)
-        {
-            auto r3 = ctx.r3;
-            auto r4 = ctx.r4;
-            auto r5 = ctx.r5;
-            auto r6 = ctx.r6;
+//         if (g_aspectRatio > WIDE_ASPECT_RATIO && (g_sceneModifier->flags & (OFFSET_SCALE_LEFT | OFFSET_SCALE_RIGHT | CORNER_EXTRACT)) != 0)
+//         {
+//             auto r3 = ctx.r3;
+//             auto r4 = ctx.r4;
+//             auto r5 = ctx.r5;
+//             auto r6 = ctx.r6;
 
-            // Queue draw calls, but don't actually draw anything. We just want to extract the corner.
-            g_cornerExtract = true;
-            __imp__sub_830C6A00(ctx, base);
-            g_cornerExtract = false;
+//             // Queue draw calls, but don't actually draw anything. We just want to extract the corner.
+//             g_cornerExtract = true;
+//             __imp__sub_830C6A00(ctx, base);
+//             g_cornerExtract = false;
 
-#ifdef CORNER_DEBUG
-            if (g_sceneModifier->cornerMax == FLT_MAX)
-            {
-                fmt::print("Corners: ");
-                for (auto corner : g_corners)
-                    fmt::print("{} ", corner);
+// #ifdef CORNER_DEBUG
+//             if (g_sceneModifier->cornerMax == FLT_MAX)
+//             {
+//                 fmt::print("Corners: ");
+//                 for (auto corner : g_corners)
+//                     fmt::print("{} ", corner);
 
-                fmt::println("");
-            }
-#endif
+//                 fmt::println("");
+//             }
+// #endif
 
-            ctx.r3 = r3;
-            ctx.r4 = r4;
-            ctx.r5 = r5;
-            ctx.r6 = r6;
-        }
-    }
+//             ctx.r3 = r3;
+//             ctx.r4 = r4;
+//             ctx.r5 = r5;
+//             ctx.r6 = r6;
+//         }
+//     }
 
-    __imp__sub_830C6A00(ctx, base);
-}
+//     __imp__sub_830C6A00(ctx, base);
+// }
 
 static std::optional<CsdModifier> g_castNodeModifier;
 
@@ -1171,52 +1171,52 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
 }
 
 // SWA::CCsdPlatformMirage::Draw
-PPC_FUNC_IMPL(__imp__sub_825E2E70);
-PPC_FUNC(sub_825E2E70)
-{
-    Draw(ctx, base, __imp__sub_825E2E70, 0x14);
-}
+// PPC_FUNC_IMPL(__imp__sub_825E2E70);
+// PPC_FUNC(sub_825E2E70)
+// {
+//     Draw(ctx, base, __imp__sub_825E2E70, 0x14);
+// }
 
-// SWA::CCsdPlatformMirage::DrawNoTex
-PPC_FUNC_IMPL(__imp__sub_825E2E88);
-PPC_FUNC(sub_825E2E88)
-{
-    Draw(ctx, base, __imp__sub_825E2E88, 0xC);
-}
+// // SWA::CCsdPlatformMirage::DrawNoTex
+// PPC_FUNC_IMPL(__imp__sub_825E2E88);
+// PPC_FUNC(sub_825E2E88)
+// {
+//     Draw(ctx, base, __imp__sub_825E2E88, 0xC);
+// }
 
-// Hedgehog::MirageDebug::SetScissorRect
-PPC_FUNC_IMPL(__imp__sub_82E16C70);
-PPC_FUNC(sub_82E16C70)
-{
-    auto scissorRect = reinterpret_cast<GuestRect*>(base + ctx.r4.u32);
+// // Hedgehog::MirageDebug::SetScissorRect
+// PPC_FUNC_IMPL(__imp__sub_82E16C70);
+// PPC_FUNC(sub_82E16C70)
+// {
+//     auto scissorRect = reinterpret_cast<GuestRect*>(base + ctx.r4.u32);
 
-    scissorRect->left = scissorRect->left * g_aspectRatioScale + g_aspectRatioOffsetX;
-    scissorRect->top = scissorRect->top * g_aspectRatioScale + g_aspectRatioOffsetY;
-    scissorRect->right = scissorRect->right * g_aspectRatioScale + g_aspectRatioOffsetX;
-    scissorRect->bottom = scissorRect->bottom * g_aspectRatioScale + g_aspectRatioOffsetY;
+//     scissorRect->left = scissorRect->left * g_aspectRatioScale + g_aspectRatioOffsetX;
+//     scissorRect->top = scissorRect->top * g_aspectRatioScale + g_aspectRatioOffsetY;
+//     scissorRect->right = scissorRect->right * g_aspectRatioScale + g_aspectRatioOffsetX;
+//     scissorRect->bottom = scissorRect->bottom * g_aspectRatioScale + g_aspectRatioOffsetY;
 
-    __imp__sub_82E16C70(ctx, base);
-}
+//     __imp__sub_82E16C70(ctx, base);
+// }
 
 // Store whether the primitive should be stretched in available padding space.
 static constexpr size_t PRIMITIVE_2D_PADDING_OFFSET = 0x29;
 static constexpr size_t PRIMITIVE_2D_PADDING_SIZE = 0x3;
 
 // Hedgehog::MirageDebug::CPrimitive2D::CPrimitive2D
-PPC_FUNC_IMPL(__imp__sub_822D0328);
-PPC_FUNC(sub_822D0328)
-{
-    memset(base + ctx.r3.u32 + PRIMITIVE_2D_PADDING_OFFSET, 0, PRIMITIVE_2D_PADDING_SIZE);
-    __imp__sub_822D0328(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_822D0328);
+// PPC_FUNC(sub_822D0328)
+// {
+//     memset(base + ctx.r3.u32 + PRIMITIVE_2D_PADDING_OFFSET, 0, PRIMITIVE_2D_PADDING_SIZE);
+//     __imp__sub_822D0328(ctx, base);
+// }
 
-// Hedgehog::MirageDebug::CPrimitive2D::CPrimitive2D(const Hedgehog::MirageDebug::CPrimitive2D&)
-PPC_FUNC_IMPL(__imp__sub_830D2328);
-PPC_FUNC(sub_830D2328)
-{
-    memcpy(base + ctx.r3.u32 + PRIMITIVE_2D_PADDING_OFFSET, base + ctx.r4.u32 + PRIMITIVE_2D_PADDING_OFFSET, PRIMITIVE_2D_PADDING_SIZE);
-    __imp__sub_830D2328(ctx, base);
-}
+// // Hedgehog::MirageDebug::CPrimitive2D::CPrimitive2D(const Hedgehog::MirageDebug::CPrimitive2D&)
+// PPC_FUNC_IMPL(__imp__sub_830D2328);
+// PPC_FUNC(sub_830D2328)
+// {
+//     memcpy(base + ctx.r3.u32 + PRIMITIVE_2D_PADDING_OFFSET, base + ctx.r4.u32 + PRIMITIVE_2D_PADDING_OFFSET, PRIMITIVE_2D_PADDING_SIZE);
+//     __imp__sub_830D2328(ctx, base);
+// }
 
 void AddPrimitive2DMidAsmHook(PPCRegister& r3)
 {
@@ -1224,86 +1224,86 @@ void AddPrimitive2DMidAsmHook(PPCRegister& r3)
 }
 
 // Hedgehog::MirageDebug::CPrimitive2D::Draw
-PPC_FUNC_IMPL(__imp__sub_830D1EF0);
-PPC_FUNC(sub_830D1EF0)
-{
-    auto r3 = ctx.r3;
+// PPC_FUNC_IMPL(__imp__sub_830D1EF0);
+// PPC_FUNC(sub_830D1EF0)
+// {
+//     auto r3 = ctx.r3;
 
-    __imp__sub_830D1EF0(ctx, base);
+//     __imp__sub_830D1EF0(ctx, base);
 
-    struct Vertex
-    {
-        be<float> x;
-        be<float> y;
-        be<float> z;
-        be<float> w;
-        be<uint32_t> color;
-        be<float> u;
-        be<float> v;
-    };
+//     struct Vertex
+//     {
+//         be<float> x;
+//         be<float> y;
+//         be<float> z;
+//         be<float> w;
+//         be<uint32_t> color;
+//         be<float> u;
+//         be<float> v;
+//     };
 
-    auto vertex = reinterpret_cast<Vertex*>(base + ctx.r4.u32);
+//     auto vertex = reinterpret_cast<Vertex*>(base + ctx.r4.u32);
 
-    for (size_t i = 0; i < 4; i++)
-    {
-        float x = vertex[i].x * 640.0f + 640.0f;
-        float y = vertex[i].y * -360.0f + 360.0f;
+//     for (size_t i = 0; i < 4; i++)
+//     {
+//         float x = vertex[i].x * 640.0f + 640.0f;
+//         float y = vertex[i].y * -360.0f + 360.0f;
 
-        if (PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET))
-        {
-            // Stretch
-            x = ((x + 0.5f) / 1280.0f) * Video::s_viewportWidth;
-            y = ((y + 0.5f) / 720.0f) * Video::s_viewportHeight;
-        }
-        else
-        {
-            // Center
-            x = g_aspectRatioOffsetX + (x + 0.5f) * g_aspectRatioScale;
-            y = g_aspectRatioOffsetY + (y + 0.5f) * g_aspectRatioScale;
-        }
+//         if (PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET))
+//         {
+//             // Stretch
+//             x = ((x + 0.5f) / 1280.0f) * Video::s_viewportWidth;
+//             y = ((y + 0.5f) / 720.0f) * Video::s_viewportHeight;
+//         }
+//         else
+//         {
+//             // Center
+//             x = g_aspectRatioOffsetX + (x + 0.5f) * g_aspectRatioScale;
+//             y = g_aspectRatioOffsetY + (y + 0.5f) * g_aspectRatioScale;
+//         }
 
-        vertex[i].x = ((x - 0.5f) / Video::s_viewportWidth) * 2.0f - 1.0f;
-        vertex[i].y = ((y - 0.5f) / Video::s_viewportHeight) * -2.0f + 1.0f;
-    }
+//         vertex[i].x = ((x - 0.5f) / Video::s_viewportWidth) * 2.0f - 1.0f;
+//         vertex[i].y = ((y - 0.5f) / Video::s_viewportHeight) * -2.0f + 1.0f;
+//     }
 
-    bool letterboxTop = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x1);
-    bool letterboxBottom = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x2);
+//     bool letterboxTop = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x1);
+//     bool letterboxBottom = PPC_LOAD_U8(r3.u32 + PRIMITIVE_2D_PADDING_OFFSET + 0x2);
 
-    if (letterboxTop || letterboxBottom)
-    {
-        float halfPixelX = 1.0f / Video::s_viewportWidth;
-        float halfPixelY = 1.0f / Video::s_viewportHeight;
+//     if (letterboxTop || letterboxBottom)
+//     {
+//         float halfPixelX = 1.0f / Video::s_viewportWidth;
+//         float halfPixelY = 1.0f / Video::s_viewportHeight;
 
-        if (letterboxTop)
-        {
-            vertex[0].x = -1.0f - halfPixelX;
-            vertex[0].y = 1.0f + halfPixelY;
+//         if (letterboxTop)
+//         {
+//             vertex[0].x = -1.0f - halfPixelX;
+//             vertex[0].y = 1.0f + halfPixelY;
 
-            vertex[1].x = 1.0f - halfPixelX;
-            vertex[1].y = 1.0f + halfPixelY;
+//             vertex[1].x = 1.0f - halfPixelX;
+//             vertex[1].y = 1.0f + halfPixelY;
 
-            vertex[2].x = -1.0f - halfPixelX;
-            // vertex[2].y untouched
+//             vertex[2].x = -1.0f - halfPixelX;
+//             // vertex[2].y untouched
 
-            vertex[3].x = 1.0f - halfPixelX;
-            // vertex[3].y untouched
-        }
-        else if (letterboxBottom)
-        {
-            vertex[0].x = -1.0f - halfPixelX;
-            // vertex[0].y untouched
+//             vertex[3].x = 1.0f - halfPixelX;
+//             // vertex[3].y untouched
+//         }
+//         else if (letterboxBottom)
+//         {
+//             vertex[0].x = -1.0f - halfPixelX;
+//             // vertex[0].y untouched
 
-            vertex[1].x = 1.0f - halfPixelX;
-            // vertex[1].y untouched
+//             vertex[1].x = 1.0f - halfPixelX;
+//             // vertex[1].y untouched
 
-            vertex[2].x = -1.0f - halfPixelX;
-            vertex[2].y = -1.0f + halfPixelY;
+//             vertex[2].x = -1.0f - halfPixelX;
+//             vertex[2].y = -1.0f + halfPixelY;
 
-            vertex[3].x = 1.0f - halfPixelX;
-            vertex[3].y = -1.0f + halfPixelY;
-        }
-    }
-}
+//             vertex[3].x = 1.0f - halfPixelX;
+//             vertex[3].y = -1.0f + halfPixelY;
+//         }
+//     }
+// }
 
 // Objects are pushed forward by 1m, so the coordinates need to compensate for it.
 static const double OBJ_GET_ITEM_TANGENT = tan(M_PI / 8.0);
@@ -1355,18 +1355,18 @@ static double ComputeObjGetItemX(uint32_t type)
 }
 
 // SWA::CObjGetItem::GetX
-PPC_FUNC_IMPL(__imp__sub_82690660);
-PPC_FUNC(sub_82690660)
-{
-    if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
-    {
-        __imp__sub_82690660(ctx, base);
-        return;
-    }
+// PPC_FUNC_IMPL(__imp__sub_82690660);
+// PPC_FUNC(sub_82690660)
+// {
+//     if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
+//     {
+//         __imp__sub_82690660(ctx, base);
+//         return;
+//     }
 
-    uint32_t type = PPC_LOAD_U32(ctx.r3.u32 + 0xE8);
-    ctx.f1.f64 = ComputeObjGetItemX(type);
-}
+//     uint32_t type = PPC_LOAD_U32(ctx.r3.u32 + 0xE8);
+//     ctx.f1.f64 = ComputeObjGetItemX(type);
+// }
 
 static double ComputeObjGetItemY(uint32_t type)
 {
@@ -1392,20 +1392,20 @@ static double ComputeObjGetItemY(uint32_t type)
 }
 
 // SWA::CObjGetItem::GetY
-PPC_FUNC_IMPL(__imp__sub_826906A8);
-PPC_FUNC(sub_826906A8)
-{
-    if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
-    {
-        __imp__sub_826906A8(ctx, base);
-        // Game scales Y by 1.4 at 4:3 aspect ratio.
-        ctx.f1.f64 *= 1.4;
-        return;
-    }
+// PPC_FUNC_IMPL(__imp__sub_826906A8);
+// PPC_FUNC(sub_826906A8)
+// {
+//     if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
+//     {
+//         __imp__sub_826906A8(ctx, base);
+//         // Game scales Y by 1.4 at 4:3 aspect ratio.
+//         ctx.f1.f64 *= 1.4;
+//         return;
+//     }
 
-    uint32_t type = PPC_LOAD_U32(ctx.r3.u32 + 0xE8);
-    ctx.f1.f64 = ComputeObjGetItemY(type);
-}
+//     uint32_t type = PPC_LOAD_U32(ctx.r3.u32 + 0xE8);
+//     ctx.f1.f64 = ComputeObjGetItemY(type);
+// }
 
 void WorldMapProjectionMidAsmHook(PPCVRegister& v63, PPCVRegister& v62)
 {
@@ -1445,45 +1445,45 @@ void ViewRingXMidAsmHook(PPCRegister& f1, PPCVRegister& v62)
 }
 
 // SWA::Inspire::CLetterbox::CLetterbox
-PPC_FUNC_IMPL(__imp__sub_82B8A8F8);
-PPC_FUNC(sub_82B8A8F8)
-{
-    // Permanently store the letterbox bool instead of letting the game set it to false from widescreen check.
-    bool letterbox = PPC_LOAD_U8(ctx.r4.u32);
-    __imp__sub_82B8A8F8(ctx, base);
-    PPC_STORE_U8(ctx.r3.u32, letterbox);
-}
+// PPC_FUNC_IMPL(__imp__sub_82B8A8F8);
+// PPC_FUNC(sub_82B8A8F8)
+// {
+//     // Permanently store the letterbox bool instead of letting the game set it to false from widescreen check.
+//     bool letterbox = PPC_LOAD_U8(ctx.r4.u32);
+//     __imp__sub_82B8A8F8(ctx, base);
+//     PPC_STORE_U8(ctx.r3.u32, letterbox);
+// }
 
-// SWA::Inspire::CLetterbox::Draw
-PPC_FUNC_IMPL(__imp__sub_82B8AA40);
-PPC_FUNC(sub_82B8AA40)
-{
-    bool letterbox = PPC_LOAD_U8(ctx.r3.u32);
-    bool shouldDrawLetterbox = letterbox && Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio < WIDE_ASPECT_RATIO;
+// // SWA::Inspire::CLetterbox::Draw
+// PPC_FUNC_IMPL(__imp__sub_82B8AA40);
+// PPC_FUNC(sub_82B8AA40)
+// {
+//     bool letterbox = PPC_LOAD_U8(ctx.r3.u32);
+//     bool shouldDrawLetterbox = letterbox && Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio < WIDE_ASPECT_RATIO;
 
-    PPC_STORE_U8(ctx.r3.u32, shouldDrawLetterbox);
-    if (shouldDrawLetterbox)
-    {
-        float aspectRatio = std::max(NARROW_ASPECT_RATIO, g_aspectRatio);
-        uint32_t width = aspectRatio * 720;
+//     PPC_STORE_U8(ctx.r3.u32, shouldDrawLetterbox);
+//     if (shouldDrawLetterbox)
+//     {
+//         float aspectRatio = std::max(NARROW_ASPECT_RATIO, g_aspectRatio);
+//         uint32_t width = aspectRatio * 720;
 
-        PPC_STORE_U32(ctx.r3.u32 + 0xC, width);
-        PPC_STORE_U32(ctx.r3.u32 + 0x10, 720);
-        PPC_STORE_U32(ctx.r3.u32 + 0x14, (720 - width * 9 / 16) / 2);
-    }
+//         PPC_STORE_U32(ctx.r3.u32 + 0xC, width);
+//         PPC_STORE_U32(ctx.r3.u32 + 0x10, 720);
+//         PPC_STORE_U32(ctx.r3.u32 + 0x14, (720 - width * 9 / 16) / 2);
+//     }
 
-    auto r3 = ctx.r3;
-    __imp__sub_82B8AA40(ctx, base);
+//     auto r3 = ctx.r3;
+//     __imp__sub_82B8AA40(ctx, base);
 
-    // Restore the original letterbox value.
-    PPC_STORE_U8(r3.u32, letterbox);
+//     // Restore the original letterbox value.
+//     PPC_STORE_U8(r3.u32, letterbox);
 
-    if (letterbox)
-    {
-        // Would be nice to also push this as a 2D primitive but I really cannot be bothered right now...
-        BlackBar::g_inspirePillarbox = Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio > WIDE_ASPECT_RATIO;
-    }
-}
+//     if (letterbox)
+//     {
+//         // Would be nice to also push this as a 2D primitive but I really cannot be bothered right now...
+//         BlackBar::g_inspirePillarbox = Config::CutsceneAspectRatio != ECutsceneAspectRatio::Unlocked && g_aspectRatio > WIDE_ASPECT_RATIO;
+//     }
+// }
 
 void InspireLetterboxTopMidAsmHook(PPCRegister& r3)
 {
@@ -1578,12 +1578,12 @@ void EvilHudGuideAllocMidAsmHook(PPCRegister& r3)
 }
 
 // SWA::Player::CEvilHudGuide::CEvilHudGuide
-PPC_FUNC_IMPL(__imp__sub_82448CF0);
-PPC_FUNC(sub_82448CF0)
-{
-    *reinterpret_cast<float*>(base + ctx.r3.u32 + EVIL_HUD_GUIDE_BYTE_SIZE) = 0.0f;
-    __imp__sub_82448CF0(ctx, base);
-}
+// PPC_FUNC_IMPL(__imp__sub_82448CF0);
+// PPC_FUNC(sub_82448CF0)
+// {
+//     *reinterpret_cast<float*>(base + ctx.r3.u32 + EVIL_HUD_GUIDE_BYTE_SIZE) = 0.0f;
+//     __imp__sub_82448CF0(ctx, base);
+// }
 
 void EvilHudGuideUpdateMidAsmHook(PPCRegister& r30, PPCRegister& f30)
 {
@@ -1591,64 +1591,64 @@ void EvilHudGuideUpdateMidAsmHook(PPCRegister& r30, PPCRegister& f30)
 }
 
 // SWA::Player::CEvilHudGuide::Update
-PPC_FUNC_IMPL(__imp__sub_82449088);
-PPC_FUNC(sub_82449088)
-{
-    auto r3 = ctx.r3;
-    __imp__sub_82449088(ctx, base);
+// PPC_FUNC_IMPL(__imp__sub_82449088);
+// PPC_FUNC(sub_82449088)
+// {
+//     auto r3 = ctx.r3;
+//     __imp__sub_82449088(ctx, base);
 
-    float positionX = *reinterpret_cast<float*>(base + r3.u32 + EVIL_HUD_GUIDE_BYTE_SIZE);
-    constexpr uint32_t OFFSETS[] = { 312, 320 };
+//     float positionX = *reinterpret_cast<float*>(base + r3.u32 + EVIL_HUD_GUIDE_BYTE_SIZE);
+//     constexpr uint32_t OFFSETS[] = { 312, 320 };
 
-    for (const auto offset : OFFSETS)
-    {
-        uint32_t scene = PPC_LOAD_U32(r3.u32 + offset + 0x4);
-        if (scene != NULL)
-        {
-            scene = PPC_LOAD_U32(scene + 0x4);
-            if (scene != NULL)
-            {
-                ctx.r3.u32 = scene;
-                ctx.f1.f64 = (1.5 - 0.5 * g_aspectRatioNarrowScale) * positionX;
-                ctx.f2.f64 = 0.0;
+//     for (const auto offset : OFFSETS)
+//     {
+//         uint32_t scene = PPC_LOAD_U32(r3.u32 + offset + 0x4);
+//         if (scene != NULL)
+//         {
+//             scene = PPC_LOAD_U32(scene + 0x4);
+//             if (scene != NULL)
+//             {
+//                 ctx.r3.u32 = scene;
+//                 ctx.f1.f64 = (1.5 - 0.5 * g_aspectRatioNarrowScale) * positionX;
+//                 ctx.f2.f64 = 0.0;
 
-                sub_830BB3D0(ctx, base);
-            }
-        }
-    }
-}
+//                 sub_830BB3D0(ctx, base);
+//             }
+//         }
+//     }
+// }
 
 // The shadow offseting is buggy for FCO text just like Werehog button guide,
 // making them appear thicker than they actually are.
-PPC_FUNC_IMPL(__imp__sub_82E54950);
-PPC_FUNC(sub_82E54950)
-{
-    if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
-    {
-        // Luckily, they have shadow offset scale values that are only used in this function.
-        uint32_t x = PPC_LOAD_U32(0x8332B7B8);
-        uint32_t y = PPC_LOAD_U32(0x8332B7BC);
+// PPC_FUNC_IMPL(__imp__sub_82E54950);
+// PPC_FUNC(sub_82E54950)
+// {
+//     if (Config::AspectRatio == EAspectRatio::OriginalNarrow)
+//     {
+//         // Luckily, they have shadow offset scale values that are only used in this function.
+//         uint32_t x = PPC_LOAD_U32(0x8332B7B8);
+//         uint32_t y = PPC_LOAD_U32(0x8332B7BC);
 
-        PPCRegister scaled;
+//         PPCRegister scaled;
 
-        // X
-        scaled.u32 = x;
-        scaled.f32 *= 1.5f;
-        PPC_STORE_U32(0x8332B7B8, scaled.u32);
+//         // X
+//         scaled.u32 = x;
+//         scaled.f32 *= 1.5f;
+//         PPC_STORE_U32(0x8332B7B8, scaled.u32);
 
-        // Y
-        scaled.u32 = y;
-        scaled.f32 *= 1.5f;
-        PPC_STORE_U32(0x8332B7BC, scaled.u32);
+//         // Y
+//         scaled.u32 = y;
+//         scaled.f32 *= 1.5f;
+//         PPC_STORE_U32(0x8332B7BC, scaled.u32);
 
-        __imp__sub_82E54950(ctx, base);
+//         __imp__sub_82E54950(ctx, base);
 
-        // Restore old values.
-        PPC_STORE_U32(0x8332B7B8, x);
-        PPC_STORE_U32(0x8332B7BC, y);
-    }
-    else
-    {
-        __imp__sub_82E54950(ctx, base);
-    }
-}
+//         // Restore old values.
+//         PPC_STORE_U32(0x8332B7B8, x);
+//         PPC_STORE_U32(0x8332B7BC, y);
+//     }
+//     else
+//     {
+//         __imp__sub_82E54950(ctx, base);
+//     }
+// }

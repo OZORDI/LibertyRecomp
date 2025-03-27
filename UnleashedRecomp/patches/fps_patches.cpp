@@ -119,15 +119,15 @@ bool LoadingUpdateMidAsmHook(PPCRegister& r31)
 }
 
 // ADXM_WaitVsync
-PPC_FUNC_IMPL(__imp__sub_8312DBF8);
-PPC_FUNC(sub_8312DBF8)
-{
-    auto now = std::chrono::steady_clock::now();
-    constexpr auto INTERVAL = 1000000000ns / 60;
-    auto next = now + (INTERVAL - now.time_since_epoch() % INTERVAL);
+// PPC_FUNC_IMPL(__imp__sub_8312DBF8);
+// PPC_FUNC(sub_8312DBF8)
+// {
+//     auto now = std::chrono::steady_clock::now();
+//     constexpr auto INTERVAL = 1000000000ns / 60;
+//     auto next = now + (INTERVAL - now.time_since_epoch() % INTERVAL);
 
-    std::this_thread::sleep_until(next);
-}
+//     std::this_thread::sleep_until(next);
+// }
 
 void WaitVsyncMidAsmHook()
 {
@@ -152,24 +152,24 @@ void CExStageBossCStateBattleCtorMidAsmHook(PPCRegister& r3)
 }
 
 // SWA::CExStageBoss::CStateBattle::Update
-PPC_FUNC_IMPL(__imp__sub_82B00D00);
-PPC_FUNC(sub_82B00D00)
-{
-    constexpr auto referenceDeltaTime = 1.0f / 30.0f;
-    constexpr auto deltaTimeTolerance = 0.0001f;
+// PPC_FUNC_IMPL(__imp__sub_82B00D00);
+// PPC_FUNC(sub_82B00D00)
+// {
+//     constexpr auto referenceDeltaTime = 1.0f / 30.0f;
+//     constexpr auto deltaTimeTolerance = 0.0001f;
 
-    auto pElapsedTime = (float*)(base + ctx.r3.u32 + EX_STAGE_BOSS_STATE_BATTLE_SIZE);
+//     auto pElapsedTime = (float*)(base + ctx.r3.u32 + EX_STAGE_BOSS_STATE_BATTLE_SIZE);
 
-    *pElapsedTime += std::min(App::s_deltaTime, 1.0 / 15.0);
+//     *pElapsedTime += std::min(App::s_deltaTime, 1.0 / 15.0);
 
-    if ((*pElapsedTime + deltaTimeTolerance) > referenceDeltaTime)
-    {
-        __imp__sub_82B00D00(ctx, base);
-        *pElapsedTime -= referenceDeltaTime;
-    }
+//     if ((*pElapsedTime + deltaTimeTolerance) > referenceDeltaTime)
+//     {
+//         __imp__sub_82B00D00(ctx, base);
+//         *pElapsedTime -= referenceDeltaTime;
+//     }
 
-    *pElapsedTime = std::max(*pElapsedTime, 0.0f);
-}
+//     *pElapsedTime = std::max(*pElapsedTime, 0.0f);
+// }
 
 // Fix for Egg Dragoon's drill missile attack rotating 90 degrees at HFR.
 void BossEggDragoonDrillMissileCMissileSetRotationMidAsmHook(PPCRegister& r4)

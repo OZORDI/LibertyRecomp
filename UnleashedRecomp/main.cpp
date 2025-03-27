@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <stdafx.h>
 #include <cpuid.h>
 #include <cpu/guest_thread.h>
@@ -8,6 +9,7 @@
 #include <kernel/xam.h>
 #include <kernel/io/file_system.h>
 #include <file.h>
+#include <vector>
 #include <xex.h>
 #include <apu/audio.h>
 #include <hid/hid.h>
@@ -60,9 +62,9 @@ void HostStartup()
 void KiSystemStartup()
 {
     const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
-    const auto updateContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Update");
+    // const auto updateContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Update");
     XamRegisterContent(gameContent, GAME_INSTALL_DIRECTORY "/game");
-    XamRegisterContent(updateContent, GAME_INSTALL_DIRECTORY "/update");
+    // XamRegisterContent(updateContent, GAME_INSTALL_DIRECTORY "/update");
 
     const auto saveFilePath = GetSaveFilePath(true);
     bool saveFileExists = std::filesystem::exists(saveFilePath);
@@ -88,7 +90,7 @@ void KiSystemStartup()
 
     // Mount game
     XamContentCreateEx(0, "game", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
-    XamContentCreateEx(0, "update", &updateContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
+    // XamContentCreateEx(0, "update", &updateContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
 
     // OS mounts game data to D:
     XamContentCreateEx(0, "D", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
@@ -124,13 +126,15 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
 
     auto srcData = loadResult.data() + header->headerSize;
     auto destData = reinterpret_cast<uint8_t*>(g_memory.Translate(security->loadAddress));
-
+    // printf("compression type: %hx\n", fileFormatInfo->compressionType);
     if (fileFormatInfo->compressionType == XEX_COMPRESSION_NONE)
     {
+        printf("compression type none\n");
         memcpy(destData, srcData, security->imageSize);
     }
     else if (fileFormatInfo->compressionType == XEX_COMPRESSION_BASIC)
     {
+        printf("compression type basic\n");
         auto* blocks = reinterpret_cast<const Xex2FileBasicCompressionBlock*>(fileFormatInfo + 1);
         const size_t numBlocks = (fileFormatInfo->infoSize / sizeof(Xex2FileBasicCompressionInfo)) - 1;
 
@@ -240,27 +244,27 @@ int main(int argc, char *argv[])
 
     if (Config::ShowConsole)
         os::process::ShowConsole();
-
+    LOGN_WARNING("Host Startup");
     HostStartup();
 
     std::filesystem::path modulePath;
     bool isGameInstalled = Installer::checkGameInstall(GAME_INSTALL_DIRECTORY, modulePath);
-    bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
-    if (runInstallerWizard)
-    {
-        if (!Video::CreateHostDevice(sdlVideoDriver))
-        {
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
-            std::_Exit(1);
-        }
+    bool runInstallerWizard = false;//forceInstaller || forceDLCInstaller || !isGameInstalled;
+    // if (runInstallerWizard)
+    // {
+    //     if (!Video::CreateHostDevice(sdlVideoDriver))
+    //     {
+    //         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
+    //         std::_Exit(1);
+    //     }
 
-        if (!InstallerWizard::Run(GAME_INSTALL_DIRECTORY, isGameInstalled && forceDLCInstaller))
-        {
-            std::_Exit(0);
-        }
-    }
+    //     if (!InstallerWizard::Run(GAME_INSTALL_DIRECTORY, isGameInstalled && forceDLCInstaller))
+    //     {
+    //         std::_Exit(0);
+    //     }
+    // }
 
-    ModLoader::Init();
+    // ModLoader::Init();
 
     KiSystemStartup();
 
@@ -274,8 +278,9 @@ int main(int argc, char *argv[])
             std::_Exit(1);
         }
     }
-
-    Video::StartPipelinePrecompilation();
+    LOGN_WARNING("Start Guest Thread");
+    LOGN_WARNING(modulePath.string());
+    // Video::StartPipelinePrecompilation();
 
     GuestThread::Start({ entry, 0, 0 });
 

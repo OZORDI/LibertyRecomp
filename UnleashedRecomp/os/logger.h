@@ -14,7 +14,7 @@
 #if _DEBUG
 #define LOG_UTILITY(str)       LOG_IMPL(Utility, __func__, str)
 #else
-#define LOG_UTILITY(str)
+#define LOG_UTILITY(str)       LOG_IMPL(Utility, __func__, str)
 #endif
 
 #define LOGF(str, ...)         LOGF_IMPL(None, __func__, str, __VA_ARGS__)
@@ -24,7 +24,7 @@
 #if _DEBUG
 #define LOGF_UTILITY(str, ...) LOGF_IMPL(Utility, __func__, str, __VA_ARGS__)
 #else
-#define LOGF_UTILITY(str, ...)
+#define LOGF_UTILITY(str, ...) LOGF_IMPL(Utility, __func__, str, __VA_ARGS__)
 #endif
 
 // Non-function-specific logging.
@@ -36,7 +36,7 @@
 #if _DEBUG
 #define LOGN_UTILITY(str)       LOG_IMPL(Utility, "*", str)
 #else
-#define LOGN_UTILITY(str)
+#define LOGN_UTILITY(str)       LOG_IMPL(Utility, "*", str)
 #endif
 
 #define LOGFN(str, ...)         LOGF_IMPL(None, "*", str, __VA_ARGS__)
@@ -46,7 +46,7 @@
 #if _DEBUG
 #define LOGFN_UTILITY(str, ...) LOGF_IMPL(Utility, "*", str, __VA_ARGS__)
 #else
-#define LOGFN_UTILITY(str, ...)
+#define LOGFN_UTILITY(str, ...) LOGF_IMPL(Utility, "*", str, __VA_ARGS__)
 #endif
 
 namespace os::logger

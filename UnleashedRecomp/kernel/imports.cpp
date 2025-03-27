@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <cstdio>
 #include <stdafx.h>
 #include <cpu/ppc_context.h>
 #include <cpu/guest_thread.h>
@@ -17,6 +19,8 @@
 #include <ntstatus.h>
 #endif
 
+std::vector<uint32_t> g_doNotDestroyHandles{};
+
 struct Event final : KernelObject, HostObject<XKEVENT>
 {
     bool manualReset;
@@ -34,6 +38,7 @@ struct Event final : KernelObject, HostObject<XKEVENT>
 
     uint32_t Wait(uint32_t timeout) override
     {
+        // printf("timeout is %d %x\n", timeout, timeout);
         if (timeout == 0)
         {
             if (manualReset)
@@ -48,7 +53,7 @@ struct Event final : KernelObject, HostObject<XKEVENT>
                     return STATUS_TIMEOUT;
             }
         }
-        else if (timeout == INFINITE)
+        else if (timeout == INFINITE || timeout == 30)
         {
             if (manualReset)
             {
@@ -123,7 +128,7 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 
             return STATUS_TIMEOUT;
         }
-        else if (timeout == INFINITE)
+        else if (timeout == INFINITE || timeout == 30)
         {
             uint32_t currentCount;
             while (true)
@@ -332,6 +337,7 @@ uint32_t XGetAVPack()
 
 void XamLoaderTerminateTitle()
 {
+    printf("XamLoaderTerminateTitle\n");
     LOG_UTILITY("!!! STUB !!!");
 }
 
@@ -371,6 +377,7 @@ uint32_t NtCreateFile
     uint32_t CreateOptions
 )
 {
+    printf("NtCreateFile\n");
     return 0;
 }
 
@@ -381,7 +388,10 @@ uint32_t NtClose(uint32_t handle)
 
     if (IsKernelObject(handle))
     {
-        DestroyKernelObject(handle);
+        auto it = std::find(g_doNotDestroyHandles.begin(), g_doNotDestroyHandles.end(), handle);
+        if (it == g_doNotDestroyHandles.end()) {
+            DestroyKernelObject(handle);
+        }
         return 0;
     }
     else
@@ -401,10 +411,30 @@ uint32_t FscSetCacheElementCount()
     return 0;
 }
 
+uint32_t FscGetCacheElementCount()
+{
+    return 0;
+}
+
+uint32_t XamLoaderGetLaunchDataSize()
+{
+    return 0;
+}
+
+uint32_t XamLoaderGetLaunchData()
+{
+    return 0;
+}
+
+uint32_t XamLoaderSetLaunchData()
+{
+    return 0;
+}
+
 uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
     uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    assert(timeout == 0 || timeout == INFINITE);
+    // assert(timeout == 0 || timeout == INFINITE);
 
     if (IsKernelObject(Handle))
     {
@@ -611,9 +641,20 @@ void NtReadFile()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void NtDuplicateObject()
+int NtDuplicateObject(uint32_t sourceHandle, be<uint32_t>* targetHandle, uint32_t options)
 {
-    LOG_UTILITY("!!! STUB !!!");
+    auto obj = GetKernelObject(sourceHandle);
+    // HACK: Duplicating handle doesn't supported now, so we just these handles to array to ignore of closing these handles
+    printf("NtDuplicateObject: %x %x %d, obj: %x\n", sourceHandle, targetHandle, options, obj);
+    auto it = std::find(g_doNotDestroyHandles.begin(), g_doNotDestroyHandles.end(), sourceHandle);
+    if (it == g_doNotDestroyHandles.end()) {
+        g_doNotDestroyHandles.push_back(sourceHandle);
+    }
+    if (!obj) return -1;
+    uint32_t newHandle = 0;
+    newHandle = sourceHandle;
+    *targetHandle = newHandle;
+    return 0;
 }
 
 void NtAllocateVirtualMemory()
@@ -678,6 +719,7 @@ uint32_t KeSetAffinityThread(uint32_t Thread, uint32_t Affinity, be<uint32_t>* l
 
 void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    // printf("RtlLeaveCriticalSection");
     cs->RecursionCount--;
 
     if (cs->RecursionCount != 0)
@@ -691,6 +733,7 @@ void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
     uint32_t thisThread = g_ppcContext->r13.u32;
+    // printf("RtlEnterCriticalSection %x %x %x %x\n", thisThread, cs->OwningThread, cs->LockCount, cs->RecursionCount);
     assert(thisThread != NULL);
 
     std::atomic_ref owningThread(cs->OwningThread);
@@ -705,17 +748,22 @@ void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
             return;
         }
 
+        printf("wait start\n");
         owningThread.wait(previousOwner);
+        printf("wait end\n");
+        break;
     }
 }
 
 void RtlImageXexHeaderField()
 {
+    printf("RtlImageXexHeaderField\n");
     LOG_UTILITY("!!! STUB !!!");
 }
 
 void HalReturnToFirmware()
 {
+    printf("HalReturnToFirmware\n");
     LOG_UTILITY("!!! STUB !!!");
 }
 
@@ -741,6 +789,7 @@ void RtlCompareMemoryUlong()
 
 uint32_t RtlInitializeCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    printf("RtlInitializeCriticalSection %x\n", cs);
     cs->Header.Absolute = 0;
     cs->LockCount = -1;
     cs->RecursionCount = 0;
@@ -857,9 +906,10 @@ void sprintf_x()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void ExRegisterTitleTerminateNotification()
+int32_t ExRegisterTitleTerminateNotification(uint32_t* reg, uint32_t create)
 {
-    LOG_UTILITY("!!! STUB !!!");
+    printf("ExRegisterTitleTerminateNotification: %x %d\n", reg, create);
+    return 0;
 }
 
 void VdShutdownEngines()
@@ -896,9 +946,10 @@ void VdSetGraphicsInterruptCallback()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void VdInitializeEngines()
+uint32_t VdInitializeEngines()
 {
     LOG_UTILITY("!!! STUB !!!");
+    return 1;
 }
 
 void VdIsHSIOTrainingSucceeded()
@@ -1013,7 +1064,7 @@ bool KeResetEvent(XKEVENT* pEvent)
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
     const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    assert(timeout == INFINITE);
+    // assert(timeout == INFINITE);
 
     switch (Object->Type)
     {
@@ -1059,6 +1110,7 @@ uint32_t KeTlsGetValue(uint32_t dwTlsIndex)
 
 uint32_t KeTlsSetValue(uint32_t dwTlsIndex, uint32_t lpTlsValue)
 {
+    printf("KeTlsSetValue\n");
     KeTlsGetValueRef(dwTlsIndex) = lpTlsValue;
     return TRUE;
 }
@@ -1200,6 +1252,7 @@ void XexGetModuleHandle()
 
 bool RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    printf("RtlTryEnterCriticalSection\n");
     uint32_t thisThread = g_ppcContext->r13.u32;
     assert(thisThread != NULL);
 
@@ -1218,6 +1271,7 @@ bool RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 
 void RtlInitializeCriticalSectionAndSpinCount(XRTL_CRITICAL_SECTION* cs, uint32_t spinCount)
 {
+    printf("RtlInitializeCriticalSectionAndSpinCount\n");
     cs->Header.Absolute = (spinCount + 255) >> 8;
     cs->LockCount = -1;
     cs->RecursionCount = 0;
@@ -1645,7 +1699,11 @@ GUEST_FUNCTION_HOOK(__imp__RtlInitAnsiString, RtlInitAnsiString);
 GUEST_FUNCTION_HOOK(__imp__NtCreateFile, NtCreateFile);
 GUEST_FUNCTION_HOOK(__imp__NtClose, NtClose);
 GUEST_FUNCTION_HOOK(__imp__NtSetInformationFile, NtSetInformationFile);
+GUEST_FUNCTION_HOOK(__imp__FscGetCacheElementCount, FscGetCacheElementCount);
 GUEST_FUNCTION_HOOK(__imp__FscSetCacheElementCount, FscSetCacheElementCount);
+GUEST_FUNCTION_HOOK(__imp__XamLoaderGetLaunchDataSize, XamLoaderGetLaunchDataSize);
+GUEST_FUNCTION_HOOK(__imp__XamLoaderGetLaunchData, XamLoaderGetLaunchData);
+GUEST_FUNCTION_HOOK(__imp__XamLoaderSetLaunchData, XamLoaderSetLaunchData);
 GUEST_FUNCTION_HOOK(__imp__NtWaitForSingleObjectEx, NtWaitForSingleObjectEx);
 GUEST_FUNCTION_HOOK(__imp__NtWriteFile, NtWriteFile);
 GUEST_FUNCTION_HOOK(__imp__ExGetXConfigSetting, ExGetXConfigSetting);

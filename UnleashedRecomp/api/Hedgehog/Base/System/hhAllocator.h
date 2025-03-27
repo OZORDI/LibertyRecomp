@@ -4,12 +4,13 @@
 
 inline void* __HH_ALLOC(const uint32_t in_Size)
 {
-    return GuestToHostFunction<void*>(sub_822C0988, in_Size);
+    return GuestToHostFunction<void*>(sub_8216B500, in_Size);
+    // return &in_Size;
 }
 
 inline void __HH_FREE(const void* in_pData)
 {
-    GuestToHostFunction<void>(sub_822C0270, in_pData);
+    // GuestToHostFunction<void>(sub_822C0270, in_pData);
 }
 
 namespace Hedgehog::Base

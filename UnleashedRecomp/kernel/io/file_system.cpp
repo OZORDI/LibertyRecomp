@@ -1,5 +1,6 @@
 #include "file_system.h"
 #include <cpu/guest_thread.h>
+#include <cstdio>
 #include <kernel/xam.h>
 #include <kernel/xdm.h>
 #include <kernel/function.h>
@@ -89,6 +90,7 @@ FileHandle* XCreateFileA
     uint32_t dwFlagsAndAttributes
 )
 {
+    printf("XCreateFileA %s\n", lpFileName);
     assert(((dwDesiredAccess & ~(GENERIC_READ | GENERIC_WRITE | FILE_READ_DATA)) == 0) && "Unknown desired access bits.");
     assert(((dwShareMode & ~(FILE_SHARE_READ | FILE_SHARE_WRITE)) == 0) && "Unknown share mode bits.");
     assert(((dwCreationDisposition & ~(CREATE_NEW | CREATE_ALWAYS)) == 0) && "Unknown creation disposition bits.");
@@ -123,6 +125,7 @@ FileHandle* XCreateFileA
 
 static uint32_t XGetFileSizeA(FileHandle* hFile, be<uint32_t>* lpFileSizeHigh)
 {
+    printf("XGetFileSizeA %x\n", hFile);
     std::error_code ec;
     auto fileSize = std::filesystem::file_size(hFile->path, ec);
     if (!ec)
@@ -164,6 +167,7 @@ uint32_t XReadFile
     XOVERLAPPED* lpOverlapped
 )
 {
+    printf("XReadFile %x %d\n", hFile, nNumberOfBytesToRead);
     uint32_t result = FALSE;
     if (lpOverlapped != nullptr)
     {
@@ -221,6 +225,11 @@ uint32_t XSetFilePointer(FileHandle* hFile, int32_t lDistanceToMove, be<int32_t>
         break;
     }
 
+    // if (!hFile) {
+    printf("XSetFilePointer %x %d %d %d %d\n", hFile, lDistanceToMove, distanceToMoveHigh, dwMoveMethod, streamSeekDir);
+    //     return INVALID_SET_FILE_POINTER;
+    // }
+
     hFile->stream.clear();
     hFile->stream.seekg(streamOffset, streamSeekDir);
     if (hFile->stream.bad())
@@ -231,7 +240,7 @@ uint32_t XSetFilePointer(FileHandle* hFile, int32_t lDistanceToMove, be<int32_t>
     std::streampos streamPos = hFile->stream.tellg();
     if (lpDistanceToMoveHigh != nullptr)
         *lpDistanceToMoveHigh = int32_t(streamPos >> 32U);
-
+    printf("XSetFilePointer streamPos: %d\n", streamPos);
     return uint32_t(streamPos);
 }
 
@@ -363,6 +372,9 @@ uint32_t XWriteFile(FileHandle* hFile, const void* lpBuffer, uint32_t nNumberOfB
 
 std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool checkForMods)
 {
+    // printf("ResolvePath: %s\n", path.data());
+    // printf("asdasdasd\n");
+    LOGF_IMPL(Utility, "Game", "Loading file: \"{}\"", path.data());
     if (checkForMods)
     {
         std::filesystem::path resolvedPath = ModLoader::ResolvePath(path);
@@ -404,15 +416,15 @@ std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool
     return std::u8string_view((const char8_t*)builtPath.c_str());
 }
 
-GUEST_FUNCTION_HOOK(sub_82BD4668, XCreateFileA);
-GUEST_FUNCTION_HOOK(sub_82BD4600, XGetFileSizeA);
-GUEST_FUNCTION_HOOK(sub_82BD5608, XGetFileSizeExA);
-GUEST_FUNCTION_HOOK(sub_82BD4478, XReadFile);
-GUEST_FUNCTION_HOOK(sub_831CD3E8, XSetFilePointer);
-GUEST_FUNCTION_HOOK(sub_831CE888, XSetFilePointerEx);
-GUEST_FUNCTION_HOOK(sub_831CDC58, XFindFirstFileA);
-GUEST_FUNCTION_HOOK(sub_831CDC00, XFindNextFileA);
-GUEST_FUNCTION_HOOK(sub_831CDF40, XReadFileEx);
-GUEST_FUNCTION_HOOK(sub_831CD6E8, XGetFileAttributesA);
-GUEST_FUNCTION_HOOK(sub_831CE3F8, XCreateFileA);
-GUEST_FUNCTION_HOOK(sub_82BD4860, XWriteFile);
+GUEST_FUNCTION_HOOK(sub_82537400, XCreateFileA); // replaced
+GUEST_FUNCTION_HOOK(sub_826FD090, XGetFileSizeA); // replaced
+GUEST_FUNCTION_HOOK(sub_826FDC88, XGetFileSizeExA); // replaced
+GUEST_FUNCTION_HOOK(sub_82537118, XReadFile); // replaced
+GUEST_FUNCTION_HOOK(sub_825372B8, XSetFilePointer); // replaced
+// GUEST_FUNCTION_HOOK(sub_831CE888, XSetFilePointerEx);
+GUEST_FUNCTION_HOOK(sub_826F2570, XFindFirstFileA); // replaced
+GUEST_FUNCTION_HOOK(sub_826FD2B8, XFindNextFileA); // replaced
+// GUEST_FUNCTION_HOOK(sub_831CDF40, XReadFileEx);
+GUEST_FUNCTION_HOOK(sub_826FD250, XGetFileAttributesA); // replaced
+// GUEST_FUNCTION_HOOK(sub_831CE3F8, XCreateFileA);
+GUEST_FUNCTION_HOOK(sub_826FCBD0, XWriteFile); // replaced

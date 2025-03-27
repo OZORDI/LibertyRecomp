@@ -20,7 +20,7 @@
 #endif
 
 #ifndef NDEBUG
-#   define VULKAN_VALIDATION_LAYER_ENABLED
+// #   define VULKAN_VALIDATION_LAYER_ENABLED
 //#   define VULKAN_OBJECT_NAMES_ENABLED
 #endif
 
@@ -2701,6 +2701,7 @@ namespace plume {
             srcStageMask |= toStageFlags(interfaceBuffer->barrierStages, rtEnabled);
             interfaceBuffer->barrierStages = stages;
         }
+        // return;
 
         for (uint32_t i = 0; i < textureBarriersCount; i++) {
             const RenderTextureBarrier &textureBarrier = textureBarriers[i];

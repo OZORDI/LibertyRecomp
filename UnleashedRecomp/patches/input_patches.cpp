@@ -399,56 +399,56 @@ void WorldMapHidSupportYMidAsmHook(PPCRegister& pPadState, PPCRegister& y)
 }
 
 // SWA::CWorldMapCamera::Update
-PPC_FUNC_IMPL(__imp__sub_82486968);
-PPC_FUNC(sub_82486968)
-{
-    auto pWorldMapCamera = (SWA::CWorldMapCamera*)g_memory.Translate(ctx.r3.u32);
+// PPC_FUNC_IMPL(__imp__sub_82486968);
+// PPC_FUNC(sub_82486968)
+// {
+//     auto pWorldMapCamera = (SWA::CWorldMapCamera*)g_memory.Translate(ctx.r3.u32);
 
-    // Reset vertical velocity if maximum pitch reached.
-    if (fabs(pWorldMapCamera->m_Pitch) >= 80.0f)
-        g_worldMapCursorVelocityY = 0;
+//     // Reset vertical velocity if maximum pitch reached.
+//     if (fabs(pWorldMapCamera->m_Pitch) >= 80.0f)
+//         g_worldMapCursorVelocityY = 0;
 
-    __imp__sub_82486968(ctx, base);
-}
+//     __imp__sub_82486968(ctx, base);
+// }
 
-// World Map cursor move hook.
-PPC_FUNC(sub_8256C938)
-{
-    auto pWorldMapCursor = (SWA::CWorldMapCursor*)g_memory.Translate(ctx.r3.u32);
+// // World Map cursor move hook.
+// PPC_FUNC(sub_8256C938)
+// {
+//     auto pWorldMapCursor = (SWA::CWorldMapCursor*)g_memory.Translate(ctx.r3.u32);
 
-    pWorldMapCursor->m_IsCursorMoving = g_isCursorActive && IsCursorThreshold(1.0);
+//     pWorldMapCursor->m_IsCursorMoving = g_isCursorActive && IsCursorThreshold(1.0);
 
-    if (ctx.r4.u8)
-    {
-        pWorldMapCursor->m_LeftStickVertical = 0;
-        pWorldMapCursor->m_LeftStickHorizontal = 0;
-    }
-    else if (auto pInputState = SWA::CInputState::GetInstance())
-    {
-        auto& rPadState = pInputState->GetPadState();
+//     if (ctx.r4.u8)
+//     {
+//         pWorldMapCursor->m_LeftStickVertical = 0;
+//         pWorldMapCursor->m_LeftStickHorizontal = 0;
+//     }
+//     else if (auto pInputState = SWA::CInputState::GetInstance())
+//     {
+//         auto& rPadState = pInputState->GetPadState();
 
-        pWorldMapCursor->m_LeftStickVertical = rPadState.LeftStickVertical;
-        pWorldMapCursor->m_LeftStickHorizontal = rPadState.LeftStickHorizontal;
+//         pWorldMapCursor->m_LeftStickVertical = rPadState.LeftStickVertical;
+//         pWorldMapCursor->m_LeftStickHorizontal = rPadState.LeftStickHorizontal;
 
-        if (!Config::DisableDPadAsAnalogInput)
-        {
-            if (rPadState.IsDown(SWA::eKeyState_DpadUp))
-                pWorldMapCursor->m_LeftStickVertical = 1.0f;
+//         if (!Config::DisableDPadAsAnalogInput)
+//         {
+//             if (rPadState.IsDown(SWA::eKeyState_DpadUp))
+//                 pWorldMapCursor->m_LeftStickVertical = 1.0f;
     
-            if (rPadState.IsDown(SWA::eKeyState_DpadDown))
-                pWorldMapCursor->m_LeftStickVertical = -1.0f;
+//             if (rPadState.IsDown(SWA::eKeyState_DpadDown))
+//                 pWorldMapCursor->m_LeftStickVertical = -1.0f;
     
-            if (rPadState.IsDown(SWA::eKeyState_DpadLeft))
-                pWorldMapCursor->m_LeftStickHorizontal = -1.0f;
+//             if (rPadState.IsDown(SWA::eKeyState_DpadLeft))
+//                 pWorldMapCursor->m_LeftStickHorizontal = -1.0f;
     
-            if (rPadState.IsDown(SWA::eKeyState_DpadRight))
-                pWorldMapCursor->m_LeftStickHorizontal = 1.0f;
-        }
+//             if (rPadState.IsDown(SWA::eKeyState_DpadRight))
+//                 pWorldMapCursor->m_LeftStickHorizontal = 1.0f;
+//         }
 
-        if (sqrtl((pWorldMapCursor->m_LeftStickHorizontal * pWorldMapCursor->m_LeftStickHorizontal) +
-            (pWorldMapCursor->m_LeftStickVertical * pWorldMapCursor->m_LeftStickVertical)) > WORLD_MAP_ROTATE_DEADZONE)
-        {
-            pWorldMapCursor->m_IsCursorMoving = true;
-        }
-    }
-}
+//         if (sqrtl((pWorldMapCursor->m_LeftStickHorizontal * pWorldMapCursor->m_LeftStickHorizontal) +
+//             (pWorldMapCursor->m_LeftStickVertical * pWorldMapCursor->m_LeftStickVertical)) > WORLD_MAP_ROTATE_DEADZONE)
+//         {
+//             pWorldMapCursor->m_IsCursorMoving = true;
+//         }
+//     }
+// }
