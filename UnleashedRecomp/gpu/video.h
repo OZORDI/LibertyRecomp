@@ -11,6 +11,11 @@
 #define D3DCLEAR_TARGET  0x1
 #define D3DCLEAR_ZBUFFER 0x10
 
+// TODO: remove
+#define SPEC_CONSTANT_BICUBIC_GI_FILTER (1 << 2)
+#define SPEC_CONSTANT_ALPHA_TO_COVERAGE (1 << 3)
+#define SPEC_CONSTANT_REVERSE_Z         (1 << 4)
+
 #define LOAD_ZSTD_TEXTURE(name) LoadTexture(decompressZstd(name, name##_uncompressed_size).get(), name##_uncompressed_size)
 
 using namespace plume;

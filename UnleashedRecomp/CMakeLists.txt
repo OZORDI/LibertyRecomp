@@ -317,31 +317,31 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_compile_definitions(UnleashedRecomp PRIVATE SDL_VULKAN_ENABLED)
 endif()
 
-find_package(directx-dxc REQUIRED)
+#find_package(directx-dxc REQUIRED)
 find_package(CURL REQUIRED)
 
-if (UNLEASHED_RECOMP_D3D12)
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/D3D12)
-    add_custom_command(TARGET UnleashedRecomp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Core,IMPORTED_LOCATION_RELEASE> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Layers,IMPORTED_LOCATION_DEBUG> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
-       COMMAND_EXPAND_LISTS
-    )
-    
-    find_file(DIRECTX_DXIL_LIBRARY "dxil.dll")
-    file(COPY ${DIRECTX_DXIL_LIBRARY} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+#if (UNLEASHED_RECOMP_D3D12)
+#    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/D3D12)
+#    add_custom_command(TARGET UnleashedRecomp POST_BUILD
+#        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Core,IMPORTED_LOCATION_RELEASE> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
+#        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Layers,IMPORTED_LOCATION_DEBUG> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
+#       COMMAND_EXPAND_LISTS
+#    )
+#    
+#    find_file(DIRECTX_DXIL_LIBRARY "dxil.dll")
+#    file(COPY ${DIRECTX_DXIL_LIBRARY} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+#
+#    target_link_libraries(UnleashedRecomp PRIVATE
+#        Microsoft::DirectX-Headers 
+#        Microsoft::DirectX-Guids 
+#        Microsoft::DirectX12-Agility
+#        Microsoft::DirectXShaderCompiler
+#        Microsoft::DXIL
+#        dxgi
+#    )
+#endif()
 
-    target_link_libraries(UnleashedRecomp PRIVATE
-        Microsoft::DirectX-Headers 
-        Microsoft::DirectX-Guids 
-        Microsoft::DirectX12-Agility
-        Microsoft::DirectXShaderCompiler
-        Microsoft::DXIL
-        dxgi
-    )
-endif()
-
-file(CHMOD ${DIRECTX_DXC_TOOL} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+#file(CHMOD ${DIRECTX_DXC_TOOL} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 
 if (WIN32)
     target_link_libraries(UnleashedRecomp PRIVATE
