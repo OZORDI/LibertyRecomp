@@ -110,7 +110,7 @@ uint32_t XAllocMem(uint32_t size, uint32_t flags)
         g_userHeap.AllocPhysical(size, (1ull << ((flags >> 24) & 0xF))) :
         g_userHeap.Alloc(size);
 
-    printf("XAllocMem %x\n", ptr);
+    // printf("XAllocMem %x (size: %x)\n", ptr, size);
     if ((flags & 0x40000000) != 0)
         memset(ptr, 0, size);
 
@@ -120,10 +120,31 @@ uint32_t XAllocMem(uint32_t size, uint32_t flags)
 
 void XFreeMem(uint32_t baseAddress, uint32_t flags)
 {
-    printf("XFreeMem %x\n", baseAddress);
-    if (baseAddress != NULL && baseAddress != 0x1000000)
+    // printf("XFreeMem %x\n", baseAddress);
+    if (baseAddress != NULL)
+    {
         g_userHeap.Free(g_memory.Translate(baseAddress));
+    }
+    else
+    {
+        printf("XFreeMem baseAddress is null %x\n", baseAddress);
+        // __builtin_trap();
+    }
 }
+
+uint32_t XVirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect)
+{
+    if (lpAddress != nullptr)
+    {
+        printf("XVirtualAlloc lpAddress is not null %p\n", lpAddress);
+        return 0;
+    }
+    uint32_t addr = g_memory.MapVirtual(g_userHeap.Alloc(dwSize));
+    printf("XVirtualAlloc %x\n", addr);
+    return addr;
+}
+
+GUEST_FUNCTION_HOOK(sub_82915668, XVirtualAlloc); // repalced
 
 GUEST_FUNCTION_STUB(sub_82535588); // HeapCreate // replaced
 // GUEST_FUNCTION_STUB(sub_82BD9250); // HeapDestroy

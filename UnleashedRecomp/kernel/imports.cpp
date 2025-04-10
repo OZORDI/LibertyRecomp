@@ -53,7 +53,7 @@ struct Event final : KernelObject, HostObject<XKEVENT>
                     return STATUS_TIMEOUT;
             }
         }
-        else if (timeout == INFINITE || timeout == 30)
+        else if (timeout == INFINITE)
         {
             if (manualReset)
             {
@@ -128,7 +128,7 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 
             return STATUS_TIMEOUT;
         }
-        else if (timeout == INFINITE || timeout == 30)
+        else if (timeout == INFINITE)
         {
             uint32_t currentCount;
             while (true)
@@ -434,7 +434,7 @@ uint32_t XamLoaderSetLaunchData()
 uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
     uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    // assert(timeout == 0 || timeout == INFINITE);
+    assert(timeout == 0 || timeout == INFINITE);
 
     if (IsKernelObject(Handle))
     {
@@ -556,9 +556,11 @@ void __C_specific_handler_x()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void RtlNtStatusToDosError()
+void RtlNtStatusToDosError(int Status)
 {
     LOG_UTILITY("!!! STUB !!!");
+    printf("RtlNtStatusToDosError: %x\n", Status);
+    // __builtin_trap();
 }
 
 void XexGetProcedureAddress()
@@ -659,6 +661,7 @@ int NtDuplicateObject(uint32_t sourceHandle, be<uint32_t>* targetHandle, uint32_
 
 void NtAllocateVirtualMemory()
 {
+    __builtin_trap();
     LOG_UTILITY("!!! STUB !!!");
 }
 
@@ -1064,7 +1067,7 @@ bool KeResetEvent(XKEVENT* pEvent)
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
     const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    // assert(timeout == INFINITE);
+    assert(timeout == INFINITE);
 
     switch (Object->Type)
     {
@@ -1470,13 +1473,12 @@ void ExTerminateThread()
 
 uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* threadId, uint32_t xApiThreadStartup, uint32_t startAddress, uint32_t startContext, uint32_t creationFlags)
 {
-    LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}",
-        (intptr_t)handle, stackSize, (intptr_t)threadId, xApiThreadStartup, startAddress, startContext, creationFlags);
 
     uint32_t hostThreadId;
 
     *handle = GetKernelHandle(GuestThread::Start({ startAddress, startContext, creationFlags }, &hostThreadId));
-
+    LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X} {:X}",
+        (intptr_t)handle, stackSize, (intptr_t)threadId, xApiThreadStartup, startAddress, startContext, creationFlags, hostThreadId);
     if (threadId != nullptr)
         *threadId = hostThreadId;
 
@@ -1666,6 +1668,16 @@ void XMACreateContext()
 //     return 0;
 // }
 
+void XapiInitProcess()
+{
+    printf("XapiInitProcess Invoked\n");
+
+    int *XapiProcessHeap = (int *)g_memory.Translate(0x82D57540);
+
+    *XapiProcessHeap = 1;
+}
+
+GUEST_FUNCTION_HOOK(sub_825383D8, XapiInitProcess)
 GUEST_FUNCTION_HOOK(__imp__XGetVideoMode, VdQueryVideoMode); // XGetVideoMode
 GUEST_FUNCTION_HOOK(__imp__XNotifyGetNext, XNotifyGetNext);
 GUEST_FUNCTION_HOOK(__imp__XGetGameRegion, XGetGameRegion);

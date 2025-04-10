@@ -11,7 +11,7 @@ else()
 endif()
 
 target_compile_definitions(XenonRecomp PRIVATE 
-    XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/SWA.toml\"
+    XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/Marathon.toml\"
     XENON_RECOMP_HEADER_FILE_PATH=\"${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/ppc_context.h\")
 
 set(UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES 
@@ -27,14 +27,12 @@ endforeach()
 
 add_custom_command(
     OUTPUT 
-        "${CMAKE_CURRENT_SOURCE_DIR}/private/default_patched.xex"
         ${UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES}
     COMMAND 
         $<TARGET_FILE:XenonRecomp>
     DEPENDS 
         "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xex"
-        # "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xexp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/SWA.toml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/Marathon.toml"
 )
 
 add_custom_command(
@@ -60,17 +58,16 @@ file(GLOB XENOS_RECOMP_SOURCES
     "${XENOS_RECOMP_ROOT}/*.cpp"
 )
 
-add_custom_command(
-    OUTPUT 
-        "${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp"
-    COMMAND
-        $<TARGET_FILE:XenosRecomp>
-    DEPENDS 
-        "${CMAKE_CURRENT_SOURCE_DIR}/private/default_patched.xex"
-        "${CMAKE_CURRENT_SOURCE_DIR}/private/shader_decompressed.ar" 
-        ${XENOS_RECOMP_SOURCES} 
-        ${XENOS_RECOMP_INCLUDE}
-)
+#add_custom_command(
+#    OUTPUT 
+#        "${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp"
+#    COMMAND
+#        $<TARGET_FILE:XenosRecomp>
+#    DEPENDS 
+#        "${CMAKE_CURRENT_SOURCE_DIR}/private/shader_decompressed.ar" 
+#        ${XENOS_RECOMP_SOURCES} 
+#        ${XENOS_RECOMP_INCLUDE}
+#)
 
 add_library(UnleashedRecompLib 
     ${UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES}

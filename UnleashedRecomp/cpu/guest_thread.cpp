@@ -19,7 +19,7 @@ GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
     assert(thread == nullptr);
 
     thread = (uint8_t*)g_userHeap.Alloc(TOTAL_SIZE);
-    printf("TOTAL_SIZE: %x %x %d\n", thread, TOTAL_SIZE, TOTAL_SIZE);
+    // printf("TOTAL_SIZE: %x %x %d\n", thread, TOTAL_SIZE, TOTAL_SIZE);
     memset(thread, 0, TOTAL_SIZE);
 
     *(uint32_t*)thread = ByteSwap(g_memory.MapVirtual(thread + PCR_SIZE)); // tls pointer
@@ -61,7 +61,7 @@ GuestThreadHandle::~GuestThreadHandle()
 
 uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 {
-    // assert(timeout == INFINITE);
+    assert(timeout == INFINITE);
 
     if (thread.joinable())
         thread.join();

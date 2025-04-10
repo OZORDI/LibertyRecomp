@@ -287,7 +287,7 @@ const char* GameWindow::GetTitle()
             : "SONIC UNLEASHED";
     }
 
-    return "Unleashed Recompiled";
+    return "Marathon Recompiled";
 }
 
 void GameWindow::SetTitle(const char* title)

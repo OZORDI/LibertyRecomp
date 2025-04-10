@@ -8,6 +8,8 @@
 #include <app.h>
 #include <bc_diff.h>
 #include <cpu/guest_thread.h>
+#include <cstdint>
+#include <cstdio>
 #include <decompressor.h>
 #include <kernel/function.h>
 #include <kernel/heap.h>
@@ -674,8 +676,9 @@ static void DestructTempResources()
         {
             const auto texture = reinterpret_cast<GuestTexture*>(resource);
 
-            if (texture->mappedMemory != nullptr)
+            if (texture->mappedMemory != nullptr) {
                 g_userHeap.Free(texture->mappedMemory);
+            }
 
             g_textureDescriptorAllocator.free(texture->descriptorIndex);
 
@@ -1007,6 +1010,7 @@ static void SetRenderState(GuestDevice* device, uint32_t value)
 
 static void SetRenderStateUnimplemented(GuestDevice* device, uint32_t value)
 {
+    LOGF_WARNING("{:x}\n", value);
 }
 
 static void SetAlphaTestMode(bool enable)
@@ -1950,7 +1954,6 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver)
     g_gammaCorrectionPipeline = g_device->createGraphicsPipeline(desc);
 
     g_backBuffer = g_userHeap.AllocPhysical<GuestSurface>(ResourceType::RenderTarget);
-    printf("g_backBuffer: %x\n", g_backBuffer);
     g_backBuffer->width = 1280;
     g_backBuffer->height = 720;
     g_backBuffer->format = BACKBUFFER_FORMAT;
@@ -1996,7 +1999,7 @@ void Video::WaitForGPU()
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
-    printf("CreateDevice call %d %d %d %d %d %x\n", a1, a2, a3, a4, a5, a6);
+    LOGF_WARNING("{:p} {:p} {:p} {:p} {:p} {:p}\n", reinterpret_cast<void*>(a1), reinterpret_cast<void*>(a2), reinterpret_cast<void*>(a3), reinterpret_cast<void*>(a4), reinterpret_cast<void*>(a5), reinterpret_cast<void*>(a6));
     g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture *>();
 
     // for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
@@ -2026,15 +2029,14 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
         device->setRenderStateFunctions[state / 4] = functionOffset;
     }
 
-    // for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
-    //     device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x8330F3DC + i * 0xC));
+    for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
+        device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x82B79CF8 + i * 0xC));
 
     device->viewport.width = 1280.0f;
     device->viewport.height = 720.0f;
     device->viewport.maxZ = 1.0f;
 
     *a6 = g_memory.MapVirtual(device);
-    // printf("CreateDevice call end %x\n", a6);
 
     return 0;
 }
@@ -2209,6 +2211,10 @@ static void GetIndexBufferDesc(GuestBuffer* buffer, GuestBufferDesc* desc)
 
 static void GetSurfaceDesc(GuestSurface* surface, GuestSurfaceDesc* desc) 
 {
+    if (surface->width == 0 && surface->height == 0) {
+        LOGF_WARNING("{:p} {:d} {:d} \n", reinterpret_cast<void*>(desc), surface->width, surface->height);
+        __builtin_trap();
+    }
     desc->width = surface->width;
     desc->height = surface->height;
 }
@@ -2879,9 +2885,14 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 
 static GuestSurface* GetBackBuffer() 
 {
-    printf("GetBackBuffer\n");
     g_backBuffer->AddRef();
     return g_backBuffer;
+}
+
+static GuestSurface* GetDepthStencil() 
+{
+    g_depthStencil->AddRef();
+    return g_depthStencil;
 }
 
 void Video::ComputeViewportDimensions()
@@ -2965,10 +2976,10 @@ static RenderFormat ConvertFormat(uint32_t format)
         return RenderFormat::R8_UNORM;
     case D3DFMT_DXT1:
         return RenderFormat::BC1_UNORM;
-    case D3DFMT_DXT5:
+    case D3DFMT_DXT4:
         return RenderFormat::BC3_UNORM;
     default:
-        printf("RenderFormat: %x\n", format);
+        LOGF_WARNING("{:x}\n", format);
         assert(false && "Unknown format");
         return RenderFormat::R16G16B16A16_FLOAT;
     }
@@ -3030,7 +3041,7 @@ static GuestTexture* CreateTexture(uint32_t width, uint32_t height, uint32_t dep
 #ifdef _DEBUG 
     texture->texture->setName(fmt::format("Texture {:X}", g_memory.MapVirtual(texture)));
 #endif
-
+    // printf("CreateTexture: w: %d, h: %d, depth: %d, levels: %d, usage: %d, format: %d, pool: %d, type: %d - %x\n", width, height, depth, levels, usage, format, pool, type, texture);
     return texture;
 }
 
@@ -3060,6 +3071,7 @@ static GuestBuffer* CreateIndexBuffer(uint32_t length, uint32_t, uint32_t format
 
 static GuestSurface* CreateSurface(uint32_t width, uint32_t height, uint32_t format, uint32_t multiSample) 
 {
+    // printf("CreateSurface: w: %d, h: %d, f: %d, ms: %d\n", width, height, format, multiSample);
     RenderTextureDesc desc;
     desc.dimension = RenderTextureDimension::TEXTURE_2D;
     desc.width = width;
@@ -3131,6 +3143,7 @@ static void FlushViewport()
 
 static void StretchRect(GuestDevice* device, uint32_t flags, uint32_t, GuestTexture* texture)
 {
+    // printf("StretchRect %x\n", texture);
     RenderCommand cmd;
     cmd.type = RenderCommandType::StretchRect;
     cmd.stretchRect.flags = flags;
@@ -3143,38 +3156,39 @@ static void SetSurface(uint32_t index, GuestSurface* surface);
 
 static void ProcStretchRect(const RenderCommand& cmd)
 {
-    // const auto& args = cmd.stretchRect;
+    const auto& args = cmd.stretchRect;
 
-    // const bool isDepthStencil = (args.flags & 0x4) != 0;
-    // const auto surface = isDepthStencil ? g_depthStencil : g_renderTarget;
+    const bool isDepthStencil = (args.flags & 0x4) != 0;
+    const auto surface = isDepthStencil ? g_depthStencil : g_renderTarget;
 
-    // // Erase previous pending command so it doesn't cause the texture to be overriden.
-    // if (args.texture->sourceSurface != nullptr)
-    //     args.texture->sourceSurface->destinationTextures.erase(args.texture);
+    // Erase previous pending command so it doesn't cause the texture to be overriden.
+    if (args.texture->sourceSurface != nullptr)
+        args.texture->sourceSurface->destinationTextures.erase(args.texture);
 
-    // args.texture->sourceSurface = surface;
-    // surface->destinationTextures.emplace(args.texture);
+    args.texture->sourceSurface = surface;
+    // printf("ProcStretchRect: surface - %x %x ? (%x : %x)\n", surface, isDepthStencil, g_depthStencil, g_renderTarget);
+    surface->destinationTextures.emplace(args.texture);
 
-    // // If the texture is assigned to any slots, set it again. This'll also push the barrier.
-    // for (uint32_t i = 0; i < std::size(g_textures); i++)
-    // {
-    //     if (g_textures[i] == args.texture)
-    //     {
-    //         // Set the original texture for MSAA textures as they always get resolved.
-    //         if (surface->sampleCount != RenderSampleCount::COUNT_1)
-    //         {
-    //             SetTextureInRenderThread(i, args.texture);
-    //             g_pendingMsaaResolves.emplace(surface);
-    //         }
-    //         else
-    //         {
-    //             SetSurface(i, surface);
-    //         }
-    //     }
-    // }
+    // If the texture is assigned to any slots, set it again. This'll also push the barrier.
+    for (uint32_t i = 0; i < std::size(g_textures); i++)
+    {
+        if (g_textures[i] == args.texture)
+        {
+            // Set the original texture for MSAA textures as they always get resolved.
+            if (surface->sampleCount != RenderSampleCount::COUNT_1)
+            {
+                SetTextureInRenderThread(i, args.texture);
+                g_pendingMsaaResolves.emplace(surface);
+            }
+            else
+            {
+                SetSurface(i, surface);
+            }
+        }
+    }
 
-    // // Remember to clear later.
-    // g_pendingSurfaceCopies.emplace(surface);
+    // Remember to clear later.
+    g_pendingSurfaceCopies.emplace(surface);
 }
 
 static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
@@ -3202,19 +3216,21 @@ static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
 
 static void SetRenderTarget(GuestDevice* device, uint32_t index, GuestSurface* renderTarget) 
 {
-    printf("SetRenderTarget\n");
-    RenderCommand cmd;
-    cmd.type = RenderCommandType::SetRenderTarget;
-    cmd.setRenderTarget.renderTarget = renderTarget;
-    g_renderQueue.enqueue(cmd);
+    // printf("SetRenderTarget %x %d %x\n", device, index, renderTarget);
+    if (renderTarget != nullptr)
+    {
+        RenderCommand cmd;
+        cmd.type = RenderCommandType::SetRenderTarget;
+        cmd.setRenderTarget.renderTarget = renderTarget;
+        g_renderQueue.enqueue(cmd);
 
-    SetDefaultViewport(device, renderTarget);
+        SetDefaultViewport(device, renderTarget);
+    }
 }
 
 static void ProcSetRenderTarget(const RenderCommand& cmd)
 {
     const auto& args = cmd.setRenderTarget;
-
     SetDirtyValue(g_dirtyStates.renderTargetAndDepthStencil, g_renderTarget, args.renderTarget);
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.renderTargetFormat, args.renderTarget != nullptr ? args.renderTarget->format : RenderFormat::UNKNOWN);
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.sampleCount, args.renderTarget != nullptr ? args.renderTarget->sampleCount : RenderSampleCount::COUNT_1);
@@ -3225,6 +3241,7 @@ static void ProcSetRenderTarget(const RenderCommand& cmd)
 
 static void SetDepthStencilSurface(GuestDevice* device, GuestSurface* depthStencil) 
 {
+    // printf("SetDepthStencilSurface: %x\n", depthStencil);
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetDepthStencilSurface;
     cmd.setDepthStencilSurface.depthStencil = depthStencil;
@@ -3296,148 +3313,148 @@ static void ExecutePendingStretchRectCommands(GuestSurface* renderTarget, GuestS
         {
             const bool multiSampling = surface->sampleCount != RenderSampleCount::COUNT_1;
 
-            // for (const auto texture : surface->destinationTextures)
-            // {
-            //     bool shaderResolve = true;
+            for (const auto texture : surface->destinationTextures)
+            {
+                bool shaderResolve = true;
 
-            //     if (multiSampling && g_hardwareResolve)
-            //     {
-            //         bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
+                if (multiSampling && g_hardwareResolve)
+                {
+                    bool hardwareDepthResolveAvailable = g_hardwareDepthResolve && !g_vulkan && g_capabilities.sampleLocations;
 
-            //         if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
-            //         {
-            //             if (surface->format == RenderFormat::D32_FLOAT)
-            //                 commandList->resolveTextureRegion(texture->texture, 0, 0, surface->texture, nullptr, RenderResolveMode::MIN);
-            //             else
-            //                 commandList->resolveTexture(texture->texture, surface->texture);
+                    if (surface->format != RenderFormat::D32_FLOAT || hardwareDepthResolveAvailable)
+                    {
+                        if (surface->format == RenderFormat::D32_FLOAT)
+                            commandList->resolveTextureRegion(texture->texture, 0, 0, surface->texture, nullptr, RenderResolveMode::MIN);
+                        else
+                            commandList->resolveTexture(texture->texture, surface->texture);
 
-            //             shaderResolve = false;
-            //         }
-            //     }
+                        shaderResolve = false;
+                    }
+                }
 
-            //     if (shaderResolve)
-            //     {
-            //         RenderPipeline* pipeline = nullptr;
+                if (shaderResolve)
+                {
+                    RenderPipeline* pipeline = nullptr;
 
-            //         if (multiSampling)
-            //         {
-            //             uint32_t pipelineIndex = 0;
+                    if (multiSampling)
+                    {
+                        uint32_t pipelineIndex = 0;
 
-            //             switch (surface->sampleCount)
-            //             {
-            //             case RenderSampleCount::COUNT_2:
-            //                 pipelineIndex = 0;
-            //                 break;
-            //             case RenderSampleCount::COUNT_4:
-            //                 pipelineIndex = 1;
-            //                 break;
-            //             case RenderSampleCount::COUNT_8:
-            //                 pipelineIndex = 2;
-            //                 break;
-            //             default:
-            //                 assert(false && "Unsupported MSAA sample count");
-            //                 break;
-            //             }
+                        switch (surface->sampleCount)
+                        {
+                        case RenderSampleCount::COUNT_2:
+                            pipelineIndex = 0;
+                            break;
+                        case RenderSampleCount::COUNT_4:
+                            pipelineIndex = 1;
+                            break;
+                        case RenderSampleCount::COUNT_8:
+                            pipelineIndex = 2;
+                            break;
+                        default:
+                            assert(false && "Unsupported MSAA sample count");
+                            break;
+                        }
 
-            //             if (texture->format == RenderFormat::D32_FLOAT)
-            //             {
-            //                 pipeline = g_resolveMsaaDepthPipelines[pipelineIndex].get();
-            //             }
-            //             else
-            //             {
-            //                 auto& resolveMsaaColorPipeline = g_resolveMsaaColorPipelines[surface->format][pipelineIndex];
-            //                 if (resolveMsaaColorPipeline == nullptr)
-            //                 {
-            //                     RenderGraphicsPipelineDesc desc;
-            //                     desc.pipelineLayout = g_pipelineLayout.get();
-            //                     desc.vertexShader = g_copyShader.get();
-            //                     desc.pixelShader = g_resolveMsaaColorShaders[pipelineIndex].get();
-            //                     desc.renderTargetFormat[0] = texture->format;
-            //                     desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
-            //                     desc.renderTargetCount = 1;
-            //                     resolveMsaaColorPipeline = g_device->createGraphicsPipeline(desc);
-            //                 }
+                        if (texture->format == RenderFormat::D32_FLOAT)
+                        {
+                            pipeline = g_resolveMsaaDepthPipelines[pipelineIndex].get();
+                        }
+                        else
+                        {
+                            auto& resolveMsaaColorPipeline = g_resolveMsaaColorPipelines[surface->format][pipelineIndex];
+                            if (resolveMsaaColorPipeline == nullptr)
+                            {
+                                RenderGraphicsPipelineDesc desc;
+                                desc.pipelineLayout = g_pipelineLayout.get();
+                                desc.vertexShader = g_copyShader.get();
+                                desc.pixelShader = g_resolveMsaaColorShaders[pipelineIndex].get();
+                                desc.renderTargetFormat[0] = texture->format;
+                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+                                desc.renderTargetCount = 1;
+                                resolveMsaaColorPipeline = g_device->createGraphicsPipeline(desc);
+                            }
 
-            //                 pipeline = resolveMsaaColorPipeline.get();
-            //             }
-            //         }
-            //         else
-            //         {
-            //             if (texture->format == RenderFormat::D32_FLOAT)
-            //             {
-            //                 pipeline = g_copyDepthPipeline.get();
-            //             }
-            //             else
-            //             {
-            //                 auto& copyColorPipeline = g_copyColorPipelines[surface->format];
-            //                 if (copyColorPipeline == nullptr)
-            //                 {
-            //                     RenderGraphicsPipelineDesc desc;
-            //                     desc.pipelineLayout = g_pipelineLayout.get();
-            //                     desc.vertexShader = g_copyShader.get();
-            //                     desc.pixelShader = g_copyColorShader.get();
-            //                     desc.renderTargetFormat[0] = texture->format;
-            //                     desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
-            //                     desc.renderTargetCount = 1;
-            //                     copyColorPipeline = g_device->createGraphicsPipeline(desc);
-            //                 }
+                            pipeline = resolveMsaaColorPipeline.get();
+                        }
+                    }
+                    else
+                    {
+                        if (texture->format == RenderFormat::D32_FLOAT)
+                        {
+                            pipeline = g_copyDepthPipeline.get();
+                        }
+                        else
+                        {
+                            auto& copyColorPipeline = g_copyColorPipelines[surface->format];
+                            if (copyColorPipeline == nullptr)
+                            {
+                                RenderGraphicsPipelineDesc desc;
+                                desc.pipelineLayout = g_pipelineLayout.get();
+                                desc.vertexShader = g_copyShader.get();
+                                desc.pixelShader = g_copyColorShader.get();
+                                desc.renderTargetFormat[0] = texture->format;
+                                desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+                                desc.renderTargetCount = 1;
+                                copyColorPipeline = g_device->createGraphicsPipeline(desc);
+                            }
 
-            //                 pipeline = copyColorPipeline.get();
-            //             }
-            //         }
+                            pipeline = copyColorPipeline.get();
+                        }
+                    }
 
-            //         if (texture->framebuffer == nullptr)
-            //         {
-            //             if (texture->format == RenderFormat::D32_FLOAT)
-            //             {
-            //                 RenderFramebufferDesc desc;
-            //                 desc.depthAttachment = texture->texture;
-            //                 texture->framebuffer = g_device->createFramebuffer(desc);
-            //             }
-            //             else
-            //             {
-            //                 RenderFramebufferDesc desc;
-            //                 desc.colorAttachments = const_cast<const RenderTexture**>(&texture->texture);
-            //                 desc.colorAttachmentsCount = 1;
-            //                 texture->framebuffer = g_device->createFramebuffer(desc);
-            //             }
-            //         }
+                    if (texture->framebuffer == nullptr)
+                    {
+                        if (texture->format == RenderFormat::D32_FLOAT)
+                        {
+                            RenderFramebufferDesc desc;
+                            desc.depthAttachment = texture->texture;
+                            texture->framebuffer = g_device->createFramebuffer(desc);
+                        }
+                        else
+                        {
+                            RenderFramebufferDesc desc;
+                            desc.colorAttachments = const_cast<const RenderTexture**>(&texture->texture);
+                            desc.colorAttachmentsCount = 1;
+                            texture->framebuffer = g_device->createFramebuffer(desc);
+                        }
+                    }
 
-            //         if (g_framebuffer != texture->framebuffer.get())
-            //         {
-            //             commandList->setFramebuffer(texture->framebuffer.get());
-            //             g_framebuffer = texture->framebuffer.get();
-            //         }
+                    if (g_framebuffer != texture->framebuffer.get())
+                    {
+                        commandList->setFramebuffer(texture->framebuffer.get());
+                        g_framebuffer = texture->framebuffer.get();
+                    }
 
-            //         commandList->setPipeline(pipeline);
-            //         commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
-            //         commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
-            //         commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
-            //         commandList->drawInstanced(6, 1, 0, 0);
+                    commandList->setPipeline(pipeline);
+                    commandList->setViewports(RenderViewport(0.0f, 0.0f, float(texture->width), float(texture->height), 0.0f, 1.0f));
+                    commandList->setScissors(RenderRect(0, 0, texture->width, texture->height));
+                    commandList->setGraphicsPushConstants(0, &surface->descriptorIndex, 0, sizeof(uint32_t));
+                    commandList->drawInstanced(6, 1, 0, 0);
 
-            //         g_dirtyStates.renderTargetAndDepthStencil = true;
-            //         g_dirtyStates.viewport = true;
-            //         g_dirtyStates.pipelineState = true;
-            //         g_dirtyStates.scissorRect = true;
+                    g_dirtyStates.renderTargetAndDepthStencil = true;
+                    g_dirtyStates.viewport = true;
+                    g_dirtyStates.pipelineState = true;
+                    g_dirtyStates.scissorRect = true;
 
-            //         if (g_vulkan)
-            //         {
-            //             g_dirtyStates.vertexShaderConstants = true; // The push constant call invalidates vertex shader constants.
-            //             g_dirtyStates.depthBias = true; // Static depth bias in copy pipeline invalidates dynamic depth bias.
-            //         }
-            //     }
+                    if (g_vulkan)
+                    {
+                        g_dirtyStates.vertexShaderConstants = true; // The push constant call invalidates vertex shader constants.
+                        g_dirtyStates.depthBias = true; // Static depth bias in copy pipeline invalidates dynamic depth bias.
+                    }
+                }
 
-            //     texture->sourceSurface = nullptr;
+                texture->sourceSurface = nullptr;
 
-            //     // Check if any texture slots had this texture assigned, and make it point back at the original texture.
-            //     for (uint32_t i = 0; i < std::size(g_textures); i++)
-            //     {
-            //         if (g_textures[i] == texture)
-            //             SetTextureInRenderThread(i, texture);
-            //     }
-            // }
+                // Check if any texture slots had this texture assigned, and make it point back at the original texture.
+                for (uint32_t i = 0; i < std::size(g_textures); i++)
+                {
+                    if (g_textures[i] == texture)
+                        SetTextureInRenderThread(i, texture);
+                }
+            }
 
-            // surface->destinationTextures.clear();
+            surface->destinationTextures.clear();
         }
     }
 }
@@ -3475,63 +3492,64 @@ static void ProcExecutePendingStretchRectCommands(const RenderCommand& cmd)
 
 static void SetFramebuffer(GuestSurface* renderTarget, GuestSurface* depthStencil, bool settingForClear)
 {
-    // if (settingForClear || g_dirtyStates.renderTargetAndDepthStencil)
-    // {
-    //     GuestSurface* framebufferContainer = nullptr;
-    //     RenderTexture* framebufferKey = nullptr;
+    if (settingForClear || g_dirtyStates.renderTargetAndDepthStencil)
+    {
+        // printf("SetFramebuffer %x %x\n", renderTarget, depthStencil);
+        GuestSurface* framebufferContainer = nullptr;
+        RenderTexture* framebufferKey = nullptr;
 
-    //     if (renderTarget != nullptr && depthStencil != nullptr)
-    //     {
-    //         framebufferContainer = depthStencil; // Backbuffer texture changes per frame so we can't use the depth stencil as the key.
-    //         framebufferKey = renderTarget->texture;
-    //     }
-    //     else if (renderTarget != nullptr && depthStencil == nullptr)
-    //     {
-    //         framebufferContainer = renderTarget;
-    //         framebufferKey = renderTarget->texture; // Backbuffer texture changes per frame so we can't assume nullptr for it.
-    //     }
-    //     else if (renderTarget == nullptr && depthStencil != nullptr)
-    //     {
-    //         framebufferContainer = depthStencil;
-    //         framebufferKey = nullptr;
-    //     }
+        if (renderTarget != nullptr && depthStencil != nullptr)
+        {
+            framebufferContainer = depthStencil; // Backbuffer texture changes per frame so we can't use the depth stencil as the key.
+            framebufferKey = renderTarget->texture;
+        }
+        else if (renderTarget != nullptr && depthStencil == nullptr)
+        {
+            framebufferContainer = renderTarget;
+            framebufferKey = renderTarget->texture; // Backbuffer texture changes per frame so we can't assume nullptr for it.
+        }
+        else if (renderTarget == nullptr && depthStencil != nullptr)
+        {
+            framebufferContainer = depthStencil;
+            framebufferKey = nullptr;
+        }
 
-    //     auto& commandList = g_commandLists[g_frame];
+        auto& commandList = g_commandLists[g_frame];
 
-    //     if (framebufferContainer != nullptr)
-    //     {
-    //         auto& framebuffer = framebufferContainer->framebuffers[framebufferKey];
+        if (framebufferContainer != nullptr)
+        {
+            auto& framebuffer = framebufferContainer->framebuffers[framebufferKey];
 
-    //         if (framebuffer == nullptr)
-    //         {
-    //             RenderFramebufferDesc desc;
+            if (framebuffer == nullptr)
+            {
+                RenderFramebufferDesc desc;
 
-    //             if (renderTarget != nullptr)
-    //             {
-    //                 desc.colorAttachments = const_cast<const RenderTexture**>(&renderTarget->texture);
-    //                 desc.colorAttachmentsCount = 1;
-    //             }
+                if (renderTarget != nullptr)
+                {
+                    desc.colorAttachments = const_cast<const RenderTexture**>(&renderTarget->texture);
+                    desc.colorAttachmentsCount = 1;
+                }
 
-    //             if (depthStencil != nullptr)
-    //                 desc.depthAttachment = depthStencil->texture;
+                if (depthStencil != nullptr)
+                    desc.depthAttachment = depthStencil->texture;
 
-    //             framebuffer = g_device->createFramebuffer(desc);
-    //         }
+                framebuffer = g_device->createFramebuffer(desc);
+            }
 
-    //         if (g_framebuffer != framebuffer.get())
-    //         {
-    //             commandList->setFramebuffer(framebuffer.get());
-    //             g_framebuffer = framebuffer.get();
-    //         }
-    //     }
-    //     else if (g_framebuffer != nullptr)
-    //     {
-    //         commandList->setFramebuffer(nullptr);
-    //         g_framebuffer = nullptr;
-    //     }
+            if (g_framebuffer != framebuffer.get())
+            {
+                commandList->setFramebuffer(framebuffer.get());
+                g_framebuffer = framebuffer.get();
+            }
+        }
+        else if (g_framebuffer != nullptr)
+        {
+            commandList->setFramebuffer(nullptr);
+            g_framebuffer = nullptr;
+        }
 
-    //     g_dirtyStates.renderTargetAndDepthStencil = settingForClear;
-    // }
+        g_dirtyStates.renderTargetAndDepthStencil = settingForClear;
+    }
 }
 
 static void Clear(GuestDevice* device, uint32_t flags, uint32_t, be<float>* color, double z) 
@@ -3549,41 +3567,45 @@ static void Clear(GuestDevice* device, uint32_t flags, uint32_t, be<float>* colo
 
 static void ProcClear(const RenderCommand& cmd)
 {
-    // const auto& args = cmd.clear;
+    const auto& args = cmd.clear;
 
-    // if (PopulateBarriersForStretchRect(g_renderTarget, g_depthStencil))
-    // {
-    //     FlushBarriers();
-    //     ExecutePendingStretchRectCommands(g_renderTarget, g_depthStencil);
-    // }
+    if (PopulateBarriersForStretchRect(g_renderTarget, g_depthStencil))
+    {
+        FlushBarriers();
+        ExecutePendingStretchRectCommands(g_renderTarget, g_depthStencil);
+    }
 
-    // AddBarrier(g_renderTarget, RenderTextureLayout::COLOR_WRITE);
-    // AddBarrier(g_depthStencil, RenderTextureLayout::DEPTH_WRITE);
-    // FlushBarriers();
+    AddBarrier(g_renderTarget, RenderTextureLayout::COLOR_WRITE);
+    AddBarrier(g_depthStencil, RenderTextureLayout::DEPTH_WRITE);
+    FlushBarriers();
 
-    // bool canClearInOnePass = (g_renderTarget == nullptr) || (g_depthStencil == nullptr) ||
-    //     (g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
+    bool canClearInOnePass = (g_renderTarget == nullptr) || (g_depthStencil == nullptr) ||
+        (g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
 
-    // if (canClearInOnePass)
-    //     SetFramebuffer(g_renderTarget, g_depthStencil, true);
+    if (canClearInOnePass)
+    {
+        SetFramebuffer(g_renderTarget, g_depthStencil, true);
+    }
 
-    // auto& commandList = g_commandLists[g_frame];
+    auto& commandList = g_commandLists[g_frame];
 
-    // if (g_renderTarget != nullptr && (args.flags & D3DCLEAR_TARGET) != 0)
-    // {
-    //     if (!canClearInOnePass)
-    //         SetFramebuffer(g_renderTarget, nullptr, true);
+    if (g_renderTarget != nullptr && (args.flags & D3DCLEAR_TARGET) != 0)
+    {
+        if (!canClearInOnePass) {
+            SetFramebuffer(g_renderTarget, nullptr, true);
+        }
 
-    //     commandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
-    // }
+        commandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
+    }
 
-    // if (g_depthStencil != nullptr && (args.flags & D3DCLEAR_ZBUFFER) != 0)
-    // {
-    //     if (!canClearInOnePass)
-    //         SetFramebuffer(nullptr, g_depthStencil, true);
+    if (g_depthStencil != nullptr && (args.flags & D3DCLEAR_ZBUFFER) != 0)
+    {
+        if (!canClearInOnePass) {
+            SetFramebuffer(nullptr, g_depthStencil, true);
+        }
 
-    //     commandList->clearDepth(true, args.z);
-    // }
+        commandList->clearDepth(true, args.z);
+    }
 }
 
 static void SetViewport(GuestDevice* device, GuestViewport* viewport)
@@ -3630,6 +3652,7 @@ static void ProcSetViewport(const RenderCommand& cmd)
 
 static void SetTexture(GuestDevice* device, uint32_t index, GuestTexture* texture) 
 {
+    // printf("SetTexture: %x %d %x\n", device, index, texture);
     auto isPlayStation = Config::ControllerIcons == EControllerIcons::PlayStation;
 
     if (Config::ControllerIcons == EControllerIcons::Auto)
@@ -4927,6 +4950,11 @@ static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType reso
     auto findResult = FindShaderCacheEntry(hash);
     GuestShader* shader = nullptr;
 
+    if (findResult == nullptr) {
+        LOGF_WARNING("Shader of function {:x} is not found by value: {:x}", reinterpret_cast<uintptr_t>(function), hash);
+        LOG_WARNING("Perhaps the path to the required shader will be printed before this error");
+        __builtin_trap();
+    }
     if (findResult != nullptr)
     {
         if (findResult->guestShader == nullptr)
@@ -5294,6 +5322,23 @@ struct GuestPictureData
     be<uint32_t> type;
 };
 
+struct GuestMyTexture
+{
+    be<uint32_t> vtable; // 0x0
+    be<uint32_t> field0x4; // 0x4
+    be<uint32_t> regIndex; // 0x8
+    char str1[0x1c]; // 0xC
+    char str2[0x1c]; // 0x28
+    char str3[0x1c]; // 0x44
+    be<uint32_t> byte60; // 0x60
+    be<uint32_t> texture; // 0x64
+    be<uint32_t> Surface[6]; // 0x64
+    be<uint32_t> TFlag1; // 0x80
+    be<uint32_t> TFlag2; // 0x84
+    be<uint32_t> graphicsDevice; // 0x88
+    be<uint32_t> guestDevice; // 0x8C
+};
+
 static RenderTextureDimension ConvertTextureDimension(ddspp::TextureType type)
 {
     switch (type) 
@@ -5481,7 +5526,10 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
         return RenderFormat::BC7_UNORM;
     case ddspp::BC7_UNORM_SRGB:
         return RenderFormat::BC7_UNORM_SRGB;
+    case ddspp::A8_UNORM:
+        return RenderFormat::R8_UNORM; // probably doesn't fit
     default:
+        printf("format: %x\n", format);
         assert(false && "Unsupported format from DDS.");
         return RenderFormat::UNKNOWN;
     }
@@ -5692,9 +5740,9 @@ static void DiffPatchTexture(GuestTexture& texture, uint8_t* data, uint32_t data
     }
 }
 
-static void MakePictureData(GuestPictureData* pictureData, uint8_t* data, uint32_t dataSize)
+static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t dataSize)
 {
-    if ((pictureData->flags & 0x1) == 0 && data != nullptr)
+    if (data != nullptr)
     {
         GuestTexture texture(ResourceType::Texture);
 
@@ -5707,7 +5755,7 @@ static void MakePictureData(GuestPictureData* pictureData, uint8_t* data, uint32
             DiffPatchTexture(texture, data, dataSize);
 
             pictureData->texture = g_memory.MapVirtual(g_userHeap.AllocPhysical<GuestTexture>(std::move(texture)));
-            pictureData->type = 0;
+            // pictureData->type = 0;
         }
     }
 }
@@ -5745,33 +5793,44 @@ static void SetResolution(be<uint32_t>* device)
 // }
 
 static GuestShader* g_movieVertexShader;
-static GuestShader* g_moviePixelShader;
+static GuestShader* g_moviePixelShaderHD;
+static GuestShader* g_moviePixelShaderSD;
 static GuestVertexDeclaration* g_movieVertexDeclaration;
 
-static void ScreenShaderInit(be<uint32_t>* a1, uint32_t a2, uint32_t a3, GuestVertexElement* vertexElements)
-{
-    if (g_moviePixelShader == nullptr)
-    {
-        g_moviePixelShader = g_userHeap.AllocPhysical<GuestShader>(ResourceType::PixelShader);
-        g_moviePixelShader->shader = CREATE_SHADER(movie_ps);
-    }
 
+// do we even need them?
+static int ScreenShaderInit(be<uint32_t>* a1)
+{
+    // auto g_xvs_VertexShader = (unsigned char*)g_memory.Translate(0x82062778);
+    // auto g_xps_I420PixelShaderSd = (unsigned char*)g_memory.Translate(0x82062868);
+    // auto g_xps_I420PixelShaderHd = (unsigned char*)g_memory.Translate(0x82062A30);
+
+    // __builtin_trap();
     if (g_movieVertexShader == nullptr)
     {
         g_movieVertexShader = g_userHeap.AllocPhysical<GuestShader>(ResourceType::VertexShader);
-        g_movieVertexShader->shader = CREATE_SHADER(movie_vs);
+        // g_movieVertexShader->shader = CREATE_SHADER(movie_vs);
     }
 
-    if (g_movieVertexDeclaration == nullptr)
-        g_movieVertexDeclaration = CreateVertexDeclarationWithoutAddRef(vertexElements);
+    if (g_moviePixelShaderHD == nullptr)
+    {
+        g_moviePixelShaderHD = g_userHeap.AllocPhysical<GuestShader>(ResourceType::PixelShader);
+        // g_moviePixelShaderHD->shader = CREATE_SHADER(movie_ps);
+    }
 
-    g_moviePixelShader->AddRef();
+    if (g_moviePixelShaderSD == nullptr)
+    {
+        g_moviePixelShaderSD = g_userHeap.AllocPhysical<GuestShader>(ResourceType::PixelShader);
+        // g_moviePixelShaderSD->shader = CREATE_SHADER(movie_ps);
+    }
+
+    g_moviePixelShaderHD->AddRef();
+    g_moviePixelShaderSD->AddRef();
     g_movieVertexShader->AddRef();
-    g_movieVertexDeclaration->AddRef();
-
-    a1[2] = g_memory.MapVirtual(g_moviePixelShader);
-    a1[3] = g_memory.MapVirtual(g_movieVertexShader);
-    a1[4] = g_memory.MapVirtual(g_movieVertexDeclaration);
+    a1[0x12] = g_memory.MapVirtual(g_movieVertexShader);
+    a1[0x51] = g_memory.MapVirtual(g_moviePixelShaderHD);
+    a1[0x52] = g_memory.MapVirtual(g_moviePixelShaderSD);
+    return 0;
 }
 
 void MovieRendererMidAsmHook(PPCRegister& r3)
@@ -6290,91 +6349,91 @@ static void CompileMeshPipeline(const Mesh& mesh, CompilationArgs& args)
     }
 
     // Shadow pipeline.
-    if (compiledOutsideMainFramebuffer && (mesh.layer == MeshLayer::Opaque || mesh.layer == MeshLayer::PunchThrough))
-    {
-        PipelineState pipelineState{};
+    // if (compiledOutsideMainFramebuffer && (mesh.layer == MeshLayer::Opaque || mesh.layer == MeshLayer::PunchThrough))
+    // {
+    //     PipelineState pipelineState{};
 
-        if (mesh.layer == MeshLayer::PunchThrough)
-        {
-            pipelineState.vertexShader = FindShaderCacheEntry(0xDD4FA7BB53876300)->guestShader;
-            pipelineState.pixelShader = FindShaderCacheEntry(0xE2ECA594590DDE8B)->guestShader;
-        }
-        else
-        {
-            pipelineState.vertexShader = FindShaderCacheEntry(0x8E4BB23465BD909E)->guestShader;
-        }
+    //     if (mesh.layer == MeshLayer::PunchThrough)
+    //     {
+    //         pipelineState.vertexShader = FindShaderCacheEntry(0xDD4FA7BB53876300)->guestShader;
+    //         pipelineState.pixelShader = FindShaderCacheEntry(0xE2ECA594590DDE8B)->guestShader;
+    //     }
+    //     else
+    //     {
+    //         pipelineState.vertexShader = FindShaderCacheEntry(0x8E4BB23465BD909E)->guestShader;
+    //     }
 
-        pipelineState.vertexDeclaration = mesh.vertexDeclaration;
-        pipelineState.cullMode = mesh.material->m_DoubleSided ? RenderCullMode::NONE : RenderCullMode::BACK;
-        pipelineState.zFunc = RenderComparisonFunction::LESS_EQUAL;
+    //     pipelineState.vertexDeclaration = mesh.vertexDeclaration;
+    //     pipelineState.cullMode = mesh.material->m_DoubleSided ? RenderCullMode::NONE : RenderCullMode::BACK;
+    //     pipelineState.zFunc = RenderComparisonFunction::LESS_EQUAL;
         
-        if (g_capabilities.dynamicDepthBias)
-        {
-            // Put common depth bias values for reducing unnecessary calls.
-            if (!g_vulkan)
-            {
-                pipelineState.depthBias = COMMON_DEPTH_BIAS_VALUE;
-                pipelineState.slopeScaledDepthBias = COMMON_SLOPE_SCALED_DEPTH_BIAS_VALUE;
-            }
-        }
-        else 
-        {
-            pipelineState.depthBias = (1 << 24) * (*reinterpret_cast<be<float>*>(g_memory.Translate(0x83302760)));
-            pipelineState.slopeScaledDepthBias = *reinterpret_cast<be<float>*>(g_memory.Translate(0x83302764));
-        }
+    //     if (g_capabilities.dynamicDepthBias)
+    //     {
+    //         // Put common depth bias values for reducing unnecessary calls.
+    //         if (!g_vulkan)
+    //         {
+    //             pipelineState.depthBias = COMMON_DEPTH_BIAS_VALUE;
+    //             pipelineState.slopeScaledDepthBias = COMMON_SLOPE_SCALED_DEPTH_BIAS_VALUE;
+    //         }
+    //     }
+    //     else 
+    //     {
+    //         pipelineState.depthBias = (1 << 24) * (*reinterpret_cast<be<float>*>(g_memory.Translate(0x83302760)));
+    //         pipelineState.slopeScaledDepthBias = *reinterpret_cast<be<float>*>(g_memory.Translate(0x83302764));
+    //     }
 
-        pipelineState.colorWriteEnable = 0;
-        pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_STRIP;
-        pipelineState.vertexStrides[0] = mesh.vertexSize;
-        pipelineState.depthStencilFormat = RenderFormat::D32_FLOAT;
+    //     pipelineState.colorWriteEnable = 0;
+    //     pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_STRIP;
+    //     pipelineState.vertexStrides[0] = mesh.vertexSize;
+    //     pipelineState.depthStencilFormat = RenderFormat::D32_FLOAT;
 
-        if (mesh.layer == MeshLayer::PunchThrough)
-            pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
+    //     if (mesh.layer == MeshLayer::PunchThrough)
+    //         pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
 
-        const char* name = (mesh.layer == MeshLayer::PunchThrough ? "MakeShadowMapTransparent" : "MakeShadowMap");
-        SanitizePipelineState(pipelineState);
-        EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, name);
+    //     const char* name = (mesh.layer == MeshLayer::PunchThrough ? "MakeShadowMapTransparent" : "MakeShadowMap");
+    //     SanitizePipelineState(pipelineState);
+    //     EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, name);
 
-        // Morph models have 4 targets where unused targets default to the first vertex stream.
-        if (mesh.morphModel)
-        {
-            for (size_t i = 0; i < 5; i++)
-            {
-                for (size_t j = 0; j < 4; j++)
-                    pipelineState.vertexStrides[j + 1] = i > j ? mesh.morphTargetVertexSize : mesh.vertexSize;
+    //     // Morph models have 4 targets where unused targets default to the first vertex stream.
+    //     if (mesh.morphModel)
+    //     {
+    //         for (size_t i = 0; i < 5; i++)
+    //         {
+    //             for (size_t j = 0; j < 4; j++)
+    //                 pipelineState.vertexStrides[j + 1] = i > j ? mesh.morphTargetVertexSize : mesh.vertexSize;
 
-                SanitizePipelineState(pipelineState);
-                EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, name);
-            }
-        }
-    }
+    //             SanitizePipelineState(pipelineState);
+    //             EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, name);
+    //         }
+    //     }
+    // }
 
-    // Motion blur pipeline. We could normally do the player here only, but apparently Werehog enemies also have object blur.
-    // TODO: Do punch through meshes get rendered?
-    if (!mesh.morphModel && compiledOutsideMainFramebuffer && args.hasMoreThanOneBone && mesh.layer == MeshLayer::Opaque)
-    {
-        PipelineState pipelineState{};
-        pipelineState.vertexShader = FindShaderCacheEntry(0x4620B236DC38100C)->guestShader;
-        pipelineState.pixelShader = FindShaderCacheEntry(0xBBDB735BEACC8F41)->guestShader;
-        pipelineState.vertexDeclaration = mesh.vertexDeclaration;
-        pipelineState.cullMode = RenderCullMode::NONE;
-        pipelineState.zFunc = RenderComparisonFunction::GREATER_EQUAL;
-        pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_STRIP;
-        pipelineState.vertexStrides[0] = mesh.vertexSize;
-        pipelineState.renderTargetFormat = RenderFormat::R8G8B8A8_UNORM;
-        pipelineState.depthStencilFormat = RenderFormat::D32_FLOAT;
-        pipelineState.specConstants = SPEC_CONSTANT_REVERSE_Z;
+    // // Motion blur pipeline. We could normally do the player here only, but apparently Werehog enemies also have object blur.
+    // // TODO: Do punch through meshes get rendered?
+    // if (!mesh.morphModel && compiledOutsideMainFramebuffer && args.hasMoreThanOneBone && mesh.layer == MeshLayer::Opaque)
+    // {
+    //     PipelineState pipelineState{};
+    //     pipelineState.vertexShader = FindShaderCacheEntry(0x4620B236DC38100C)->guestShader;
+    //     pipelineState.pixelShader = FindShaderCacheEntry(0xBBDB735BEACC8F41)->guestShader;
+    //     pipelineState.vertexDeclaration = mesh.vertexDeclaration;
+    //     pipelineState.cullMode = RenderCullMode::NONE;
+    //     pipelineState.zFunc = RenderComparisonFunction::GREATER_EQUAL;
+    //     pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_STRIP;
+    //     pipelineState.vertexStrides[0] = mesh.vertexSize;
+    //     pipelineState.renderTargetFormat = RenderFormat::R8G8B8A8_UNORM;
+    //     pipelineState.depthStencilFormat = RenderFormat::D32_FLOAT;
+    //     pipelineState.specConstants = SPEC_CONSTANT_REVERSE_Z;
 
-        SanitizePipelineState(pipelineState);
-        EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, "FxVelocityMap");
+    //     SanitizePipelineState(pipelineState);
+    //     EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, "FxVelocityMap");
 
-        if (args.velocityMapQuickStep)
-        {
-            pipelineState.vertexShader = FindShaderCacheEntry(0x99DC3F27E402700D)->guestShader;
-            SanitizePipelineState(pipelineState);
-            EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, "FxVelocityMapQuickStep");
-        }
-    }
+    //     if (args.velocityMapQuickStep)
+    //     {
+    //         pipelineState.vertexShader = FindShaderCacheEntry(0x99DC3F27E402700D)->guestShader;
+    //         SanitizePipelineState(pipelineState);
+    //         EnqueueGraphicsPipelineCompilation(pipelineState, args.tokenPair, "FxVelocityMapQuickStep");
+    //     }
+    // }
 
     uint32_t defaultStr = args.instancing ? 0x820C8734 : 0x8202DDBC; // "instancing" for instancing, "default" for regular
     guest_stack_var<Hedgehog::Base::CStringSymbol> defaultSymbol(reinterpret_cast<const char*>(g_memory.Translate(defaultStr)));
@@ -7627,13 +7686,6 @@ struct LightAndIndexBufferResourceV5
 //         g_userHeap.Free(newIndices);
 // }
 
-// PPC_FUNC_IMPL(__imp__sub_8253EC98);
-// PPC_FUNC(sub_8253EC98)
-// {
-//     printf("CreateDevice call\n");
-
-//     __imp__sub_8253EC98(ctx, base);
-// }
 GUEST_FUNCTION_HOOK(sub_8253EC98, CreateDevice); // replaced
 
 GUEST_FUNCTION_HOOK(sub_8253AE98, DestructResource); // replaced
@@ -7654,13 +7706,15 @@ GUEST_FUNCTION_HOOK(sub_8253AB20, GetSurfaceDesc); // replaced
 GUEST_FUNCTION_HOOK(sub_825471F8, GetVertexDeclaration); // replaced
 // // GUEST_FUNCTION_HOOK(sub_82BE0530, HashVertexDeclaration);
 
-GUEST_FUNCTION_HOOK(sub_82558CD0, Video::Present);
+GUEST_FUNCTION_HOOK(sub_825B1A28, Video::Present);
+// GUEST_FUNCTION_HOOK(sub_82558CD0, Video::Present); // wmv player present
 GUEST_FUNCTION_HOOK(sub_82543B58, GetBackBuffer);
+GUEST_FUNCTION_HOOK(sub_82543BA0, GetDepthStencil);
 
 GUEST_FUNCTION_HOOK(sub_8253A8D8, CreateTexture); // replaced
 GUEST_FUNCTION_HOOK(sub_8253B508, CreateVertexBuffer); // replaced
 GUEST_FUNCTION_HOOK(sub_8253B640, CreateIndexBuffer); // replaced
-GUEST_FUNCTION_HOOK(sub_826F9AA0, CreateSurface); // replaced
+GUEST_FUNCTION_HOOK(sub_8253A9F8, CreateSurface); // replaced
 
 GUEST_FUNCTION_HOOK(sub_825575B8, StretchRect); // replaced
 
@@ -7677,9 +7731,9 @@ GUEST_FUNCTION_HOOK(sub_82543628, SetScissorRect); // replaced
 
 GUEST_FUNCTION_HOOK(sub_826FEC28, DrawPrimitive); // replaced
 GUEST_FUNCTION_HOOK(sub_826FF030, DrawIndexedPrimitive); // replaced
-// // GUEST_FUNCTION_HOOK(sub_82BE52F8, DrawPrimitiveUP);
+GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 
-// // GUEST_FUNCTION_HOOK(sub_82BE0428, CreateVertexDeclaration); // TODO
+GUEST_FUNCTION_HOOK(sub_82547118, CreateVertexDeclaration); // replaced
 GUEST_FUNCTION_HOOK(sub_825470F8, SetVertexDeclaration); // replaced
 
 GUEST_FUNCTION_HOOK(sub_82548700, CreateVertexShader); // replaced
@@ -7690,15 +7744,23 @@ GUEST_FUNCTION_HOOK(sub_82543AC8, SetIndices); // replaced
 
 GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader); // replaced
 GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
+int GetType(GuestResource* resource) {
+    if (resource->type == ResourceType::Texture) return 3;
+    LOGF_WARNING("unknown resource type {:d}!", (int32_t)resource->type);
+    __builtin_trap();
+    return 0;
+}
+
+GUEST_FUNCTION_HOOK(sub_8253AE08, GetType);
 
 // // GUEST_FUNCTION_HOOK(sub_82C003B8, D3DXFillTexture);
 // // GUEST_FUNCTION_HOOK(sub_82C00910, D3DXFillVolumeTexture);
 
-// // GUEST_FUNCTION_HOOK(sub_82E43FC8, MakePictureData);
+GUEST_FUNCTION_HOOK(sub_82656B68, MakePictureData); // GUEST_FUNCTION_HOOK(sub_82E43FC8, MakePictureData);
 
 // // GUEST_FUNCTION_HOOK(sub_82E9EE38, SetResolution);
 
-// // GUEST_FUNCTION_HOOK(sub_82AE2BF8, ScreenShaderInit);
+GUEST_FUNCTION_HOOK(sub_82736178, ScreenShaderInit); // sub_82AE2BF8
 
 // // This is a buggy function that recreates framebuffers
 // // if the inverse capture ratio is not 2.0, but the parameter
@@ -7708,88 +7770,35 @@ GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
 
 // // GUEST_FUNCTION_STUB(sub_822C15D8);
 // // GUEST_FUNCTION_STUB(sub_822C1810);
-// // GUEST_FUNCTION_STUB(sub_82BD97A8);
-// // GUEST_FUNCTION_STUB(sub_82BD97E8);
+GUEST_FUNCTION_STUB(sub_8253EB38); // GUEST_FUNCTION_STUB(sub_82BD97A8); // set thread to d3ddevvice
+GUEST_FUNCTION_STUB(sub_8253EB78); // GUEST_FUNCTION_STUB(sub_82BD97E8); // reset thread to d3ddevice
 // // GUEST_FUNCTION_STUB(sub_82BDD370); // SetGammaRamp
-GUEST_FUNCTION_STUB(sub_8253EB78); // // GUEST_FUNCTION_STUB(sub_82BE05B8);
-GUEST_FUNCTION_STUB(sub_82558F88); // GUEST_FUNCTION_STUB(sub_82BE9C98);
+GUEST_FUNCTION_STUB(sub_82547278); // set shader allocation // GUEST_FUNCTION_STUB(sub_82BE05B8);
+GUEST_FUNCTION_STUB(sub_82558F88); // GUEST_FUNCTION_STUB(sub_82BE9C98); // D3DDevice_BeginTiling
 GUEST_FUNCTION_STUB(sub_82559480); // GUEST_FUNCTION_STUB(sub_82BEA308);
-GUEST_FUNCTION_STUB(sub_8272F6B8); // GUEST_FUNCTION_STUB(sub_82CD5D68);
+GUEST_FUNCTION_STUB(sub_8272FAD0); // GUEST_FUNCTION_STUB(sub_82CD5D68);
 GUEST_FUNCTION_STUB(sub_82558E00); // GUEST_FUNCTION_STUB(sub_82BE9B28);
 GUEST_FUNCTION_STUB(sub_82559928); // GUEST_FUNCTION_STUB(sub_82BEA018);
 GUEST_FUNCTION_STUB(sub_82559C18); // GUEST_FUNCTION_STUB(sub_82BEA7C0);
 GUEST_FUNCTION_STUB(sub_82700C18); // GUEST_FUNCTION_STUB(sub_82BFFF88); // D3DXFilterTexture
 GUEST_FUNCTION_STUB(sub_8253EAE0);// GUEST_FUNCTION_STUB(sub_82BD96D0);
 
-
-
-GUEST_FUNCTION_STUB(sub_828B5050);
-GUEST_FUNCTION_STUB(sub_8266F1E8);
-GUEST_FUNCTION_STUB(sub_82667B10);
-GUEST_FUNCTION_STUB(sub_82668410);
-GUEST_FUNCTION_STUB(sub_828F5CF0);
-GUEST_FUNCTION_STUB(sub_8265E3D8);
-GUEST_FUNCTION_STUB(sub_825B19F0);
-GUEST_FUNCTION_STUB(sub_8253F5B8);
-// sub_82731038
-// 
-GUEST_FUNCTION_STUB(sub_826FE108);
-GUEST_FUNCTION_STUB(sub_82592388);
-GUEST_FUNCTION_STUB(sub_825B1A28);
-GUEST_FUNCTION_STUB(sub_82659A88);
-GUEST_FUNCTION_STUB(sub_82665048);
-// GUEST_FUNCTION_STUB(sub_8253DA28);
-// GUEST_FUNCTION_STUB(sub_82734638);
-GUEST_FUNCTION_STUB(sub_828FF190);
 GUEST_FUNCTION_STUB(sub_8253E798); // flush
-// GUEST_FUNCTION_STUB(sub_8259B088);
-// GUEST_FUNCTION_STUB(sub_8289CF60);
-// GUEST_FUNCTION_STUB(sub_828B3DF8);
-// // GUEST_FUNCTION_STUB(sub_828B94B8);
-// // GUEST_FUNCTION_STUB(sub_82581E38);
-// // GUEST_FUNCTION_STUB(sub_82659610);
-// // GUEST_FUNCTION_STUB(sub_828B95B8);
-// // GUEST_FUNCTION_STUB(sub_826390D8);
-// GUEST_FUNCTION_STUB(sub_82637418);
-// GUEST_FUNCTION_STUB(sub_825E9738);
-// GUEST_FUNCTION_STUB(sub_82617570);
-// GUEST_FUNCTION_STUB(sub_8261A5B0);
-// GUEST_FUNCTION_STUB(sub_82629D00);
-// удалить
-// GUEST_FUNCTION_STUB(sub_82649AC0);
-// GUEST_FUNCTION_STUB(sub_8253B080);
-// GUEST_FUNCTION_STUB(sub_828B34D8);
-// GUEST_FUNCTION_STUB(sub_826339A8);
-// GUEST_FUNCTION_STUB(sub_82663988);
-// GUEST_FUNCTION_STUB(sub_82663288);
-// GUEST_FUNCTION_STUB(sub_825F0588);
-// GUEST_FUNCTION_STUB(sub_825F11C8);
-// GUEST_FUNCTION_STUB(sub_825F1398);
-// GUEST_FUNCTION_STUB(sub_82547278);
-// GUEST_FUNCTION_STUB(sub_825586B0);
-// GUEST_FUNCTION_STUB(sub_82648B68);
-// // // GUEST_FUNCTION_STUB(sub_825EB070);
-// // GUEST_FUNCTION_STUB(sub_824D7BC8);
-// // GUEST_FUNCTION_STUB(sub_824FADB8);
-// // GUEST_FUNCTION_STUB(sub_825866A8);
-// // GUEST_FUNCTION_STUB(sub_825E9E28);
-// // GUEST_FUNCTION_STUB(sub_82161AB8);
-// // GUEST_FUNCTION_STUB(sub_825B19F0);
-// GUEST_FUNCTION_STUB(sub_825B1A28);
-// // GUEST_FUNCTION_STUB(sub_82581D50);
-// // GUEST_FUNCTION_STUB(sub_82580E90);
+GUEST_FUNCTION_STUB(sub_825586B0); // swap
 
-// GUEST_FUNCTION_STUB(sub_82653DD8);
-// GUEST_FUNCTION_STUB(sub_82619650);
-// GUEST_FUNCTION_STUB(sub_8262A140);
-// GUEST_FUNCTION_STUB(sub_825F9910);
-// GUEST_FUNCTION_STUB(sub_825FE718);
-// GUEST_FUNCTION_STUB(sub_826346B8);
+// GUEST_FUNCTION_STUB(sub_8259ABE8);
 
-// что-то тут расскоментить надо будет
 
-// GUEST_FUNCTION_STUB(sub_828FC2A0);
-// GUEST_FUNCTION_STUB(sub_828FC008);
-// GUEST_FUNCTION_STUB(sub_82648DB0);
+// GUEST_FUNCTION_STUB(sub_82592B70);
 
-GUEST_FUNCTION_STUB(sub_8259ABE8);
+// GUEST_FUNCTION_STUB(sub_826FE5C0);
+// GUEST_FUNCTION_STUB(sub_828FF2B8); // audio exeutemain
+GUEST_FUNCTION_STUB(sub_829023B8); // audio exeutemain
+// GUEST_FUNCTION_STUB(sub_82731038); // something with textures causes memory error
+// GUEST_FUNCTION_STUB(sub_82730C68); // something with textures causes memory error
+// GUEST_FUNCTION_STUB(sub_8255A8A8); // something audio
+// GUEST_FUNCTION_STUB(sub_8255A4D0); // something something
+// GUEST_FUNCTION_STUB(sub_82743188); // something render
+// GUEST_FUNCTION_STUB(sub_82734C50);
+
+// GUEST_FUNCTION_STUB(sub_827344C0) // I don't know

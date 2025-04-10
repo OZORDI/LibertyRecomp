@@ -5,6 +5,8 @@
 //#define PSO_CACHING_CLEANUP
 
 #include "rhi/plume_render_interface.h"
+#include <os/logger.h>
+#include <cstdint>
 
 #define D3DCLEAR_TARGET  0x1
 #define D3DCLEAR_ZBUFFER 0x10
@@ -33,24 +35,24 @@ struct GuestSamplerState
 
 struct GuestDevice
 {
-    be<uint64_t> dirtyFlags[8];
+    be<uint64_t> dirtyFlags[7]; // 0x0 + 0x38
 
-    be<uint32_t> setRenderStateFunctions[0x65];
-    uint32_t setSamplerStateFunctions[0x14];
+    be<uint32_t> setRenderStateFunctions[0x61]; // 0x38 + 0x184
+    uint32_t setSamplerStateFunctions[0x14]; // 0x1BC + 0x50
 
-    uint8_t padding224[0x25C];
+    uint8_t padding20C[0x1F4]; // 0x20C + 0x1F4
 
-    GuestSamplerState samplerStates[0x20];
+    GuestSamplerState samplerStates[0x20]; // 0x400 + 0x300
 
-    uint32_t vertexShaderFloatConstants[0x400];
-    uint32_t pixelShaderFloatConstants[0x400];
+    uint32_t vertexShaderFloatConstants[0x400]; // 0x700 + 0x1000
+    uint32_t pixelShaderFloatConstants[0x400]; // 0x1700 + 0x1000
 
-    be<uint32_t> vertexShaderBoolConstants[0x4];
-    be<uint32_t> pixelShaderBoolConstants[0x4];
+    be<uint32_t> vertexShaderBoolConstants[0x4]; // 0x2700 + 0x10
+    be<uint32_t> pixelShaderBoolConstants[0x4]; // 0x2710 + 0x10
 
-    uint8_t padding27A0[0x68C];
-    be<uint32_t> vertexDeclaration;
-    uint8_t padding2E30[0x338];
+    uint8_t padding2720[0x5F0]; // 0x2720 + 0x5F0
+    be<uint32_t> vertexDeclaration; // 0x2D10 + 0x4
+    uint8_t padding2D14[0x344]; // 0x2D14 + 0x344
     struct
     {
         be<float> x;
@@ -59,8 +61,8 @@ struct GuestDevice
         be<float> height;
         be<float> minZ;
         be<float> maxZ;
-    } viewport;
-    uint8_t padding3180[0x1E80];
+    } viewport; // 0x3058 + 0x18
+    uint8_t padding3070[0x1F90]; // 0x3070 + 0x1F90
 };
 
 static_assert(sizeof(GuestDevice) == 0x5000);
@@ -122,7 +124,7 @@ enum GuestFormat
     D3DFMT_A16B16G16R16F_2 = 0x1A2201BF,
     D3DFMT_A16B16G16R16F_EXPAND = 0x1A22AB5D,
     D3DFMT_DXT1 = 0x1A200152,
-    D3DFMT_DXT5 = 0x1A200154,
+    D3DFMT_DXT4 = 0x1A200154,
     D3DFMT_A8B8G8R8 = 0x1A200186,
     D3DFMT_A8R8G8B8 = 0x18280186,
     D3DFMT_LIN_A8R8G8B8 = 0x18280086,

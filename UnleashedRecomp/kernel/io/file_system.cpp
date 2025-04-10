@@ -167,7 +167,7 @@ uint32_t XReadFile
     XOVERLAPPED* lpOverlapped
 )
 {
-    printf("XReadFile %x %d\n", hFile, nNumberOfBytesToRead);
+    // printf("XReadFile %x %d\n", hFile, nNumberOfBytesToRead);
     uint32_t result = FALSE;
     if (lpOverlapped != nullptr)
     {
@@ -372,8 +372,6 @@ uint32_t XWriteFile(FileHandle* hFile, const void* lpBuffer, uint32_t nNumberOfB
 
 std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool checkForMods)
 {
-    // printf("ResolvePath: %s\n", path.data());
-    // printf("asdasdasd\n");
     LOGF_IMPL(Utility, "Game", "Loading file: \"{}\"", path.data());
     if (checkForMods)
     {

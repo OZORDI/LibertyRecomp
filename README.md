@@ -1,10 +1,16 @@
 MarathonRecomp is an attempt to use the XenonRecomp and UnleashedRecomp tool as a base to run Sonic 2006 from the Xbox 360
 
-The current code works with many caveats, I had to stub some important methods that cause the game to essentially not "render" and there is also a race condition/memory corruption that can cause the game to crash before rendering thread or a bit after rendering thread
+The current code renders video playback and renders some textures in the menu
+
+Unfortunately some wrong things are ignored and also memory corruption or race condition can still occur, restarting mostly helps
 
 ## TO-DO:
 - [x] Code execution up to the rendering thread
-- [ ] Stable rendering thread without stubbing important functions
+- [x] Stable rendering thread without stubbing important functions
 - [ ] Cleanup of code that depends on Unleashed (and also reset git history)
-- [ ] Audio (probably should work OOB at some point)
+- [x] Audio (probably should work OOB at some point)
 - [ ] Graphics (current code is very dependent on Unleashed)
+    - [x] It's rendering something
+    - [ ] Correct texture rendering (alpha)
+    - [ ] Correct fonts rendering
+    - [ ] Probably everything 3D
