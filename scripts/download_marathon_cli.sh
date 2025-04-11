@@ -26,14 +26,12 @@ case "$OS" in
         ;;
     *)
         echo "Unsupported operating system: $OS"
-        rm -rf "$TEMP_DIR"
         exit 1
         ;;
 esac
 
 if [ $? -ne 0 ]; then
     echo "Download failed"
-    rm -rf "$TEMP_DIR"
     exit 1
 fi
 
@@ -42,7 +40,7 @@ tar -xzf "$NAME.tar.gz"
 
 if [ $? -ne 0 ]; then
     echo "Unpacking failed"
-    rm -rf "$TEMP_DIR"
+    rm "$NAME.tar.gz"
     exit 1
 fi
 
@@ -50,7 +48,7 @@ if [ $? -eq 0 ]; then
     echo "$NAME installed successfully to $INSTALL_DIR"
 else
     echo "Installation failed"
-    rm -rf "$TEMP_DIR"
+    rm "$NAME.tar.gz"
     exit 1
 fi
 
