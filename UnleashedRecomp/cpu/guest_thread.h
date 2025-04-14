@@ -25,6 +25,8 @@ struct GuestThreadHandle : KernelObject
     GuestThreadParams params;
     std::atomic<bool> suspended;
     std::thread thread;
+    // HACK(1)
+    std::atomic<bool> isFinished = false;
 
     GuestThreadHandle(const GuestThreadParams& params);
     ~GuestThreadHandle() override;

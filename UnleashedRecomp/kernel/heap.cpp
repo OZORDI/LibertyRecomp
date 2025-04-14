@@ -156,8 +156,8 @@ uint32_t XVirtualFree(uint32_t lpAddress, unsigned int dwSize, unsigned int dwFr
     return 1;
 }
 
-GUEST_FUNCTION_HOOK(sub_82915668, XVirtualAlloc); // repalced
-GUEST_FUNCTION_HOOK(sub_829156B8, XVirtualFree); // repalced
+GUEST_FUNCTION_HOOK(sub_82915668, XVirtualAlloc);
+GUEST_FUNCTION_HOOK(sub_829156B8, XVirtualFree);
 
 GUEST_FUNCTION_STUB(sub_82535588); // HeapCreate // replaced
 // GUEST_FUNCTION_STUB(sub_82BD9250); // HeapDestroy

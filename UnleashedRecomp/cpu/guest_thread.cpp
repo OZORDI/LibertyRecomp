@@ -46,6 +46,8 @@ static void GuestThreadFunc(GuestThreadHandle* hThread)
 {
     hThread->suspended.wait(true);
     GuestThread::Start(hThread->params);
+    // HACK(1)
+    hThread->isFinished = true;
 }
 
 GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
@@ -61,12 +63,34 @@ GuestThreadHandle::~GuestThreadHandle()
 
 uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 {
-    assert(timeout == INFINITE);
+    if (timeout == INFINITE || isFinished) // HACK(1): isFinished
+    {
+        if (thread.joinable())
+            thread.join();
 
-    if (thread.joinable())
-        thread.join();
+        return STATUS_WAIT_0;
+    }
+    else if (timeout == 0)
+    {
+        if (thread.joinable())
+            return STATUS_TIMEOUT;
 
-    return STATUS_WAIT_0;
+        return STATUS_WAIT_0;
+    }
+    else
+    {
+        auto start = std::chrono::steady_clock::now();
+        while (thread.joinable())
+        {
+            auto elapsed = std::chrono::steady_clock::now() - start;
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= timeout)
+                return STATUS_TIMEOUT;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        return STATUS_WAIT_0;
+    }
 }
 
 uint32_t GuestThread::Start(const GuestThreadParams& params)
