@@ -119,6 +119,7 @@ endif()
 
 set(UNLEASHED_RECOMP_APU_CXX_SOURCES
     "apu/audio.cpp"
+    "apu/xma_decoder.cpp"
     "apu/embedded_player.cpp"
     "apu/driver/sdl2_driver.cpp"
 )
@@ -189,6 +190,11 @@ set(UNLEASHED_RECOMP_MOD_CXX_SOURCES
     "mod/mod_loader.cpp"
 )
 
+set(UNLEASHED_RECOMP_UTILS_CXX_SOURCES
+    "utils/bit_stream.cpp"
+    "utils/ring_buffer.cpp"
+)
+
 set(UNLEASHED_RECOMP_THIRDPARTY_SOURCES
     "${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl2.cpp"
     "${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/imgui/imgui.cpp"
@@ -245,6 +251,7 @@ set(UNLEASHED_RECOMP_CXX_SOURCES
     ${UNLEASHED_RECOMP_UI_CXX_SOURCES}
     ${UNLEASHED_RECOMP_INSTALL_CXX_SOURCES}
     ${UNLEASHED_RECOMP_USER_CXX_SOURCES}
+    ${UNLEASHED_RECOMP_UTILS_CXX_SOURCES}
     ${UNLEASHED_RECOMP_MOD_CXX_SOURCES}
     ${UNLEASHED_RECOMP_THIRDPARTY_SOURCES}
 )
@@ -367,6 +374,9 @@ target_link_libraries(UnleashedRecomp PRIVATE
     UnleashedRecompLib
     xxHash::xxhash
     CURL::libcurl
+    ffmpeg::avcodec
+    ffmpeg::swresample
+    ffmpeg::avutil
 )
 
 target_include_directories(UnleashedRecomp PRIVATE
