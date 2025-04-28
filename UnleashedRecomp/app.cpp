@@ -188,13 +188,24 @@ PPC_FUNC(sub_82538B48)
 //     __imp__sub_825E6F70(ctx, base);
 // }
 // 82186158
-// PPC_FUNC_IMPL(__imp__sub_825E7918);
+
+PPC_FUNC_IMPL(__imp__sub_825E7918);
 PPC_FUNC(sub_825E7918)
 {
+    // for some reason, this function checks that r4 is not zero, but it's always zero
+    ctx.r4.u32 = 1;
     LOGN_WARNING("spanverse allocex");
-    // printf("%x\n", ctx.r3.u32);
 
-    sub_82186158(ctx, base);
+    __imp__sub_825E7918(ctx, base);
+}
+
+PPC_FUNC_IMPL(__imp__sub_825E7958);
+PPC_FUNC(sub_825E7958)
+{
+    ctx.r4.u32 = 1;
+    LOGN_WARNING("spanverse freeex");
+
+    __imp__sub_825E7958(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_825822D0);
