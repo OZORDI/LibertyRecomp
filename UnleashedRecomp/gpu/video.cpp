@@ -5489,6 +5489,7 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     case ddspp::R8_TYPELESS:
         return RenderFormat::R8_TYPELESS;
     case ddspp::R8_UNORM:
+    case ddspp::A8_UNORM:
         return RenderFormat::R8_UNORM;
     case ddspp::R8_UINT:
         return RenderFormat::R8_UINT;
@@ -5538,8 +5539,6 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
         return RenderFormat::BC7_UNORM;
     case ddspp::BC7_UNORM_SRGB:
         return RenderFormat::BC7_UNORM_SRGB;
-    case ddspp::A8_UNORM:
-        return RenderFormat::A8_UNORM;
     default:
         printf("format: %x\n", format);
         assert(false && "Unsupported format from DDS.");
@@ -5570,6 +5569,13 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
         viewDesc.format = desc.format;
         viewDesc.dimension = ConvertTextureViewDimension(ddsDesc.type);
         viewDesc.mipLevels = ddsDesc.numMips;
+
+        if (ddsDesc.format == ddspp::A8_UNORM)
+        {
+            // Map A8_UNORM to R8_UNORM for compatability
+            componentMapping = RenderComponentMapping(RenderSwizzle::ZERO, RenderSwizzle::ZERO, RenderSwizzle::ZERO, RenderSwizzle::R);
+        }
+
         viewDesc.componentMapping = componentMapping;
         texture.textureView = texture.texture->createTextureView(viewDesc);
         texture.descriptorIndex = g_textureDescriptorAllocator.allocate();
