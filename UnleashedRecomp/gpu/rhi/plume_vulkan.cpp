@@ -929,7 +929,7 @@ namespace plume {
         imageInfo.format = toVk(desc.format);
         imageInfo.extent.width = uint32_t(desc.width);
         imageInfo.extent.height = desc.height;
-        imageInfo.extent.depth = 1;
+        imageInfo.extent.depth = desc.depth;
         imageInfo.mipLevels = desc.mipLevels;
         imageInfo.arrayLayers = desc.arraySize;
         imageInfo.samples = VkSampleCountFlagBits(desc.multisampling.sampleCount);
