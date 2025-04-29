@@ -3025,8 +3025,10 @@ static GuestTexture* CreateTexture(uint32_t width, uint32_t height, uint32_t dep
 
     if (texture->type == ResourceType::ArrayTexture) {
         desc.arraySize = depth;
+        desc.depth = 1;
     } else {
         desc.depth = depth;
+        desc.arraySize = 1;
     }
 
     if (desc.format == RenderFormat::D32_FLOAT)
