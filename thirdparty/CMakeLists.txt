@@ -21,6 +21,10 @@ add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/o1heap")
 add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL")
 add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
 
+if (APPLE)
+    add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/MoltenVK")
+endif()
+
 set(FFMPEG_PATH ${CMAKE_CURRENT_SOURCE_DIR}/FFmpeg) 
 
 add_custom_command(

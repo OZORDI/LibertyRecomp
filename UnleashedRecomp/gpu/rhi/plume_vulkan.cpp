@@ -14,6 +14,7 @@
 #include <cmath>
 #include <climits>
 #include <unordered_map>
+#include <iostream>
 
 #if DLSS_ENABLED
 #   include "render/plume_dlss.h"
@@ -51,13 +52,18 @@ namespace plume {
         VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
 #   elif defined(__linux__)
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+#   elif defined(__APPLE__)
+        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
 #   endif
     };
 
     static const std::unordered_set<std::string> OptionalInstanceExtensions = {
-        // No optional instance extensions yet.
+#   if defined(__APPLE__)
+        // Tells the system Vulkan loader to enumerate portability drivers, if supported.
+        VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#   endif
     };
-    
+
     static const std::unordered_set<std::string> RequiredDeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
@@ -79,6 +85,8 @@ namespace plume {
         VK_KHR_PRESENT_ID_EXTENSION_NAME,
         VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
         VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME,
+        // Vulkan spec requires this to be enabled if supported by the driver.
+        VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
     };
 
     // Common functions.
@@ -567,14 +575,16 @@ namespace plume {
         }
     }
     
-    static VkPipelineStageFlags toStageFlags(RenderBarrierStages stages, bool rtSupported) {
+    static VkPipelineStageFlags toStageFlags(RenderBarrierStages stages, bool geometrySupported, bool rtSupported) {
         VkPipelineStageFlags flags = 0;
 
         if (stages & RenderBarrierStage::GRAPHICS) {
             flags |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
             flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
             flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-            flags |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+            if (geometrySupported) {
+                flags |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+            }
             flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
             flags |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
             flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -919,7 +929,7 @@ namespace plume {
         imageInfo.format = toVk(desc.format);
         imageInfo.extent.width = uint32_t(desc.width);
         imageInfo.extent.height = desc.height;
-        imageInfo.extent.depth = desc.depth;
+        imageInfo.extent.depth = 1;
         imageInfo.mipLevels = desc.mipLevels;
         imageInfo.arrayLayers = desc.arraySize;
         imageInfo.samples = VkSampleCountFlagBits(desc.multisampling.sampleCount);
@@ -2045,6 +2055,19 @@ namespace plume {
             fprintf(stderr, "vkCreateXlibSurfaceKHR failed with error code 0x%X.\n", res);
             return;
         }
+#   elif defined(__APPLE__)
+        assert(renderWindow.window != 0);
+        assert(renderWindow.view != 0);
+        VkMetalSurfaceCreateInfoEXT surfaceCreateInfo = {};
+        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+        surfaceCreateInfo.pLayer = renderWindow.view;
+
+        VulkanInterface *renderInterface = commandQueue->device->renderInterface;
+        res = vkCreateMetalSurfaceEXT(renderInterface->instance, &surfaceCreateInfo, nullptr, &surface);
+        if (res != VK_SUCCESS) {
+            fprintf(stderr, "vkCreateMetalSurfaceEXT failed with error code 0x%X.\n", res);
+            return;
+        }
 #   endif
 
         VkBool32 presentSupported = false;
@@ -2185,7 +2208,14 @@ namespace plume {
         }
 
         // Handle the error silently.
+#if defined(__APPLE__)
+        // Under MoltenVK, VK_SUBOPTIMAL_KHR does not result in a valid state for rendering. We intentionally
+        // only check for this error during present to avoid having to synchronize manually against the semaphore
+        // signalled by vkAcquireNextImageKHR.
+        if (res != VK_SUCCESS) {
+#else
         if ((res != VK_SUCCESS) && (res != VK_SUBOPTIMAL_KHR)) {
+#endif
             return false;
         }
 
@@ -2354,6 +2384,8 @@ namespace plume {
         // The attributes width and height members do not include the border.
         dstWidth = attributes.width;
         dstHeight = attributes.height;
+#   elif defined(__APPLE__)
+        SDL_GetWindowSizeInPixels(renderWindow.window, (int *)(&dstWidth), (int *)(&dstHeight));
 #   endif
     }
 
@@ -2677,9 +2709,10 @@ namespace plume {
 
         endActiveRenderPass();
 
+        const bool geometryEnabled = device->capabilities.geometryShader;
         const bool rtEnabled = device->capabilities.raytracing;
         VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | toStageFlags(stages, rtEnabled);
+        VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | toStageFlags(stages, geometryEnabled, rtEnabled);
         thread_local std::vector<VkBufferMemoryBarrier> bufferMemoryBarriers;
         thread_local std::vector<VkImageMemoryBarrier> imageMemoryBarriers;
         bufferMemoryBarriers.clear();
@@ -2698,7 +2731,7 @@ namespace plume {
             bufferMemoryBarrier.offset = 0;
             bufferMemoryBarrier.size = interfaceBuffer->desc.size;
             bufferMemoryBarriers.emplace_back(bufferMemoryBarrier);
-            srcStageMask |= toStageFlags(interfaceBuffer->barrierStages, rtEnabled);
+            srcStageMask |= toStageFlags(interfaceBuffer->barrierStages, geometryEnabled, rtEnabled);
             interfaceBuffer->barrierStages = stages;
         }
         // return;
@@ -2719,7 +2752,7 @@ namespace plume {
             imageMemoryBarrier.subresourceRange.layerCount = interfaceTexture->desc.arraySize;
             imageMemoryBarrier.subresourceRange.aspectMask = (interfaceTexture->desc.flags & RenderTextureFlag::DEPTH_TARGET) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
             imageMemoryBarriers.emplace_back(imageMemoryBarrier);
-            srcStageMask |= toStageFlags(interfaceTexture->barrierStages, rtEnabled);
+            srcStageMask |= toStageFlags(interfaceTexture->barrierStages, geometryEnabled, rtEnabled);
             interfaceTexture->textureLayout = textureBarrier.layout;
             interfaceTexture->barrierStages = stages;
         }
@@ -2885,6 +2918,11 @@ namespace plume {
             offsetVector.clear();
             for (uint32_t i = 0; i < viewCount; i++) {
                 const VulkanBuffer *interfaceBuffer = static_cast<const VulkanBuffer *>(views[i].buffer.ref);
+                if (interfaceBuffer == nullptr && !device->nullDescriptorSupported) {
+                    interfaceBuffer = static_cast<const VulkanBuffer *>(device->nullBuffer.get());
+                    continue;
+                }
+                std::cout.flush();
                 bufferVector.emplace_back((interfaceBuffer != nullptr) ? interfaceBuffer->vk : VK_NULL_HANDLE);
                 offsetVector.emplace_back(views[i].buffer.offset);
             }
@@ -3691,6 +3729,11 @@ namespace plume {
         bufferDeviceAddressFeatures.pNext = featuresChain;
         featuresChain = &bufferDeviceAddressFeatures;
 
+        VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilityFeatures = {};
+        portabilityFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
+        portabilityFeatures.pNext = featuresChain;
+        featuresChain = &portabilityFeatures;
+
         VkPhysicalDeviceFeatures2 deviceFeatures = {};
         deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         deviceFeatures.pNext = featuresChain;
@@ -3761,6 +3804,12 @@ namespace plume {
             createDeviceChain = &bufferDeviceAddressFeatures;
         }
 
+        const bool portabilitySubset = supportedOptionalExtensions.find(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) != supportedOptionalExtensions.end();
+        if (portabilitySubset) {
+            portabilityFeatures.pNext = createDeviceChain;
+            createDeviceChain = &portabilityFeatures;
+        }
+
         // Retrieve the information for the queue families.
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
@@ -3773,6 +3822,7 @@ namespace plume {
             uint32_t familyIndex = 0;
             uint32_t familySetBits = sizeof(uint32_t) * 8;
             uint32_t familyQueueCount = 0;
+            bool familyUsed = false;
             for (uint32_t i = 0; i < queueFamilyCount; i++) {
                 const VkQueueFamilyProperties &props = queueFamilyProperties[i];
 
@@ -3782,11 +3832,14 @@ namespace plume {
                 }
 
                 // Prefer picking the queues with the least amount of bits set that match the mask we're looking for.
+                // If the queue families have matching capabilities but one is already used, prefer the unused one.
                 uint32_t setBits = numberOfSetBits(props.queueFlags);
-                if ((setBits < familySetBits) || ((setBits == familySetBits) && (props.queueCount > familyQueueCount))) {
+                bool used = queueFamilyUsed[i];
+                if ((setBits < familySetBits) || ((setBits == familySetBits) && ((props.queueCount > familyQueueCount) || (familyUsed && !used)))) {
                     familyIndex = i;
                     familySetBits = setBits;
                     familyQueueCount = props.queueCount;
+                    familyUsed = used;
                 }
             }
 
@@ -3898,6 +3951,7 @@ namespace plume {
         description.dedicatedVideoMemory = memoryHeapSize;
 
         // Fill capabilities.
+        capabilities.geometryShader = deviceFeatures.features.geometryShader;
         capabilities.raytracing = rtSupported;
         capabilities.raytracingStateUpdate = false;
         capabilities.sampleLocations = sampleLocationsSupported;
@@ -3906,11 +3960,23 @@ namespace plume {
         capabilities.presentWait = presentWait;
         capabilities.displayTiming = supportedOptionalExtensions.find(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) != supportedOptionalExtensions.end();
         capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
-        capabilities.triangleFan = true;
+#if defined(__APPLE__)
+                // MoltenVK supports triangle fans but does so via compute shaders to translate to lists, since it has to
+                // support all cases including indirect draw. This results in renderpass restarts that can harm performance,
+                // so force disable native triangle fan support and rely on the game to emulate fans if needed.
+                capabilities.triangleFan = false;
+        #else
+                capabilities.triangleFan = true;
+        #endif
+
         capabilities.dynamicDepthBias = true;
 
         // Fill Vulkan-only capabilities.
         loadStoreOpNoneSupported = supportedOptionalExtensions.find(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != supportedOptionalExtensions.end();
+
+        if (!nullDescriptorSupported) {
+            nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
+        }
     }
 
     VulkanDevice::~VulkanDevice() {
@@ -4236,6 +4302,10 @@ namespace plume {
         createInfo.pApplicationInfo = &appInfo;
         createInfo.ppEnabledLayerNames = nullptr;
         createInfo.enabledLayerCount = 0;
+
+#   ifdef __APPLE__
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#   endif
 
         // Check for extensions.
         uint32_t extensionCount;
