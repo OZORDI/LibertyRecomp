@@ -77,9 +77,7 @@ static void* GuestThreadFunc(GuestThreadHandle* hThread)
     GuestThread::Start(hThread->params);
     // HACK(1)
     hThread->isFinished = true;
-#ifdef USE_PTHREAD
     return nullptr;
-#endif
 }
 
 GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)

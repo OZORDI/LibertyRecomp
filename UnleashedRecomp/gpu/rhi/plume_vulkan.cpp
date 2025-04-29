@@ -2918,11 +2918,6 @@ namespace plume {
             offsetVector.clear();
             for (uint32_t i = 0; i < viewCount; i++) {
                 const VulkanBuffer *interfaceBuffer = static_cast<const VulkanBuffer *>(views[i].buffer.ref);
-                if (interfaceBuffer == nullptr && !device->nullDescriptorSupported) {
-                    interfaceBuffer = static_cast<const VulkanBuffer *>(device->nullBuffer.get());
-                    continue;
-                }
-                std::cout.flush();
                 bufferVector.emplace_back((interfaceBuffer != nullptr) ? interfaceBuffer->vk : VK_NULL_HANDLE);
                 offsetVector.emplace_back(views[i].buffer.offset);
             }
