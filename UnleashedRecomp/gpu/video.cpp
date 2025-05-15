@@ -4785,7 +4785,9 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
             { D3DDECLUSAGE_POSITION, 0, 0 },
             { D3DDECLUSAGE_NORMAL, 0, 1 },
             { D3DDECLUSAGE_TANGENT, 0, 2 },
+            { D3DDECLUSAGE_POSITION, 2, 14 },
             { D3DDECLUSAGE_BINORMAL, 0, 3 },
+            { D3DDECLUSAGE_POSITION, 3, 16 },
             { D3DDECLUSAGE_TEXCOORD, 0, 4 },
             { D3DDECLUSAGE_TEXCOORD, 1, 5 },
             { D3DDECLUSAGE_TEXCOORD, 2, 6 },
@@ -4798,7 +4800,13 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
             { D3DDECLUSAGE_TEXCOORD, 5, 13 },
             { D3DDECLUSAGE_TEXCOORD, 6, 14 },
             { D3DDECLUSAGE_TEXCOORD, 7, 15 },
-            { D3DDECLUSAGE_POSITION, 1, 15 }
+            { D3DDECLUSAGE_POSITION, 1, 15 },
+            { D3DDECLUSAGE_NORMAL, 1, 8 },
+            { D3DDECLUSAGE_NORMAL, 2, 9 },
+            { D3DDECLUSAGE_NORMAL, 3, 10 },
+            { D3DDECLUSAGE_TANGENT, 1, 11 },
+            { D3DDECLUSAGE_TANGENT, 2, 12 },
+            { D3DDECLUSAGE_TANGENT, 3, 13 }
         };
 
         vertexElement = vertexElements;
@@ -4908,7 +4916,9 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
         addInputElement(D3DDECLUSAGE_POSITION, 0);
         addInputElement(D3DDECLUSAGE_NORMAL, 0);
         addInputElement(D3DDECLUSAGE_TANGENT, 0);
+        addInputElement(D3DDECLUSAGE_POSITION, 2);
         addInputElement(D3DDECLUSAGE_BINORMAL, 0);
+        addInputElement(D3DDECLUSAGE_POSITION, 3);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 0);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 1);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 2);
