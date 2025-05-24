@@ -5803,10 +5803,11 @@ static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t
             texture.texture->setName(reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2)));
 #endif
 
-            DiffPatchTexture(texture, data, dataSize);
+            // DiffPatchTexture(texture, data, dataSize);
 
             pictureData->texture = g_memory.MapVirtual(g_userHeap.AllocPhysical<GuestTexture>(std::move(texture)));
-            // pictureData->type = 0;
+            pictureData->width = texture.width;
+            pictureData->height = texture.height;
         }
     }
 }
