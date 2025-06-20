@@ -694,6 +694,14 @@ static void DestructTempResources()
         {
             const auto buffer = reinterpret_cast<GuestBuffer*>(resource);
 
+            // HACK: game remove index buffer before it is used
+            if (resource->type == ResourceType::IndexBuffer && buffer->buffer.get() == g_indexBufferView.buffer.ref)
+            {
+                SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.buffer, RenderBufferReference{});
+                SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.format, RenderFormat::R16_UINT);
+                SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.size, 0u);
+            }
+
             if (buffer->mappedMemory != nullptr)
                 g_userHeap.Free(buffer->mappedMemory);
 
@@ -7775,7 +7783,6 @@ GUEST_FUNCTION_HOOK(sub_825444F0, SetRenderTarget); // replaced
 GUEST_FUNCTION_HOOK(sub_82544210, SetDepthStencilSurface); // replaced
 
 GUEST_FUNCTION_HOOK(sub_82555B30, Clear);
-GUEST_FUNCTION_HOOK(sub_82555EE0, Clear);
 
 GUEST_FUNCTION_HOOK(sub_825436F0, SetViewport); // replaced
 
@@ -7897,7 +7904,7 @@ int D3DDevice_BeginTiling(GuestDevice* device, uint32_t flags, uint32_t count, R
     // for (uint32_t i = 0; i < count; i++) {
     //     printf("pTileRects: %d %d %d %d\n", pTileRects[i].x1.get(), pTileRects[i].y1.get(), pTileRects[i].x2.get(), pTileRects[i].y2.get());
     // }
-    Clear(device, 0, 0, pClearColor, clearZ);
+    Clear(device, 0x3F, 0, pClearColor, clearZ);
     return 0;
 }
 
@@ -7919,3 +7926,23 @@ int D3DDevice_EndTiling(GuestDevice* device, uint32_t flags, Rect* pResolveRects
 }
 
 GUEST_FUNCTION_HOOK(sub_82559480, D3DDevice_EndTiling);
+static uint32_t g_ringBuffer;
+// It's actually easier to return a buffer here than to implement BeginShaderConstantF4, then BeginShaderConstantF4 will do all the work for us and it seems fast enough on modern hardware
+uint32_t BeginRingBig(GuestDevice* device, int32_t count) {
+    if (!g_ringBuffer) {
+        g_ringBuffer = g_memory.MapVirtual(g_userHeap.AllocPhysical((size_t)0x1000, 16));
+    }
+    device->dirtyFlags[0] = ~0ull; // copy all
+    device->dirtyFlags[1] = ~0ull;
+    return g_ringBuffer;
+}
+
+GUEST_FUNCTION_HOOK(sub_8253E260, BeginRingBig);
+
+GUEST_FUNCTION_STUB(sub_8254D598); // BeginConditional
+GUEST_FUNCTION_STUB(sub_8254D7B0); // BeginConditional
+GUEST_FUNCTION_STUB(sub_8254D9D0); // BeginConditional
+GUEST_FUNCTION_STUB(sub_8254DB90); // BeginConditional
+GUEST_FUNCTION_STUB(sub_8254DD40); // SetScreenExtentQueryMode
+
+GUEST_FUNCTION_STUB(sub_8238D8A8); // sound, need to fix and remove this stub

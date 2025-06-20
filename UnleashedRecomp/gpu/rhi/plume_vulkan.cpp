@@ -2734,7 +2734,6 @@ namespace plume {
             srcStageMask |= toStageFlags(interfaceBuffer->barrierStages, geometryEnabled, rtEnabled);
             interfaceBuffer->barrierStages = stages;
         }
-        // return;
 
         for (uint32_t i = 0; i < textureBarriersCount; i++) {
             const RenderTextureBarrier &textureBarrier = textureBarriers[i];
