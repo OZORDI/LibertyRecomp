@@ -48,7 +48,7 @@ set(XENOS_RECOMP_ROOT "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenosRecomp/XenosRecomp")
 set(XENOS_RECOMP_INCLUDE "${XENOS_RECOMP_ROOT}/shader_common.h")
 
 target_compile_definitions(XenosRecomp PRIVATE 
-    XENOS_RECOMP_INPUT=\"${CMAKE_CURRENT_SOURCE_DIR}/private/shader_build\" 
+    XENOS_RECOMP_INPUT=\"${CMAKE_CURRENT_SOURCE_DIR}/private/shader\" 
     XENOS_RECOMP_OUTPUT=\"${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp\"
     XENOS_RECOMP_INCLUDE_INPUT=\"${XENOS_RECOMP_INCLUDE}\"
 )
@@ -64,7 +64,7 @@ add_custom_command(
     COMMAND
         $<TARGET_FILE:XenosRecomp>
     DEPENDS 
-        "${CMAKE_CURRENT_SOURCE_DIR}/private/shader_build" 
+        "${CMAKE_CURRENT_SOURCE_DIR}/private/shader" 
         ${XENOS_RECOMP_SOURCES} 
         ${XENOS_RECOMP_INCLUDE}
 )
