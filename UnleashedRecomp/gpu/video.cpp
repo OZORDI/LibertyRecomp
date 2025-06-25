@@ -5374,14 +5374,38 @@ struct GuestPictureData
     be<uint32_t> type;
 };
 
+union Bxty {
+    char _Buf[16];
+    xpointer<uint32_t> _Ptr;
+};
+
+struct BEString
+{
+    char alval[1];
+    Bxty bx;
+    be<uint32_t> size;
+    uint32_t res;
+
+    const char* c_str() {
+        uint32_t len = size.get();
+        if (len == 0) {
+            return alval;
+        } else if (len < 16) {
+            return bx._Buf;
+        } else {
+            return reinterpret_cast<const char*>(bx._Ptr.get());
+        }
+    }
+};
+
 struct GuestMyTexture
 {
     be<uint32_t> vtable; // 0x0
     be<uint32_t> field0x4; // 0x4
     be<uint32_t> regIndex; // 0x8
-    char str1[0x1c]; // 0xC
-    char str2[0x1c]; // 0x28
-    char str3[0x1c]; // 0x44
+    BEString str1; // 0xC
+    BEString str2; // 0x28
+    BEString str3; // 0x44
     be<uint32_t> byte60; // 0x60
     be<uint32_t> texture; // 0x64
     be<uint32_t> Surface[6]; // 0x64
@@ -5806,9 +5830,11 @@ static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t
 
         if (LoadTexture(texture, data, dataSize, {}))
         {
-// #ifdef _DEBUG
-//             texture.texture->setName(reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2)));
-// #endif
+#ifdef _DEBUG
+            if (pictureData->str1.size.get() > 0) {
+                texture.texture->setName(fmt::format("Texture {}", pictureData->str1.c_str()));
+            }
+#endif
 
             // DiffPatchTexture(texture, data, dataSize);
 
