@@ -5806,9 +5806,9 @@ static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t
 
         if (LoadTexture(texture, data, dataSize, {}))
         {
-#ifdef _DEBUG
-            texture.texture->setName(reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2)));
-#endif
+// #ifdef _DEBUG
+//             texture.texture->setName(reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2)));
+// #endif
 
             // DiffPatchTexture(texture, data, dataSize);
 

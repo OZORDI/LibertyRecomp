@@ -46,6 +46,9 @@ namespace plume {
 
     static const std::unordered_set<std::string> RequiredInstanceExtensions = {
         VK_KHR_SURFACE_EXTENSION_NAME,
+#   ifdef VULKAN_OBJECT_NAMES_ENABLED
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#   endif
 #   if defined(_WIN64)
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #   elif defined(__ANDROID__)
@@ -70,9 +73,6 @@ namespace plume {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME,
-#   ifdef VULKAN_OBJECT_NAMES_ENABLED
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-#   endif
     };
     
     static const std::unordered_set<std::string> OptionalDeviceExtensions = {
@@ -730,16 +730,16 @@ namespace plume {
         }
     }
 
-    static void setObjectName(VkDevice device, VkDebugReportObjectTypeEXT objectType, uint64_t object, const std::string &name) {
+    static void setObjectName(VkDevice device, VkObjectType objectType, uint64_t object, const std::string &name) {
 #   ifdef VULKAN_OBJECT_NAMES_ENABLED
-        VkDebugMarkerObjectNameInfoEXT nameInfo = {};
-        nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
+        VkDebugUtilsObjectNameInfoEXT nameInfo = {};
+        nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
         nameInfo.objectType = objectType;
-        nameInfo.object = object;
+        nameInfo.objectHandle = object;
         nameInfo.pObjectName = name.c_str();
-        VkResult res = vkDebugMarkerSetObjectNameEXT(device, &nameInfo);
+        VkResult res = vkSetDebugUtilsObjectNameEXT(device, &nameInfo);
         if (res != VK_SUCCESS) {
-            fprintf(stderr, "vkDebugMarkerSetObjectNameEXT failed with error code 0x%X.\n", res);
+            fprintf(stderr, "vkSetDebugUtilsObjectNameEXT failed with error code 0x%X.\n", res);
             return;
         }
 #   endif
@@ -874,7 +874,7 @@ namespace plume {
     }
 
     void VulkanBuffer::setName(const std::string &name) {
-        setObjectName(device->vk, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, uint64_t(vk), name);
+        setObjectName(device->vk, VK_OBJECT_TYPE_IMAGE, uint64_t(vk), name);
     }
 
     uint64_t VulkanBuffer::getDeviceAddress() const {
@@ -1012,7 +1012,7 @@ namespace plume {
     }
 
     void VulkanTexture::setName(const std::string &name) {
-        setObjectName(device->vk, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, uint64_t(vk), name);
+        setObjectName(device->vk, VK_OBJECT_TYPE_IMAGE, uint64_t(vk), name);
     }
     
     void VulkanTexture::fillSubresourceRange() {
@@ -1256,6 +1256,10 @@ namespace plume {
         }
     }
 
+    void VulkanShader::setName(const std::string &name) {
+        setObjectName(device->vk, VK_OBJECT_TYPE_SHADER_MODULE, uint64_t(vk), name);
+    }
+
     // VulkanSampler
 
     VulkanSampler::VulkanSampler(VulkanDevice *device, const RenderSamplerDesc &desc) {
@@ -1345,7 +1349,7 @@ namespace plume {
     }
 
     void VulkanComputePipeline::setName(const std::string& name) const {
-        setObjectName(device->vk, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT, uint64_t(vk), name);
+        setObjectName(device->vk, VK_OBJECT_TYPE_PIPELINE, uint64_t(vk), name);
     }
 
     RenderPipelineProgram VulkanComputePipeline::getProgram(const std::string &name) const {
@@ -1592,7 +1596,7 @@ namespace plume {
     }
 
     void VulkanGraphicsPipeline::setName(const std::string& name) const {
-        setObjectName(device->vk, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT, uint64_t(vk), name);
+        setObjectName(device->vk, VK_OBJECT_TYPE_PIPELINE, uint64_t(vk), name);
     }
 
     RenderPipelineProgram VulkanGraphicsPipeline::getProgram(const std::string &name) const {
@@ -1796,7 +1800,7 @@ namespace plume {
     }
 
     void VulkanRaytracingPipeline::setName(const std::string& name) const {
-        setObjectName(device->vk, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT, uint64_t(vk), name);
+        setObjectName(device->vk, VK_OBJECT_TYPE_PIPELINE, uint64_t(vk), name);
     }
 
     RenderPipelineProgram VulkanRaytracingPipeline::getProgram(const std::string &name) const {

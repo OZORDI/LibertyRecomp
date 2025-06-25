@@ -144,6 +144,7 @@ namespace plume {
 
         VulkanShader(VulkanDevice *device, const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format);
         ~VulkanShader() override;
+        void setName(const std::string &name) override;
     };
 
     struct VulkanSampler : RenderSampler {

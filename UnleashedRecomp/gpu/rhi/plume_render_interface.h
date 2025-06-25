@@ -48,6 +48,7 @@ namespace plume {
 
     struct RenderShader {
         virtual ~RenderShader() { }
+        virtual void setName(const std::string &name) = 0;
     };
 
     struct RenderSampler {
