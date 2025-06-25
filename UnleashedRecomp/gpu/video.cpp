@@ -3804,6 +3804,9 @@ static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specCons
                 assert(result);
 
                 guestShader->shader = g_device->createShader(decoded.data(), decoded.size(), "main", RenderShaderFormat::SPIRV);
+                #ifdef _DEBUG
+                guestShader->shader->setName(fmt::format("{}:{:x}", guestShader->shaderCacheEntry->filename, guestShader->shaderCacheEntry->hash));
+                #endif
             }
             else
             {
