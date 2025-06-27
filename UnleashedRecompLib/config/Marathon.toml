@@ -91,6 +91,18 @@ invalid_instructions = [
     #{ data = 0x00485645, size = 44 } # End of .text
 ]
 
+[[midasm_hook]]
+name = "DisableMSAA"
+address = 0x82607B94
+registers = ["r28"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "DisableMSAA"
+address = 0x82607BB8
+registers = ["r28"]
+after_instruction = true
+
 #[[midasm_hook]]
 #name = "DebugZlibMidAsmHook"
 #address = 0x826DC30C

@@ -291,6 +291,11 @@ PPC_FUNC(sub_825EA610)
     // __imp__sub_825EA610(ctx, base);
 }
 
+void DisableMSAA(PPCRegister& val)
+{
+    val.u32 = 0;
+}
+
 
 void DebugZlibMidAsmHook(PPCRegister& id)
 {
