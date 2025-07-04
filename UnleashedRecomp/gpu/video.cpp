@@ -2222,6 +2222,16 @@ static void GetSurfaceDesc(GuestSurface* surface, GuestSurfaceDesc* desc)
     desc->height = surface->height;
     desc->format = surface->guestFormat;
     desc->type = 4; // D3DRTYPE_SURFACE
+    // desc->multiSampleType = 0;
+    if (surface->sampleCount == RenderSampleCount::COUNT_1) {
+        desc->multiSampleType = 0;
+    } else if (surface->sampleCount == RenderSampleCount::COUNT_2) {
+        desc->multiSampleType = 1;
+    } else {
+        desc->multiSampleType = 2;
+    }
+    desc->multiSampleQuality = 0;
+    desc->usage = 0;
 }
 
 static void GetVertexDeclaration(GuestVertexDeclaration* vertexDeclaration, GuestVertexElement* vertexElements, be<uint32_t>* count) 
@@ -2965,6 +2975,8 @@ static RenderFormat ConvertFormat(uint32_t format)
     case D3DFMT_X8R8G8B8:
     case D3DFMT_LE_X8R8G8B8:
         return RenderFormat::R8G8B8A8_UNORM;
+    case D3DFMT_R32F:
+        return RenderFormat::R32_FLOAT;
     case D3DFMT_D24FS8:
     case D3DFMT_D24S8:
         return RenderFormat::D32_FLOAT;
@@ -3105,7 +3117,12 @@ static GuestSurface* CreateSurface(uint32_t width, uint32_t height, uint32_t for
     desc.depth = 1;
     desc.mipLevels = 1;
     desc.arraySize = 1;
-    desc.multisampling.sampleCount = multiSample != 0 && Config::AntiAliasing != EAntiAliasing::None ? int32_t(Config::AntiAliasing.Value) : RenderSampleCount::COUNT_1;
+    // desc.multisampling.sampleCount = multiSample != 0 && Config::AntiAliasing != EAntiAliasing::None ? int32_t(Config::AntiAliasing.Value) : RenderSampleCount::COUNT_1;
+    if (multiSample == 0) {
+        desc.multisampling.sampleCount = RenderSampleCount::COUNT_1;
+    } else {
+        desc.multisampling.sampleCount = multiSample == 1 ? RenderSampleCount::COUNT_2 : RenderSampleCount::COUNT_4;
+    }
     desc.format = ConvertFormat(format);
     desc.flags = desc.format == RenderFormat::D32_FLOAT ? RenderTextureFlag::DEPTH_TARGET : RenderTextureFlag::RENDER_TARGET;
 
