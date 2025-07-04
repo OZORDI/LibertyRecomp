@@ -3162,8 +3162,8 @@ static void FlushViewport()
         viewport.x += 0.5f;
         viewport.y += 0.5f;
 
-        if (viewport.minDepth > viewport.maxDepth)
-            std::swap(viewport.minDepth, viewport.maxDepth);
+        // if (viewport.minDepth > viewport.maxDepth)
+        //     std::swap(viewport.minDepth, viewport.maxDepth);
 
         commandList->setViewports(viewport);
 
