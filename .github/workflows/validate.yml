@@ -61,7 +61,7 @@ jobs:
           key: ccache-${{ runner.os }}-${{ matrix.preset }}
 
       - name: Prepare Project
-        run: cp ./private/* ./UnleashedRecompLib/private
+        run: cp ./private/* ./MarathonRecompLib/private
   
       - name: Configure Project
         env:
@@ -71,13 +71,13 @@ jobs:
       - name: Build Project
         env:
           CCACHE_DIR: /tmp/ccache
-        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target UnleashedRecomp
+        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target MarathonRecomp
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UnleashedRecomp-Linux-${{ env.CMAKE_PRESET }}
-          path: ./out/build/${{ env.CMAKE_PRESET }}/UnleashedRecomp/UnleashedRecomp
+          name: MarathonRecomp-Linux-${{ env.CMAKE_PRESET }}
+          path: ./out/build/${{ env.CMAKE_PRESET }}/MarathonRecomp/MarathonRecomp
   build-windows:
     name: Build Windows
     runs-on: windows-latest
@@ -127,43 +127,43 @@ jobs:
         run: |
           $commitMessage = git log -1 --pretty=%s
           Add-Content -Path $env:GITHUB_ENV -Value "commit_message=$commitMessage"
-          copy .\private\* .\UnleashedRecompLib\private
+          copy .\private\* .\MarathonRecompLib\private
 
       - name: Configure Project
         run: cmake . --preset ${{ env.CMAKE_PRESET }} -DSDL2MIXER_VORBIS=VORBISFILE -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
 
       - name: Build Project
-        run: cmake --build .\out\build\${{ env.CMAKE_PRESET }} --target UnleashedRecomp
+        run: cmake --build .\out\build\${{ env.CMAKE_PRESET }} --target MarathonRecomp
       
       - name: Pack Release
         run: |
           New-Item -ItemType Directory -Path .\release
           New-Item -ItemType Directory -Path .\release\D3D12
 
-          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\UnleashedRecomp\D3D12\D3D12Core.dll" -Destination ".\release\D3D12\D3D12Core.dll"
-          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\UnleashedRecomp\dxcompiler.dll" -Destination ".\release\dxcompiler.dll"
-          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\UnleashedRecomp\dxil.dll" -Destination ".\release\dxil.dll"
-          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\UnleashedRecomp\UnleashedRecomp.exe" -Destination ".\release\UnleashedRecomp.exe"
+          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\MarathonRecomp\D3D12\D3D12Core.dll" -Destination ".\release\D3D12\D3D12Core.dll"
+          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\MarathonRecomp\dxcompiler.dll" -Destination ".\release\dxcompiler.dll"
+          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\MarathonRecomp\dxil.dll" -Destination ".\release\dxil.dll"
+          Move-Item -Path ".\out\build\${{ env.CMAKE_PRESET }}\MarathonRecomp\MarathonRecomp.exe" -Destination ".\release\MarathonRecomp.exe"
 
-          Compress-Archive -Path .\release\* -DestinationPath .\UnleashedRecomp-Windows.zip
+          Compress-Archive -Path .\release\* -DestinationPath .\MarathonRecomp-Windows.zip
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UnleashedRecomp-Windows-${{ env.CMAKE_PRESET }}
-          path: .\UnleashedRecomp-Windows.zip
+          name: MarathonRecomp-Windows-${{ env.CMAKE_PRESET }}
+          path: .\MarathonRecomp-Windows.zip
 
       - name: Upload PDB
         uses: actions/upload-artifact@v4
         if: ${{ matrix.preset != 'x64-Clang-Release' }}
         with:
-          name: UnleashedRecomp-Windows-${{ env.CMAKE_PRESET }}-PDB
-          path: .\out\build\${{ env.CMAKE_PRESET }}\UnleashedRecomp\UnleashedRecomp.pdb
+          name: MarathonRecomp-Windows-${{ env.CMAKE_PRESET }}-PDB
+          path: .\out\build\${{ env.CMAKE_PRESET }}\MarathonRecomp\MarathonRecomp.pdb
   build-flatpak:
     name: Build Flatpak
     runs-on: ubuntu-24.04
     env:
-      FLATPAK_ID: io.github.hedge_dev.unleashedrecomp
+      FLATPAK_ID: io.github.hedge_dev.marathonrecomp
       FREEDESKTOP_VERSION: 23.08
       LLVM_VERSION: 18
 
@@ -192,7 +192,7 @@ jobs:
           key: ccache-${{ runner.os }}
 
       - name: Prepare Project
-        run: cp ./private/* ./UnleashedRecompLib/private  
+        run: cp ./private/* ./MarathonRecompLib/private  
 
       - name: Prepare Flatpak
         run: |
@@ -210,7 +210,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UnleashedRecomp-Flatpak
+          name: MarathonRecomp-Flatpak
           path: ./${{ env.FLATPAK_ID }}.flatpak
   build-macos:
     name: Build macOS
@@ -262,7 +262,7 @@ jobs:
 
       - name: Prepare Project
         run: |
-          cp ./private/* ./UnleashedRecompLib/private
+          cp ./private/* ./MarathonRecompLib/private
 
       - name: Configure Project
         env:
@@ -272,15 +272,15 @@ jobs:
       - name: Build Project
         env:
           CCACHE_DIR: /tmp/ccache
-        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target UnleashedRecomp
+        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target MarathonRecomp
 
       - name: Pack Release
         run: |
-          codesign --deep -fs - "./out/build/${{ env.CMAKE_PRESET }}/UnleashedRecomp/Unleashed Recompiled.app"
-          tar -czf UnleashedRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}.tar.gz -C ./out/build/${{ env.CMAKE_PRESET }}/UnleashedRecomp "Unleashed Recompiled.app"
+          codesign --deep -fs - "./out/build/${{ env.CMAKE_PRESET }}/MarathonRecomp/Marathon Recompiled.app"
+          tar -czf MarathonRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}.tar.gz -C ./out/build/${{ env.CMAKE_PRESET }}/MarathonRecomp "Marathon Recompiled.app"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UnleashedRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}
-          path: UnleashedRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}.tar.gz
+          name: MarathonRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}
+          path: MarathonRecomp-macOS-${{ matrix.arch }}-${{ env.CMAKE_PRESET }}.tar.gz
