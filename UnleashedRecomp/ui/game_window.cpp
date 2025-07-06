@@ -285,9 +285,7 @@ const char* GameWindow::GetTitle()
 {
     if (Config::UseOfficialTitleOnTitleBar)
     {
-        return Config::Language == ELanguage::Japanese
-            ? "SONIC WORLD ADVENTURE"
-            : "SONIC UNLEASHED";
+        return "SONIC THE HEDGEHOG";
     }
 
     return "Marathon Recompiled";
