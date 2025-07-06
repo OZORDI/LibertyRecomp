@@ -28,20 +28,12 @@ endif()
 set(FFMPEG_PATH ${CMAKE_CURRENT_SOURCE_DIR}/FFmpeg) 
 
 add_custom_command(
-    OUTPUT ${FFMPEG_PATH}/.patched
-    COMMAND patch -p1 --forward --silent < ../ffmpeg_mathops.patch
-    COMMAND touch .patched
-    COMMENT "Applying FFmpeg patch..."
-    WORKING_DIRECTORY ${FFMPEG_PATH}
-)
-
-add_custom_command(
     OUTPUT ${FFMPEG_PATH}/config.h
-    COMMAND ./configure --arch=x86_64 --disable-everything --disable-programs --disable-all --disable-x86asm --disable-autodetect --disable-network --enable-avcodec --enable-avformat --enable-avutil --enable-decoder='mp3,mp3float,wmav2,xmaframes' --enable-parser=mpegaudio --enable-demuxer='asf,mp3' --enable-protocol=file
+    COMMAND ./configure --disable-everything --disable-programs --disable-all --disable-x86asm --disable-autodetect --disable-network --enable-avcodec --enable-avformat --enable-avutil  --enable-swresample --enable-decoder='mp3,mp3float,wmav2,xmaframes' --enable-parser=mpegaudio --enable-demuxer='asf,mp3' --enable-protocol=file
     COMMENT "Configuring FFmpeg..."
     WORKING_DIRECTORY ${FFMPEG_PATH}
 )
-add_custom_target(ffmpeg-configure DEPENDS ${FFMPEG_PATH}/config.h ${FFMPEG_PATH}/.patched)
+add_custom_target(ffmpeg-configure DEPENDS ${FFMPEG_PATH}/config.h)
 
 function(import_ffmpeg_library name)
     if (${CMAKE_GENERATOR} STREQUAL "Unix Makefiles")

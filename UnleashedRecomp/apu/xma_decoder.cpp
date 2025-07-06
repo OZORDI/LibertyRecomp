@@ -345,18 +345,20 @@ void Decode(XmaPlayback *playback) {
   auto samples = reinterpret_cast<const uint8_t **>(&playback->av_frame_->data);
   debug_printf("decoded samples: %d\n", playback->av_frame_->nb_samples);
   uint32_t o = 0;
-  for (uint32_t i = 0; i < kSamplesPerFrame; i++) {
-    for (uint32_t j = 0; j <= uint32_t(true); j++) {
-      // Select the appropriate array based on the current channel.
-      auto in = reinterpret_cast<const float *>(samples[j]);
+  if (playback->av_frame_->nb_samples != 0) {
+      for (uint32_t i = 0; i < kSamplesPerFrame; i++) {
+          for (uint32_t j = 0; j <= uint32_t(true); j++) {
+              // Select the appropriate array based on the current channel.
+              auto in = reinterpret_cast<const float *>(samples[j]);
 
-      // Raw samples sometimes aren't within [-1, 1]
-      float scaled_sample = clamp_float(in[i], -1.0f, 1.0f) * scale;
+              // Raw samples sometimes aren't within [-1, 1]
+              float scaled_sample = clamp_float(in[i], -1.0f, 1.0f) * scale;
 
-      // Convert the sample and output it in big endian.
-      auto sample = static_cast<int16_t>(scaled_sample);
-      out[o++] = ByteSwap(sample);
-    }
+              // Convert the sample and output it in big endian.
+              auto sample = static_cast<int16_t>(scaled_sample);
+              out[o++] = ByteSwap(sample);
+          }
+      }
   }
   playback->current_frame_remaining_subframes_ = 4 << 1;
 
@@ -890,46 +892,25 @@ uint32_t XMAPlaybackQueryCurrentPosition(XmaPlayback *playback) {
   return 0;
 }
 
-// GUEST_FUNCTION_HOOK(sub_8255C090, XMAPlaybackCreate);
-
-// GUEST_FUNCTION_HOOK(sub_8255CC48, XMAPlaybackRequestModifyLock);
-
-// GUEST_FUNCTION_HOOK(sub_8255CCC8, XMAPlaybackWaitUntilModifyLockObtained);
-
-// GUEST_FUNCTION_HOOK(sub_8255C4D0, XMAPlaybackQueryReadyForMoreData);
-
-// GUEST_FUNCTION_HOOK(sub_8255C520, XMAPlaybackIsIdle);
-
-// GUEST_FUNCTION_HOOK(sub_8255C388, XMAPlaybackQueryContextsAllocated);
-
-// GUEST_FUNCTION_HOOK(sub_8255CF10, XMAPlaybackResumePlayback);
-
-// GUEST_FUNCTION_HOOK(sub_8255C470, XMAPlaybackQueryInputDataPending);
-
-// GUEST_FUNCTION_HOOK(sub_8255C9A0, XMAPlaybackGetErrorBits);
-
-// GUEST_FUNCTION_HOOK(sub_8255C398, XMAPlaybackSubmitData);
-
-// GUEST_FUNCTION_HOOK(sub_8255C578, XMAPlaybackQueryAvailableData);
-
-// GUEST_FUNCTION_HOOK(sub_8255C7A8, XMAPlaybackAccessDecodedData);
-
-// GUEST_FUNCTION_HOOK(sub_8255C5F0, XMAPlaybackConsumeDecodedData);
-
-// GUEST_FUNCTION_HOOK(sub_8255CD90, XMAPlaybackQueryModifyLockObtained);
-
-// GUEST_FUNCTION_HOOK(sub_8255C8D8, XMAPlaybackFlushData);
-
-// GUEST_FUNCTION_HOOK(sub_8255C9D8, XmaPlaybackSetLoop);
-
-// GUEST_FUNCTION_HOOK(sub_8255CA50, XMAPlaybackGetRemainingLoopCount);
-
-// GUEST_FUNCTION_HOOK(sub_8255CA90, XMAPlaybackGetStreamPosition);
-
-// GUEST_FUNCTION_HOOK(sub_8255CB20, XMAPlaybackSetDecodePosition);
-
-// GUEST_FUNCTION_HOOK(sub_8255C850, XMAPlaybackRewindDecodePosition);
-
-// GUEST_FUNCTION_HOOK(sub_8255CAB0, XMAPlaybackQueryCurrentPosition);
-
-// GUEST_FUNCTION_HOOK(sub_8255C2C0, XMAPlaybackDestroy);
+GUEST_FUNCTION_HOOK(sub_8255C090, XMAPlaybackCreate);
+GUEST_FUNCTION_HOOK(sub_8255CC48, XMAPlaybackRequestModifyLock);
+GUEST_FUNCTION_HOOK(sub_8255CCC8, XMAPlaybackWaitUntilModifyLockObtained);
+GUEST_FUNCTION_HOOK(sub_8255C4D0, XMAPlaybackQueryReadyForMoreData);
+GUEST_FUNCTION_HOOK(sub_8255C520, XMAPlaybackIsIdle);
+GUEST_FUNCTION_HOOK(sub_8255C388, XMAPlaybackQueryContextsAllocated);
+GUEST_FUNCTION_HOOK(sub_8255CF10, XMAPlaybackResumePlayback);
+GUEST_FUNCTION_HOOK(sub_8255C470, XMAPlaybackQueryInputDataPending);
+GUEST_FUNCTION_HOOK(sub_8255C9A0, XMAPlaybackGetErrorBits);
+GUEST_FUNCTION_HOOK(sub_8255C398, XMAPlaybackSubmitData);
+GUEST_FUNCTION_HOOK(sub_8255C578, XMAPlaybackQueryAvailableData);
+GUEST_FUNCTION_HOOK(sub_8255C7A8, XMAPlaybackAccessDecodedData);
+GUEST_FUNCTION_HOOK(sub_8255C5F0, XMAPlaybackConsumeDecodedData);
+GUEST_FUNCTION_HOOK(sub_8255CD90, XMAPlaybackQueryModifyLockObtained);
+GUEST_FUNCTION_HOOK(sub_8255C8D8, XMAPlaybackFlushData);
+GUEST_FUNCTION_HOOK(sub_8255C9D8, XmaPlaybackSetLoop);
+GUEST_FUNCTION_HOOK(sub_8255CA50, XMAPlaybackGetRemainingLoopCount);
+GUEST_FUNCTION_HOOK(sub_8255CA90, XMAPlaybackGetStreamPosition);
+GUEST_FUNCTION_HOOK(sub_8255CB20, XMAPlaybackSetDecodePosition);
+GUEST_FUNCTION_HOOK(sub_8255C850, XMAPlaybackRewindDecodePosition);
+GUEST_FUNCTION_HOOK(sub_8255CAB0, XMAPlaybackQueryCurrentPosition);
+GUEST_FUNCTION_HOOK(sub_8255C2C0, XMAPlaybackDestroy);

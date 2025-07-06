@@ -60,4 +60,4 @@
 	url = https://github.com/nlohmann/json
 [submodule "thirdparty/FFmpeg"]
 	path = thirdparty/FFmpeg
-	url = https://github.com/xenia-canary/FFmpeg_radixsplit
+	url = https://github.com/IsaacMarovitz/FFmpegadixsplit

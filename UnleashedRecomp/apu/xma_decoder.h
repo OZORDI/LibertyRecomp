@@ -106,7 +106,7 @@ struct XmaPlayback {
     }
 
     codec_ctx->sample_rate = sampleRate;
-    codec_ctx->channels = channelCount;
+    codec_ctx->ch_layout.nb_channels = channelCount;
 
     av_frame_ = av_frame_alloc();
     if (!av_frame_) {
