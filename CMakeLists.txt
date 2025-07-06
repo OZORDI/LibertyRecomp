@@ -17,7 +17,7 @@ endif()
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project("UnleashedRecomp-ALL")
+project("MarathonRecomp-ALL")
 
 if (CMAKE_OSX_ARCHITECTURES)
     set(UNLEASHED_RECOMP_ARCHITECTURE ${CMAKE_OSX_ARCHITECTURES})

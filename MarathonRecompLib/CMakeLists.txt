@@ -1,4 +1,4 @@
-project("UnleashedRecompLib")
+project("MarathonRecompLib")
 
 add_compile_options(
     -fno-strict-aliasing
@@ -72,12 +72,12 @@ add_custom_command(
         ${XENOS_RECOMP_INCLUDE}
 )
 
-add_library(UnleashedRecompLib 
+add_library(MarathonRecompLib
     ${UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES}
     "shader/shader_cache.h"
     "shader/shader_cache.cpp"
 )
 
-target_include_directories(UnleashedRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(UnleashedRecompLib PRIVATE "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde")
-target_precompile_headers(UnleashedRecompLib PUBLIC "ppc/ppc_recomp_shared.h")
+target_include_directories(MarathonRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(MarathonRecompLib PRIVATE "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde")
+target_precompile_headers(MarathonRecompLib PUBLIC "ppc/ppc_recomp_shared.h")
