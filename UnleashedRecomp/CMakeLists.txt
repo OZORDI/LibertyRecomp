@@ -325,10 +325,10 @@ elseif (APPLE)
     set_source_files_properties(res/macos/game_icon.icns PROPERTIES
             MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(UnleashedRecomp PROPERTIES
-            OUTPUT_NAME "Unleashed Recompiled"
+            OUTPUT_NAME "Marathon Recompiled"
             MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/macos/MacOSXBundleInfo.plist.in
-            MACOSX_BUNDLE_GUI_IDENTIFIER hedge-dev.UnleashedRecomp
-            MACOSX_BUNDLE_BUNDLE_NAME "Unleashed Recompiled"
+            MACOSX_BUNDLE_GUI_IDENTIFIER hedge-dev.MarathonRecomp
+            MACOSX_BUNDLE_BUNDLE_NAME "Marathon Recompiled"
             MACOSX_BUNDLE_BUNDLE_VERSION ${MACOS_BUNDLE_VERSION}
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${MACOS_BUNDLE_VERSION}
             MACOSX_BUNDLE_ICON_FILE "game_icon.icns"
@@ -338,7 +338,7 @@ elseif (APPLE)
     # Instead, copy the MoltenVK dylib to the app bundle along with an ICD file for the loader to find it.
     # In the event the loader is not installed, the MoltenVK dylib can still be picked up directly in the app bundle.
     set(MVK_BUNDLED_PATH "Resources/vulkan/icd.d")
-    set(MVK_DST "${CMAKE_CURRENT_BINARY_DIR}/Unleashed Recompiled.app/Contents/${MVK_BUNDLED_PATH}")
+    set(MVK_DST "${CMAKE_CURRENT_BINARY_DIR}/Marathon Recompiled.app/Contents/${MVK_BUNDLED_PATH}")
     set_property(TARGET UnleashedRecomp APPEND PROPERTY BUILD_RPATH "@executable_path/../${MVK_BUNDLED_PATH}")
 
     set(MVK_ICD_SRC "${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/MoltenVK/MoltenVK/MoltenVK/icd/MoltenVK_icd.json")
