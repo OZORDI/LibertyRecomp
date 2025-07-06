@@ -57,7 +57,7 @@
 	url = https://github.com/nlohmann/json
 [submodule "thirdparty/FFmpeg"]
 	path = thirdparty/FFmpeg
-	url = https://github.com/IsaacMarovitz/FFmpegadixsplit
+	url = https://github.com/IsaacMarovitz/FFmpeg
 [submodule "MarathonRecompResources"]
 	path = MarathonRecompResources
 	url = https://github.com/IsaacMarovitz/MarathonRecompResources
