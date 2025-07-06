@@ -40,5 +40,5 @@ add_subdirectory(${UNLEASHED_RECOMP_THIRDPARTY_ROOT})
 add_subdirectory(${UNLEASHED_RECOMP_TOOLS_ROOT})
 
 # Include sub-projects.
-add_subdirectory("UnleashedRecompLib")
+add_subdirectory("MarathonRecompLib")
 add_subdirectory("UnleashedRecomp")
