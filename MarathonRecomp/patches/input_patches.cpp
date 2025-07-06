@@ -42,7 +42,7 @@ public:
 }
 g_worldMapCursorParamsOrbis;
 
-#ifdef UNLEASHED_RECOMP_UI_KBM_SUPPORT
+#ifdef MARATHON_RECOMP_UI_KBM_SUPPORT
 class WorldMapCursorParamsMouse : public WorldMapCursorParams
 {
 public:
@@ -128,7 +128,7 @@ public:
 
         switch (event->type)
         {
-#ifdef UNLEASHED_RECOMP_UI_KBM_SUPPORT
+#ifdef MARATHON_RECOMP_UI_KBM_SUPPORT
             case SDL_MOUSEMOTION:
             {
                 if (!ms_isMouseDown)
