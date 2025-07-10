@@ -366,13 +366,13 @@ static std::string& GetWizardText(WizardPage page)
 static const int WIZARD_INSTALL_TEXTURE_INDEX[] =
 {
     0,
-    0,
     1,
     2,
     3,
     4,
-    7, // Force Werehog on InstallSucceeded.
-    5  // Force Eggman on InstallFailed.
+    5,
+    7, // Force Elise on InstallSucceeded.
+    6  // Force Eggman on InstallFailed.
 };
 
 // These are ordered from bottom to top in a 3x2 grid.
