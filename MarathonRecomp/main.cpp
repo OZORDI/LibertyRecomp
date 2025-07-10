@@ -250,20 +250,20 @@ int main(int argc, char *argv[])
 
     std::filesystem::path modulePath;
     bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
-    bool runInstallerWizard = false;//forceInstaller || forceDLCInstaller || !isGameInstalled;
-    // if (runInstallerWizard)
-    // {
-    //     if (!Video::CreateHostDevice(sdlVideoDriver))
-    //     {
-    //         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
-    //         std::_Exit(1);
-    //     }
+    bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
+     if (runInstallerWizard)
+     {
+         if (!Video::CreateHostDevice(sdlVideoDriver))
+         {
+             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
+             std::_Exit(1);
+         }
 
-    //     if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
-    //     {
-    //         std::_Exit(0);
-    //     }
-    // }
+         if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
+         {
+             std::_Exit(0);
+         }
+     }
 
     // ModLoader::Init();
 
