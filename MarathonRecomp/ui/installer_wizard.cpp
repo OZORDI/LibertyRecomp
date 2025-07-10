@@ -465,7 +465,11 @@ static void DrawBackground()
 {
     auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
-    drawList->AddRectFilled({ 0.0, 0.0 }, res, IM_COL32_BLACK);
+
+    const uint32_t TOP = IM_COL32(0, 103, 255, 255);
+    const uint32_t BOTTOM = IM_COL32(0, 40, 100, 255);
+
+    drawList->AddRectFilledMultiColor({ 0.0, 0.0 }, res, TOP, TOP, BOTTOM, BOTTOM);
 }
 
 static void DrawLeftImage()
