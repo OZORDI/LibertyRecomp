@@ -68,8 +68,8 @@ static constexpr double PULSE_ANIMATION_LOOP_FADE_HIGH_POINT = 0.5;
 
 constexpr float IMAGE_X = 161.5f;
 constexpr float IMAGE_Y = 103.5f;
-constexpr float IMAGE_WIDTH = 512.0f;
-constexpr float IMAGE_HEIGHT = 512.0f;
+constexpr float IMAGE_WIDTH = 1024.0f;
+constexpr float IMAGE_HEIGHT = 1024.0f;
 
 constexpr float CONTAINER_X = 513.0f;
 constexpr float CONTAINER_Y = 226.0f;
