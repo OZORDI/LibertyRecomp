@@ -4856,7 +4856,6 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
                     vertexDeclaration->indexVertexStream = vertexElement->stream;
                 break;
 
-
             case D3DDECLUSAGE_TEXCOORD:
                 switch (vertexElement->type)
                 {
