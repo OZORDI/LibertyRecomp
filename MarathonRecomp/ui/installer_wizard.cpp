@@ -352,7 +352,7 @@ static std::string& GetWizardText(WizardPage page)
     {
         case WizardPage::SelectLanguage: return Localise("Installer_Page_SelectLanguage");
         case WizardPage::Introduction: return Localise("Installer_Page_Introduction");
-        case WizardPage::SelectGame: return Localise("Installer_Page_SelectGameAndUpdate");
+        case WizardPage::SelectGame: return Localise("Installer_Page_SelectGame");
         case WizardPage::SelectDLC: return Localise("Installer_Page_SelectDLC");
         case WizardPage::CheckSpace: return Localise("Installer_Page_CheckSpace");
         case WizardPage::Installing: return Localise("Installer_Page_Installing");

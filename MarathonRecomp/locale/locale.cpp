@@ -303,24 +303,24 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
         // Japanese Notes: This localization should include furigana.
         "Installer_Page_Introduction",
         {
-            { ELanguage::English,  "Welcome to\nUnleashed Recompiled!\n\nYou'll need an Xbox 360 copy\nof Sonic Unleashed in order to proceed with the installation." },
-            { ELanguage::Japanese, "Unleashed Recompiledへようこそ！\nインストールにはXbox 360[版:ばん]の\n「ソニック ワールドアドベンチャー」\nが必要です" },
-            { ELanguage::German,   "Willkommen zu\nUnleashed Recompiled!\nEs wird eine Xbox 360 Kopie von Sonic Unleashed benötigt um mit der Installation fortfahren zu können." },
-            { ELanguage::French,   "Bienvenue sur\nUnleashed Recompiled !\n\nVous aurez besoin d'une copie de Sonic Unleashed pour Xbox\n360 pour procéder à l'installation." },
-            { ELanguage::Spanish,  "¡Bienvenido a\nUnleashed Recompiled!\n\nNecesitas una copia de\nSonic Unleashed de Xbox 360\npara continuar con la instalación." },
-            { ELanguage::Italian,  "Benvenuto a\nUnleashed Recompiled!\n\nDovrai avere una copia di\nSonic Unleashed per la Xbox 360\nper proseguire con l'installazione." }
+            { ELanguage::English,  "Welcome to\nMarathon Recompiled!\n\nYou'll need an Xbox 360 copy\nof Sonic the Hedgehog (2006) in order to proceed with the installation." },
+            { ELanguage::Japanese, "Marathon Recompiledへようこそ！\nインストールにはXbox 360[版:ばん]の\n「ソニック ワールドアドベンチャー」\nが必要です" },
+            { ELanguage::German,   "Willkommen zu\nMarathon Recompiled!\nEs wird eine Xbox 360 Kopie von Sonic the Hedgehog (2006) benötigt um mit der Installation fortfahren zu können." },
+            { ELanguage::French,   "Bienvenue sur\nMarathon Recompiled !\n\nVous aurez besoin d'une copie de Sonic the Hedgehog (2006) pour Xbox\n360 pour procéder à l'installation." },
+            { ELanguage::Spanish,  "¡Bienvenido a\nMarathon Recompiled!\n\nNecesitas una copia de\nSonic the Hedgehog (2006) de Xbox 360\npara continuar con la instalación." },
+            { ELanguage::Italian,  "Benvenuto a\nMarathon Recompiled!\n\nDovrai avere una copia di\nSonic the Hedgehog (2006) per la Xbox 360\nper proseguire con l'installazione." }
         }
     },
     {
         // Japanese Notes: This localization should include furigana.
-        "Installer_Page_SelectGameAndUpdate",
+        "Installer_Page_SelectGame",
         {
-            { ELanguage::English,  "Add the sources for the game and its title update." },
-            { ELanguage::Japanese, "ゲームのソースとタイトルアップデート\nを[追加:ついか]" },
-            { ELanguage::German,   "Füge die Quellen für das Spiel und dessen Update hinzu." },
-            { ELanguage::French,   "Ajouter les fichiers du jeu ainsi que ses mises à jour." },
-            { ELanguage::Spanish,  "Añade las fuentes para el juego y su actualización." },
-            { ELanguage::Italian,  "Aggiungi le fonti per il gioco e per il suo file d'aggiornamento." }
+            { ELanguage::English,  "Add the sources for the game." },
+            { ELanguage::Japanese, "ゲームのソース\nを[追加:ついか]" },
+            { ELanguage::German,   "Füge die Quellen für das Spiel." },
+            { ELanguage::French,   "Ajouter les fichiers du jeu." },
+            { ELanguage::Spanish,  "Añade las fuentes para el juego." },
+            { ELanguage::Italian,  "Aggiungi le fonti per il gioco." }
         }
     },
     {
@@ -695,12 +695,12 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
     {
         "System_Win32_MissingDLLs",
         {
-            { ELanguage::English,  "The module \"%s\" could not be found.\n\nPlease make sure that:\n\n- You extracted this copy of Unleashed Recompiled fully and not just the *.exe file.\n- You are not running Unleashed Recompiled from a *.zip file." },
-            { ELanguage::Japanese, "モジュール\"%s\"が見つかりませんでした\n\n次の点を確認してください：\n\n※Unleashed Recompiledの*.exeファイルだけを抽出していなく、 コピーを完全に抽出してること\n※Unleashed Recompiledを*.zipファイルから実行していないこと" },
-            { ELanguage::German,   "Das Modul \"%s\" konnte nicht gefunden werden.\n\nBitte stelle sicher, dass:\n\n- Diese Kopie von Unleashed Recompiled vollständig entpackt wurde und nicht nur die *.exe-Datei.\n- Unleashed Recompiled nicht direkt aus einer *.zip-Datei ausgeführt wird." },
-            { ELanguage::French,   "Le module \"%s\" n'a pas pu être trouvé.\n\nVeuillez vous assurer que :\n\n- Vous avez extrait Unleashed Recompiled dans son entièreté et pas seulement le fichier *.exe.\n- Vous n'exécutez pas Unleashed Recompiled à partir d'un fichier *.zip." },
-            { ELanguage::Spanish,  "No se pudo encontrar el módulo \"%s\".\n\nAsegúrese de que:\n\n- Ha extraido esta copia de Unleashed Recompiled por completo y no solo el archivo *.exe.\n- No está ejecutando Unleashed Recompiled desde un archivo *.zip." },
-            { ELanguage::Italian,  "Impossibile trovare il modulo \"%s\".\n\nAssicurati che:\n\n- Hai estratto questa copia di Unleashed Recompiled correttamente e non solo il file *.exe.\n- Non stai eseguendo Unleashed Recompiled da un file *.zip." }
+            { ELanguage::English,  "The module \"%s\" could not be found.\n\nPlease make sure that:\n\n- You extracted this copy of Marathon Recompiled fully and not just the *.exe file.\n- You are not running Marathon Recompiled from a *.zip file." },
+            { ELanguage::Japanese, "モジュール\"%s\"が見つかりませんでした\n\n次の点を確認してください：\n\n※Marathon Recompiledの*.exeファイルだけを抽出していなく、 コピーを完全に抽出してること\n※Marathon Recompiledを*.zipファイルから実行していないこと" },
+            { ELanguage::German,   "Das Modul \"%s\" konnte nicht gefunden werden.\n\nBitte stelle sicher, dass:\n\n- Diese Kopie von Marathon Recompiled vollständig entpackt wurde und nicht nur die *.exe-Datei.\n- Marathon Recompiled nicht direkt aus einer *.zip-Datei ausgeführt wird." },
+            { ELanguage::French,   "Le module \"%s\" n'a pas pu être trouvé.\n\nVeuillez vous assurer que :\n\n- Vous avez extrait Marathon Recompiled dans son entièreté et pas seulement le fichier *.exe.\n- Vous n'exécutez pas Marathon Recompiled à partir d'un fichier *.zip." },
+            { ELanguage::Spanish,  "No se pudo encontrar el módulo \"%s\".\n\nAsegúrese de que:\n\n- Ha extraido esta copia de Marathon Recompiled por completo y no solo el archivo *.exe.\n- No está ejecutando Marathon Recompiled desde un archivo *.zip." },
+            { ELanguage::Italian,  "Impossibile trovare il modulo \"%s\".\n\nAssicurati che:\n\n- Hai estratto questa copia di Marathon Recompiled correttamente e non solo il file *.exe.\n- Non stai eseguendo Marathon Recompiled da un file *.zip." }
         }
     },
     {
