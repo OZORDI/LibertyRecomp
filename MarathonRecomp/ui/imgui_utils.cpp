@@ -214,7 +214,7 @@ void DrawArrows(ImVec2 min, ImVec2 max)
 {
     auto drawList = ImGui::GetBackgroundDrawList();
 
-    const float maxOpacity = 0.2f;
+    const float maxOpacity = 0.15f;
 
     auto leftArrowSize = Scale(450);
     auto leftArrowOffset = Scale(230);
