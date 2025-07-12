@@ -301,6 +301,28 @@ void DisableStartWait()
     // printf("DisableStartWait\n");
 }
 
+void EnableTitleButtons(PPCRegister& val)
+{
+    val.u32 = 3;
+}
+
+void EnableTitleButtons2(PPCRegister& val)
+{
+    val.u32 = 5;
+}
+
+void TitleMenuDefaultSelection(PPCRegister& r4, PPCRegister& r31)
+{
+    auto saveFilePath = GetSaveFilePath(false);
+
+    if (std::filesystem::exists(saveFilePath)) {
+        r4.s64 = 5;
+
+        auto pSelectedIndex = (be<uint32_t>*)g_memory.Translate(r31.u32 + 0x7C);
+        *pSelectedIndex = 1;
+    }
+}
+
 void DebugZlibMidAsmHook(PPCRegister& id)
 {
     // printf("DebugZlibMidAsmHook: %x\n", id.u64);
