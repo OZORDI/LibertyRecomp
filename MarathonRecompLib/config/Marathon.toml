@@ -103,6 +103,11 @@ address = 0x82607BB8
 registers = ["r28"]
 after_instruction = true
 
+[[midasm_hook]]
+name = "DisableStartWait"
+address = 0x82512748
+jump_address = 0x8251274c
+
 #[[midasm_hook]]
 #name = "DebugZlibMidAsmHook"
 #address = 0x826DC30C

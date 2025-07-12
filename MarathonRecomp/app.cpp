@@ -296,6 +296,10 @@ void DisableMSAA(PPCRegister& val)
     val.u32 = 0;
 }
 
+void DisableStartWait()
+{
+    // printf("DisableStartWait\n");
+}
 
 void DebugZlibMidAsmHook(PPCRegister& id)
 {
