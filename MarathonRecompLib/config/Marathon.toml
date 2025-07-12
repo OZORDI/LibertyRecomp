@@ -106,7 +106,7 @@ after_instruction = true
 [[midasm_hook]]
 name = "DisableStartWait"
 address = 0x82512748
-jump_address = 0x8251274c
+jump_address = 0x8251274C
 
 [[midasm_hook]]
 name = "EnableTitleButtons"

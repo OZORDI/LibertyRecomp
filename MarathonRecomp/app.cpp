@@ -301,6 +301,13 @@ void DisableStartWait()
     // printf("DisableStartWait\n");
 }
 
+PPC_FUNC_IMPL(__imp__sub_82511540);
+PPC_FUNC(sub_82511540)
+{
+    // printf("DisableStartWait2\n");
+    ctx.r11.u32 = 1;
+}
+
 void EnableTitleButtons(PPCRegister& val)
 {
     val.u32 = 3;
