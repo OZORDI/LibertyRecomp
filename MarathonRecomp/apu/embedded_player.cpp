@@ -3,23 +3,25 @@
 #include <user/config.h>
 
 #include <res/music/installer.ogg.h>
-#include <res/sounds/sys_worldmap_cursor.ogg.h>
-#include <res/sounds/sys_worldmap_finaldecide.ogg.h>
-#include <res/sounds/sys_actstg_pausecansel.ogg.h>
-#include <res/sounds/sys_actstg_pausecursor.ogg.h>
-#include <res/sounds/sys_actstg_pausedecide.ogg.h>
-#include <res/sounds/sys_actstg_pausewinclose.ogg.h>
-#include <res/sounds/sys_actstg_pausewinopen.ogg.h>
+#include <res/sounds/window_open.ogg.h>
+#include <res/sounds/window_close.ogg.h>
+#include <res/sounds/cursor2.ogg.h>
+#include <res/sounds/deside.ogg.h>
+#include <res/sounds/move.ogg.h>
+#include <res/sounds/main_deside.ogg.h>
+
+// The raw sound files are kind of loud
+// so reduce their volume slightly in player
+const float EFFECTS_VOLUME = 0.5f;
 
 enum class EmbeddedSound
 {
-    SysWorldMapCursor,
-    SysWorldMapFinalDecide,
-    SysActStgPauseCansel,
-    SysActStgPauseCursor,
-    SysActStgPauseDecide,
-    SysActStgPauseWinClose,
-    SysActStgPauseWinOpen,
+    WindowOpen,
+    WindowClose,
+    Cursor2,
+    Deside,
+    Move,
+    MainDeside,
     Count,
 };
 
@@ -31,13 +33,12 @@ struct EmbeddedSoundData
 static std::array<EmbeddedSoundData, size_t(EmbeddedSound::Count)> g_embeddedSoundData = {};
 static const std::unordered_map<std::string_view, EmbeddedSound> g_embeddedSoundMap =
 {
-    { "sys_worldmap_cursor", EmbeddedSound::SysWorldMapCursor },
-    { "sys_worldmap_finaldecide", EmbeddedSound::SysWorldMapFinalDecide },
-    { "sys_actstg_pausecansel", EmbeddedSound::SysActStgPauseCansel },
-    { "sys_actstg_pausecursor", EmbeddedSound::SysActStgPauseCursor },
-    { "sys_actstg_pausedecide", EmbeddedSound::SysActStgPauseDecide },
-    { "sys_actstg_pausewinclose", EmbeddedSound::SysActStgPauseWinClose },
-    { "sys_actstg_pausewinopen", EmbeddedSound::SysActStgPauseWinOpen },
+    { "window_open", EmbeddedSound::WindowOpen },
+    { "window_close", EmbeddedSound::WindowClose },
+    { "cursor2", EmbeddedSound::Cursor2 },
+    { "deside", EmbeddedSound::Deside },
+    { "move", EmbeddedSound::Move },
+    { "main_deside", EmbeddedSound::MainDeside },
 };
 
 static size_t g_channelIndex;
@@ -52,33 +53,29 @@ static void PlayEmbeddedSound(EmbeddedSound s)
         size_t soundDataSize = 0;
         switch (s)
         {
-        case EmbeddedSound::SysWorldMapCursor:
-            soundData = g_sys_worldmap_cursor;
-            soundDataSize = sizeof(g_sys_worldmap_cursor);
+        case EmbeddedSound::WindowOpen:
+            soundData = g_window_open;
+            soundDataSize = sizeof(g_window_open);
             break;
-        case EmbeddedSound::SysWorldMapFinalDecide:
-            soundData = g_sys_worldmap_finaldecide;
-            soundDataSize = sizeof(g_sys_worldmap_finaldecide);
+        case EmbeddedSound::WindowClose:
+            soundData = g_window_close;
+            soundDataSize = sizeof(g_window_close);
             break;
-        case EmbeddedSound::SysActStgPauseCansel:
-            soundData = g_sys_actstg_pausecansel;
-            soundDataSize = sizeof(g_sys_actstg_pausecansel);
+        case EmbeddedSound::Cursor2:
+            soundData = g_cursor2;
+            soundDataSize = sizeof(g_cursor2);
             break;
-        case EmbeddedSound::SysActStgPauseCursor:
-            soundData = g_sys_actstg_pausecursor;
-            soundDataSize = sizeof(g_sys_actstg_pausecursor);
+        case EmbeddedSound::Deside:
+            soundData = g_deside;
+            soundDataSize = sizeof(g_deside);
             break;
-        case EmbeddedSound::SysActStgPauseDecide:
-            soundData = g_sys_actstg_pausedecide;
-            soundDataSize = sizeof(g_sys_actstg_pausedecide);
+        case EmbeddedSound::Move:
+            soundData = g_move;
+            soundDataSize = sizeof(g_move);
             break;
-        case EmbeddedSound::SysActStgPauseWinClose:
-            soundData = g_sys_actstg_pausewinclose;
-            soundDataSize = sizeof(g_sys_actstg_pausewinclose);
-            break;
-        case EmbeddedSound::SysActStgPauseWinOpen:
-            soundData = g_sys_actstg_pausewinopen;
-            soundDataSize = sizeof(g_sys_actstg_pausewinopen);
+        case EmbeddedSound::MainDeside:
+            soundData = g_main_deside;
+            soundDataSize = sizeof(g_main_deside);
             break;
         default:
             assert(false && "Unknown embedded sound.");
@@ -88,7 +85,7 @@ static void PlayEmbeddedSound(EmbeddedSound s)
         data.chunk = Mix_LoadWAV_RW(SDL_RWFromConstMem(soundData, soundDataSize), 1);
     }
     
-    Mix_VolumeChunk(data.chunk, Config::MasterVolume * Config::EffectsVolume * MIX_MAX_VOLUME);
+    Mix_VolumeChunk(data.chunk, (Config::MasterVolume * Config::EffectsVolume * EFFECTS_VOLUME) * MIX_MAX_VOLUME);
     Mix_PlayChannel(g_channelIndex % MIX_CHANNELS, data.chunk, 0);
     ++g_channelIndex;
 }

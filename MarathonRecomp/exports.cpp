@@ -9,10 +9,12 @@
 
 void Game_PlaySound(const char* pName)
 {
-    // if (EmbeddedPlayer::s_isActive)
-    // {
-    //     EmbeddedPlayer::Play(pName);
-    // }
+     if (EmbeddedPlayer::s_isActive)
+     {
+         EmbeddedPlayer::Play(pName);
+     }
+
+     // TODO: Support in-game sounds see sub_824C7868
     // else
     // {
     //     // Use EVENT category in cutscenes since SYSTEM gets muted by the game.

@@ -423,7 +423,7 @@ void MessageWindow::Draw()
 
                     if (scrollUp || scrollDown)
                     {
-                        Game_PlaySound("sys_actstg_pausecursor");
+                        Game_PlaySound("move");
                         g_rowSelectionTime = ImGui::GetTime();
                         g_prevSelectedRowIndex = prevSelectedRowIndex;
                         g_joypadAxis.y = 0;
@@ -464,7 +464,7 @@ void MessageWindow::Draw()
                     {
                         g_result = g_cancelButtonIndex;
 
-                        Game_PlaySound("sys_actstg_pausecansel");
+                        Game_PlaySound("cursor2");
                         MessageWindow::Close();
                     }
                 }
@@ -488,7 +488,7 @@ void MessageWindow::Draw()
                         if (ImGui::IsMouseHoveringRect(itemMin, itemMax, false))
                         {
                             if (g_selectedRowIndex != i)
-                                Game_PlaySound("sys_actstg_pausecursor");
+                                Game_PlaySound("move");
 
                             g_selectedRowIndex = i;
 
@@ -509,7 +509,7 @@ void MessageWindow::Draw()
                 {
                     g_result = g_selectedRowIndex;
 
-                    Game_PlaySound("sys_actstg_pausedecide");
+                    Game_PlaySound("main_deside");
                     MessageWindow::Close();
                 }
 
@@ -525,7 +525,7 @@ void MessageWindow::Draw()
                     g_isControlsVisible = true;
 
                     ResetSelection();
-                    Game_PlaySound("sys_actstg_pausewinopen");
+                    Game_PlaySound("window_open");
                 }
             }
         }
@@ -565,7 +565,7 @@ bool MessageWindow::Open(std::string text, int* result, std::span<std::string> b
 
         ResetSelection();
 
-        Game_PlaySound("sys_actstg_pausewinopen");
+        Game_PlaySound("window_open");
 
         g_isAwaitingResult = true;
     }
@@ -590,5 +590,5 @@ void MessageWindow::Close()
         ButtonGuide::Close();
     }
 
-    Game_PlaySound("sys_actstg_pausewinclose");
+    Game_PlaySound("window_close");
 }

@@ -310,7 +310,7 @@ public:
         if (newCursorIndex >= 0)
         {
             if (g_currentCursorIndex != newCursorIndex)
-                Game_PlaySound("sys_worldmap_cursor");
+                Game_PlaySound("move");
 
             g_currentCursorIndex = newCursorIndex;
         }
@@ -406,7 +406,7 @@ static bool PushCursorRect(ImVec2 min, ImVec2 max, bool &cursorPressed, bool mak
     {
         if (g_currentCursorAccepted)
         {
-            Game_PlaySound("sys_worldmap_finaldecide");
+            Game_PlaySound("main_deside");
             cursorPressed = true;
             g_currentCursorAccepted = false;
         }
@@ -1292,7 +1292,7 @@ static void CheckCancelAction()
         return;
     }
 
-    Game_PlaySound("sys_actstg_pausecansel");
+    Game_PlaySound("cursor2");
 
     if (g_currentPage == g_firstPage || g_currentPage == WizardPage::InstallFailed)
     {
