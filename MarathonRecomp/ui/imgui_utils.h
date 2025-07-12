@@ -58,6 +58,7 @@ double ComputeLinearMotion(double duration, double offset, double total);
 double ComputeMotion(double duration, double offset, double total);
 void DrawArrows(ImVec2 min, ImVec2 max);
 void DrawHUD(ImVec2 min, ImVec2 max, const ImFont* font, const char* text);
+void DrawContainerBox(ImVec2 min, ImVec2 max, float alpha = 1);
 void DrawPauseContainer(ImVec2 min, ImVec2 max, float alpha = 1);
 void DrawTextBasic(const ImFont* font, float fontSize, const ImVec2& pos, ImU32 colour, const char* text);
 void DrawPauseHeaderContainer(ImVec2 min, ImVec2 max, float alpha = 1);

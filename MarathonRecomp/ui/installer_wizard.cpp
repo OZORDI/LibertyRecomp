@@ -47,15 +47,14 @@ static constexpr double CONTAINER_INNER_DURATION = 15.0;
 static constexpr double ALL_ANIMATIONS_FULL_DURATION = CONTAINER_INNER_TIME + CONTAINER_INNER_DURATION;
 static constexpr double QUITTING_EXTRA_DURATION = 60.0;
 
-constexpr float IMAGE_X = 200.5f;
-constexpr float IMAGE_Y = 180.5f;
-constexpr float IMAGE_WIDTH = 350.0f;
-constexpr float IMAGE_HEIGHT = 350.0f;
+constexpr float IMAGE_WIDTH = 1000.0f;
+constexpr float IMAGE_HEIGHT = 1000.0f;
 
-constexpr float CONTAINER_X = 550.0f;
+constexpr float CONTAINER_X = 650.0f;
 constexpr float CONTAINER_Y = 226.0f;
 constexpr float CONTAINER_WIDTH = 526.5f;
 constexpr float CONTAINER_HEIGHT = 246.0f;
+constexpr float CONTAINER_PADDING = 25.0f;
 constexpr float SIDE_CONTAINER_WIDTH = CONTAINER_WIDTH / 2.0f;
 
 constexpr float BOTTOM_X_GAP = 4.0f;
@@ -97,6 +96,15 @@ static std::atomic<bool> g_installerHalted = false;
 static std::atomic<bool> g_installerCancelled = false;
 static bool g_installerFailed = false;
 static std::string g_installerErrorMessage;
+
+static std::array<ImVec2, 8> g_installTexturePositions = { ImVec2(120.0f, 90.0f),    // Sonic
+                                                           ImVec2(100.0f, 80.0f),    // Tails
+                                                           ImVec2(120.0f, 90.0f),    // Amy
+                                                           ImVec2(10.0f, 90.0f),     // Shadow
+                                                           ImVec2(120.0f, 90.0f),    // Rouge
+                                                           ImVec2(120.0f, 10.0f),    // Silver
+                                                           ImVec2(10.0f, 140.0f),    // Eggman
+                                                           ImVec2(200.0f, 140.0f) }; // Elise
 
 enum class WizardPage
 {
@@ -455,16 +463,17 @@ static void DrawLeftImage()
     }
 
     double imageAlpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, IMAGE_ANIMATION_TIME, IMAGE_ANIMATION_DURATION);
-    int a = std::lround(255.0 * imageAlpha);
+    int a = std::lround(140.0 * imageAlpha);
     GuestTexture *guestTexture = g_installTextures[installTextureIndex % g_installTextures.size()].get();
     auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
-    ImVec2 min = { g_aspectRatioOffsetX + Scale(IMAGE_X), g_aspectRatioOffsetY + Scale(IMAGE_Y) };
+    auto pos = g_installTexturePositions[installTextureIndex % g_installTextures.size()];
+    ImVec2 min = { g_aspectRatioOffsetX + Scale(pos.x), g_aspectRatioOffsetY + Scale(pos.y) };
     ImVec2 max = { min.x + Scale(IMAGE_WIDTH), min.y + Scale(IMAGE_HEIGHT) };
     drawList->AddImage(guestTexture, min, max, ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, a));
 }
 
-static void DrawHUDTitle()
+static void DrawHUD()
 {
     auto &res = ImGui::GetIO().DisplaySize;
 
@@ -484,14 +493,14 @@ static void DrawContainer(ImVec2 min, ImVec2 max, bool isTextArea)
 
     double gridOverlayAlpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
 
-    const uint32_t gridOverlayColor = IM_COL32(0, 32, 0, 128 * gridOverlayAlpha);
+    if (isTextArea)
+    {
+        auto padding = Scale(CONTAINER_PADDING);
+
+        DrawContainerBox({ min.x - padding, min.y - padding }, { max.x + padding, max.y + padding }, gridOverlayAlpha);
+    }
 
     float gridSize = Scale(GRID_SIZE);
-
-    if (isTextArea) 
-    {
-        drawList->AddRectFilled(min, max, gridOverlayColor);
-    }
 
     // The draw area
     drawList->PushClipRect({ min.x - gridSize * 2.0f, min.y + gridSize * 2.0f }, { max.x - gridSize * 2.0f + 1.0f, max.y - gridSize * 2.0f + 1.0f });
@@ -754,18 +763,12 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
 
     DrawButtonContainer(min, max, baser, baseg, alpha);
 
-    ImFont *font = sourceButton ? g_rodinFont : g_newRodinFont;
-    float size = Scale(sourceButton ? 16.5f : 20.0f);
+    ImFont *font = g_rodinFont;
+    float size = Scale(18.0f);
     float squashRatio;
     ImVec2 textSize = ComputeTextSize(font, buttonText, size, squashRatio, Scale(maxTextWidth));
     min.x += ((max.x - min.x) - textSize.x) / 2.0f;
     min.y += ((max.y - min.y) - textSize.y) / 2.0f;
-
-    if (!sourceButton)
-    {
-        // Fixes slight misalignment caused by this particular font.
-        min.y -= Scale(1.0f);
-    }
 
     SetOrigin({ min.x + textSize.x / 2.0f, min.y });
     SetScale({ squashRatio, 1.0f });
@@ -1318,79 +1321,6 @@ static void CheckCancelAction()
     }
 }
 
-static void DrawHorizontalBorder(bool bottomBorder)
-{
-    const uint32_t FADE_COLOR_LEFT = IM_COL32(155, 155, 155, 0);
-    const uint32_t SOLID_COLOR = IM_COL32(155, 200, 155, 255);
-    const uint32_t FADE_COLOR_RIGHT = IM_COL32(155, 225, 155, 0);
-    auto drawList = ImGui::GetBackgroundDrawList();
-    double borderScale = 1.0 - ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_LINE_ANIMATION_TIME, CONTAINER_LINE_ANIMATION_DURATION);
-    float midX = g_aspectRatioOffsetX + Scale(CONTAINER_X + CONTAINER_WIDTH / 5);
-    float minX = std::lerp(g_aspectRatioOffsetX + Scale(CONTAINER_X - BORDER_SIZE - BORDER_OVERSHOOT), midX, borderScale);
-    float maxX = std::lerp(g_aspectRatioOffsetX + Scale(CONTAINER_X + CONTAINER_WIDTH + SIDE_CONTAINER_WIDTH + BORDER_OVERSHOOT), midX, borderScale);
-    float minY = g_aspectRatioOffsetY + (bottomBorder ? Scale(CONTAINER_Y + CONTAINER_HEIGHT) : Scale(CONTAINER_Y - BORDER_SIZE));
-    float maxY = minY + Scale(BORDER_SIZE);
-    drawList->AddRectFilledMultiColor
-    (
-        { minX, minY },
-        { midX, maxY },
-        FADE_COLOR_LEFT,
-        SOLID_COLOR,
-        SOLID_COLOR,
-        FADE_COLOR_LEFT
-    );
-
-    drawList->AddRectFilledMultiColor
-    (
-        { midX, minY },
-        { maxX, maxY },
-        SOLID_COLOR,
-        FADE_COLOR_RIGHT,
-        FADE_COLOR_RIGHT,
-        SOLID_COLOR
-    );
-}
-
-static void DrawVerticalBorder(bool rightBorder)
-{
-    const uint32_t SOLID_COLOR = IM_COL32(155, rightBorder ? 225 : 155, 155, 255);
-    const uint32_t FADE_COLOR = IM_COL32(155, rightBorder ? 225 : 155, 155, 0);
-    auto drawList = ImGui::GetBackgroundDrawList();
-    double borderScale = 1.0 - ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_LINE_ANIMATION_TIME, CONTAINER_LINE_ANIMATION_DURATION);
-    float minX = g_aspectRatioOffsetX + (rightBorder ? Scale(CONTAINER_X + CONTAINER_WIDTH) : Scale(CONTAINER_X - BORDER_SIZE));
-    float maxX = minX + Scale(BORDER_SIZE);
-    float midY = g_aspectRatioOffsetY + Scale(CONTAINER_Y + CONTAINER_HEIGHT / 2);
-    float minY = std::lerp(g_aspectRatioOffsetY + Scale(CONTAINER_Y - BORDER_OVERSHOOT), midY, borderScale);
-    float maxY = std::lerp(g_aspectRatioOffsetY + Scale(CONTAINER_Y + CONTAINER_HEIGHT + BORDER_OVERSHOOT), midY, borderScale);
-    drawList->AddRectFilledMultiColor
-    (
-        { minX, minY },
-        { maxX, midY },
-        FADE_COLOR,
-        FADE_COLOR,
-        SOLID_COLOR,
-        SOLID_COLOR
-    );
-
-    drawList->AddRectFilledMultiColor
-    (
-        { minX, midY },
-        { maxX, maxY },
-        SOLID_COLOR,
-        SOLID_COLOR,
-        FADE_COLOR,
-        FADE_COLOR
-    );
-}
-
-static void DrawBorders()
-{
-    DrawHorizontalBorder(false);
-    DrawHorizontalBorder(true);
-    DrawVerticalBorder(false);
-    DrawVerticalBorder(true);
-}
-
 static void DrawMessagePrompt()
 {
     if (g_currentMessagePrompt.empty())
@@ -1543,7 +1473,7 @@ void InstallerWizard::Draw()
     DrawBackground();
     DrawArrows();
     DrawLeftImage();
-    DrawHUDTitle();
+    DrawHUD();
     DrawDescriptionContainer();
     DrawLanguagePicker();
     DrawSourcePickers();
@@ -1551,7 +1481,6 @@ void InstallerWizard::Draw()
     DrawInstallingProgress();
     DrawNavigationButton();
     CheckCancelAction();
-    DrawBorders();
     DrawMessagePrompt();
     PickerDrawForeground();
     PickerCheckTutorial();
