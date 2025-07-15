@@ -230,17 +230,17 @@ void DrawArrows(ImVec2 min, ImVec2 max)
     double cycleTime = fmod(elapsedTime, totalTime);
     auto totalAnimOffset = (float)(xOffset * totalTime);
 
-    const uint leftArrows = (uint)((max.x + Scale(200) + totalAnimOffset) / leftArrowOffset) + 1;
-    const uint rightArrows = (uint)((max.x + Scale(20) + totalAnimOffset) / rightArrowOffset) + 1;
+    const uint32_t leftArrows = (uint32_t)((max.x + Scale(200) + totalAnimOffset) / leftArrowOffset) + 1;
+    const uint32_t rightArrows = (uint32_t)((max.x + Scale(20) + totalAnimOffset) / rightArrowOffset) + 1;
 
     auto leftBaseY = min.y - (leftArrowSize / 2);
     auto leftEndY = min.y + (leftArrowSize / 2);
 
-    for (uint i = 0; i < leftArrows; i++)
+    for (uint32_t i = 0; i < leftArrows; i++)
     {
         auto baseX = min.x + (i * leftArrowOffset) - Scale(200) - totalAnimOffset;
         auto endX = baseX + leftArrowSize;
-        auto opacity = (uint)((maxOpacity * ComputeLoopMotion(cycleTime, 1.0 + ((double)(leftArrows - i) / leftArrows))) * 255);
+        auto opacity = (uint32_t)((maxOpacity * ComputeLoopMotion(cycleTime, 1.0 + ((double)(leftArrows - i) / leftArrows))) * 255);
 
         drawList->AddImage(g_texArrow.get(), { endX, leftBaseY }, { baseX, leftEndY }, GET_UV_COORDS(arrowUV), IM_COL32(255, 255, 255, opacity));
     }
@@ -248,11 +248,11 @@ void DrawArrows(ImVec2 min, ImVec2 max)
     auto rightBaseY = min.y - (rightArrowSize / 2);
     auto rightEndY = min.y + (rightArrowSize / 2);
 
-    for (uint i = 0; i < rightArrows; i++)
+    for (uint32_t i = 0; i < rightArrows; i++)
     {
         auto baseX = max.x - (i * rightArrowOffset) - rightArrowSize + Scale(20) + totalAnimOffset;
         auto endX = baseX + rightArrowSize;
-        auto opacity = (uint)((maxOpacity * ComputeLoopMotion(cycleTime, ((double)(rightArrows - i) / rightArrows))) * 255);
+        auto opacity = (uint32_t)((maxOpacity * ComputeLoopMotion(cycleTime, ((double)(rightArrows - i) / rightArrows))) * 255);
 
         drawList->AddImage(g_texArrow.get(), { baseX, rightBaseY }, { endX, rightEndY }, GET_UV_COORDS(arrowUV), IM_COL32(255, 255, 255, opacity));
     }
