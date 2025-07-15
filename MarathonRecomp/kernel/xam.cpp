@@ -387,6 +387,9 @@ uint32_t XamContentGetDeviceData(uint32_t DeviceID, XDEVICE_DATA* pDeviceData)
 
 uint32_t XamInputGetCapabilities(uint32_t unk, uint32_t userIndex, uint32_t flags, XAMINPUT_CAPABILITIES* caps)
 {
+    if (userIndex != 0)
+        return ERROR_NO_SUCH_USER;
+
     uint32_t result = hid::GetCapabilities(userIndex, caps);
 
     if (result == ERROR_SUCCESS)
@@ -406,6 +409,9 @@ uint32_t XamInputGetCapabilities(uint32_t unk, uint32_t userIndex, uint32_t flag
 
 uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* state)
 {
+    if (userIndex != 0)
+        return ERROR_NO_SUCH_USER;
+
     memset(state, 0, sizeof(*state));
 
     if (hid::IsInputAllowed())
@@ -492,6 +498,9 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
 
 uint32_t XamInputSetState(uint32_t userIndex, uint32_t flags, XAMINPUT_VIBRATION* vibration)
 {
+    if (userIndex != 0)
+        return ERROR_NO_SUCH_USER;
+
     if (!hid::IsInputDeviceController() || !Config::Vibration)
         return ERROR_SUCCESS;
 
