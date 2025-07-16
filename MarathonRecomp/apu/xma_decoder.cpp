@@ -1,4 +1,5 @@
-// Almsot all decoding code is from Xenia Canary, so leave the copyright here
+// Almost all decoding code is from Xenia Canary, so leave the copyright here
+
 /**
 ******************************************************************************
 * Xenia : Xbox 360 Emulator Research Project                                 *
@@ -353,12 +354,14 @@ void Decode(XmaPlayback *playback) {
               // Select the appropriate array based on the current channel.
               auto in = reinterpret_cast<const float *>(samples[j]);
 
-              // Raw samples sometimes aren't within [-1, 1]
-              float scaled_sample = clamp_float(in[i], -1.0f, 1.0f) * scale;
+              if (in != nullptr) {
+                  // Raw samples sometimes aren't within [-1, 1]
+                  float scaled_sample = clamp_float(in[i], -1.0f, 1.0f) * scale;
 
-              // Convert the sample and output it in big endian.
-              auto sample = static_cast<int16_t>(scaled_sample);
-              out[o++] = ByteSwap(sample);
+                  // Convert the sample and output it in big endian.
+                  auto sample = static_cast<int16_t>(scaled_sample);
+                  out[o++] = ByteSwap(sample);
+              }
           }
       }
   }
