@@ -9,12 +9,7 @@
 #include <condition_variable>
 
 extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/opt.h>
-#include <libavutil/samplefmt.h>
-#include <libswresample/swresample.h>
+    #include <libavcodec/avcodec.h>
 }
 
 struct XMAPLAYBACKINIT {
@@ -26,11 +21,11 @@ struct XMAPLAYBACKINIT {
 
 constexpr uint32_t kBytesPerPacket = 2048;
 constexpr uint32_t kBytesPerPacketHeader = 4;
-constexpr uint32_t kBytesPerPacketData =
-    kBytesPerPacket - kBytesPerPacketHeader;
+constexpr uint32_t kBytesPerPacketData = kBytesPerPacket - kBytesPerPacketHeader;
 constexpr uint32_t kBytesPerSample = 2;
 constexpr uint32_t kSamplesPerFrame = 512;
 constexpr uint32_t kBytesPerFrameChannel = kSamplesPerFrame * kBytesPerSample;
+
 struct XmaPlayback {
   uint32_t sampleRate;
   uint32_t outputBufferSize;
