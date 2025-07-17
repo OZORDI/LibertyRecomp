@@ -4940,7 +4940,7 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
                 case D3DDECLUSAGE_TANGENT:
                 case D3DDECLUSAGE_BINORMAL:
                 case D3DDECLUSAGE_BLENDINDICES:
-                    format = RenderFormat::R32_UINT;
+                    format = RenderFormat::R32G32B32_FLOAT;
                     break;
                 }
 
@@ -4948,11 +4948,12 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
             };
 
         addInputElement(D3DDECLUSAGE_POSITION, 0);
+        addInputElement(D3DDECLUSAGE_POSITION, 1);
+        addInputElement(D3DDECLUSAGE_POSITION, 2);
+        addInputElement(D3DDECLUSAGE_POSITION, 3);
         addInputElement(D3DDECLUSAGE_NORMAL, 0);
         addInputElement(D3DDECLUSAGE_TANGENT, 0);
-        addInputElement(D3DDECLUSAGE_POSITION, 2);
         addInputElement(D3DDECLUSAGE_BINORMAL, 0);
-        addInputElement(D3DDECLUSAGE_POSITION, 3);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 0);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 1);
         addInputElement(D3DDECLUSAGE_TEXCOORD, 2);
