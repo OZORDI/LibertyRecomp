@@ -425,7 +425,7 @@ void Consume(XmaPlayback *playback) {
                (int8_t)playback->subframes);
 
   const int8_t raw_frame_read_offset =
-      ((kBytesPerFrameChannel / kOutputBytesPerBlock) * playback->channelCount)
+      ((kBytesPerFrameChannel / kOutputBytesPerBlock) * playback->channelCount) -
       playback->current_frame_remaining_subframes_;
   // + data->subframe_skip_count;
 
