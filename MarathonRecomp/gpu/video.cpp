@@ -166,6 +166,10 @@ struct SharedConstants
     uint32_t samplerIndices[16]{};
     uint32_t booleans{};
     uint32_t swappedTexcoords{};
+    uint32_t swappedNormals{};
+    uint32_t swappedBinormals{};
+    uint32_t swappedTangents{};
+    uint32_t swappedBlendWeights{};
     float halfPixelOffsetX{};
     float halfPixelOffsetY{};
     float alphaThreshold{};
@@ -4890,6 +4894,70 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
 
             switch (vertexElement->usage)
             {
+            case D3DDECLUSAGE_NORMAL:
+                switch (vertexElement->type)
+                {
+                case D3DDECLTYPE_SHORT2:
+                case D3DDECLTYPE_SHORT4:
+                case D3DDECLTYPE_SHORT2N:
+                case D3DDECLTYPE_SHORT4N:
+                case D3DDECLTYPE_USHORT2N:
+                case D3DDECLTYPE_USHORT4N:
+                case D3DDECLTYPE_FLOAT16_2:
+                case D3DDECLTYPE_FLOAT16_4:
+                    vertexDeclaration->swappedNormals |= 1 << vertexElement->usageIndex;
+                    break;
+                }
+
+                break;
+            case D3DDECLUSAGE_BINORMAL:
+                switch (vertexElement->type)
+                {
+                case D3DDECLTYPE_SHORT2:
+                case D3DDECLTYPE_SHORT4:
+                case D3DDECLTYPE_SHORT2N:
+                case D3DDECLTYPE_SHORT4N:
+                case D3DDECLTYPE_USHORT2N:
+                case D3DDECLTYPE_USHORT4N:
+                case D3DDECLTYPE_FLOAT16_2:
+                case D3DDECLTYPE_FLOAT16_4:
+                    vertexDeclaration->swappedBinormals |= 1 << vertexElement->usageIndex;
+                    break;
+                }
+
+                break;
+            case D3DDECLUSAGE_TANGENT:
+                switch (vertexElement->type)
+                {
+                case D3DDECLTYPE_SHORT2:
+                case D3DDECLTYPE_SHORT4:
+                case D3DDECLTYPE_SHORT2N:
+                case D3DDECLTYPE_SHORT4N:
+                case D3DDECLTYPE_USHORT2N:
+                case D3DDECLTYPE_USHORT4N:
+                case D3DDECLTYPE_FLOAT16_2:
+                case D3DDECLTYPE_FLOAT16_4:
+                    vertexDeclaration->swappedTangents |= 1 << vertexElement->usageIndex;
+                    break;
+                }
+
+                break;
+            case D3DDECLUSAGE_BLENDWEIGHT:
+                switch (vertexElement->type)
+                {
+                case D3DDECLTYPE_SHORT2:
+                case D3DDECLTYPE_SHORT4:
+                case D3DDECLTYPE_SHORT2N:
+                case D3DDECLTYPE_SHORT4N:
+                case D3DDECLTYPE_USHORT2N:
+                case D3DDECLTYPE_USHORT4N:
+                case D3DDECLTYPE_FLOAT16_2:
+                case D3DDECLTYPE_FLOAT16_4:
+                    vertexDeclaration->swappedBlendWeights |= 1 << vertexElement->usageIndex;
+                    break;
+                }
+
+                break;
             case D3DDECLUSAGE_POSITION:
                 if (vertexElement->usageIndex == 1)
                     vertexDeclaration->indexVertexStream = vertexElement->stream;
@@ -5006,6 +5074,10 @@ static void ProcSetVertexDeclaration(const RenderCommand& cmd)
     if (args.vertexDeclaration != nullptr)
     {
         SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTexcoords, args.vertexDeclaration->swappedTexcoords);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedNormals, args.vertexDeclaration->swappedNormals);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBinormals, args.vertexDeclaration->swappedBinormals);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTangents, args.vertexDeclaration->swappedTangents);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBlendWeights, args.vertexDeclaration->swappedBlendWeights);
 
         uint32_t specConstants = g_pipelineState.specConstants;
         if (args.vertexDeclaration->hasR11G11B10Normal)

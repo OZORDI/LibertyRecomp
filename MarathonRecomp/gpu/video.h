@@ -298,6 +298,10 @@ struct GuestVertexDeclaration : GuestResource
     uint32_t inputElementCount = 0;
     uint32_t vertexElementCount = 0;
     uint32_t swappedTexcoords = 0;
+    uint32_t swappedNormals = 0;
+    uint32_t swappedBinormals = 0;
+    uint32_t swappedTangents = 0;
+    uint32_t swappedBlendWeights = 0;
     bool hasR11G11B10Normal = false;
     bool vertexStreams[16]{};
     uint32_t indexVertexStream = 0;
