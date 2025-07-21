@@ -7,6 +7,7 @@
 #include <mod/mod_loader.h>
 #include <os/logger.h>
 #include <user/config.h>
+#include <user/paths.h>
 #include <stdafx.h>
 
 struct FileHandle : KernelObject
@@ -109,6 +110,14 @@ FileHandle* XCreateFileA
     }
 
     fileStream.open(filePath, fileOpenMode);
+#ifdef __linux__
+    if (!fileStream.is_open()) {
+        std::filesystem::path cachedPath = FindInPathCache(filePath);
+        if (!cachedPath.empty()) {
+            fileStream.open(cachedPath, fileOpenMode);
+        }
+    }
+#endif
     if (!fileStream.is_open())
     {
 #ifdef _WIN32

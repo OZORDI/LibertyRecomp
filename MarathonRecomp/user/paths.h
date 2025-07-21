@@ -9,6 +9,7 @@
 #endif
 
 extern std::filesystem::path g_executableRoot;
+inline std::unordered_map<std::string, std::filesystem::path> g_pathCache;
 
 bool CheckPortable();
 std::filesystem::path BuildUserPath();
@@ -42,4 +43,26 @@ inline std::filesystem::path GetSaveFilePath(bool checkForMods)
         return ModLoader::s_saveFilePath;
     else
         return GetSavePath(false) / "SonicNextSaveData.bin";
+}
+
+static std::string toLower(std::string str) {
+    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); });
+    return str;
+};
+
+inline void BuildPathCache(const std::string& gamePath) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(gamePath)) {
+        std::string fullPath = entry.path().string();
+        std::string key = toLower(fullPath);
+        g_pathCache[key] = entry.path();
+    }
+}
+
+inline std::filesystem::path FindInPathCache(const std::string& targetPath) {
+    std::string key = toLower(targetPath);
+    auto it = g_pathCache.find(key);
+    if (it != g_pathCache.end()) {
+        return it->second;
+    }
+    return {};
 }
