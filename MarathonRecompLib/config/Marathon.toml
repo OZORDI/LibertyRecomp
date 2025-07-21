@@ -81,7 +81,8 @@ functions = [
     { address = 0x82860FD0, size = 0x1A8 },
     { address = 0x829DA628, size = 0x70 },
     { address = 0x8223DD38, size = 0x1C4 },
-    { address = 0x824ABA68, size = 0xE0 }
+    { address = 0x824ABA68, size = 0xE0 },
+    { address = 0x824ABB10, size = 0x38 }
 ]
 
 invalid_instructions = [
