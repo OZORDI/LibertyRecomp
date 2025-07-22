@@ -67,9 +67,7 @@ void KiSystemStartup()
     const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
     const std::string gamePath = (const char*)(GetGamePath() / "game").u8string().c_str();
 
-    #ifdef __linux__
-        BuildPathCache(gamePath);
-    #endif
+    BuildPathCache(gamePath);
 
     XamRegisterContent(gameContent, gamePath);
 

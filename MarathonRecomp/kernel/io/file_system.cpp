@@ -110,14 +110,14 @@ FileHandle* XCreateFileA
     }
 
     fileStream.open(filePath, fileOpenMode);
-#ifdef __linux__
+
     if (!fileStream.is_open()) {
         std::filesystem::path cachedPath = FindInPathCache(filePath);
         if (!cachedPath.empty()) {
             fileStream.open(cachedPath, fileOpenMode);
         }
     }
-#endif
+
     if (!fileStream.is_open())
     {
 #ifdef _WIN32
