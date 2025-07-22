@@ -1448,9 +1448,95 @@ void KeQuerySystemTime(be<uint64_t>* time)
     *time = currentTime100ns;
 }
 
-void RtlTimeToTimeFields()
+struct TIME_FIELDS {
+    be<uint16_t> Year;
+    be<uint16_t> Month;
+    be<uint16_t> Day;
+    be<uint16_t> Hour;
+    be<uint16_t> Minute;
+    be<uint16_t> Second;
+    be<uint16_t> Milliseconds;
+    be<uint16_t> Weekday;
+};
+
+void RtlTimeToTimeFields(const be<uint64_t>* time, TIME_FIELDS* timeFields)
 {
-    LOG_UTILITY("!!! STUB !!!");
+    constexpr uint64_t TICKS_PER_MILLISECOND = 10000;
+    constexpr uint64_t TICKS_PER_SECOND = 10000000;
+    constexpr uint64_t TICKS_PER_MINUTE = 600000000;
+    constexpr uint64_t TICKS_PER_HOUR = 36000000000;
+    constexpr uint64_t TICKS_PER_DAY = 864000000000;
+
+    static const int DaysInMonth[2][12] = {
+            {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}, // Non-leap
+            {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}  // Leap
+    };
+
+    // Calculate total days since January 1, 1601
+    uint64_t days = *time / TICKS_PER_DAY;
+    uint64_t remainingTicks = *time % TICKS_PER_DAY;
+
+    timeFields->Hour = static_cast<uint16_t>(remainingTicks / TICKS_PER_HOUR);
+    remainingTicks %= TICKS_PER_HOUR;
+
+    timeFields->Minute = static_cast<uint16_t>(remainingTicks / TICKS_PER_MINUTE);
+    remainingTicks %= TICKS_PER_MINUTE;
+
+    timeFields->Second = static_cast<uint16_t>(remainingTicks / TICKS_PER_SECOND);
+    remainingTicks %= TICKS_PER_SECOND;
+
+    timeFields->Milliseconds = static_cast<uint16_t>(remainingTicks / TICKS_PER_MILLISECOND);
+
+    // Calculate day of week (January 1, 1601 was a Monday = 1)
+    timeFields->Weekday = static_cast<uint16_t>((days + 1) % 7);
+
+    // Calculate year
+    uint32_t year = 1601;
+
+    // Each 400-year cycle has 146097 days
+    uint32_t cycles400 = static_cast<uint32_t>(days / 146097);
+    days %= 146097;
+    year += cycles400 * 400;
+
+    // Handle 100-year cycles (24 leap years + 76 normal years = 36524 days)
+    // Except the 4th century which has 36525 days
+    uint32_t cycles100 = static_cast<uint32_t>(days / 36524);
+    if (cycles100 == 4) cycles100 = 3; // Last day of 400-year cycle
+    days -= cycles100 * 36524;
+    year += cycles100 * 100;
+
+    // Handle 4-year cycles (1 leap year + 3 normal years = 1461 days)
+    uint32_t cycles4 = static_cast<uint32_t>(days / 1461);
+    days %= 1461;
+    year += cycles4 * 4;
+
+    // Handle individual years within 4-year cycle
+    uint32_t yearInCycle = static_cast<uint32_t>(days / 365);
+    if (yearInCycle == 4) yearInCycle = 3; // Last day of leap cycle
+    days -= yearInCycle * 365;
+    if (yearInCycle > 0) {
+        // Account for leap days in previous years of this cycle
+        days -= (yearInCycle - 1) / 4;
+    }
+    year += yearInCycle;
+
+    timeFields->Year = static_cast<uint16_t>(year);
+
+    // Determine if current year is a leap year
+    bool isLeapYear = ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0);
+
+    // Calculate month and day
+    const int* monthDays = DaysInMonth[isLeapYear ? 1 : 0];
+    uint32_t dayOfYear = static_cast<uint32_t>(days) + 1; // Convert to 1-based
+
+    uint16_t month = 1;
+    while (dayOfYear > static_cast<uint32_t>(monthDays[month - 1])) {
+        dayOfYear -= monthDays[month - 1];
+        month++;
+    }
+
+    timeFields->Month = month;
+    timeFields->Day = static_cast<uint16_t>(dayOfYear);
 }
 
 void RtlFreeAnsiString()
