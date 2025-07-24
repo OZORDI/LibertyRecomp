@@ -8066,18 +8066,31 @@ int D3DDevice_EndTiling(GuestDevice* device, uint32_t flags, Rect* pResolveRects
 }
 
 GUEST_FUNCTION_HOOK(sub_82559480, D3DDevice_EndTiling);
-static uint32_t g_ringBuffer;
-// It's actually easier to return a buffer here than to implement BeginShaderConstantF4, then BeginShaderConstantF4 will do all the work for us and it seems fast enough on modern hardware
-uint32_t BeginRingBig(GuestDevice* device, int32_t count) {
-    if (!g_ringBuffer) {
-        g_ringBuffer = g_memory.MapVirtual(g_userHeap.AllocPhysical((size_t)0x1000, 16));
+
+int D3DDevice_BeginShaderConstantF4(GuestDevice* device, uint32_t isPixelShader, uint32_t startRegister, be<uint32_t>* cachedConstantData, be<uint32_t>* writeCombinedConstantData, uint32_t vectorCount) {
+    uint32_t* constants;
+    be<uint64_t>* dirtyFlags;
+    if (isPixelShader) {
+        constants = &device->pixelShaderFloatConstants[startRegister * 4];
+        dirtyFlags = &device->dirtyFlags[1];
+    } else {
+        constants = &device->vertexShaderFloatConstants[startRegister * 4];
+        dirtyFlags = &device->dirtyFlags[0];
     }
-    device->dirtyFlags[0] = ~0ull; // copy all
-    device->dirtyFlags[1] = ~0xFFull;
-    return g_ringBuffer;
+
+    const uint32_t addr = g_memory.MapVirtual(constants);
+    *cachedConstantData = addr;
+    *writeCombinedConstantData = addr;
+
+    const uint32_t startBit = startRegister >> 2;
+    const uint32_t endBit = (startRegister + vectorCount - 1) >> 2;
+    const uint64_t dirtyFlag = ~0ull << startBit >> startBit >> (63 - endBit) << (63 - endBit);
+    *dirtyFlags = dirtyFlags->get() | dirtyFlag;
+
+    return 0;
 }
 
-GUEST_FUNCTION_HOOK(sub_8253E260, BeginRingBig);
+GUEST_FUNCTION_HOOK(sub_825466E8, D3DDevice_BeginShaderConstantF4);
 
 GUEST_FUNCTION_STUB(sub_8254D598); // BeginConditional
 GUEST_FUNCTION_STUB(sub_8254D7B0); // BeginConditional
