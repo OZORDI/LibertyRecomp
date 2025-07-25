@@ -142,19 +142,19 @@ PPC_FUNC(sub_82744840)
 //     __imp__sub_82558CD0(ctx, base);
 // }
 
-PPC_FUNC_IMPL(__imp__sub_82538B48);
-PPC_FUNC(sub_82538B48)
-{
-    // LOGN_WARNING("NtWaitForSingleObjectEx timeout converter");
-    // printf("timeout in ms %d\n", ctx.r4.u32);
-    if (ctx.r4.u32 == 0x1) {
-        // __builtin_trap();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        ctx.r4.u32 = -1;
-    }
+// PPC_FUNC_IMPL(__imp__sub_82538B48);
+// PPC_FUNC(sub_82538B48)
+// {
+//     // LOGN_WARNING("NtWaitForSingleObjectEx timeout converter");
+//     // printf("timeout in ms %d\n", ctx.r4.u32);
+//     if (ctx.r4.u32 == 0x1) {
+//         // __builtin_trap();
+//         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+//         ctx.r4.u32 = -1;
+//     }
 
-    __imp__sub_82538B48(ctx, base);
-}
+//     __imp__sub_82538B48(ctx, base);
+// }
 
 struct DXSettings {
     be<uint32_t> m_Width;

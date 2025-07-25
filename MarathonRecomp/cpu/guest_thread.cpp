@@ -129,7 +129,7 @@ uint32_t GuestThreadHandle::GetThreadId() const
 
 uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 {
-    if (timeout == INFINITE || isFinished) // HACK(1): isFinished
+    if (timeout == INFINITE || isFinished.load()) // HACK(1): isFinished
     {
 #ifdef USE_PTHREAD
         pthread_join(thread, nullptr);
