@@ -127,6 +127,12 @@ address = 0x82512B04
 registers = ["r4", "r31"]
 after_instruction = true
 
+[[midasm_hook]]
+name = "IgnoreXAudioLockPlsFixAndDeleteThisMidasm"
+address = 0x8255AAE8
+registers = ["r11"]
+jump_address = 0x8255AB24
+
 #[[midasm_hook]]
 #name = "DebugZlibMidAsmHook"
 #address = 0x826DC30C

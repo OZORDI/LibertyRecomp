@@ -301,6 +301,10 @@ void DisableStartWait()
     // printf("DisableStartWait\n");
 }
 
+void IgnoreXAudioLockPlsFixAndDeleteThisMidasm(PPCRegister& val)
+{
+}
+
 PPC_FUNC_IMPL(__imp__sub_82511540);
 PPC_FUNC(sub_82511540)
 {
