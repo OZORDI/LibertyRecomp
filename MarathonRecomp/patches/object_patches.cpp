@@ -1,4 +1,4 @@
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <user/config.h>
 #include <hid/hid.h>
 #include <app.h>
@@ -53,22 +53,22 @@ void ObjBigBarrelAllocMidAsmHook(PPCRegister& r3)
 //     }
 // }
 
-void ObjBigBarrelSetPositionMidAsmHook(PPCRegister& r3, PPCRegister& r4)
-{
-    uint8_t* base = g_memory.base;
-    auto objBigBarrelEx = reinterpret_cast<ObjBigBarrelEx*>(base + r3.u32 + OBJ_BIG_BARREL_SIZE);
-
-    if (objBigBarrelEx->interpolate)
-    {
-        auto characterProxy = reinterpret_cast<SWA::CCharacterProxy*>(base + PPC_LOAD_U32(r3.u32 + 0x100));
-        auto position = reinterpret_cast<Hedgehog::Math::CVector*>(base + r4.u32);
-
-        float factor = (1.0f / 30.0f) - objBigBarrelEx->elapsedTime;
-        position->X = position->X - characterProxy->m_Velocity.X * factor;
-        position->Y = position->Y - characterProxy->m_Velocity.Y * factor;
-        position->Z = position->Z - characterProxy->m_Velocity.Z * factor;
-    }
-}
+//void ObjBigBarrelSetPositionMidAsmHook(PPCRegister& r3, PPCRegister& r4)
+//{
+//    uint8_t* base = g_memory.base;
+//    auto objBigBarrelEx = reinterpret_cast<ObjBigBarrelEx*>(base + r3.u32 + OBJ_BIG_BARREL_SIZE);
+//
+//    if (objBigBarrelEx->interpolate)
+//    {
+//        auto characterProxy = reinterpret_cast<SWA::CCharacterProxy*>(base + PPC_LOAD_U32(r3.u32 + 0x100));
+//        auto position = reinterpret_cast<Hedgehog::Math::CVector*>(base + r4.u32);
+//
+//        float factor = (1.0f / 30.0f) - objBigBarrelEx->elapsedTime;
+//        position->X = position->X - characterProxy->m_Velocity.X * factor;
+//        position->Y = position->Y - characterProxy->m_Velocity.Y * factor;
+//        position->Z = position->Z - characterProxy->m_Velocity.Z * factor;
+//    }
+//}
 
 // SWA::CExBullet::AddCallback
 // Tornado Defense bullet particles are colored by the button prompt, which differs on PlayStation 3.

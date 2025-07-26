@@ -1,5 +1,5 @@
 #include <kernel/memory.h>
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <ui/game_window.h>
 #include <user/config.h>
 #include <app.h>
@@ -91,32 +91,32 @@ using namespace std::chrono_literals;
 
 static std::chrono::steady_clock::time_point g_prev;
 
-bool LoadingUpdateMidAsmHook(PPCRegister& r31)
-{
-    auto now = std::chrono::steady_clock::now();
-    double deltaTime = std::min(std::chrono::duration<double>(now - g_prev).count(), 1.0 / 15.0);
-    g_prev = now;
-
-    uint8_t* base = g_memory.base;
-    uint32_t application = PPC_LOAD_U32(PPC_LOAD_U32(r31.u32 + 4));
-    uint32_t update = PPC_LOAD_U32(PPC_LOAD_U32(application) + 20);
-
-    g_ppcContext->r3.u32 = application;
-    g_ppcContext->f1.f64 = deltaTime;
-    g_memory.FindFunction(update)(*g_ppcContext, base);
-
-    bool loading = *SWA::SGlobals::ms_IsLoading;
-    if (loading)
-    {
-        now = std::chrono::steady_clock::now();
-        constexpr auto INTERVAL = 1000000000ns / 30;
-        auto next = now + (INTERVAL - now.time_since_epoch() % INTERVAL);
-
-        std::this_thread::sleep_until(next);
-    }
-
-    return loading;
-}
+//bool LoadingUpdateMidAsmHook(PPCRegister& r31)
+//{
+//    auto now = std::chrono::steady_clock::now();
+//    double deltaTime = std::min(std::chrono::duration<double>(now - g_prev).count(), 1.0 / 15.0);
+//    g_prev = now;
+//
+//    uint8_t* base = g_memory.base;
+//    uint32_t application = PPC_LOAD_U32(PPC_LOAD_U32(r31.u32 + 4));
+//    uint32_t update = PPC_LOAD_U32(PPC_LOAD_U32(application) + 20);
+//
+//    g_ppcContext->r3.u32 = application;
+//    g_ppcContext->f1.f64 = deltaTime;
+//    g_memory.FindFunction(update)(*g_ppcContext, base);
+//
+//    bool loading = *SWA::SGlobals::ms_IsLoading;
+//    if (loading)
+//    {
+//        now = std::chrono::steady_clock::now();
+//        constexpr auto INTERVAL = 1000000000ns / 30;
+//        auto next = now + (INTERVAL - now.time_since_epoch() % INTERVAL);
+//
+//        std::this_thread::sleep_until(next);
+//    }
+//
+//    return loading;
+//}
 
 // ADXM_WaitVsync
 // PPC_FUNC_IMPL(__imp__sub_8312DBF8);
@@ -172,21 +172,21 @@ void CExStageBossCStateBattleCtorMidAsmHook(PPCRegister& r3)
 // }
 
 // Fix for Egg Dragoon's drill missile attack rotating 90 degrees at HFR.
-void BossEggDragoonDrillMissileCMissileSetRotationMidAsmHook(PPCRegister& r4)
-{
-    auto pRotation = (Hedgehog::Math::CQuaternion*)g_memory.Translate(r4.u32);
-    auto magnitude = std::sqrt(pRotation->X * pRotation->X + pRotation->Y * pRotation->Y + pRotation->Z * pRotation->Z + pRotation->W * pRotation->W);
-
-    if (magnitude < 0.0f)
-        return;
-
-    auto magnitudeNrm = 1.0f / magnitude;
-
-    pRotation->X = pRotation->X * magnitudeNrm;
-    pRotation->Y = pRotation->Y * magnitudeNrm;
-    pRotation->Z = pRotation->Z * magnitudeNrm;
-    pRotation->W = pRotation->W * magnitudeNrm;
-}
+//void BossEggDragoonDrillMissileCMissileSetRotationMidAsmHook(PPCRegister& r4)
+//{
+//    auto pRotation = (Hedgehog::Math::CQuaternion*)g_memory.Translate(r4.u32);
+//    auto magnitude = std::sqrt(pRotation->X * pRotation->X + pRotation->Y * pRotation->Y + pRotation->Z * pRotation->Z + pRotation->W * pRotation->W);
+//
+//    if (magnitude < 0.0f)
+//        return;
+//
+//    auto magnitudeNrm = 1.0f / magnitude;
+//
+//    pRotation->X = pRotation->X * magnitudeNrm;
+//    pRotation->Y = pRotation->Y * magnitudeNrm;
+//    pRotation->Z = pRotation->Z * magnitudeNrm;
+//    pRotation->W = pRotation->W * magnitudeNrm;
+//}
 
 bool SparkleLocusMidAsmHook()
 {

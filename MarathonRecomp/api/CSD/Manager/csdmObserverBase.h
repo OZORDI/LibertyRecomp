@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SWA.inl"
+#include "Marathon.inl"
 
 namespace Chao::CSD
 {
@@ -14,7 +14,7 @@ namespace Chao::CSD
         };
 
         xpointer<Vftable> m_pVftable;
-        SWA_INSERT_PADDING(0x08);
+        MARATHON_INSERT_PADDING(0x08);
 
         ~CObserverBase();
     };

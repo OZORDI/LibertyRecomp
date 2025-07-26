@@ -1,7 +1,6 @@
 #include "mod_loader.h"
 #include "ini_file.h"
 
-#include <api/Hedgehog/Base/System/hhAllocator.h>
 #include <cpu/guest_stack_var.h>
 #include <kernel/function.h>
 #include <kernel/heap.h>

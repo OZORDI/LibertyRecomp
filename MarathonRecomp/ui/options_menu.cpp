@@ -2,7 +2,7 @@
 #include "options_menu_thumbnails.h"
 #include "tv_static.h"
 
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <apu/audio.h>
 #include <gpu/imgui/imgui_common.h>
 #include <gpu/video.h>
@@ -259,30 +259,30 @@ static void DrawScanlineBars()
     auto& res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
 
-    if (OptionsMenu::s_pauseMenuType != SWA::eMenuType_WorldMap)
-    {
-        // Top bar fade
-        drawList->AddRectFilledMultiColor
-        (
-            { 0.0f, 0.0f },
-            { res.x, height },
-            FADE_COLOR0,
-            FADE_COLOR0,
-            FADE_COLOR1,
-            FADE_COLOR1
-        );
-
-        // Bottom bar fade
-        drawList->AddRectFilledMultiColor
-        (
-            { res.x, res.y },
-            { 0.0f, res.y - height },
-            FADE_COLOR0,
-            FADE_COLOR0,
-            FADE_COLOR1,
-            FADE_COLOR1
-        );
-    }
+//    if (OptionsMenu::s_pauseMenuType != SWA::eMenuType_WorldMap)
+//    {
+//        // Top bar fade
+//        drawList->AddRectFilledMultiColor
+//        (
+//            { 0.0f, 0.0f },
+//            { res.x, height },
+//            FADE_COLOR0,
+//            FADE_COLOR0,
+//            FADE_COLOR1,
+//            FADE_COLOR1
+//        );
+//
+//        // Bottom bar fade
+//        drawList->AddRectFilledMultiColor
+//        (
+//            { res.x, res.y },
+//            { 0.0f, res.y - height },
+//            FADE_COLOR0,
+//            FADE_COLOR0,
+//            FADE_COLOR1,
+//            FADE_COLOR1
+//        );
+//    }
 
     // Top bar
     drawList->AddRectFilledMultiColor
@@ -424,183 +424,183 @@ static void ResetSelection()
     g_canReset = false;
 }
 
-static bool DrawCategories()
-{
-    double motion = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_CATEGORY_TIME, CONTAINER_CATEGORY_DURATION);
-
-    if (motion == 0.0)
-        return false;
-
-    auto inputState = SWA::CInputState::GetInstance();
-
-    bool moveLeft = !g_lockedOnOption && inputState->GetPadState().IsTapped(SWA::eKeyState_LeftBumper);
-    bool moveRight = !g_lockedOnOption && inputState->GetPadState().IsTapped(SWA::eKeyState_RightBumper);
-
-    if (moveLeft)
-    {
-        --g_categoryIndex;
-        if (g_categoryIndex < 0)
-            g_categoryIndex = g_categoryCount - 1;
-    }
-    else if (moveRight)
-    {
-        ++g_categoryIndex;
-        if (g_categoryIndex >= g_categoryCount)
-            g_categoryIndex = 0;
-    }
-
-    if (moveLeft || moveRight)
-    {
-        ResetSelection();
-        Game_PlaySound("sys_actstg_score");
-    }
-
-    auto drawList = ImGui::GetBackgroundDrawList();
-    auto clipRectMin = drawList->GetClipRectMin();
-    auto clipRectMax = drawList->GetClipRectMax();
-
-    float gridSize = Scale(GRID_SIZE);
-
-    float size = Scale(32.0f);
-    ImVec2 textSizes[g_categoryCount];
-    float clipRectWidth = clipRectMax.x - clipRectMin.x;
-
-    float textWidthSum = 0.0f;
-    for (size_t i = 0; i < g_categoryCount; i++)
-    {
-        textSizes[i] = g_newRodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, GetCategory(i).c_str());
-        textWidthSum += textSizes[i].x;
-    }
-
-    float textSquashRatio = 1.0f;
-    float maxTextWidthSum = clipRectWidth - (gridSize * 4.0f * (g_categoryCount - 1));
-    if (textWidthSum > maxTextWidthSum)
-    {
-        textSquashRatio = maxTextWidthSum / textWidthSum;
-        for (auto& textSize : textSizes)
-            textSize.x *= textSquashRatio;
-
-        textWidthSum = maxTextWidthSum;
-    }
-
-    float tabHeight = gridSize * 4.0f;
-    float textPadding = (clipRectWidth - textWidthSum) / (g_categoryCount + 1.0f);
-    float xOffset = textPadding;
-    xOffset -= (1.0 - motion) * gridSize * 4.0;
-
-    ImVec2 textPositions[g_categoryCount];
-
-    for (size_t i = 0; i < g_categoryCount; i++)
-    {
-        float tabPadding = std::min(textPadding / 2.0f, gridSize * 3.0f);
-
-        ImVec2 min = { clipRectMin.x + xOffset - tabPadding, clipRectMin.y };
-        ImVec2 max = { min.x + textSizes[i].x + tabPadding * 2.0f, min.y + tabHeight};
-
-        if (g_categoryIndex == i)
-        {
-            // Animation interrupted by entering/exiting or resizing the options menu
-            if (motion < 1.0 || abs(g_categoryAnimMin.y - min.y) > 0.01f || abs(g_categoryAnimMax.y - max.y) > 0.01f)
-            {
-                g_categoryAnimMin = min;
-                g_categoryAnimMax = max;
-            }
-            else
-            {
-                float animWidth = g_categoryAnimMax.x - g_categoryAnimMin.x;
-                float width = max.x - min.x;
-                float height = max.y - min.y;
-                
-                animWidth = Lerp(animWidth, width, 1.0f - exp(-64.0f * ImGui::GetIO().DeltaTime));
-
-                auto center = Lerp(min, max, 0.5f);
-                auto animCenter = Lerp(g_categoryAnimMin, g_categoryAnimMax, 0.5f);
-                auto animatedCenter = Lerp(animCenter, center, 1.0f - exp(-16.0f * ImGui::GetIO().DeltaTime));
-
-                float widthHalfExtent = width / 2.0f;
-                float heightHalfExtent = height / 2.0f;
-
-                g_categoryAnimMin = { animatedCenter.x - widthHalfExtent, animatedCenter.y - heightHalfExtent };
-                g_categoryAnimMax = { animatedCenter.x + widthHalfExtent, animatedCenter.y + heightHalfExtent };
-            }
-
-            drawList->AddRectFilledMultiColor
-            (
-                g_categoryAnimMin,
-                g_categoryAnimMax,
-                IM_COL32(0, 130, 0, 223 * motion),
-                IM_COL32(0, 130, 0, 178 * motion), 
-                IM_COL32(0, 130, 0, 223 * motion),
-                IM_COL32(0, 130, 0, 178 * motion)
-            );
-
-            drawList->AddRectFilledMultiColor
-            (
-                g_categoryAnimMin, 
-                g_categoryAnimMax,
-                IM_COL32(0, 0, 0, 13 * motion),
-                IM_COL32(0, 0, 0, 0),
-                IM_COL32(0, 0, 0, 55 * motion),
-                IM_COL32(0, 0, 0, 6)
-            );
-
-            drawList->AddRectFilledMultiColor
-            (
-                g_categoryAnimMin, 
-                g_categoryAnimMax,
-                IM_COL32(0, 130, 0, 13 * motion),
-                IM_COL32(0, 130, 0, 111 * motion),
-                IM_COL32(0, 130, 0, 0), 
-                IM_COL32(0, 130, 0, 55 * motion)
-            );
-        }
-
-        // Store to draw again later, otherwise the tab background gets drawn on top of text during the animation.
-        textPositions[i] = { clipRectMin.x + xOffset, clipRectMin.y };
-        xOffset += textSizes[i].x + textPadding;
-    }
-
-    SetScale({ textSquashRatio, 1.0f });
-
-    for (size_t i = 0; i < g_categoryCount; i++)
-    {
-        auto& pos = textPositions[i];
-        uint8_t alpha = (i == g_categoryIndex ? 235 : 128) * motion;
-        
-        SetOrigin({ pos.x, pos.y });
-        SetGradient
-        (
-            pos,
-            { pos.x + textSizes[i].x, pos.y + textSizes[i].y },
-            IM_COL32(128, 255, 0, alpha),
-            IM_COL32(255, 192, 0, alpha)
-        );
-
-        DrawTextWithOutline
-        (
-            g_newRodinFont,
-            size,
-            pos,
-            IM_COL32_WHITE,
-            GetCategory(i).c_str(),
-            4,
-            IM_COL32_BLACK,
-            IMGUI_SHADER_MODIFIER_CATEGORY_BEVEL
-        );
-    }
-
-    SetScale({ 1.0f, 1.0f });
-    SetOrigin({ 0.0f, 0.0f });
-    ResetGradient();
-
-    if (g_isStage || (ImGui::GetTime() - g_appearTime) >= (CONTAINER_FULL_DURATION / 60.0))
-    {
-        drawList->PushClipRect({ clipRectMin.x, clipRectMin.y + gridSize * 6.0f }, { clipRectMax.x - gridSize, clipRectMax.y - gridSize });
-        return true;
-    }
-
-    return false;
-}
+//static bool DrawCategories()
+//{
+//    double motion = g_isStage ? 1.0 : ComputeMotion(g_appearTime, CONTAINER_CATEGORY_TIME, CONTAINER_CATEGORY_DURATION);
+//
+//    if (motion == 0.0)
+//        return false;
+//
+//    auto inputState = SWA::CInputState::GetInstance();
+//
+//    bool moveLeft = !g_lockedOnOption && inputState->GetPadState().IsTapped(SWA::eKeyState_LeftBumper);
+//    bool moveRight = !g_lockedOnOption && inputState->GetPadState().IsTapped(SWA::eKeyState_RightBumper);
+//
+//    if (moveLeft)
+//    {
+//        --g_categoryIndex;
+//        if (g_categoryIndex < 0)
+//            g_categoryIndex = g_categoryCount - 1;
+//    }
+//    else if (moveRight)
+//    {
+//        ++g_categoryIndex;
+//        if (g_categoryIndex >= g_categoryCount)
+//            g_categoryIndex = 0;
+//    }
+//
+//    if (moveLeft || moveRight)
+//    {
+//        ResetSelection();
+//        Game_PlaySound("sys_actstg_score");
+//    }
+//
+//    auto drawList = ImGui::GetBackgroundDrawList();
+//    auto clipRectMin = drawList->GetClipRectMin();
+//    auto clipRectMax = drawList->GetClipRectMax();
+//
+//    float gridSize = Scale(GRID_SIZE);
+//
+//    float size = Scale(32.0f);
+//    ImVec2 textSizes[g_categoryCount];
+//    float clipRectWidth = clipRectMax.x - clipRectMin.x;
+//
+//    float textWidthSum = 0.0f;
+//    for (size_t i = 0; i < g_categoryCount; i++)
+//    {
+//        textSizes[i] = g_newRodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, GetCategory(i).c_str());
+//        textWidthSum += textSizes[i].x;
+//    }
+//
+//    float textSquashRatio = 1.0f;
+//    float maxTextWidthSum = clipRectWidth - (gridSize * 4.0f * (g_categoryCount - 1));
+//    if (textWidthSum > maxTextWidthSum)
+//    {
+//        textSquashRatio = maxTextWidthSum / textWidthSum;
+//        for (auto& textSize : textSizes)
+//            textSize.x *= textSquashRatio;
+//
+//        textWidthSum = maxTextWidthSum;
+//    }
+//
+//    float tabHeight = gridSize * 4.0f;
+//    float textPadding = (clipRectWidth - textWidthSum) / (g_categoryCount + 1.0f);
+//    float xOffset = textPadding;
+//    xOffset -= (1.0 - motion) * gridSize * 4.0;
+//
+//    ImVec2 textPositions[g_categoryCount];
+//
+//    for (size_t i = 0; i < g_categoryCount; i++)
+//    {
+//        float tabPadding = std::min(textPadding / 2.0f, gridSize * 3.0f);
+//
+//        ImVec2 min = { clipRectMin.x + xOffset - tabPadding, clipRectMin.y };
+//        ImVec2 max = { min.x + textSizes[i].x + tabPadding * 2.0f, min.y + tabHeight};
+//
+//        if (g_categoryIndex == i)
+//        {
+//            // Animation interrupted by entering/exiting or resizing the options menu
+//            if (motion < 1.0 || abs(g_categoryAnimMin.y - min.y) > 0.01f || abs(g_categoryAnimMax.y - max.y) > 0.01f)
+//            {
+//                g_categoryAnimMin = min;
+//                g_categoryAnimMax = max;
+//            }
+//            else
+//            {
+//                float animWidth = g_categoryAnimMax.x - g_categoryAnimMin.x;
+//                float width = max.x - min.x;
+//                float height = max.y - min.y;
+//
+//                animWidth = Lerp(animWidth, width, 1.0f - exp(-64.0f * ImGui::GetIO().DeltaTime));
+//
+//                auto center = Lerp(min, max, 0.5f);
+//                auto animCenter = Lerp(g_categoryAnimMin, g_categoryAnimMax, 0.5f);
+//                auto animatedCenter = Lerp(animCenter, center, 1.0f - exp(-16.0f * ImGui::GetIO().DeltaTime));
+//
+//                float widthHalfExtent = width / 2.0f;
+//                float heightHalfExtent = height / 2.0f;
+//
+//                g_categoryAnimMin = { animatedCenter.x - widthHalfExtent, animatedCenter.y - heightHalfExtent };
+//                g_categoryAnimMax = { animatedCenter.x + widthHalfExtent, animatedCenter.y + heightHalfExtent };
+//            }
+//
+//            drawList->AddRectFilledMultiColor
+//            (
+//                g_categoryAnimMin,
+//                g_categoryAnimMax,
+//                IM_COL32(0, 130, 0, 223 * motion),
+//                IM_COL32(0, 130, 0, 178 * motion),
+//                IM_COL32(0, 130, 0, 223 * motion),
+//                IM_COL32(0, 130, 0, 178 * motion)
+//            );
+//
+//            drawList->AddRectFilledMultiColor
+//            (
+//                g_categoryAnimMin,
+//                g_categoryAnimMax,
+//                IM_COL32(0, 0, 0, 13 * motion),
+//                IM_COL32(0, 0, 0, 0),
+//                IM_COL32(0, 0, 0, 55 * motion),
+//                IM_COL32(0, 0, 0, 6)
+//            );
+//
+//            drawList->AddRectFilledMultiColor
+//            (
+//                g_categoryAnimMin,
+//                g_categoryAnimMax,
+//                IM_COL32(0, 130, 0, 13 * motion),
+//                IM_COL32(0, 130, 0, 111 * motion),
+//                IM_COL32(0, 130, 0, 0),
+//                IM_COL32(0, 130, 0, 55 * motion)
+//            );
+//        }
+//
+//        // Store to draw again later, otherwise the tab background gets drawn on top of text during the animation.
+//        textPositions[i] = { clipRectMin.x + xOffset, clipRectMin.y };
+//        xOffset += textSizes[i].x + textPadding;
+//    }
+//
+//    SetScale({ textSquashRatio, 1.0f });
+//
+//    for (size_t i = 0; i < g_categoryCount; i++)
+//    {
+//        auto& pos = textPositions[i];
+//        uint8_t alpha = (i == g_categoryIndex ? 235 : 128) * motion;
+//
+//        SetOrigin({ pos.x, pos.y });
+//        SetGradient
+//        (
+//            pos,
+//            { pos.x + textSizes[i].x, pos.y + textSizes[i].y },
+//            IM_COL32(128, 255, 0, alpha),
+//            IM_COL32(255, 192, 0, alpha)
+//        );
+//
+//        DrawTextWithOutline
+//        (
+//            g_newRodinFont,
+//            size,
+//            pos,
+//            IM_COL32_WHITE,
+//            GetCategory(i).c_str(),
+//            4,
+//            IM_COL32_BLACK,
+//            IMGUI_SHADER_MODIFIER_CATEGORY_BEVEL
+//        );
+//    }
+//
+//    SetScale({ 1.0f, 1.0f });
+//    SetOrigin({ 0.0f, 0.0f });
+//    ResetGradient();
+//
+//    if (g_isStage || (ImGui::GetTime() - g_appearTime) >= (CONTAINER_FULL_DURATION / 60.0))
+//    {
+//        drawList->PushClipRect({ clipRectMin.x, clipRectMin.y + gridSize * 6.0f }, { clipRectMax.x - gridSize, clipRectMax.y - gridSize });
+//        return true;
+//    }
+//
+//    return false;
+//}
 
 static void DrawSelectionArrows(ImVec2 min, ImVec2 max, bool isLeftTapped, bool isRightTapped, bool isSlider)
 {
@@ -728,664 +728,664 @@ static void DrawSelectionArrows(ImVec2 min, ImVec2 max, bool isLeftTapped, bool 
     SetAdditive(false);
 }
 
-template<typename T>
-static void DrawConfigOption(int32_t rowIndex, float yOffset, ConfigDef<T>* config,
-    bool isAccessible, std::string* inaccessibleReason = nullptr,
-    T valueMin = T(0), T valueCenter = T(0.5), T valueMax = T(1), bool isSlider = true)
-{
-    auto drawList = ImGui::GetBackgroundDrawList();
-    auto clipRectMin = drawList->GetClipRectMin();
-    auto clipRectMax = drawList->GetClipRectMax();
-    auto& padState = SWA::CInputState::GetInstance()->GetPadState();
-
-    constexpr float OPTION_NARROW_GRID_COUNT = 36.0f;
-    constexpr float OPTION_WIDE_GRID_COUNT = 54.0f;
-    constexpr bool IS_SLIDER_TYPE = std::is_same_v<T, float> || std::is_same_v<T, int32_t>;
-
-    auto isValueSlider = IS_SLIDER_TYPE && isSlider;
-    auto gridSize = Scale(GRID_SIZE);
-    auto optionWidth = gridSize * floor(Lerp(OPTION_NARROW_GRID_COUNT, OPTION_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
-    auto optionHeight = gridSize * 5.5f;
-    auto optionPadding = gridSize * 0.5f;
-    auto valueWidth = Scale(192.0f);
-    auto valueHeight = gridSize * 3.0f;
-
-    // Left side
-    ImVec2 min = { clipRectMin.x, clipRectMin.y + (optionHeight + optionPadding) * rowIndex + yOffset };
-    ImVec2 max = { min.x + optionWidth, min.y + optionHeight };
-
-    auto configName = config->GetNameLocalised(Config::Language);
-    auto size = Scale(26.0f);
-    auto textSize = g_rodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, configName.c_str());
-
-    ImVec2 textPos = { min.x + gridSize, min.y + (optionHeight - textSize.y) / 2.0f };
-    ImVec4 textClipRect = { min.x, min.y, max.x, max.y };
-
-    bool lockedOnOption = false;
-
-    if (g_selectedRowIndex == rowIndex)
-    {
-        g_selectedItem = config;
-        g_inaccessibleReason = isAccessible ? nullptr : inaccessibleReason;
-
-        if (!g_isEnterKeyBuffered)
-        {
-            if (isAccessible)
-            {
-                if constexpr (std::is_same_v<T, bool>)
-                {
-                    if (padState.IsTapped(SWA::eKeyState_A))
-                    {
-                        config->Value = !config->Value;
-
-                        if (config->Callback)
-                            config->Callback(config);
-
-                        VideoConfigValueChangedCallback(config);
-                        XAudioConfigValueChangedCallback(config);
-
-                        Game_PlaySound("sys_worldmap_finaldecide");
-                    }
-                }
-                else
-                {
-                    static T s_oldValue;
-
-                    if (padState.IsTapped(SWA::eKeyState_A))
-                    {
-                        g_lockedOnOption ^= true;
-
-                        if (g_lockedOnOption)
-                        {
-                            g_lockedOnTime = ImGui::GetTime();
-                            g_leftWasHeld = false;
-                            g_rightWasHeld = false;
-
-                            // remember value
-                            s_oldValue = config->Value;
-
-                            if (config->LockCallback)
-                                config->LockCallback(config);
-
-                            Game_PlaySound("sys_worldmap_decide");
-                        }
-                        else
-                        {
-                            // released lock, do callbacks if value is different
-                            if (config->Value != s_oldValue)
-                            {
-                                VideoConfigValueChangedCallback(config);
-                                XAudioConfigValueChangedCallback(config);
-
-                                if (config->ApplyCallback)
-                                    config->ApplyCallback(config);
-                            }
-
-                            Game_PlaySound("sys_worldmap_finaldecide");
-                        }
-                    }
-                    else if (padState.IsTapped(SWA::eKeyState_B))
-                    {
-                        // released lock, restore old value
-                        config->Value = s_oldValue;
-
-                        g_lockedOnOption = false;
-
-                        Game_PlaySound("sys_worldmap_cansel");
-                    }
-
-                    lockedOnOption = g_lockedOnOption;
-                }
-
-                if (g_canReset && padState.IsTapped(SWA::eKeyState_X))
-                {
-                    if (!config->IsDefaultValue())
-                    {
-                        config->MakeDefault();
-
-                        VideoConfigValueChangedCallback(config);
-                        XAudioConfigValueChangedCallback(config);
-
-                        if (config->Callback)
-                            config->Callback(config);
-
-                        if (config->ApplyCallback)
-                            config->ApplyCallback(config);
-                    }
-
-                    Game_PlaySound("sys_worldmap_decide");
-                }
-            }
-            else
-            {
-                if (padState.IsTapped(SWA::eKeyState_A))
-                    Game_PlaySound("sys_actstg_stateserror");
-            }
-        }
-    }
-
-    auto fadedOut = (g_lockedOnOption && g_selectedItem != config) || !isAccessible;
-    auto alpha = fadedOut ? 0.5f : 1.0f;
-    auto textColour = IM_COL32(255, 255, 255, 255 * alpha);
-
-    if (Config::Language == ELanguage::Japanese)
-        textPos.y += Scale(10.0f);
-
-    if (g_selectedItem == config)
-    {
-        float prevItemOffset = (g_prevSelectedRowIndex - g_selectedRowIndex) * (optionHeight + optionPadding);
-        double animRatio = std::clamp((ImGui::GetTime() - g_rowSelectionTime) * 60.0 / 8.0, 0.0, 1.0);
-        prevItemOffset *= pow(1.0 - animRatio, 3.0);
-
-        auto c0 = IM_COL32(0xE2, 0x71, 0x22, isAccessible ? 0x80 : 0x30);
-        auto c1 = IM_COL32(0x92, 0xFF, 0x31, isAccessible ? 0x80 : 0x30);
-
-        drawList->AddRectFilledMultiColor({ min.x, min.y + prevItemOffset }, { max.x, max.y + prevItemOffset }, c0, c0, c1, c1);
-
-        DrawTextWithMarquee(g_rodinFont, size, textPos, min, max, textColour, configName.c_str(), g_rowSelectionTime, 0.9, Scale(250.0));
-
-        // large
-        g_canReset = g_isControlsVisible &&
-            !g_lockedOnOption &&
-            g_selectedItem->GetName().find("Language") == std::string::npos &&
-            g_selectedItem != &Config::WindowSize &&
-            isAccessible;
-    }
-    else
-    {
-        drawList->PushClipRect(min, max, true);
-
-        DrawRubyAnnotatedText
-        (
-            g_rodinFont,
-            size,
-            FLT_MAX,
-            textPos,
-            0.0f,
-            configName.c_str(),
-            [=](const char* str, ImVec2 pos)
-            {
-                DrawTextBasic(g_rodinFont, size, pos, textColour, str);
-            },
-            [=](const char* str, float annotationSize, ImVec2 pos)
-            {
-                DrawTextBasic(g_rodinFont, annotationSize, pos, textColour, str);
-            }
-        );
-
-        drawList->PopClipRect();
-    }
-
-    // Right side
-    min = { max.x + (clipRectMax.x - max.x - valueWidth) / 2.0f, min.y + (optionHeight - valueHeight) / 2.0f };
-    max = { min.x + valueWidth, min.y + valueHeight };
-
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 130, 0, 223 * alpha), IM_COL32(0, 130, 0, 178 * alpha), IM_COL32(0, 130, 0, 223 * alpha), IM_COL32(0, 130, 0, 178 * alpha));
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 0, 0, 13 * alpha), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 55 * alpha), IM_COL32(0, 0, 0, 6 * alpha));
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 130, 0, 13 * alpha), IM_COL32(0, 130, 0, 111 * alpha), IM_COL32(0, 130, 0, 0), IM_COL32(0, 130, 0, 55 * alpha));
-
-    if (isSlider)
-    {
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, int32_t>)
-        {
-            if (lockedOnOption)
-            {
-                SetAdditive(true);
-                drawList->AddRectFilled(min, max, IM_COL32(192, 192, 0, 96 * ComputeMotion(g_lockedOnTime, 0, VALUE_SLIDER_INTRO_DURATION)));
-                SetAdditive(false);
-            }
-
-            // Inner container of slider
-            const uint32_t innerColor0 = IM_COL32(0, 65, 0, 255 * alpha);
-            const uint32_t innerColor1 = IM_COL32(0, 32, 0, 255 * alpha);
-
-            float xPadding = Scale(6);
-            float yPadding = Scale(3);
-
-            drawList->AddRectFilledMultiColor
-            (
-                { min.x + xPadding, min.y + yPadding },
-                { max.x - xPadding, max.y - yPadding },
-                innerColor0,
-                innerColor0,
-                innerColor1,
-                innerColor1
-            );
-
-            // The actual slider
-            const uint32_t sliderColor0 = IM_COL32(57, 241, 0, 255 * alpha);
-            const uint32_t sliderColor1 = IM_COL32(2, 106, 0, 255 * alpha);
-
-            xPadding += Scale(2);
-            yPadding += Scale(2);
-
-            ImVec2 sliderMin = { min.x + xPadding, min.y + yPadding };
-            ImVec2 sliderMax = { max.x - xPadding, max.y - yPadding };
-            float factor;
-
-            if (config->Value <= valueCenter)
-                factor = float(config->Value - valueMin) / (valueCenter - valueMin) * 0.5f;
-            else
-                factor = 0.5f + float(config->Value - valueCenter) / (valueMax - valueCenter) * 0.5f;
-
-            sliderMax.x = sliderMin.x + (sliderMax.x - sliderMin.x) * factor;
-
-            drawList->AddRectFilledMultiColor(sliderMin, sliderMax, sliderColor0, sliderColor0, sliderColor1, sliderColor1);
-        }
-    }
-
-    if constexpr (std::is_same_v<T, bool>)
-        DrawToggleLight({ min.x + Scale(14), min.y + ((max.y - min.y) - Scale(14)) / 2 + Scale(1) }, config->Value, alpha);
-
-    // Selection triangles
-    if (lockedOnOption)
-    {
-        bool leftIsHeld = padState.IsDown(SWA::eKeyState_DpadLeft) || padState.LeftStickHorizontal < -0.5f;
-        bool rightIsHeld = padState.IsDown(SWA::eKeyState_DpadRight) || padState.LeftStickHorizontal > 0.5f;
-
-        bool leftTapped = !g_leftWasHeld && leftIsHeld;
-        bool rightTapped = !g_rightWasHeld && rightIsHeld;
-
-        double time = ImGui::GetTime();
-
-        if (leftTapped || rightTapped)
-            g_lastTappedTime = time;
-
-        bool decrement = leftTapped;
-        bool increment = rightTapped;
-
-        g_leftWasHeld = leftIsHeld;
-        g_rightWasHeld = rightIsHeld;
-
-        DrawSelectionArrows(min, max, leftTapped, rightTapped, isValueSlider);
-
-        if constexpr (std::is_enum_v<T>)
-        {
-            auto it = config->EnumTemplateReverse.find(config->Value);
-
-            if (leftTapped)
-            {
-                if (it == config->EnumTemplateReverse.begin())
-                    it = config->EnumTemplateReverse.end();
-
-                --it;
-            }
-            else if (rightTapped)
-            {
-                ++it;
-
-                if (it == config->EnumTemplateReverse.end())
-                    it = config->EnumTemplateReverse.begin();
-            }
-
-            config->Value = it->first;
-
-            if (increment || decrement)
-                Game_PlaySound("sys_actstg_pausecursor");
-        }
-        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, int32_t>)
-        {
-            float deltaTime = ImGui::GetIO().DeltaTime;
-
-            bool fastIncrement = (time - g_lastTappedTime) > 0.5;
-            bool isPlayIncrementSound = true;
-
-            constexpr double INCREMENT_TIME = 1.0 / 120.0;
-            constexpr double INCREMENT_SOUND_TIME = 1.0 / 7.5;
-
-            if (isSlider)
-            {
-                if (fastIncrement)
-                {
-                    isPlayIncrementSound = (time - g_lastIncrementSoundTime) > INCREMENT_SOUND_TIME;
-
-                    if ((time - g_lastIncrementTime) < INCREMENT_TIME)
-                        fastIncrement = false;
-                    else
-                        g_lastIncrementTime = time;
-                }
-
-                if (fastIncrement)
-                {
-                    decrement = leftIsHeld;
-                    increment = rightIsHeld;
-                }
-            }
-
-            do
-            {
-                if constexpr (std::is_integral_v<T>)
-                {
-                    if (decrement)
-                        config->Value -= 1;
-                    else if (increment)
-                        config->Value += 1;
-                }
-                else
-                {
-                    if (decrement)
-                        config->Value -= 0.01f;
-                    else if (increment)
-                        config->Value += 0.01f;
-                }
-
-                deltaTime -= INCREMENT_TIME;
-            }
-            while (fastIncrement && deltaTime > 0.0f);
-
-            bool isConfigValueInBounds = config->Value >= valueMin && config->Value <= valueMax;
-
-            if ((increment || decrement) && isConfigValueInBounds && isPlayIncrementSound) 
-            {
-                g_lastIncrementSoundTime = time;
-                Game_PlaySound("sys_actstg_twn_speechbutton");
-            }
-
-            config->Value = std::clamp(config->Value, valueMin, valueMax);
-        }
-
-        if (!config->ApplyCallback)
-        {
-            if ((increment || decrement) && config->Callback)
-                config->Callback(config);
-        }
-    }
-
-    std::string valueText;
-    if constexpr (std::is_same_v<T, float>)
-    {
-        valueText = fmt::format("{}%", int32_t(round(config->Value * 100.0f)));
-    }
-    else if constexpr (std::is_same_v<T, int32_t>)
-    {
-        if (config == &Config::WindowSize)
-        {
-            if (Config::Fullscreen)
-            {
-                int displayW, displayH;
-                GameWindow::GetSizeInPixels(&displayW, &displayH);
-                valueText = fmt::format("{}x{}", displayW, displayH);
-            }
-            else
-            {
-                auto displayModes = GameWindow::GetDisplayModes();
-                if (config->Value >= 0 && config->Value < displayModes.size())
-                {
-                    auto& displayMode = displayModes[config->Value];
-
-                    valueText = fmt::format("{}x{}", displayMode.w, displayMode.h);
-                }
-                else
-                {
-                    valueText = fmt::format("{}x{}", GameWindow::s_width, GameWindow::s_height);
-                }
-            }
-        }
-        else if (config == &Config::Monitor)
-        {
-            valueText = fmt::format("{}", config->Value + 1);
-        }
-        else
-        {
-            valueText = fmt::format("{}", config->Value);
-
-            if (isSlider && config->Value >= valueMax)
-                valueText = Localise("Options_Value_Max");
-        }
-    }
-    else
-    {
-        valueText = config->GetValueLocalised(Config::Language);
-    }
-
-    size = Scale(20.0f);
-    textSize = g_newRodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, valueText.data());
-
-    auto textSquashRatio = 1.0f;
-
-    if (textSize.x > max.x - min.x)
-        textSquashRatio = (max.x - min.x) / textSize.x - 0.1f;
-
-    auto textX = min.x + ((max.x - min.x) - (textSize.x * textSquashRatio)) / 2.0f;
-    auto textY = min.y + ((max.y - min.y) - textSize.y) / 2.0f;
-
-    SetGradient
-    (
-        { textX, textY },
-        { textX + textSize.x, textY + textSize.y },
-        IM_COL32(192, 255, 0, 255),
-        IM_COL32(128, 170, 0, 255)
-    );
-
-    SetScale({ textSquashRatio, 1.0f });
-    SetOrigin({ textX, textY });
-
-    DrawTextWithOutline
-    (
-        g_newRodinFont,
-        size,
-        { textX, textY },
-        IM_COL32(255, 255, 255, 255 * alpha),
-        valueText.data(),
-        4,
-        IM_COL32(0, 0, 0, 255 * alpha)
-    );
-
-    SetScale({ 1.0f, 1.0f });
-    SetOrigin({ 0.0f, 0.0f });
-
-    ResetGradient();
-}
-
-static void DrawConfigOptions()
-{
-    auto drawList = ImGui::GetBackgroundDrawList();
-    auto clipRectMin = drawList->GetClipRectMin();
-    auto clipRectMax = drawList->GetClipRectMax();
-
-    drawList->PushClipRect({ clipRectMin.x, clipRectMin.y }, { clipRectMax.x, clipRectMax.y - Scale(5.0f) });
-
-    g_selectedItem = nullptr;
-
-    float gridSize = Scale(GRID_SIZE);
-    float optionHeightWithPadding = gridSize * 6.0f;
-    float yOffset = -g_firstVisibleRowIndex * optionHeightWithPadding;
-
-    int32_t rowCount = 0;
-
-    bool isStage = OptionsMenu::s_pauseMenuType == SWA::eMenuType_Stage || OptionsMenu::s_pauseMenuType == SWA::eMenuType_Hub;
-    auto cmnReason = &Localise("Options_Desc_NotAvailable");
-
-    // TODO: Don't use raw numbers here!
-    switch (g_categoryIndex)
-    {
-        case 0: // SYSTEM
-            DrawConfigOption(rowCount++, yOffset, &Config::Language, !OptionsMenu::s_isPause, cmnReason);
-            DrawConfigOption(rowCount++, yOffset, &Config::VoiceLanguage, OptionsMenu::s_pauseMenuType == SWA::eMenuType_WorldMap, cmnReason);
-            DrawConfigOption(rowCount++, yOffset, &Config::Subtitles, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::Hints, !isStage, cmnReason);
-            DrawConfigOption(rowCount++, yOffset, &Config::ControlTutorial, !isStage, cmnReason);
-            DrawConfigOption(rowCount++, yOffset, &Config::AchievementNotifications, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::TimeOfDayTransition, !Config::UseArrowsForTimeOfDayTransition);
-            break;
-
-        case 1: // INPUT
-            DrawConfigOption(rowCount++, yOffset, &Config::HorizontalCamera, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::VerticalCamera, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::Vibration, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::AllowBackgroundInput, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::ControllerIcons, true);
-            break;
-
-        case 2: // AUDIO
-            DrawConfigOption(rowCount++, yOffset, &Config::MasterVolume, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::MusicVolume, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::EffectsVolume, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::ChannelConfiguration, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::MusicAttenuation, AudioPatches::CanAttenuate(), &Localise("Options_Desc_OSNotSupported"));
-            DrawConfigOption(rowCount++, yOffset, &Config::BattleTheme, true);
-            break;
-
-        case 3: // VIDEO
-        {
-            DrawConfigOption(rowCount++, yOffset, &Config::WindowSize,
-                !Config::Fullscreen, &Localise("Options_Desc_NotAvailableFullscreen"),
-                0, 0, (int32_t)GameWindow::GetDisplayModes().size() - 1, false);
-
-            auto displayCount = GameWindow::GetDisplayCount();
-            auto canChangeMonitor = Config::Fullscreen && displayCount > 1;
-            auto monitorReason = &Localise("Options_Desc_NotAvailableWindowed");
-
-            if (Config::Fullscreen && displayCount <= 1)
-                monitorReason = &Localise("Options_Desc_NotAvailableHardware");
-
-            DrawConfigOption(rowCount++, yOffset, &Config::Monitor, canChangeMonitor, monitorReason, 0, 0, displayCount - 1, false);
-
-            DrawConfigOption(rowCount++, yOffset, &Config::AspectRatio, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::ResolutionScale, true, nullptr, 0.25f, 1.0f, 2.0f);
-            DrawConfigOption(rowCount++, yOffset, &Config::Fullscreen, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::VSync, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::FPS, true, nullptr, FPS_MIN, 120, FPS_MAX);
-            DrawConfigOption(rowCount++, yOffset, &Config::Brightness, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::AntiAliasing, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::TransparencyAntiAliasing, Config::AntiAliasing != EAntiAliasing::None, &Localise("Options_Desc_NotAvailableMSAA"));
-            DrawConfigOption(rowCount++, yOffset, &Config::ShadowResolution, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::GITextureFiltering, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::MotionBlur, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::XboxColorCorrection, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::CutsceneAspectRatio, true);
-            DrawConfigOption(rowCount++, yOffset, &Config::UIAlignmentMode, true);
-
-            break;
-        }
-    }
-
-    auto inputState = SWA::CInputState::GetInstance();
-
-    bool upIsHeld = !g_lockedOnOption && (inputState->GetPadState().IsDown(SWA::eKeyState_DpadUp) ||
-        inputState->GetPadState().LeftStickVertical > 0.5f);
-
-    bool downIsHeld = !g_lockedOnOption && (inputState->GetPadState().IsDown(SWA::eKeyState_DpadDown) ||
-        inputState->GetPadState().LeftStickVertical < -0.5f);
-
-    bool scrollUp = !g_upWasHeld && upIsHeld;
-    bool scrollDown = !g_downWasHeld && downIsHeld;
-
-    int32_t prevSelectedRowIndex = g_selectedRowIndex;
-
-    auto time = ImGui::GetTime();
-    auto fastScroll = (time - g_lastTappedTime) > 0.6;
-    auto fastScrollSpeed = 1.0 / 3.5;
-    auto fastScrollEncounteredEdge = false;
-    static auto fastScrollSpeedUp = false;
-
-    if (scrollUp || scrollDown)
-        g_lastTappedTime = time;
-
-    if (!upIsHeld && !downIsHeld)
-        fastScrollSpeedUp = false;
-
-    if (fastScrollSpeedUp)
-        fastScrollSpeed /= 2;
-
-    if (fastScroll)
-    {
-        if ((time - g_lastIncrementTime) < fastScrollSpeed)
-        {
-            fastScroll = false;
-        }
-        else
-        {
-            g_lastIncrementTime = time;
-
-            scrollUp = upIsHeld;
-            scrollDown = downIsHeld;
-        }
-    }
-
-    if (scrollUp)
-    {
-        --g_selectedRowIndex;
-
-        if (g_selectedRowIndex < 0)
-        {
-            g_selectedRowIndex = fastScroll ? 0 : rowCount - 1;
-            fastScrollEncounteredEdge = fastScroll;
-            fastScrollSpeedUp = false;
-        }
-    }
-    else if (scrollDown)
-    {
-        ++g_selectedRowIndex;
-
-        if (g_selectedRowIndex >= rowCount)
-        {
-            g_selectedRowIndex = fastScroll ? rowCount - 1 : 0;
-            fastScrollEncounteredEdge = fastScroll;
-            fastScrollSpeedUp = false;
-        }
-    }
-
-    if ((scrollUp || scrollDown) && !fastScrollEncounteredEdge)
-    {
-        g_rowSelectionTime = time;
-        g_prevSelectedRowIndex = prevSelectedRowIndex;
-        Game_PlaySound("sys_worldmap_cursor");
-    }
-
-    g_upWasHeld = upIsHeld;
-    g_downWasHeld = downIsHeld;
-
-    int32_t visibleRowCount = int32_t(floor((clipRectMax.y - clipRectMin.y) / optionHeightWithPadding));
-
-    bool disableMoveAnimation = false;
-
-    if (g_firstVisibleRowIndex > g_selectedRowIndex)
-    {
-        g_firstVisibleRowIndex = g_selectedRowIndex;
-        disableMoveAnimation = true;
-
-        if (g_selectedRowIndex > 0)
-            fastScrollSpeedUp = true;
-    }
-
-    if (g_firstVisibleRowIndex + visibleRowCount - 1 < g_selectedRowIndex)
-    {
-        g_firstVisibleRowIndex = std::max(0, g_selectedRowIndex - visibleRowCount + 1);
-        disableMoveAnimation = true;
-
-        if (g_selectedRowIndex < rowCount - 1)
-            fastScrollSpeedUp = true;
-    }
-
-    if (disableMoveAnimation)
-        g_prevSelectedRowIndex = g_selectedRowIndex;
-
-    drawList->PopClipRect();
-
-    // Pop clip rect from DrawCategories
-    drawList->PopClipRect();
-
-    // Draw scroll bar
-    if (rowCount > visibleRowCount)
-    {
-        float totalHeight = (clipRectMax.y - clipRectMin.y) - Scale(2.0f);
-        float heightRatio = float(visibleRowCount) / float(rowCount);
-
-        float offsetRatio = float(g_firstVisibleRowIndex) / float(rowCount);
-        offsetRatio = Lerp(g_prevOffsetRatio, offsetRatio, 1.0f - exp(-16.0f * ImGui::GetIO().DeltaTime));
-        g_prevOffsetRatio = offsetRatio;
-
-        float minY = offsetRatio * totalHeight + clipRectMin.y;
-
-        drawList->AddRectFilled
-        (
-            { clipRectMax.x, minY },
-            { clipRectMax.x + gridSize - Scale(1.0f), minY + totalHeight * heightRatio},
-            IM_COL32(0, 128, 0, 255)
-        );
-    }
-}
+//template<typename T>
+//static void DrawConfigOption(int32_t rowIndex, float yOffset, ConfigDef<T>* config,
+//    bool isAccessible, std::string* inaccessibleReason = nullptr,
+//    T valueMin = T(0), T valueCenter = T(0.5), T valueMax = T(1), bool isSlider = true)
+//{
+//    auto drawList = ImGui::GetBackgroundDrawList();
+//    auto clipRectMin = drawList->GetClipRectMin();
+//    auto clipRectMax = drawList->GetClipRectMax();
+//    auto& padState = SWA::CInputState::GetInstance()->GetPadState();
+//
+//    constexpr float OPTION_NARROW_GRID_COUNT = 36.0f;
+//    constexpr float OPTION_WIDE_GRID_COUNT = 54.0f;
+//    constexpr bool IS_SLIDER_TYPE = std::is_same_v<T, float> || std::is_same_v<T, int32_t>;
+//
+//    auto isValueSlider = IS_SLIDER_TYPE && isSlider;
+//    auto gridSize = Scale(GRID_SIZE);
+//    auto optionWidth = gridSize * floor(Lerp(OPTION_NARROW_GRID_COUNT, OPTION_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
+//    auto optionHeight = gridSize * 5.5f;
+//    auto optionPadding = gridSize * 0.5f;
+//    auto valueWidth = Scale(192.0f);
+//    auto valueHeight = gridSize * 3.0f;
+//
+//    // Left side
+//    ImVec2 min = { clipRectMin.x, clipRectMin.y + (optionHeight + optionPadding) * rowIndex + yOffset };
+//    ImVec2 max = { min.x + optionWidth, min.y + optionHeight };
+//
+//    auto configName = config->GetNameLocalised(Config::Language);
+//    auto size = Scale(26.0f);
+//    auto textSize = g_rodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, configName.c_str());
+//
+//    ImVec2 textPos = { min.x + gridSize, min.y + (optionHeight - textSize.y) / 2.0f };
+//    ImVec4 textClipRect = { min.x, min.y, max.x, max.y };
+//
+//    bool lockedOnOption = false;
+//
+//    if (g_selectedRowIndex == rowIndex)
+//    {
+//        g_selectedItem = config;
+//        g_inaccessibleReason = isAccessible ? nullptr : inaccessibleReason;
+//
+//        if (!g_isEnterKeyBuffered)
+//        {
+//            if (isAccessible)
+//            {
+//                if constexpr (std::is_same_v<T, bool>)
+//                {
+//                    if (padState.IsTapped(SWA::eKeyState_A))
+//                    {
+//                        config->Value = !config->Value;
+//
+//                        if (config->Callback)
+//                            config->Callback(config);
+//
+//                        VideoConfigValueChangedCallback(config);
+//                        XAudioConfigValueChangedCallback(config);
+//
+//                        Game_PlaySound("sys_worldmap_finaldecide");
+//                    }
+//                }
+//                else
+//                {
+//                    static T s_oldValue;
+//
+//                    if (padState.IsTapped(SWA::eKeyState_A))
+//                    {
+//                        g_lockedOnOption ^= true;
+//
+//                        if (g_lockedOnOption)
+//                        {
+//                            g_lockedOnTime = ImGui::GetTime();
+//                            g_leftWasHeld = false;
+//                            g_rightWasHeld = false;
+//
+//                            // remember value
+//                            s_oldValue = config->Value;
+//
+//                            if (config->LockCallback)
+//                                config->LockCallback(config);
+//
+//                            Game_PlaySound("sys_worldmap_decide");
+//                        }
+//                        else
+//                        {
+//                            // released lock, do callbacks if value is different
+//                            if (config->Value != s_oldValue)
+//                            {
+//                                VideoConfigValueChangedCallback(config);
+//                                XAudioConfigValueChangedCallback(config);
+//
+//                                if (config->ApplyCallback)
+//                                    config->ApplyCallback(config);
+//                            }
+//
+//                            Game_PlaySound("sys_worldmap_finaldecide");
+//                        }
+//                    }
+//                    else if (padState.IsTapped(SWA::eKeyState_B))
+//                    {
+//                        // released lock, restore old value
+//                        config->Value = s_oldValue;
+//
+//                        g_lockedOnOption = false;
+//
+//                        Game_PlaySound("sys_worldmap_cansel");
+//                    }
+//
+//                    lockedOnOption = g_lockedOnOption;
+//                }
+//
+//                if (g_canReset && padState.IsTapped(SWA::eKeyState_X))
+//                {
+//                    if (!config->IsDefaultValue())
+//                    {
+//                        config->MakeDefault();
+//
+//                        VideoConfigValueChangedCallback(config);
+//                        XAudioConfigValueChangedCallback(config);
+//
+//                        if (config->Callback)
+//                            config->Callback(config);
+//
+//                        if (config->ApplyCallback)
+//                            config->ApplyCallback(config);
+//                    }
+//
+//                    Game_PlaySound("sys_worldmap_decide");
+//                }
+//            }
+//            else
+//            {
+//                if (padState.IsTapped(SWA::eKeyState_A))
+//                    Game_PlaySound("sys_actstg_stateserror");
+//            }
+//        }
+//    }
+//
+//    auto fadedOut = (g_lockedOnOption && g_selectedItem != config) || !isAccessible;
+//    auto alpha = fadedOut ? 0.5f : 1.0f;
+//    auto textColour = IM_COL32(255, 255, 255, 255 * alpha);
+//
+//    if (Config::Language == ELanguage::Japanese)
+//        textPos.y += Scale(10.0f);
+//
+//    if (g_selectedItem == config)
+//    {
+//        float prevItemOffset = (g_prevSelectedRowIndex - g_selectedRowIndex) * (optionHeight + optionPadding);
+//        double animRatio = std::clamp((ImGui::GetTime() - g_rowSelectionTime) * 60.0 / 8.0, 0.0, 1.0);
+//        prevItemOffset *= pow(1.0 - animRatio, 3.0);
+//
+//        auto c0 = IM_COL32(0xE2, 0x71, 0x22, isAccessible ? 0x80 : 0x30);
+//        auto c1 = IM_COL32(0x92, 0xFF, 0x31, isAccessible ? 0x80 : 0x30);
+//
+//        drawList->AddRectFilledMultiColor({ min.x, min.y + prevItemOffset }, { max.x, max.y + prevItemOffset }, c0, c0, c1, c1);
+//
+//        DrawTextWithMarquee(g_rodinFont, size, textPos, min, max, textColour, configName.c_str(), g_rowSelectionTime, 0.9, Scale(250.0));
+//
+//        // large
+//        g_canReset = g_isControlsVisible &&
+//            !g_lockedOnOption &&
+//            g_selectedItem->GetName().find("Language") == std::string::npos &&
+//            g_selectedItem != &Config::WindowSize &&
+//            isAccessible;
+//    }
+//    else
+//    {
+//        drawList->PushClipRect(min, max, true);
+//
+//        DrawRubyAnnotatedText
+//        (
+//            g_rodinFont,
+//            size,
+//            FLT_MAX,
+//            textPos,
+//            0.0f,
+//            configName.c_str(),
+//            [=](const char* str, ImVec2 pos)
+//            {
+//                DrawTextBasic(g_rodinFont, size, pos, textColour, str);
+//            },
+//            [=](const char* str, float annotationSize, ImVec2 pos)
+//            {
+//                DrawTextBasic(g_rodinFont, annotationSize, pos, textColour, str);
+//            }
+//        );
+//
+//        drawList->PopClipRect();
+//    }
+//
+//    // Right side
+//    min = { max.x + (clipRectMax.x - max.x - valueWidth) / 2.0f, min.y + (optionHeight - valueHeight) / 2.0f };
+//    max = { min.x + valueWidth, min.y + valueHeight };
+//
+//    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 130, 0, 223 * alpha), IM_COL32(0, 130, 0, 178 * alpha), IM_COL32(0, 130, 0, 223 * alpha), IM_COL32(0, 130, 0, 178 * alpha));
+//    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 0, 0, 13 * alpha), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 55 * alpha), IM_COL32(0, 0, 0, 6 * alpha));
+//    drawList->AddRectFilledMultiColor(min, max, IM_COL32(0, 130, 0, 13 * alpha), IM_COL32(0, 130, 0, 111 * alpha), IM_COL32(0, 130, 0, 0), IM_COL32(0, 130, 0, 55 * alpha));
+//
+//    if (isSlider)
+//    {
+//        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, int32_t>)
+//        {
+//            if (lockedOnOption)
+//            {
+//                SetAdditive(true);
+//                drawList->AddRectFilled(min, max, IM_COL32(192, 192, 0, 96 * ComputeMotion(g_lockedOnTime, 0, VALUE_SLIDER_INTRO_DURATION)));
+//                SetAdditive(false);
+//            }
+//
+//            // Inner container of slider
+//            const uint32_t innerColor0 = IM_COL32(0, 65, 0, 255 * alpha);
+//            const uint32_t innerColor1 = IM_COL32(0, 32, 0, 255 * alpha);
+//
+//            float xPadding = Scale(6);
+//            float yPadding = Scale(3);
+//
+//            drawList->AddRectFilledMultiColor
+//            (
+//                { min.x + xPadding, min.y + yPadding },
+//                { max.x - xPadding, max.y - yPadding },
+//                innerColor0,
+//                innerColor0,
+//                innerColor1,
+//                innerColor1
+//            );
+//
+//            // The actual slider
+//            const uint32_t sliderColor0 = IM_COL32(57, 241, 0, 255 * alpha);
+//            const uint32_t sliderColor1 = IM_COL32(2, 106, 0, 255 * alpha);
+//
+//            xPadding += Scale(2);
+//            yPadding += Scale(2);
+//
+//            ImVec2 sliderMin = { min.x + xPadding, min.y + yPadding };
+//            ImVec2 sliderMax = { max.x - xPadding, max.y - yPadding };
+//            float factor;
+//
+//            if (config->Value <= valueCenter)
+//                factor = float(config->Value - valueMin) / (valueCenter - valueMin) * 0.5f;
+//            else
+//                factor = 0.5f + float(config->Value - valueCenter) / (valueMax - valueCenter) * 0.5f;
+//
+//            sliderMax.x = sliderMin.x + (sliderMax.x - sliderMin.x) * factor;
+//
+//            drawList->AddRectFilledMultiColor(sliderMin, sliderMax, sliderColor0, sliderColor0, sliderColor1, sliderColor1);
+//        }
+//    }
+//
+//    if constexpr (std::is_same_v<T, bool>)
+//        DrawToggleLight({ min.x + Scale(14), min.y + ((max.y - min.y) - Scale(14)) / 2 + Scale(1) }, config->Value, alpha);
+//
+//    // Selection triangles
+//    if (lockedOnOption)
+//    {
+//        bool leftIsHeld = padState.IsDown(SWA::eKeyState_DpadLeft) || padState.LeftStickHorizontal < -0.5f;
+//        bool rightIsHeld = padState.IsDown(SWA::eKeyState_DpadRight) || padState.LeftStickHorizontal > 0.5f;
+//
+//        bool leftTapped = !g_leftWasHeld && leftIsHeld;
+//        bool rightTapped = !g_rightWasHeld && rightIsHeld;
+//
+//        double time = ImGui::GetTime();
+//
+//        if (leftTapped || rightTapped)
+//            g_lastTappedTime = time;
+//
+//        bool decrement = leftTapped;
+//        bool increment = rightTapped;
+//
+//        g_leftWasHeld = leftIsHeld;
+//        g_rightWasHeld = rightIsHeld;
+//
+//        DrawSelectionArrows(min, max, leftTapped, rightTapped, isValueSlider);
+//
+//        if constexpr (std::is_enum_v<T>)
+//        {
+//            auto it = config->EnumTemplateReverse.find(config->Value);
+//
+//            if (leftTapped)
+//            {
+//                if (it == config->EnumTemplateReverse.begin())
+//                    it = config->EnumTemplateReverse.end();
+//
+//                --it;
+//            }
+//            else if (rightTapped)
+//            {
+//                ++it;
+//
+//                if (it == config->EnumTemplateReverse.end())
+//                    it = config->EnumTemplateReverse.begin();
+//            }
+//
+//            config->Value = it->first;
+//
+//            if (increment || decrement)
+//                Game_PlaySound("sys_actstg_pausecursor");
+//        }
+//        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, int32_t>)
+//        {
+//            float deltaTime = ImGui::GetIO().DeltaTime;
+//
+//            bool fastIncrement = (time - g_lastTappedTime) > 0.5;
+//            bool isPlayIncrementSound = true;
+//
+//            constexpr double INCREMENT_TIME = 1.0 / 120.0;
+//            constexpr double INCREMENT_SOUND_TIME = 1.0 / 7.5;
+//
+//            if (isSlider)
+//            {
+//                if (fastIncrement)
+//                {
+//                    isPlayIncrementSound = (time - g_lastIncrementSoundTime) > INCREMENT_SOUND_TIME;
+//
+//                    if ((time - g_lastIncrementTime) < INCREMENT_TIME)
+//                        fastIncrement = false;
+//                    else
+//                        g_lastIncrementTime = time;
+//                }
+//
+//                if (fastIncrement)
+//                {
+//                    decrement = leftIsHeld;
+//                    increment = rightIsHeld;
+//                }
+//            }
+//
+//            do
+//            {
+//                if constexpr (std::is_integral_v<T>)
+//                {
+//                    if (decrement)
+//                        config->Value -= 1;
+//                    else if (increment)
+//                        config->Value += 1;
+//                }
+//                else
+//                {
+//                    if (decrement)
+//                        config->Value -= 0.01f;
+//                    else if (increment)
+//                        config->Value += 0.01f;
+//                }
+//
+//                deltaTime -= INCREMENT_TIME;
+//            }
+//            while (fastIncrement && deltaTime > 0.0f);
+//
+//            bool isConfigValueInBounds = config->Value >= valueMin && config->Value <= valueMax;
+//
+//            if ((increment || decrement) && isConfigValueInBounds && isPlayIncrementSound)
+//            {
+//                g_lastIncrementSoundTime = time;
+//                Game_PlaySound("sys_actstg_twn_speechbutton");
+//            }
+//
+//            config->Value = std::clamp(config->Value, valueMin, valueMax);
+//        }
+//
+//        if (!config->ApplyCallback)
+//        {
+//            if ((increment || decrement) && config->Callback)
+//                config->Callback(config);
+//        }
+//    }
+//
+//    std::string valueText;
+//    if constexpr (std::is_same_v<T, float>)
+//    {
+//        valueText = fmt::format("{}%", int32_t(round(config->Value * 100.0f)));
+//    }
+//    else if constexpr (std::is_same_v<T, int32_t>)
+//    {
+//        if (config == &Config::WindowSize)
+//        {
+//            if (Config::Fullscreen)
+//            {
+//                int displayW, displayH;
+//                GameWindow::GetSizeInPixels(&displayW, &displayH);
+//                valueText = fmt::format("{}x{}", displayW, displayH);
+//            }
+//            else
+//            {
+//                auto displayModes = GameWindow::GetDisplayModes();
+//                if (config->Value >= 0 && config->Value < displayModes.size())
+//                {
+//                    auto& displayMode = displayModes[config->Value];
+//
+//                    valueText = fmt::format("{}x{}", displayMode.w, displayMode.h);
+//                }
+//                else
+//                {
+//                    valueText = fmt::format("{}x{}", GameWindow::s_width, GameWindow::s_height);
+//                }
+//            }
+//        }
+//        else if (config == &Config::Monitor)
+//        {
+//            valueText = fmt::format("{}", config->Value + 1);
+//        }
+//        else
+//        {
+//            valueText = fmt::format("{}", config->Value);
+//
+//            if (isSlider && config->Value >= valueMax)
+//                valueText = Localise("Options_Value_Max");
+//        }
+//    }
+//    else
+//    {
+//        valueText = config->GetValueLocalised(Config::Language);
+//    }
+//
+//    size = Scale(20.0f);
+//    textSize = g_newRodinFont->CalcTextSizeA(size, FLT_MAX, 0.0f, valueText.data());
+//
+//    auto textSquashRatio = 1.0f;
+//
+//    if (textSize.x > max.x - min.x)
+//        textSquashRatio = (max.x - min.x) / textSize.x - 0.1f;
+//
+//    auto textX = min.x + ((max.x - min.x) - (textSize.x * textSquashRatio)) / 2.0f;
+//    auto textY = min.y + ((max.y - min.y) - textSize.y) / 2.0f;
+//
+//    SetGradient
+//    (
+//        { textX, textY },
+//        { textX + textSize.x, textY + textSize.y },
+//        IM_COL32(192, 255, 0, 255),
+//        IM_COL32(128, 170, 0, 255)
+//    );
+//
+//    SetScale({ textSquashRatio, 1.0f });
+//    SetOrigin({ textX, textY });
+//
+//    DrawTextWithOutline
+//    (
+//        g_newRodinFont,
+//        size,
+//        { textX, textY },
+//        IM_COL32(255, 255, 255, 255 * alpha),
+//        valueText.data(),
+//        4,
+//        IM_COL32(0, 0, 0, 255 * alpha)
+//    );
+//
+//    SetScale({ 1.0f, 1.0f });
+//    SetOrigin({ 0.0f, 0.0f });
+//
+//    ResetGradient();
+//}
+//
+//static void DrawConfigOptions()
+//{
+//    auto drawList = ImGui::GetBackgroundDrawList();
+//    auto clipRectMin = drawList->GetClipRectMin();
+//    auto clipRectMax = drawList->GetClipRectMax();
+//
+//    drawList->PushClipRect({ clipRectMin.x, clipRectMin.y }, { clipRectMax.x, clipRectMax.y - Scale(5.0f) });
+//
+//    g_selectedItem = nullptr;
+//
+//    float gridSize = Scale(GRID_SIZE);
+//    float optionHeightWithPadding = gridSize * 6.0f;
+//    float yOffset = -g_firstVisibleRowIndex * optionHeightWithPadding;
+//
+//    int32_t rowCount = 0;
+//
+//    bool isStage = OptionsMenu::s_pauseMenuType == SWA::eMenuType_Stage || OptionsMenu::s_pauseMenuType == SWA::eMenuType_Hub;
+//    auto cmnReason = &Localise("Options_Desc_NotAvailable");
+//
+//    // TODO: Don't use raw numbers here!
+//    switch (g_categoryIndex)
+//    {
+//        case 0: // SYSTEM
+//            DrawConfigOption(rowCount++, yOffset, &Config::Language, !OptionsMenu::s_isPause, cmnReason);
+//            DrawConfigOption(rowCount++, yOffset, &Config::VoiceLanguage, OptionsMenu::s_pauseMenuType == SWA::eMenuType_WorldMap, cmnReason);
+//            DrawConfigOption(rowCount++, yOffset, &Config::Subtitles, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::Hints, !isStage, cmnReason);
+//            DrawConfigOption(rowCount++, yOffset, &Config::ControlTutorial, !isStage, cmnReason);
+//            DrawConfigOption(rowCount++, yOffset, &Config::AchievementNotifications, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::TimeOfDayTransition, !Config::UseArrowsForTimeOfDayTransition);
+//            break;
+//
+//        case 1: // INPUT
+//            DrawConfigOption(rowCount++, yOffset, &Config::HorizontalCamera, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::VerticalCamera, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::Vibration, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::AllowBackgroundInput, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::ControllerIcons, true);
+//            break;
+//
+//        case 2: // AUDIO
+//            DrawConfigOption(rowCount++, yOffset, &Config::MasterVolume, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::MusicVolume, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::EffectsVolume, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::ChannelConfiguration, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::MusicAttenuation, AudioPatches::CanAttenuate(), &Localise("Options_Desc_OSNotSupported"));
+//            DrawConfigOption(rowCount++, yOffset, &Config::BattleTheme, true);
+//            break;
+//
+//        case 3: // VIDEO
+//        {
+//            DrawConfigOption(rowCount++, yOffset, &Config::WindowSize,
+//                !Config::Fullscreen, &Localise("Options_Desc_NotAvailableFullscreen"),
+//                0, 0, (int32_t)GameWindow::GetDisplayModes().size() - 1, false);
+//
+//            auto displayCount = GameWindow::GetDisplayCount();
+//            auto canChangeMonitor = Config::Fullscreen && displayCount > 1;
+//            auto monitorReason = &Localise("Options_Desc_NotAvailableWindowed");
+//
+//            if (Config::Fullscreen && displayCount <= 1)
+//                monitorReason = &Localise("Options_Desc_NotAvailableHardware");
+//
+//            DrawConfigOption(rowCount++, yOffset, &Config::Monitor, canChangeMonitor, monitorReason, 0, 0, displayCount - 1, false);
+//
+//            DrawConfigOption(rowCount++, yOffset, &Config::AspectRatio, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::ResolutionScale, true, nullptr, 0.25f, 1.0f, 2.0f);
+//            DrawConfigOption(rowCount++, yOffset, &Config::Fullscreen, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::VSync, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::FPS, true, nullptr, FPS_MIN, 120, FPS_MAX);
+//            DrawConfigOption(rowCount++, yOffset, &Config::Brightness, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::AntiAliasing, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::TransparencyAntiAliasing, Config::AntiAliasing != EAntiAliasing::None, &Localise("Options_Desc_NotAvailableMSAA"));
+//            DrawConfigOption(rowCount++, yOffset, &Config::ShadowResolution, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::GITextureFiltering, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::MotionBlur, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::XboxColorCorrection, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::CutsceneAspectRatio, true);
+//            DrawConfigOption(rowCount++, yOffset, &Config::UIAlignmentMode, true);
+//
+//            break;
+//        }
+//    }
+//
+//    auto inputState = SWA::CInputState::GetInstance();
+//
+//    bool upIsHeld = !g_lockedOnOption && (inputState->GetPadState().IsDown(SWA::eKeyState_DpadUp) ||
+//        inputState->GetPadState().LeftStickVertical > 0.5f);
+//
+//    bool downIsHeld = !g_lockedOnOption && (inputState->GetPadState().IsDown(SWA::eKeyState_DpadDown) ||
+//        inputState->GetPadState().LeftStickVertical < -0.5f);
+//
+//    bool scrollUp = !g_upWasHeld && upIsHeld;
+//    bool scrollDown = !g_downWasHeld && downIsHeld;
+//
+//    int32_t prevSelectedRowIndex = g_selectedRowIndex;
+//
+//    auto time = ImGui::GetTime();
+//    auto fastScroll = (time - g_lastTappedTime) > 0.6;
+//    auto fastScrollSpeed = 1.0 / 3.5;
+//    auto fastScrollEncounteredEdge = false;
+//    static auto fastScrollSpeedUp = false;
+//
+//    if (scrollUp || scrollDown)
+//        g_lastTappedTime = time;
+//
+//    if (!upIsHeld && !downIsHeld)
+//        fastScrollSpeedUp = false;
+//
+//    if (fastScrollSpeedUp)
+//        fastScrollSpeed /= 2;
+//
+//    if (fastScroll)
+//    {
+//        if ((time - g_lastIncrementTime) < fastScrollSpeed)
+//        {
+//            fastScroll = false;
+//        }
+//        else
+//        {
+//            g_lastIncrementTime = time;
+//
+//            scrollUp = upIsHeld;
+//            scrollDown = downIsHeld;
+//        }
+//    }
+//
+//    if (scrollUp)
+//    {
+//        --g_selectedRowIndex;
+//
+//        if (g_selectedRowIndex < 0)
+//        {
+//            g_selectedRowIndex = fastScroll ? 0 : rowCount - 1;
+//            fastScrollEncounteredEdge = fastScroll;
+//            fastScrollSpeedUp = false;
+//        }
+//    }
+//    else if (scrollDown)
+//    {
+//        ++g_selectedRowIndex;
+//
+//        if (g_selectedRowIndex >= rowCount)
+//        {
+//            g_selectedRowIndex = fastScroll ? rowCount - 1 : 0;
+//            fastScrollEncounteredEdge = fastScroll;
+//            fastScrollSpeedUp = false;
+//        }
+//    }
+//
+//    if ((scrollUp || scrollDown) && !fastScrollEncounteredEdge)
+//    {
+//        g_rowSelectionTime = time;
+//        g_prevSelectedRowIndex = prevSelectedRowIndex;
+//        Game_PlaySound("sys_worldmap_cursor");
+//    }
+//
+//    g_upWasHeld = upIsHeld;
+//    g_downWasHeld = downIsHeld;
+//
+//    int32_t visibleRowCount = int32_t(floor((clipRectMax.y - clipRectMin.y) / optionHeightWithPadding));
+//
+//    bool disableMoveAnimation = false;
+//
+//    if (g_firstVisibleRowIndex > g_selectedRowIndex)
+//    {
+//        g_firstVisibleRowIndex = g_selectedRowIndex;
+//        disableMoveAnimation = true;
+//
+//        if (g_selectedRowIndex > 0)
+//            fastScrollSpeedUp = true;
+//    }
+//
+//    if (g_firstVisibleRowIndex + visibleRowCount - 1 < g_selectedRowIndex)
+//    {
+//        g_firstVisibleRowIndex = std::max(0, g_selectedRowIndex - visibleRowCount + 1);
+//        disableMoveAnimation = true;
+//
+//        if (g_selectedRowIndex < rowCount - 1)
+//            fastScrollSpeedUp = true;
+//    }
+//
+//    if (disableMoveAnimation)
+//        g_prevSelectedRowIndex = g_selectedRowIndex;
+//
+//    drawList->PopClipRect();
+//
+//    // Pop clip rect from DrawCategories
+//    drawList->PopClipRect();
+//
+//    // Draw scroll bar
+//    if (rowCount > visibleRowCount)
+//    {
+//        float totalHeight = (clipRectMax.y - clipRectMin.y) - Scale(2.0f);
+//        float heightRatio = float(visibleRowCount) / float(rowCount);
+//
+//        float offsetRatio = float(g_firstVisibleRowIndex) / float(rowCount);
+//        offsetRatio = Lerp(g_prevOffsetRatio, offsetRatio, 1.0f - exp(-16.0f * ImGui::GetIO().DeltaTime));
+//        g_prevOffsetRatio = offsetRatio;
+//
+//        float minY = offsetRatio * totalHeight + clipRectMin.y;
+//
+//        drawList->AddRectFilled
+//        (
+//            { clipRectMax.x, minY },
+//            { clipRectMax.x + gridSize - Scale(1.0f), minY + totalHeight * heightRatio},
+//            IM_COL32(0, 128, 0, 255)
+//        );
+//    }
+//}
 
 static void DrawSettingsPanel(ImVec2 settingsMin, ImVec2 settingsMax)
 {
@@ -1394,16 +1394,16 @@ static void DrawSettingsPanel(ImVec2 settingsMin, ImVec2 settingsMax)
     SetProceduralOrigin(settingsMin);
     DrawContainer(settingsMin, settingsMax, true);
 
-    if (DrawCategories())
-    {
-        DrawConfigOptions();
-
-        g_isControlsVisible = true;
-    }
-    else
-    {
-        ResetSelection();
-    }
+//    if (DrawCategories())
+//    {
+//        DrawConfigOptions();
+//
+//        g_isControlsVisible = true;
+//    }
+//    else
+//    {
+//        ResetSelection();
+//    }
 
     ResetProceduralOrigin();
 
@@ -1625,7 +1625,7 @@ static void DrawInfoPanel(ImVec2 infoMin, ImVec2 infoMax)
 static void SetOptionsMenuVisible(bool isVisible)
 {
     OptionsMenu::s_isVisible = isVisible;
-    *SWA::SGlobals::ms_IsRenderHud = !isVisible;
+//    *SWA::SGlobals::ms_IsRenderHud = !isVisible;
 }
 
 static bool DrawMilesElectric()
@@ -1711,94 +1711,94 @@ void OptionsMenu::Init()
     TVStatic::Init();
 }
 
-void OptionsMenu::Draw()
-{
-    if (!s_isVisible)
-        return;
-
-    // We've entered the menu now, no need to check this.
-    auto pInputState = SWA::CInputState::GetInstance();
-    if (pInputState->GetPadState().IsReleased(SWA::eKeyState_A))
-        g_isEnterKeyBuffered = false;
-
-    if (g_isStage)
-    {
-        if (!DrawMilesElectric())
-            return;
-    }
-
-    if (!g_isClosing)
-    {
-        auto drawList = ImGui::GetBackgroundDrawList();
-        auto& res = ImGui::GetIO().DisplaySize;
-
-        if (g_isStage)
-            drawList->AddRectFilled({ 0.0f, 0.0f }, res, IM_COL32(0, 0, 0, 223));
-
-        DrawScanlineBars();
-
-        float settingsGridCount = floor(Lerp(SETTINGS_NARROW_GRID_COUNT, SETTINGS_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
-        float paddingGridCount = Lerp(PADDING_NARROW_GRID_COUNT, PADDING_WIDE_GRID_COUNT, g_aspectRatioNarrowScale);
-        float infoGridCount = floor(Lerp(INFO_NARROW_GRID_COUNT, INFO_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
-        float totalGridCount = settingsGridCount + paddingGridCount + infoGridCount;
-
-        float minX = round(g_aspectRatioOffsetX + Scale((1280.0f - (GRID_SIZE * totalGridCount)) / 2.0f));
-        float maxX = res.x - minX;
-        float minY = round(g_aspectRatioOffsetY + Scale(CONTAINER_POS_Y));
-        float maxY = round(g_aspectRatioOffsetY + Scale((720.0f - CONTAINER_POS_Y + 1.0f)));
-
-        DrawSettingsPanel(
-            { minX, minY },
-            { minX + Scale(settingsGridCount * GRID_SIZE), maxY }
-        );
-
-        DrawInfoPanel(
-            { maxX - Scale(infoGridCount * GRID_SIZE) - 1.0f, minY },
-            { maxX - 1.0f, maxY }
-        );
-
-        if (g_isStage)
-            DrawFadeTransition();
-    }
-
-    s_isRestartRequired = Config::Language != App::s_language;
-}
-
-void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
-{
-    g_isClosing = false;
-    s_isPause = isPause;
-    s_pauseMenuType = pauseMenuType;
-    g_isStage = isPause && pauseMenuType != SWA::eMenuType_WorldMap;
-    
-    g_appearTime = ImGui::GetTime();
-    g_categoryIndex = 0;
-    g_categoryAnimMin = { 0.0f, 0.0f };
-    g_categoryAnimMax = { 0.0f, 0.0f };
-    g_selectedItem = nullptr;
-    g_titleAnimBegin = true;
-
-    /* Store button state so we can track it later
-       and prevent the first item being selected. */
-    if (SWA::CInputState::GetInstance()->GetPadState().IsDown(SWA::eKeyState_A))
-        g_isEnterKeyBuffered = true;
-
-    ResetSelection();
-    SetOptionsMenuVisible(true);
-
-    std::array<Button, 4> buttons =
-    {
-        Button("Common_Switch", 115.0f, EButtonIcon::LBRB, EButtonAlignment::Left, &g_isControlsVisible),
-        Button("Common_Reset", 110.0f, EButtonIcon::X, &g_canReset),
-        Button("Common_Select", 115.0f, EButtonIcon::A, &g_isControlsVisible),
-        Button("Common_Back", 65.0f, EButtonIcon::B, &g_isControlsVisible)
-    };
-    
-    ButtonGuide::Open(buttons);
-    ButtonGuide::SetSideMargins(250);
-
-    hid::SetProhibitedInputs(XAMINPUT_GAMEPAD_START, false, true);
-}
+//void OptionsMenu::Draw()
+//{
+//    if (!s_isVisible)
+//        return;
+//
+//    // We've entered the menu now, no need to check this.
+//    auto pInputState = SWA::CInputState::GetInstance();
+//    if (pInputState->GetPadState().IsReleased(SWA::eKeyState_A))
+//        g_isEnterKeyBuffered = false;
+//
+//    if (g_isStage)
+//    {
+//        if (!DrawMilesElectric())
+//            return;
+//    }
+//
+//    if (!g_isClosing)
+//    {
+//        auto drawList = ImGui::GetBackgroundDrawList();
+//        auto& res = ImGui::GetIO().DisplaySize;
+//
+//        if (g_isStage)
+//            drawList->AddRectFilled({ 0.0f, 0.0f }, res, IM_COL32(0, 0, 0, 223));
+//
+//        DrawScanlineBars();
+//
+//        float settingsGridCount = floor(Lerp(SETTINGS_NARROW_GRID_COUNT, SETTINGS_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
+//        float paddingGridCount = Lerp(PADDING_NARROW_GRID_COUNT, PADDING_WIDE_GRID_COUNT, g_aspectRatioNarrowScale);
+//        float infoGridCount = floor(Lerp(INFO_NARROW_GRID_COUNT, INFO_WIDE_GRID_COUNT, g_aspectRatioNarrowScale));
+//        float totalGridCount = settingsGridCount + paddingGridCount + infoGridCount;
+//
+//        float minX = round(g_aspectRatioOffsetX + Scale((1280.0f - (GRID_SIZE * totalGridCount)) / 2.0f));
+//        float maxX = res.x - minX;
+//        float minY = round(g_aspectRatioOffsetY + Scale(CONTAINER_POS_Y));
+//        float maxY = round(g_aspectRatioOffsetY + Scale((720.0f - CONTAINER_POS_Y + 1.0f)));
+//
+//        DrawSettingsPanel(
+//            { minX, minY },
+//            { minX + Scale(settingsGridCount * GRID_SIZE), maxY }
+//        );
+//
+//        DrawInfoPanel(
+//            { maxX - Scale(infoGridCount * GRID_SIZE) - 1.0f, minY },
+//            { maxX - 1.0f, maxY }
+//        );
+//
+//        if (g_isStage)
+//            DrawFadeTransition();
+//    }
+//
+//    s_isRestartRequired = Config::Language != App::s_language;
+//}
+//
+//void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
+//{
+//    g_isClosing = false;
+//    s_isPause = isPause;
+//    s_pauseMenuType = pauseMenuType;
+//    g_isStage = isPause && pauseMenuType != SWA::eMenuType_WorldMap;
+//
+//    g_appearTime = ImGui::GetTime();
+//    g_categoryIndex = 0;
+//    g_categoryAnimMin = { 0.0f, 0.0f };
+//    g_categoryAnimMax = { 0.0f, 0.0f };
+//    g_selectedItem = nullptr;
+//    g_titleAnimBegin = true;
+//
+//    /* Store button state so we can track it later
+//       and prevent the first item being selected. */
+//    if (SWA::CInputState::GetInstance()->GetPadState().IsDown(SWA::eKeyState_A))
+//        g_isEnterKeyBuffered = true;
+//
+//    ResetSelection();
+//    SetOptionsMenuVisible(true);
+//
+//    std::array<Button, 4> buttons =
+//    {
+//        Button("Common_Switch", 115.0f, EButtonIcon::LBRB, EButtonAlignment::Left, &g_isControlsVisible),
+//        Button("Common_Reset", 110.0f, EButtonIcon::X, &g_canReset),
+//        Button("Common_Select", 115.0f, EButtonIcon::A, &g_isControlsVisible),
+//        Button("Common_Back", 65.0f, EButtonIcon::B, &g_isControlsVisible)
+//    };
+//
+//    ButtonGuide::Open(buttons);
+//    ButtonGuide::SetSideMargins(250);
+//
+//    hid::SetProhibitedInputs(XAMINPUT_GAMEPAD_START, false, true);
+//}
 
 void OptionsMenu::Close()
 {

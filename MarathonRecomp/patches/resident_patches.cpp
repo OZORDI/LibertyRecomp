@@ -1,4 +1,4 @@
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/achievement_manager.h>

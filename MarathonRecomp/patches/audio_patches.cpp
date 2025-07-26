@@ -3,7 +3,7 @@
 #include <os/media.h>
 #include <os/version.h>
 #include <patches/audio_patches.h>
-#include <api/SWA.h>
+#include <api/Marathon.h>
 
 int AudioPatches::m_isAttenuationSupported = -1;
 

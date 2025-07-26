@@ -1,5 +1,5 @@
 #include <user/config.h>
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <app.h>
 #include <ui/game_window.h>
 #include <ui/black_bar.h>
@@ -15,7 +15,7 @@ namespace Chao::CSD
 {
     struct Cast
     {
-        SWA_INSERT_PADDING(0x144);
+        MARATHON_INSERT_PADDING(0x144);
     };
 
     struct CastLink
@@ -41,7 +41,7 @@ namespace Chao::CSD
 
     struct Scene
     {
-        SWA_INSERT_PADDING(0x24);
+        MARATHON_INSERT_PADDING(0x24);
         be<uint32_t> CastNodeCount;
         xpointer<CastNode> pCastNodes;
         be<uint32_t> CastCount;

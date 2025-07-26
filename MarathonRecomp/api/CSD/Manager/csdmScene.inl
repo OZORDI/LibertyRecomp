@@ -2,17 +2,17 @@ namespace Chao::CSD
 {
     inline CScene::~CScene()
     {
-        SWA_VIRTUAL_FUNCTION(void, 0, this);
+        MARATHON_VIRTUAL_FUNCTION(void, 0, this);
     }
 
     inline void CScene::Update(float in_DeltaTime)
     {
-        SWA_VIRTUAL_FUNCTION(void, 2, this, in_DeltaTime);
+        MARATHON_VIRTUAL_FUNCTION(void, 2, this, in_DeltaTime);
     }
 
     inline void CScene::Render(void* in_pUnk)
     {
-        SWA_VIRTUAL_FUNCTION(void, 3, this, in_pUnk);
+        MARATHON_VIRTUAL_FUNCTION(void, 3, this, in_pUnk);
     }
 
     inline void CScene::GetNode(RCPtr<CNode>& out_rResult, const char* in_pName)

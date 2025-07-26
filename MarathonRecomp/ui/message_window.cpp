@@ -1,5 +1,5 @@
 #include "message_window.h"
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <gpu/imgui/imgui_snapshot.h>
 #include <gpu/video.h>
 #include <hid/hid.h>
@@ -329,24 +329,24 @@ void MessageWindow::Draw()
         // Always assume keyboard to prevent mouse from blocking control in-game.
         isKeyboard = true;
 
-        if (auto pInputState = SWA::CInputState::GetInstance())
-        {
-            auto& rPadState = pInputState->GetPadState();
-
-            g_joypadAxis.y = rPadState.LeftStickVertical;
-
-            if (rPadState.IsTapped(SWA::eKeyState_DpadUp))
-                g_joypadAxis.y = -1.0f;
-
-            if (rPadState.IsTapped(SWA::eKeyState_DpadDown))
-                g_joypadAxis.y = 1.0f;
-
-            g_isAccepted = rPadState.IsTapped(SWA::eKeyState_A);
-            g_isDeclined = rPadState.IsTapped(SWA::eKeyState_B);
-
-            if (isKeyboard)
-                g_isAccepted = g_isAccepted || rPadState.IsTapped(SWA::eKeyState_Start);
-        }
+//        if (auto pInputState = SWA::CInputState::GetInstance())
+//        {
+//            auto& rPadState = pInputState->GetPadState();
+//
+//            g_joypadAxis.y = rPadState.LeftStickVertical;
+//
+//            if (rPadState.IsTapped(SWA::eKeyState_DpadUp))
+//                g_joypadAxis.y = -1.0f;
+//
+//            if (rPadState.IsTapped(SWA::eKeyState_DpadDown))
+//                g_joypadAxis.y = 1.0f;
+//
+//            g_isAccepted = rPadState.IsTapped(SWA::eKeyState_A);
+//            g_isDeclined = rPadState.IsTapped(SWA::eKeyState_B);
+//
+//            if (isKeyboard)
+//                g_isAccepted = g_isAccepted || rPadState.IsTapped(SWA::eKeyState_Start);
+//        }
     }
 
     if (DrawContainer(g_appearTime, centre, { textSize.x / 2 + textMarginX, textSize.y / 2 + textMarginY }, !g_isControlsVisible))

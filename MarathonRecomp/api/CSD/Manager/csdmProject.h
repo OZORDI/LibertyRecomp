@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SWA.inl"
+#include "Marathon.inl"
 #include "CSD/Manager/csdmBase.h"
 #include "CSD/Manager/csdmResourceBase.h"
 
@@ -14,9 +14,9 @@ namespace Chao::CSD
     class CProject : public CResourceBase<Project>, CBase
     {
     public:
-        SWA_INSERT_PADDING(0x1C);
+        MARATHON_INSERT_PADDING(0x1C);
         RCPtr<CTexList> m_rcTexList;
-        SWA_INSERT_PADDING(0x1C);
+        MARATHON_INSERT_PADDING(0x1C);
 
         RCPtr<CScene> CreateScene(const char* in_pName) const;
         RCPtr<CScene> CreateScene(const char* in_pName, const char* in_pMotionName) const;

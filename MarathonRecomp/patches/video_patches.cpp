@@ -1,10 +1,10 @@
 #include <user/config.h>
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <ui/game_window.h>
 #include <gpu/video.h>
 #include "aspect_ratio_patches.h"
 
-using SVertexData = SWA::Sequence::Utility::CPlayMovieWrapper::CRender::SVertexData;
+//using SVertexData = SWA::Sequence::Utility::CPlayMovieWrapper::CRender::SVertexData;
 
 // Update movie player aspect ratio.
 // PPC_FUNC_IMPL(__imp__sub_82AE30D8);

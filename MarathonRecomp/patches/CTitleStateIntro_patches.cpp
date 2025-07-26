@@ -1,5 +1,5 @@
 #include "CTitleStateIntro_patches.h"
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <install/update_checker.h>
 #include <locale/locale.h>
 #include <ui/fader.h>

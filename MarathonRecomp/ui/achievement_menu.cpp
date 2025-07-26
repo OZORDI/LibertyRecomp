@@ -1,5 +1,5 @@
 #include "achievement_menu.h"
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <gpu/imgui/imgui_snapshot.h>
 #include <gpu/video.h>
 #include <hid/hid.h>
@@ -506,220 +506,220 @@ static void DrawAchievementTotal(ImVec2 min, ImVec2 max)
     );
 }
 
-static void DrawContentContainer()
-{
-    auto drawList = ImGui::GetBackgroundDrawList();
-
-    // Expand/retract animation.
-    auto motion = g_isClosing
-        ? ComputeMotion(g_appearTime, 0, CONTENT_CONTAINER_COMMON_MOTION_START)
-        : ComputeMotion(g_appearTime, CONTENT_CONTAINER_COMMON_MOTION_START, CONTENT_CONTAINER_COMMON_MOTION_END);
-
-    auto minX = g_isClosing
-        ? Hermite(251, 301, motion)
-        : Hermite(301, 251, motion);
-
-    auto minY = g_isClosing
-        ? Hermite(189, 206, motion)
-        : Hermite(206, 189, motion);
-
-    auto maxX = g_isClosing
-        ? Hermite(1031, 978, motion)
-        : Hermite(978, 1031, motion);
-
-    auto maxY = g_isClosing
-        ? Hermite(604, 573, motion)
-        : Hermite(573, 604, motion);
-
-    ImVec2 min = { g_aspectRatioOffsetX + Scale(minX), g_aspectRatioOffsetY + Scale(minY) };
-    ImVec2 max = { g_aspectRatioOffsetX + Scale(maxX), g_aspectRatioOffsetY + Scale(maxY) };
-
-    // Transparency fade animation.
-    auto alpha = g_isClosing
-        ? Hermite(1, 0, motion)
-        : Hermite(0, 1, motion);
-
-    DrawContainer(min, max, IM_COL32(197, 194, 197, 200), IM_COL32(115, 113, 115, 236), alpha);
-
-    if (motion < 1.0f)
-    {
-        drawList->PopClipRect();
-        return;
-    }
-    else if (g_isClosing)
-    {
-        AchievementMenu::s_isVisible = false;
-        drawList->PopClipRect();
-        return;
-    }
-
-    auto clipRectMin = drawList->GetClipRectMin();
-    auto clipRectMax = drawList->GetClipRectMax();
-
-    auto itemHeight = Scale(94);
-    auto yOffset = -g_firstVisibleRowIndex * itemHeight + Scale(2);
-    auto rowCount = 0;
-
-    // Draw separators.
-    for (int i = 1; i <= 3; i++)
-    {
-        ImVec2 lineMin = { clipRectMin.x + Scale(35), clipRectMin.y + itemHeight * i + Scale(2) };
-        ImVec2 lineMax = { clipRectMax.x - Scale(55), lineMin.y + Scale(1.3f) };
-
-        SetAdditive(true);
-        drawList->AddRectFilled(lineMin, lineMax, IM_COL32(160, 160, 160, 60));
-        SetAdditive(false);
-    }
-
-    for (auto& tpl : g_achievements)
-    {
-        auto achievement = std::get<0>(tpl);
-
-        if (AchievementManager::IsUnlocked(achievement.ID))
-            DrawAchievement(rowCount++, yOffset, achievement, true);
-    }
-
-    for (auto& tpl : g_achievements)
-    {
-        auto achievement = std::get<0>(tpl);
-
-        if (!AchievementManager::IsUnlocked(achievement.ID))
-            DrawAchievement(rowCount++, yOffset, achievement, false);
-    }
-
-    auto inputState = SWA::CInputState::GetInstance();
-
-    bool upIsHeld = inputState->GetPadState().IsDown(SWA::eKeyState_DpadUp) ||
-        inputState->GetPadState().LeftStickVertical > 0.5f;
-
-    bool downIsHeld = inputState->GetPadState().IsDown(SWA::eKeyState_DpadDown) ||
-        inputState->GetPadState().LeftStickVertical < -0.5f;
-
-    bool isReachedTop = g_selectedRowIndex == 0;
-    bool isReachedBottom = g_selectedRowIndex == rowCount - 1;
-
-    bool scrollUp = !g_upWasHeld && upIsHeld;
-    bool scrollDown = !g_downWasHeld && downIsHeld;
-
-    auto time = ImGui::GetTime();
-    auto fastScroll = (time - g_lastTappedTime) > 0.6;
-    auto fastScrollSpeed = 1.0 / 3.5;
-    static auto fastScrollSpeedUp = false;
-
-    if (scrollUp || scrollDown)
-        g_lastTappedTime = time;
-
-    if (!upIsHeld && !downIsHeld)
-        fastScrollSpeedUp = false;
-
-    if (fastScrollSpeedUp)
-        fastScrollSpeed /= 2;
-
-    if (fastScroll)
-    {
-        if ((time - g_lastIncrementTime) < fastScrollSpeed)
-        {
-            fastScroll = false;
-        }
-        else
-        {
-            g_lastIncrementTime = time;
-
-            scrollUp = upIsHeld;
-            scrollDown = downIsHeld;
-            fastScrollSpeedUp = true;
-        }
-    }
-
-    if (scrollUp)
-    {
-        --g_selectedRowIndex;
-        if (g_selectedRowIndex < 0)
-            g_selectedRowIndex = rowCount - 1;
-    }
-    else if (scrollDown)
-    {
-        ++g_selectedRowIndex;
-        if (g_selectedRowIndex >= rowCount)
-            g_selectedRowIndex = 0;
-    }
-
-    if (scrollUp || scrollDown)
-    {
-        g_rowSelectionTime = time;
-        Game_PlaySound("sys_actstg_pausecursor");
-    }
-
-    g_upWasHeld = upIsHeld;
-    g_downWasHeld = downIsHeld;
-
-    int visibleRowCount = int(floor((clipRectMax.y - clipRectMin.y) / itemHeight));
-
-    if (g_firstVisibleRowIndex > g_selectedRowIndex)
-        g_firstVisibleRowIndex = g_selectedRowIndex;
-
-    if (g_firstVisibleRowIndex + visibleRowCount - 1 < g_selectedRowIndex)
-        g_firstVisibleRowIndex = std::max(0, g_selectedRowIndex - visibleRowCount + 1);
-
-    // Pop clip rect from DrawContentContainer
-    drawList->PopClipRect();
-
-    DrawAchievementTotal(min, max);
-
-    // Draw scroll bar
-    if (rowCount > visibleRowCount)
-    {
-        float cornerRadius = Scale(25);
-        float totalHeight = (clipRectMax.y - clipRectMin.y - cornerRadius) - Scale(5);
-        float heightRatio = float(visibleRowCount) / float(rowCount);
-        float offsetRatio = float(g_firstVisibleRowIndex) / float(rowCount);
-        float offsetX = clipRectMax.x - Scale(39);
-        float offsetY = offsetRatio * totalHeight + clipRectMin.y + Scale(4);
-        float maxY = max.y - cornerRadius - Scale(3);
-        float lineThickness = Scale(1);
-        float innerMarginX = Scale(2);
-        float outerMarginX = Scale(24);
-
-        // Outline
-        drawList->AddRect
-        (
-            { /* X */ offsetX - lineThickness, /* Y */ clipRectMin.y - lineThickness },
-            { /* X */ clipRectMax.x - outerMarginX + lineThickness, /* Y */ maxY + lineThickness },
-            IM_COL32(255, 255, 255, 155),
-            Scale(1)
-        );
-
-        // Background
-        drawList->AddRectFilledMultiColor
-        (
-            { /* X */ offsetX, /* Y */ clipRectMin.y },
-            { /* X */ clipRectMax.x - outerMarginX, /* Y */ maxY },
-            IM_COL32(123, 125, 123, 255),
-            IM_COL32(123, 125, 123, 255),
-            IM_COL32(97, 99, 97, 255),
-            IM_COL32(97, 99, 97, 255)
-        );
-
-        // Scroll Bar Outline
-        drawList->AddRectFilledMultiColor
-        (
-            { /* X */ offsetX + innerMarginX, /* Y */ offsetY - lineThickness },
-            { /* X */ clipRectMax.x - outerMarginX - innerMarginX, /* Y */ offsetY + lineThickness + totalHeight * heightRatio },
-            IM_COL32(185, 185, 185, 255),
-            IM_COL32(185, 185, 185, 255),
-            IM_COL32(172, 172, 172, 255),
-            IM_COL32(172, 172, 172, 255)
-        );
-
-        // Scroll Bar
-        drawList->AddRectFilled
-        (
-            { /* X */ offsetX + innerMarginX + lineThickness, /* Y */ offsetY },
-            { /* X */ clipRectMax.x - outerMarginX - innerMarginX - lineThickness, /* Y */ offsetY + totalHeight * heightRatio },
-            IM_COL32(255, 255, 255, 255)
-        );
-    }
-}
+//static void DrawContentContainer()
+//{
+//    auto drawList = ImGui::GetBackgroundDrawList();
+//
+//    // Expand/retract animation.
+//    auto motion = g_isClosing
+//        ? ComputeMotion(g_appearTime, 0, CONTENT_CONTAINER_COMMON_MOTION_START)
+//        : ComputeMotion(g_appearTime, CONTENT_CONTAINER_COMMON_MOTION_START, CONTENT_CONTAINER_COMMON_MOTION_END);
+//
+//    auto minX = g_isClosing
+//        ? Hermite(251, 301, motion)
+//        : Hermite(301, 251, motion);
+//
+//    auto minY = g_isClosing
+//        ? Hermite(189, 206, motion)
+//        : Hermite(206, 189, motion);
+//
+//    auto maxX = g_isClosing
+//        ? Hermite(1031, 978, motion)
+//        : Hermite(978, 1031, motion);
+//
+//    auto maxY = g_isClosing
+//        ? Hermite(604, 573, motion)
+//        : Hermite(573, 604, motion);
+//
+//    ImVec2 min = { g_aspectRatioOffsetX + Scale(minX), g_aspectRatioOffsetY + Scale(minY) };
+//    ImVec2 max = { g_aspectRatioOffsetX + Scale(maxX), g_aspectRatioOffsetY + Scale(maxY) };
+//
+//    // Transparency fade animation.
+//    auto alpha = g_isClosing
+//        ? Hermite(1, 0, motion)
+//        : Hermite(0, 1, motion);
+//
+//    DrawContainer(min, max, IM_COL32(197, 194, 197, 200), IM_COL32(115, 113, 115, 236), alpha);
+//
+//    if (motion < 1.0f)
+//    {
+//        drawList->PopClipRect();
+//        return;
+//    }
+//    else if (g_isClosing)
+//    {
+//        AchievementMenu::s_isVisible = false;
+//        drawList->PopClipRect();
+//        return;
+//    }
+//
+//    auto clipRectMin = drawList->GetClipRectMin();
+//    auto clipRectMax = drawList->GetClipRectMax();
+//
+//    auto itemHeight = Scale(94);
+//    auto yOffset = -g_firstVisibleRowIndex * itemHeight + Scale(2);
+//    auto rowCount = 0;
+//
+//    // Draw separators.
+//    for (int i = 1; i <= 3; i++)
+//    {
+//        ImVec2 lineMin = { clipRectMin.x + Scale(35), clipRectMin.y + itemHeight * i + Scale(2) };
+//        ImVec2 lineMax = { clipRectMax.x - Scale(55), lineMin.y + Scale(1.3f) };
+//
+//        SetAdditive(true);
+//        drawList->AddRectFilled(lineMin, lineMax, IM_COL32(160, 160, 160, 60));
+//        SetAdditive(false);
+//    }
+//
+//    for (auto& tpl : g_achievements)
+//    {
+//        auto achievement = std::get<0>(tpl);
+//
+//        if (AchievementManager::IsUnlocked(achievement.ID))
+//            DrawAchievement(rowCount++, yOffset, achievement, true);
+//    }
+//
+//    for (auto& tpl : g_achievements)
+//    {
+//        auto achievement = std::get<0>(tpl);
+//
+//        if (!AchievementManager::IsUnlocked(achievement.ID))
+//            DrawAchievement(rowCount++, yOffset, achievement, false);
+//    }
+//
+//    auto inputState = SWA::CInputState::GetInstance();
+//
+//    bool upIsHeld = inputState->GetPadState().IsDown(SWA::eKeyState_DpadUp) ||
+//        inputState->GetPadState().LeftStickVertical > 0.5f;
+//
+//    bool downIsHeld = inputState->GetPadState().IsDown(SWA::eKeyState_DpadDown) ||
+//        inputState->GetPadState().LeftStickVertical < -0.5f;
+//
+//    bool isReachedTop = g_selectedRowIndex == 0;
+//    bool isReachedBottom = g_selectedRowIndex == rowCount - 1;
+//
+//    bool scrollUp = !g_upWasHeld && upIsHeld;
+//    bool scrollDown = !g_downWasHeld && downIsHeld;
+//
+//    auto time = ImGui::GetTime();
+//    auto fastScroll = (time - g_lastTappedTime) > 0.6;
+//    auto fastScrollSpeed = 1.0 / 3.5;
+//    static auto fastScrollSpeedUp = false;
+//
+//    if (scrollUp || scrollDown)
+//        g_lastTappedTime = time;
+//
+//    if (!upIsHeld && !downIsHeld)
+//        fastScrollSpeedUp = false;
+//
+//    if (fastScrollSpeedUp)
+//        fastScrollSpeed /= 2;
+//
+//    if (fastScroll)
+//    {
+//        if ((time - g_lastIncrementTime) < fastScrollSpeed)
+//        {
+//            fastScroll = false;
+//        }
+//        else
+//        {
+//            g_lastIncrementTime = time;
+//
+//            scrollUp = upIsHeld;
+//            scrollDown = downIsHeld;
+//            fastScrollSpeedUp = true;
+//        }
+//    }
+//
+//    if (scrollUp)
+//    {
+//        --g_selectedRowIndex;
+//        if (g_selectedRowIndex < 0)
+//            g_selectedRowIndex = rowCount - 1;
+//    }
+//    else if (scrollDown)
+//    {
+//        ++g_selectedRowIndex;
+//        if (g_selectedRowIndex >= rowCount)
+//            g_selectedRowIndex = 0;
+//    }
+//
+//    if (scrollUp || scrollDown)
+//    {
+//        g_rowSelectionTime = time;
+//        Game_PlaySound("sys_actstg_pausecursor");
+//    }
+//
+//    g_upWasHeld = upIsHeld;
+//    g_downWasHeld = downIsHeld;
+//
+//    int visibleRowCount = int(floor((clipRectMax.y - clipRectMin.y) / itemHeight));
+//
+//    if (g_firstVisibleRowIndex > g_selectedRowIndex)
+//        g_firstVisibleRowIndex = g_selectedRowIndex;
+//
+//    if (g_firstVisibleRowIndex + visibleRowCount - 1 < g_selectedRowIndex)
+//        g_firstVisibleRowIndex = std::max(0, g_selectedRowIndex - visibleRowCount + 1);
+//
+//    // Pop clip rect from DrawContentContainer
+//    drawList->PopClipRect();
+//
+//    DrawAchievementTotal(min, max);
+//
+//    // Draw scroll bar
+//    if (rowCount > visibleRowCount)
+//    {
+//        float cornerRadius = Scale(25);
+//        float totalHeight = (clipRectMax.y - clipRectMin.y - cornerRadius) - Scale(5);
+//        float heightRatio = float(visibleRowCount) / float(rowCount);
+//        float offsetRatio = float(g_firstVisibleRowIndex) / float(rowCount);
+//        float offsetX = clipRectMax.x - Scale(39);
+//        float offsetY = offsetRatio * totalHeight + clipRectMin.y + Scale(4);
+//        float maxY = max.y - cornerRadius - Scale(3);
+//        float lineThickness = Scale(1);
+//        float innerMarginX = Scale(2);
+//        float outerMarginX = Scale(24);
+//
+//        // Outline
+//        drawList->AddRect
+//        (
+//            { /* X */ offsetX - lineThickness, /* Y */ clipRectMin.y - lineThickness },
+//            { /* X */ clipRectMax.x - outerMarginX + lineThickness, /* Y */ maxY + lineThickness },
+//            IM_COL32(255, 255, 255, 155),
+//            Scale(1)
+//        );
+//
+//        // Background
+//        drawList->AddRectFilledMultiColor
+//        (
+//            { /* X */ offsetX, /* Y */ clipRectMin.y },
+//            { /* X */ clipRectMax.x - outerMarginX, /* Y */ maxY },
+//            IM_COL32(123, 125, 123, 255),
+//            IM_COL32(123, 125, 123, 255),
+//            IM_COL32(97, 99, 97, 255),
+//            IM_COL32(97, 99, 97, 255)
+//        );
+//
+//        // Scroll Bar Outline
+//        drawList->AddRectFilledMultiColor
+//        (
+//            { /* X */ offsetX + innerMarginX, /* Y */ offsetY - lineThickness },
+//            { /* X */ clipRectMax.x - outerMarginX - innerMarginX, /* Y */ offsetY + lineThickness + totalHeight * heightRatio },
+//            IM_COL32(185, 185, 185, 255),
+//            IM_COL32(185, 185, 185, 255),
+//            IM_COL32(172, 172, 172, 255),
+//            IM_COL32(172, 172, 172, 255)
+//        );
+//
+//        // Scroll Bar
+//        drawList->AddRectFilled
+//        (
+//            { /* X */ offsetX + innerMarginX + lineThickness, /* Y */ offsetY },
+//            { /* X */ clipRectMax.x - outerMarginX - innerMarginX - lineThickness, /* Y */ offsetY + totalHeight * heightRatio },
+//            IM_COL32(255, 255, 255, 255)
+//        );
+//    }
+//}
 
 void AchievementMenu::Init()
 {
@@ -737,7 +737,7 @@ void AchievementMenu::Draw()
         return;
 
     DrawHeaderContainer(Localise("Achievements_Name_Uppercase").c_str());
-    DrawContentContainer();
+//    DrawContentContainer();
 }
 
 void AchievementMenu::Open()

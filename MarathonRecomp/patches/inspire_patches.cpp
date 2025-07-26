@@ -1,5 +1,5 @@
 #include "inspire_patches.h"
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <ui/game_window.h>
 #include <os/logger.h>
 #include <app.h>
@@ -7,7 +7,7 @@
 
 std::string InspirePatches::s_sceneName;
 
-static SWA::Inspire::CScene* g_pScene;
+//static SWA::Inspire::CScene* g_pScene;
 static bool g_isFirstFrameChecked;
 static uint32_t g_eventDispatchCount;
 
@@ -72,42 +72,42 @@ void AnimationDataMakeMidAsmHook(PPCRegister& r31, PPCRegister& r29, PPCRegister
 //         __imp__sub_82E32048(ctx, base);
 // }
 
-void InspirePatches::DrawDebug()
-{
-    if (!g_pScene)
-    {
-        ImGui::Text("There is no active scene.");
-        return;
-    }
-
-    ImGui::Text("Name: %s", InspirePatches::s_sceneName.c_str());
-    ImGui::Text("Frame: %f", g_pScene->m_pData->Frame.get());
-    ImGui::Text("Cut: %d", g_pScene->m_pData->Cut.get());
-
-    static std::vector<float> g_loggedFrames{};
-
-    ImGui::Separator();
-
-    if (ImGui::Button("Log"))
-        g_loggedFrames.push_back(g_pScene->m_pData->Frame);
-
-    if (ImGui::Button("Clear"))
-        g_loggedFrames.clear();
-
-    if (g_loggedFrames.size())
-    {
-        ImGui::Separator();
-
-        for (auto& frame : g_loggedFrames)
-            ImGui::Text("%f", frame);
-    }
-}
-
-void InspirePatches::Update()
-{
-    if (!g_pScene || !InspirePatches::s_sceneName.size())
-        return;
-
-    g_hideMorphModels = g_loadedMouthExplosionAnimation && g_pScene->m_pData->Frame >= 185.0f &&
-        g_pScene->m_pData->Frame < 195.0f && InspirePatches::s_sceneName == "evrt_t0_04";
-}
+//void InspirePatches::DrawDebug()
+//{
+//    if (!g_pScene)
+//    {
+//        ImGui::Text("There is no active scene.");
+//        return;
+//    }
+//
+//    ImGui::Text("Name: %s", InspirePatches::s_sceneName.c_str());
+//    ImGui::Text("Frame: %f", g_pScene->m_pData->Frame.get());
+//    ImGui::Text("Cut: %d", g_pScene->m_pData->Cut.get());
+//
+//    static std::vector<float> g_loggedFrames{};
+//
+//    ImGui::Separator();
+//
+//    if (ImGui::Button("Log"))
+//        g_loggedFrames.push_back(g_pScene->m_pData->Frame);
+//
+//    if (ImGui::Button("Clear"))
+//        g_loggedFrames.clear();
+//
+//    if (g_loggedFrames.size())
+//    {
+//        ImGui::Separator();
+//
+//        for (auto& frame : g_loggedFrames)
+//            ImGui::Text("%f", frame);
+//    }
+//}
+//
+//void InspirePatches::Update()
+//{
+//    if (!g_pScene || !InspirePatches::s_sceneName.size())
+//        return;
+//
+//    g_hideMorphModels = g_loadedMouthExplosionAnimation && g_pScene->m_pData->Frame >= 185.0f &&
+//        g_pScene->m_pData->Frame < 195.0f && InspirePatches::s_sceneName == "evrt_t0_04";
+//}

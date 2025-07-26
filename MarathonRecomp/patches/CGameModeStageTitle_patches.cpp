@@ -1,4 +1,4 @@
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <patches/CTitleStateIntro_patches.h>
 
 // SWA::CGameModeStageTitle::Update

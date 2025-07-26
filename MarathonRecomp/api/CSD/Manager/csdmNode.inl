@@ -1,10 +1,10 @@
-#include "SWA.inl"
+#include "Marathon.inl"
 
 namespace Chao::CSD
 {
     inline CNode::~CNode()
     {
-        SWA_VIRTUAL_FUNCTION(void, 0, this);
+        MARATHON_VIRTUAL_FUNCTION(void, 0, this);
     }
 
     inline void CNode::SetText(const char* in_pText)
@@ -15,11 +15,6 @@ namespace Chao::CSD
     inline void CNode::SetText(const wchar_t* in_pText)
     {
         // GuestToHostFunction<int>(sub_830BF640, this, in_pText);
-    }
-
-    inline void CNode::GetPosition(Hedgehog::Math::CVector2& out_rResult) const
-    {
-        // GuestToHostFunction<void>(sub_830BF008, &out_rResult, this);
     }
 
     inline void CNode::SetPosition(float in_X, float in_Y)

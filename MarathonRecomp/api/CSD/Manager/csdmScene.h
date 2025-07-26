@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SWA.inl"
+#include "Marathon.inl"
 #include "CSD/Manager/csdmBase.h"
 #include "CSD/Manager/csdmResourceBase.h"
 #include "CSD/Manager/csdmSceneObserver.h"
@@ -23,17 +23,17 @@ namespace Chao::CSD
     class CScene : public CResourceBase<Scene>, SubjectBase<CSceneObserver, CScene>, CBase
     {
     public:
-        SWA_INSERT_PADDING(0x60);
+        MARATHON_INSERT_PADDING(0x60);
         be<float> m_PrevMotionFrame;
         be<float> m_MotionFrame;
         be<float> m_MotionSpeed;
         be<float> m_MotionStartFrame;
         be<float> m_MotionEndFrame;
-        SWA_INSERT_PADDING(0x0C);
+        MARATHON_INSERT_PADDING(0x0C);
         be<uint32_t> m_MotionDisableFlag;
-        SWA_INSERT_PADDING(0x10);
+        MARATHON_INSERT_PADDING(0x10);
         be<EMotionRepeatType> m_MotionRepeatType;
-        SWA_INSERT_PADDING(0x2C);
+        MARATHON_INSERT_PADDING(0x2C);
 
         ~CScene();
         void Update(float in_DeltaTime = 0.0f);

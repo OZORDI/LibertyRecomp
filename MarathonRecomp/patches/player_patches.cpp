@@ -1,4 +1,4 @@
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <ui/game_window.h>
 #include <user/config.h>
 #include <os/logger.h>
@@ -84,16 +84,16 @@ void ResetScoreOnRestartMidAsmHook()
 //     }
 // }
 
-void PostUnleashMidAsmHook(PPCRegister& r30)
-{
-    if (!g_isUnleashCancelled)
-        return;
-
-    if (auto pEvilSonicContext = (SWA::Player::CEvilSonicContext*)g_memory.Translate(r30.u32))
-        pEvilSonicContext->m_DarkGaiaEnergy = std::max(0.0f, g_lastDarkGaiaEnergy - 35.0f);
-
-    g_isUnleashCancelled = false;
-}
+//void PostUnleashMidAsmHook(PPCRegister& r30)
+//{
+//    if (!g_isUnleashCancelled)
+//        return;
+//
+//    if (auto pEvilSonicContext = (SWA::Player::CEvilSonicContext*)g_memory.Translate(r30.u32))
+//        pEvilSonicContext->m_DarkGaiaEnergy = std::max(0.0f, g_lastDarkGaiaEnergy - 35.0f);
+//
+//    g_isUnleashCancelled = false;
+//}
 
 // SWA::Player::CEvilSonicContext
 // PPC_FUNC_IMPL(__imp__sub_823B49D8);

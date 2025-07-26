@@ -1,4 +1,4 @@
-#include <api/SWA.h>
+#include <api/Marathon.h>
 #include <hid/hid.h>
 #include <app.h>
 #include <exports.h>
@@ -210,193 +210,193 @@ g_sdlEventListenerForInputPatches;
 
 // -------------- COMMON --------------- //
 
-static bool IsDPadThreshold(const SWA::SPadState* pPadState)
-{
-    if (Config::DisableDPadAsAnalogInput)
-        return false;
-
-    return pPadState->IsDown(SWA::eKeyState_DpadUp)   ||
-           pPadState->IsDown(SWA::eKeyState_DpadDown) ||
-           pPadState->IsDown(SWA::eKeyState_DpadLeft) ||
-           pPadState->IsDown(SWA::eKeyState_DpadRight);
-}
-
-static bool IsLeftStickThreshold(const SWA::SPadState* pPadState, double deadzone = 0)
-{
-    return sqrtl((pPadState->LeftStickHorizontal * pPadState->LeftStickHorizontal) +
-        (pPadState->LeftStickVertical * pPadState->LeftStickVertical)) > deadzone;
-}
-
-static bool IsCursorThreshold(double deadzone = 0, bool isBelowThreshold = false)
-{
-    auto sqrt = sqrtl((g_worldMapCursorVelocityX * g_worldMapCursorVelocityX) +
-        (g_worldMapCursorVelocityY * g_worldMapCursorVelocityY));
-
-    if (isBelowThreshold)
-        return sqrt < deadzone;
-
-    return sqrt >= deadzone;
-}
-
-static void SetDPadAnalogDirectionX(PPCRegister& pPadState, PPCRegister& x, bool invert, float max = 1.0f)
-{
-    if (Config::DisableDPadAsAnalogInput)
-        return;
-
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadLeft))
-        x.f64 = invert ? max : -max;
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadRight))
-        x.f64 = invert ? -max : max;
-}
-
-static void SetDPadAnalogDirectionY(PPCRegister& pPadState, PPCRegister& y, bool invert, float max = 1.0f)
-{
-    if (Config::DisableDPadAsAnalogInput)
-        return;
-
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadUp))
-        y.f64 = invert ? -max : max;
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadDown))
-        y.f64 = invert ? max : -max;
-}
+//static bool IsDPadThreshold(const SWA::SPadState* pPadState)
+//{
+//    if (Config::DisableDPadAsAnalogInput)
+//        return false;
+//
+//    return pPadState->IsDown(SWA::eKeyState_DpadUp)   ||
+//           pPadState->IsDown(SWA::eKeyState_DpadDown) ||
+//           pPadState->IsDown(SWA::eKeyState_DpadLeft) ||
+//           pPadState->IsDown(SWA::eKeyState_DpadRight);
+//}
+//
+//static bool IsLeftStickThreshold(const SWA::SPadState* pPadState, double deadzone = 0)
+//{
+//    return sqrtl((pPadState->LeftStickHorizontal * pPadState->LeftStickHorizontal) +
+//        (pPadState->LeftStickVertical * pPadState->LeftStickVertical)) > deadzone;
+//}
+//
+//static bool IsCursorThreshold(double deadzone = 0, bool isBelowThreshold = false)
+//{
+//    auto sqrt = sqrtl((g_worldMapCursorVelocityX * g_worldMapCursorVelocityX) +
+//        (g_worldMapCursorVelocityY * g_worldMapCursorVelocityY));
+//
+//    if (isBelowThreshold)
+//        return sqrt < deadzone;
+//
+//    return sqrt >= deadzone;
+//}
+//
+//static void SetDPadAnalogDirectionX(PPCRegister& pPadState, PPCRegister& x, bool invert, float max = 1.0f)
+//{
+//    if (Config::DisableDPadAsAnalogInput)
+//        return;
+//
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadLeft))
+//        x.f64 = invert ? max : -max;
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadRight))
+//        x.f64 = invert ? -max : max;
+//}
+//
+//static void SetDPadAnalogDirectionY(PPCRegister& pPadState, PPCRegister& y, bool invert, float max = 1.0f)
+//{
+//    if (Config::DisableDPadAsAnalogInput)
+//        return;
+//
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadUp))
+//        y.f64 = invert ? -max : max;
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadDown))
+//        y.f64 = invert ? max : -max;
+//}
 
 // -------------- PLAYER --------------- //
 
-void PostureDPadSupportMidAsmHook(PPCRegister& pPadState, PPCRegister& x, PPCRegister& y)
-{
-    SetDPadAnalogDirectionX(pPadState, x, false);
-    SetDPadAnalogDirectionY(pPadState, y, false);
-}
-
-void PostureDPadSupportInvertYMidAsmHook(PPCRegister& pPadState, PPCRegister& x, PPCRegister& y)
-{
-    SetDPadAnalogDirectionX(pPadState, x, false);
-    SetDPadAnalogDirectionY(pPadState, y, true);
-}
-
-void PostureDPadSupportXMidAsmHook(PPCRegister& pPadState, PPCRegister& x)
-{
-    SetDPadAnalogDirectionX(pPadState, x, false);
-}
-
-void PostureDPadSupportYMidAsmHook(PPCRegister& pPadState, PPCRegister& y)
-{
-    SetDPadAnalogDirectionY(pPadState, y, false);
-}
-
-void PostureSpaceHurrierDPadSupportXMidAsmHook(PPCRegister& pPadState, PPCVRegister& vector)
-{
-    if (Config::DisableDPadAsAnalogInput)
-        return;
-    
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadLeft))
-        vector.f32[3] = -1.0f;
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadRight))
-        vector.f32[3] = 1.0f;
-}
-
-void PostureSpaceHurrierDPadSupportYMidAsmHook(PPCRegister& pPadState, PPCVRegister& vector)
-{
-    if (Config::DisableDPadAsAnalogInput)
-        return;
-
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadUp))
-        vector.f32[3] = 1.0f;
-
-    if (pGuestPadState->IsDown(SWA::eKeyState_DpadDown))
-        vector.f32[3] = -1.0f;
-}
-
-void SetXButtonHomingMidAsmHook(PPCRegister& r1)
-{
-    auto pXButtonHoming = (bool*)(g_memory.base + r1.u32 + 0x63);
-
-    *pXButtonHoming = !Config::HomingAttackOnJump;
-}
-
-bool IsHomingAttackOnJump()
-{
-    return Config::HomingAttackOnJump;
-}
+//void PostureDPadSupportMidAsmHook(PPCRegister& pPadState, PPCRegister& x, PPCRegister& y)
+//{
+//    SetDPadAnalogDirectionX(pPadState, x, false);
+//    SetDPadAnalogDirectionY(pPadState, y, false);
+//}
+//
+//void PostureDPadSupportInvertYMidAsmHook(PPCRegister& pPadState, PPCRegister& x, PPCRegister& y)
+//{
+//    SetDPadAnalogDirectionX(pPadState, x, false);
+//    SetDPadAnalogDirectionY(pPadState, y, true);
+//}
+//
+//void PostureDPadSupportXMidAsmHook(PPCRegister& pPadState, PPCRegister& x)
+//{
+//    SetDPadAnalogDirectionX(pPadState, x, false);
+//}
+//
+//void PostureDPadSupportYMidAsmHook(PPCRegister& pPadState, PPCRegister& y)
+//{
+//    SetDPadAnalogDirectionY(pPadState, y, false);
+//}
+//
+//void PostureSpaceHurrierDPadSupportXMidAsmHook(PPCRegister& pPadState, PPCVRegister& vector)
+//{
+//    if (Config::DisableDPadAsAnalogInput)
+//        return;
+//
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadLeft))
+//        vector.f32[3] = -1.0f;
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadRight))
+//        vector.f32[3] = 1.0f;
+//}
+//
+//void PostureSpaceHurrierDPadSupportYMidAsmHook(PPCRegister& pPadState, PPCVRegister& vector)
+//{
+//    if (Config::DisableDPadAsAnalogInput)
+//        return;
+//
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadUp))
+//        vector.f32[3] = 1.0f;
+//
+//    if (pGuestPadState->IsDown(SWA::eKeyState_DpadDown))
+//        vector.f32[3] = -1.0f;
+//}
+//
+//void SetXButtonHomingMidAsmHook(PPCRegister& r1)
+//{
+//    auto pXButtonHoming = (bool*)(g_memory.base + r1.u32 + 0x63);
+//
+//    *pXButtonHoming = !Config::HomingAttackOnJump;
+//}
+//
+//bool IsHomingAttackOnJump()
+//{
+//    return Config::HomingAttackOnJump;
+//}
 
 // ------------- WORLD MAP ------------- //
 
-bool WorldMapDeadzoneMidAsmHook(PPCRegister& pPadState)
-{
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (IsDPadThreshold(pGuestPadState) || IsLeftStickThreshold(pGuestPadState))
-    {
-        g_worldMapCursorVelocityX = 0;
-        g_worldMapCursorVelocityY = 0;
-    }
-    else
-    {
-        SDLEventListenerForInputPatches::Update(App::s_deltaTime);
-
-        /* Reduce noise if the cursor is resting in
-           place, but allow much precise values for
-           proper interpolation to zero. */
-        if (IsCursorThreshold(0.05, true))
-            return !g_isCursorActive;
-
-        return IsCursorThreshold();
-    }
-
-    return IsDPadThreshold(pGuestPadState) || IsLeftStickThreshold(pGuestPadState, WORLD_MAP_ROTATE_DEADZONE);
-}
-
-bool WorldMapMagnetismMidAsmHook(PPCRegister& f0)
-{
-    if (IsCursorThreshold(f0.f64, true))
-    {
-        g_worldMapCursorVelocityX = 0;
-        g_worldMapCursorVelocityY = 0;
-
-        return true;
-    }
-
-    return false;
-}
-
-void WorldMapHidSupportXMidAsmHook(PPCRegister& pPadState, PPCRegister& x)
-{
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (IsDPadThreshold(pGuestPadState))
-    {
-        SetDPadAnalogDirectionX(pPadState, x, false);
-    }
-    else if (fabs(g_worldMapCursorVelocityX) > 0)
-    {
-        x.f64 = -g_worldMapCursorVelocityX;
-    }
-}
-
-void WorldMapHidSupportYMidAsmHook(PPCRegister& pPadState, PPCRegister& y)
-{
-    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
-
-    if (IsDPadThreshold(pGuestPadState))
-    {
-        SetDPadAnalogDirectionY(pPadState, y, false);
-    }
-    else if (fabs(g_worldMapCursorVelocityY) > 0)
-    {
-        y.f64 = g_worldMapCursorVelocityY;
-    }
-}
+//bool WorldMapDeadzoneMidAsmHook(PPCRegister& pPadState)
+//{
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (IsDPadThreshold(pGuestPadState) || IsLeftStickThreshold(pGuestPadState))
+//    {
+//        g_worldMapCursorVelocityX = 0;
+//        g_worldMapCursorVelocityY = 0;
+//    }
+//    else
+//    {
+//        SDLEventListenerForInputPatches::Update(App::s_deltaTime);
+//
+//        /* Reduce noise if the cursor is resting in
+//           place, but allow much precise values for
+//           proper interpolation to zero. */
+//        if (IsCursorThreshold(0.05, true))
+//            return !g_isCursorActive;
+//
+//        return IsCursorThreshold();
+//    }
+//
+//    return IsDPadThreshold(pGuestPadState) || IsLeftStickThreshold(pGuestPadState, WORLD_MAP_ROTATE_DEADZONE);
+//}
+//
+//bool WorldMapMagnetismMidAsmHook(PPCRegister& f0)
+//{
+//    if (IsCursorThreshold(f0.f64, true))
+//    {
+//        g_worldMapCursorVelocityX = 0;
+//        g_worldMapCursorVelocityY = 0;
+//
+//        return true;
+//    }
+//
+//    return false;
+//}
+//
+//void WorldMapHidSupportXMidAsmHook(PPCRegister& pPadState, PPCRegister& x)
+//{
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (IsDPadThreshold(pGuestPadState))
+//    {
+//        SetDPadAnalogDirectionX(pPadState, x, false);
+//    }
+//    else if (fabs(g_worldMapCursorVelocityX) > 0)
+//    {
+//        x.f64 = -g_worldMapCursorVelocityX;
+//    }
+//}
+//
+//void WorldMapHidSupportYMidAsmHook(PPCRegister& pPadState, PPCRegister& y)
+//{
+//    auto pGuestPadState = (SWA::SPadState*)g_memory.Translate(pPadState.u32);
+//
+//    if (IsDPadThreshold(pGuestPadState))
+//    {
+//        SetDPadAnalogDirectionY(pPadState, y, false);
+//    }
+//    else if (fabs(g_worldMapCursorVelocityY) > 0)
+//    {
+//        y.f64 = g_worldMapCursorVelocityY;
+//    }
+//}
 
 // SWA::CWorldMapCamera::Update
 // PPC_FUNC_IMPL(__imp__sub_82486968);
