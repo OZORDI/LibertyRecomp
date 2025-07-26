@@ -722,9 +722,9 @@ uint32_t KeSetAffinityThread(uint32_t Thread, uint32_t Affinity, be<uint32_t>* l
 void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
     // printf("RtlLeaveCriticalSection");
-    cs->RecursionCount--;
+    cs->RecursionCount = cs->RecursionCount.get() - 1;
 
-    if (cs->RecursionCount != 0)
+    if (cs->RecursionCount.get() != 0)
         return;
 
     std::atomic_ref owningThread(cs->OwningThread);
@@ -746,7 +746,7 @@ void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 
         if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
         {
-            cs->RecursionCount++;
+            cs->RecursionCount = cs->RecursionCount.get() + 1;
             return;
         }
 
@@ -1263,7 +1263,7 @@ bool RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 
     if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
     {
-        cs->RecursionCount++;
+        cs->RecursionCount = cs->RecursionCount.get() + 1;
         return true;
     }
 
