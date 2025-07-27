@@ -819,7 +819,7 @@ enum class CsdFilterState
 static CsdFilterState g_csdFilterState;
 
 static ankerl::unordered_dense::set<GuestSurface*> g_pendingSurfaceCopies;
-static ankerl::unordered_dense::set<GuestSurface*> g_pendingMsaaResolves;
+static ankerl::unordered_dense::set<GuestSurface*> g_pendingResolves;
 
 enum class RenderCommandType
 {
@@ -3365,11 +3365,13 @@ static void ProcStretchRect(const RenderCommand& cmd)
     {
         if (g_textures[i] == args.texture)
         {
-            // Set the original texture for MSAA textures as they always get resolved.
-            if (surface->sampleCount != RenderSampleCount::COUNT_1)
+            // TODO: Render depth directly to slice and avoid copy
+            // Set the original texture for MSAA and depth textures as they always get resolved.
+            if (surface->sampleCount != RenderSampleCount::COUNT_1 ||
+                surface->format == RenderFormat::D32_FLOAT_S8_UINT)
             {
                 SetTextureInRenderThread(i, args.texture);
-                g_pendingMsaaResolves.emplace(surface);
+                g_pendingResolves.emplace(surface);
             }
             else
             {
@@ -3679,7 +3681,7 @@ static void ProcExecutePendingStretchRectCommands(const RenderCommand& cmd)
     }
 
     g_pendingSurfaceCopies.clear();
-    g_pendingMsaaResolves.clear();
+    g_pendingResolves.clear();
 }
 
 static void SetFramebuffer(GuestSurface* renderTarget, GuestSurface* depthStencil, bool settingForClear)
@@ -3902,10 +3904,12 @@ static void ProcSetTexture(const RenderCommand& cmd)
     bool shouldSetTexture = true;
     if (args.texture != nullptr && args.texture->sourceSurface != nullptr)
     {
-        // MSAA surfaces need to be resolved and cannot be used directly.
-        if (args.texture->sourceSurface->sampleCount != RenderSampleCount::COUNT_1)
+        // TODO: Render depth directly to slice and avoid copy
+        // MSAA and depth surfaces need to be resolved and cannot be used directly.
+        if (args.texture->sourceSurface->sampleCount != RenderSampleCount::COUNT_1 ||
+            args.texture->format == RenderFormat::D32_FLOAT_S8_UINT)
         {
-            g_pendingMsaaResolves.emplace(args.texture->sourceSurface);
+            g_pendingResolves.emplace(args.texture->sourceSurface);
         }
         else
         {
@@ -4594,7 +4598,7 @@ static void FlushRenderStateForRenderThread()
 
     bool foundAny = PopulateBarriersForStretchRect(renderTarget, depthStencil);
 
-    for (const auto surface : g_pendingMsaaResolves)
+    for (const auto surface : g_pendingResolves)
     {
         bool isDepthStencil = RenderFormatIsDepth(surface->format);
         foundAny |= PopulateBarriersForStretchRect(isDepthStencil ? nullptr : surface, isDepthStencil ? surface : nullptr);
@@ -4605,15 +4609,15 @@ static void FlushRenderStateForRenderThread()
         FlushBarriers();
         ExecutePendingStretchRectCommands(renderTarget, depthStencil);
 
-        for (const auto surface : g_pendingMsaaResolves)
+        for (const auto surface : g_pendingResolves)
         {
             bool isDepthStencil = RenderFormatIsDepth(surface->format);
             ExecutePendingStretchRectCommands(isDepthStencil ? nullptr : surface, isDepthStencil ? surface : nullptr);
         }
     }
 
-    if (!g_pendingMsaaResolves.empty())
-        g_pendingMsaaResolves.clear();
+    if (!g_pendingResolves.empty())
+        g_pendingResolves.clear();
 
     AddBarrier(renderTarget, RenderTextureLayout::COLOR_WRITE);
     AddBarrier(depthStencil, RenderTextureLayout::DEPTH_WRITE);
