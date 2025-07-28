@@ -56,10 +56,4 @@
 11. Hold the CTRL key and click on **SONIC THE HEDGEHOG** under the `Games` node, as well as the **DLC** under the `DLC` node, if you have the DLC installed. Ensure all are selected before the next step.
 12. Right-click any of the selected items and click **Copy Selected to Local Disk**, then navigate to the folder you created in step 7 and select it. Velocity will now begin copying the game files to your PC.
 13. Once the transfer is complete, close the **Device Content Viewer** window and navigate to **Tools > Device Tools > Raw Device Viewer**.
-
-> [!TIP]
-> If you wish to verify that the contents of this file are correct, you may double-click on it to open it in **Package Viewer** and confirm that `default.xex` exists inside, along with a folder called `work`.
->
-> Once you've verified it, close the **Package Viewer** window and proceed to the next step.
-
 14. Once the transfer is complete, you should now have all of the necessary files for installation. [Return to the readme and proceed to the next step](/README.md#how-to-install).
