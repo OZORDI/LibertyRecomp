@@ -6601,8 +6601,8 @@ static void PipelineCompilerThread()
 
     std::unique_ptr<GuestThreadContext> ctx;
 
-    while (true)
-    {
+//    while (true)
+//    {
 //        PipelineStateQueueItem queueItem;
 //        g_pipelineStateQueue.wait_dequeue(queueItem);
 //
@@ -6630,9 +6630,9 @@ static void PipelineCompilerThread()
 //            , queueItem.pipelineName.c_str()
 //#endif
 //        );
-
-        std::this_thread::yield();
-    }
+//
+//        std::this_thread::yield();
+//    }
 }
 
 static std::vector<std::unique_ptr<std::thread>> g_pipelineCompilerThreads = []()
