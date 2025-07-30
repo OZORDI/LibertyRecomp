@@ -59,8 +59,6 @@ PPC_FUNC(sub_8262A568)
 PPC_FUNC_IMPL(__imp__sub_825EA610);
 PPC_FUNC(sub_825EA610)
 {
-    __imp__sub_825EA610(ctx, base);
-
     Video::WaitOnSwapChain();
 
     // Correct small delta time errors.
@@ -88,6 +86,8 @@ PPC_FUNC(sub_825EA610)
 
     // Allow variable FPS when config is not 60 FPS.
     App::s_pApp->m_pDoc->m_VFrame = Config::FPS != 60;
+
+    __imp__sub_825EA610(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82582648);
