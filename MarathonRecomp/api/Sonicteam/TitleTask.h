@@ -8,7 +8,7 @@ namespace Sonicteam
     class TitleTask : public Sonicteam::SoX::Engine::Task
     {
     public:
-        MARATHON_INSERT_PADDING(0x0C);
+        MARATHON_INSERT_PADDING(0x10);
         be<uint32_t> m_SelectedIndex;
     };
 }
