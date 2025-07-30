@@ -1,7 +1,5 @@
 #pragma once
 
-#ifndef _WIN32
-
 #include <utils/bit_stream.h>
 #include <utils/ring_buffer.h>
 #include <kernel/function.h>
@@ -159,5 +157,3 @@ struct XmaPlayback {
         }
     }
 };
-
-#endif

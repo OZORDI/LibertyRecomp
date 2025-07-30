@@ -11,8 +11,6 @@
 
 #include "xma_decoder.h"
 
-#ifndef _WIN32
-
 // #define ENABLE_DEBUG_XMA_DECODER
 
 #ifdef ENABLE_DEBUG_XMA_DECODER
@@ -787,5 +785,3 @@ GUEST_FUNCTION_HOOK(sub_8255CB20, XMAPlaybackSetDecodePosition);
 GUEST_FUNCTION_HOOK(sub_8255C850, XMAPlaybackRewindDecodePosition);
 GUEST_FUNCTION_HOOK(sub_8255CAB0, XMAPlaybackQueryCurrentPosition);
 GUEST_FUNCTION_HOOK(sub_8255C2C0, XMAPlaybackDestroy);
-
-#endif
