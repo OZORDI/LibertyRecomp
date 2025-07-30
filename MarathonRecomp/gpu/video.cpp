@@ -3474,8 +3474,7 @@ static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
 
 static void SetRenderTarget(GuestDevice* device, uint32_t index, GuestSurface* renderTarget) 
 {
-    // printf("SetRenderTarget %x %d %x\n", device, index, renderTarget);
-    if (renderTarget != nullptr)
+    if (index == 0)
     {
         RenderCommand cmd;
         cmd.type = RenderCommandType::SetRenderTarget;
@@ -3483,6 +3482,11 @@ static void SetRenderTarget(GuestDevice* device, uint32_t index, GuestSurface* r
         g_renderQueue.enqueue(cmd);
 
         SetDefaultViewport(device, renderTarget);
+    }
+    else
+    {
+        // Multiple targets are not currently handled. Make sure any attempt to set them is nullptr.
+        assert(renderTarget == nullptr);
     }
 }
 
@@ -3499,7 +3503,6 @@ static void ProcSetRenderTarget(const RenderCommand& cmd)
 
 static void SetDepthStencilSurface(GuestDevice* device, GuestSurface* depthStencil) 
 {
-    // printf("SetDepthStencilSurface: %x\n", depthStencil);
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetDepthStencilSurface;
     cmd.setDepthStencilSurface.depthStencil = depthStencil;
