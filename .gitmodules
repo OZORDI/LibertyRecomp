@@ -1,12 +1,12 @@
 [submodule "tools/XenonRecomp"]
 	path = tools/XenonRecomp
-	url = https://github.com/ga2mer/XenonRecomp.git
+	url = https://github.com/sonicnext-dev/XenonRecomp.git
 [submodule "thirdparty/ddspp"]
 	path = thirdparty/ddspp
 	url = https://github.com/redorav/ddspp.git
 [submodule "tools/XenosRecomp"]
 	path = tools/XenosRecomp
-	url = https://github.com/ga2mer/XenosRecomp.git
+	url = https://github.com/sonicnext-dev/XenosRecomp.git
 [submodule "thirdparty/msdf-atlas-gen"]
 	path = thirdparty/msdf-atlas-gen
 	url = https://github.com/Chlumsky/msdf-atlas-gen.git
@@ -45,7 +45,7 @@
 	url = https://github.com/nlohmann/json
 [submodule "MarathonRecompResources"]
 	path = MarathonRecompResources
-	url = https://github.com/IsaacMarovitz/MarathonRecompResources
+	url = https://github.com/sonicnext-dev/MarathonRecompResources
 [submodule "thirdparty/MoltenVK/MoltenVK"]
 	path = thirdparty/MoltenVK/MoltenVK
 	url = https://github.com/KhronosGroup/MoltenVK.git
@@ -57,4 +57,4 @@
 	url = https://github.com/renderbag/plume
 [submodule "thirdparty/ffmpeg-core"]
 	path = thirdparty/ffmpeg-core
-	url = https://github.com/IsaacMarovitz/ffmpeg-core
+	url = https://github.com/sonicnext-dev/ffmpeg-core

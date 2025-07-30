@@ -4,7 +4,7 @@
 
 Clone **MarathonRecomp** with submodules using [Git](https://git-scm.com/).
 ```
-git clone --recurse-submodules https://github.com/ga2mer/MarathonRecomp.git
+git clone --recurse-submodules https://github.com/sonicnext-dev/MarathonRecomp.git
 ```
 
 ### Windows
@@ -20,7 +20,7 @@ Copy the following files from the game and place them inside `./MarathonRecompLi
 `default.xex` is located in the game's root directory, while the others are located in `/xenon/archives`.
 
 [//]: # (> [!TIP])
-[//]: # (> It is recommended that you install the game using [an existing Marathon Recompiled release]&#40;https://github.com/ga2mer/MarathonRecomp/releases/latest&#41; to acquire these files, otherwise you'll need to rely on third-party tools to extract them.)
+[//]: # (> It is recommended that you install the game using [an existing Marathon Recompiled release]&#40;https://github.com/sonicnext-dev/MarathonRecomp/releases/latest&#41; to acquire these files, otherwise you'll need to rely on third-party tools to extract them.)
 [//]: # (>)
 [//]: # (> Using the Marathon Recompiled installation wizard will also ensure that these files are compatible with each other so that they can be used with the build environment.)
 [//]: # (>)

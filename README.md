@@ -11,7 +11,7 @@ Marathon Recompiled is an unofficial PC port of the Xbox 360 version of Sonic th
 
 **This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Marathon Recompiled.**
 
-[XenonRecomp](https://github.com/ga2mer/XenonRecomp) and [XenosRecomp](https://github.com/ga2mer/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively. The development of these recompilers was directly inspired by [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was used to create [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
+[XenonRecomp](https://github.com/sonicnext-dev/XenonRecomp) and [XenosRecomp](https://github.com/sonicnext-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively. The development of these recompilers was directly inspired by [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was used to create [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
 ## Table of Contents
 
@@ -22,11 +22,11 @@ Marathon Recompiled is an unofficial PC port of the Xbox 360 version of Sonic th
 
 ## Known Issues
 
-Before reporting any issues, check if they are listed [here](https://github.com/ga2mer/MarathonRecomp/issues/7).
+Before reporting any issues, check if they are listed [here](https://github.com/sonicnext-dev/MarathonRecomp/issues).
 
 ### Original Game Bugs
 
-Game bugs present on the original hardware are intentionally preserved and will not be fixed apart from a few minor exceptions in [#44](https://github.com/ga2mer/MarathonRecomp/issues/44). Please do not report issues for these bugs and verify that the issue does not occur on original hardware before reporting. Bug reports for issues found in the original game will be rejected. Bugs that only happen in Marathon Recompiled must be accompanied by footage captured on original Xbox 360 hardware showing that the bug does not happen there.
+Game bugs present on the original hardware are intentionally preserved and will not be fixed apart from a few minor exceptions in [#44](https://github.com/sonicnext-dev/MarathonRecomp/issues/44). Please do not report issues for these bugs and verify that the issue does not occur on original hardware before reporting. Bug reports for issues found in the original game will be rejected. Bugs that only happen in Marathon Recompiled must be accompanied by footage captured on original Xbox 360 hardware showing that the bug does not happen there.
 
 ### File Picker Unavailable on Steam Deck in Game Mode
 
@@ -43,7 +43,7 @@ Marathon Recompiled does not have an official website.
 **Please link here when directing anyone to the project.**
 
 > [!CAUTION]
-> Do not download builds of Marathon Recompiled from anywhere but our [Releases](https://github.com/ga2mer/MarathonRecomp/releases/latest) page.
+> Do not download builds of Marathon Recompiled from anywhere but our [Releases](https://github.com/sonicnext-dev/MarathonRecomp/releases/latest) page.
 >
 > **We will never distribute builds on other websites, via Discord servers or via third-party update tools.**
 
@@ -92,7 +92,7 @@ Right Stick - Right|Unbound
 
 You can change the keyboard bindings by editing `config.toml` located in the [configuration directory](#where-is-the-save-data-and-configuration-file-stored), although using a controller is highly recommended until Action Remapping is added in a future update.
 
-Refer to the left column of [this enum template](https://github.com/ga2mer/MarathonRecomp/blob/main/MarathonRecomp/user/config.cpp#L40) for a list of valid keys.
+Refer to the left column of [this enum template](https://github.com/sonicnext-dev/MarathonRecomp/blob/main/MarathonRecomp/user/config.cpp#L40) for a list of valid keys.
 
 *The default keyboard layout is based on Devil's Details' keyboard layout for Sonic Generations (2011)*.
 
@@ -107,7 +107,7 @@ You will find the save data under the `save` folder. The configuration file is n
 
 ### I want to update the game. How can I avoid losing my save data? Do I need to reinstall the game?
 
-Updating the game can be done by simply copying and replacing the files from a [release](https://github.com/ga2mer/MarathonRecomp/releases) on top of your existing installation. **Your save data and configuration will not be lost.** You won't need to reinstall the game, as the game files will always remain the same across versions of Marathon Recompiled.
+Updating the game can be done by simply copying and replacing the files from a [release](https://github.com/sonicnext-dev/MarathonRecomp/releases) on top of your existing installation. **Your save data and configuration will not be lost.** You won't need to reinstall the game, as the game files will always remain the same across versions of Marathon Recompiled.
 
 ### How can I force the game to store the save data and configuration in the installation folder?
 
@@ -128,7 +128,7 @@ The second argument will be passed directly to SDL as a hint to try to initializ
 
 ### Where is the game data for the Flatpak version installed?
 
-Given it is not possible to run the game where the Flatpak is stored, the game data will be installed to `~/.var/app/io.github.hedge_dev.marathonrecomp/data`. The Flatpak build will only recognize this directory as valid. Feel free to reuse this data directory with a native Linux build if you wish to switch in the future.
+Given it is not possible to run the game where the Flatpak is stored, the game data will be installed to `~/.var/app/io.github.sonicnext_dev.marathonrecomp/data`. The Flatpak build will only recognize this directory as valid. Feel free to reuse this data directory with a native Linux build if you wish to switch in the future.
 
 If you wish to move this data to another location, you can do so by creating a symlink from this directory to the one where you'll migrate your installation to.
 

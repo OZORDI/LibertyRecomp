@@ -163,7 +163,7 @@ jobs:
     name: Build Flatpak
     runs-on: ubuntu-24.04
     env:
-      FLATPAK_ID: io.github.hedge_dev.marathonrecomp
+      FLATPAK_ID: io.github.sonicnext_dev.marathonrecomp
       FREEDESKTOP_VERSION: 23.08
       LLVM_VERSION: 18
 

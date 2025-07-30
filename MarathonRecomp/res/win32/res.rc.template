@@ -26,7 +26,7 @@ BEGIN
         BEGIN
             VALUE "ProductName",      "Marathon Recompiled"
             VALUE "FileDescription",  "Marathon Recompiled"
-            VALUE "CompanyName",      "hedge-dev"
+            VALUE "CompanyName",      "sonicnext-dev"
             VALUE "FileVersion",      MARATHON_RECOMP_VERSION_STR
             VALUE "ProductVersion",   MARATHON_RECOMP_VERSION_STR
             VALUE "InternalName",     "MarathonRecomp"

@@ -5,7 +5,7 @@ type: Bug
 ---
 
 ### Validation
-- [ ] I have checked the [Issues](https://github.com/ga2mer/MarathonRecomp/issues) page to see if my problem has already been reported
+- [ ] I have checked the [Issues](https://github.com/sonicnext-dev/MarathonRecomp/issues) page to see if my problem has already been reported
 - [ ] I have confirmed that this bug does not occur in the original game running on original Xbox 360 hardware
 
 #### If you have DLC installed, please specify which ones you have.

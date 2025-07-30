@@ -311,7 +311,7 @@ elseif (APPLE)
     set_target_properties(MarathonRecomp PROPERTIES
             OUTPUT_NAME "Marathon Recompiled"
             MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/macos/MacOSXBundleInfo.plist.in
-            MACOSX_BUNDLE_GUI_IDENTIFIER hedge-dev.MarathonRecomp
+            MACOSX_BUNDLE_GUI_IDENTIFIER sonicnext-dev.MarathonRecomp
             MACOSX_BUNDLE_BUNDLE_NAME "Marathon Recompiled"
             MACOSX_BUNDLE_BUNDLE_VERSION ${MACOS_BUNDLE_VERSION}
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${MACOS_BUNDLE_VERSION}
