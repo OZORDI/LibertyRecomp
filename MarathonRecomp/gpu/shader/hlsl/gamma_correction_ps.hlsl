@@ -2,17 +2,17 @@
 
 #ifdef __spirv__
 
-#define g_Gamma vk::RawBufferLoad<float3>(g_PushConstants.SharedConstants + 0)
-#define g_TextureDescriptorIndex vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 12)
+#define g_Gamma vk::RawBufferLoad<float>(g_PushConstants.SharedConstants + 0)
+#define g_TextureDescriptorIndex vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 4)
 
-#define g_ViewportOffset vk::RawBufferLoad<int2>(g_PushConstants.SharedConstants + 16)
-#define g_ViewportSize vk::RawBufferLoad<int2>(g_PushConstants.SharedConstants + 24)
+#define g_ViewportOffset vk::RawBufferLoad<int2>(g_PushConstants.SharedConstants + 8)
+#define g_ViewportSize vk::RawBufferLoad<int2>(g_PushConstants.SharedConstants + 16)
 
 #else
 
 cbuffer SharedConstants : register(b2, space4)
 {
-    float3 g_Gamma;
+    float g_Gamma;
     uint g_TextureDescriptorIndex;
     int2 g_ViewportOffset;
     int2 g_ViewportSize;

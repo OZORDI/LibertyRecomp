@@ -1726,34 +1726,24 @@ static void BeginCommandList()
         uint32_t width = Video::s_viewportWidth;
         uint32_t height = Video::s_viewportHeight;
 
-        bool usingIntermediaryTexture = (width != g_swapChain->getWidth()) || (height != g_swapChain->getHeight()) ||
-            Config::XboxColorCorrection || (abs(Config::Brightness - 0.5f) > 0.001f);
-
-        if (usingIntermediaryTexture)
+        if (g_intermediaryBackBufferTextureWidth != width ||
+            g_intermediaryBackBufferTextureHeight != height)
         {
-            if (g_intermediaryBackBufferTextureWidth != width ||
-                g_intermediaryBackBufferTextureHeight != height)
-            {
-                if (g_intermediaryBackBufferTextureDescriptorIndex == NULL)
-                    g_intermediaryBackBufferTextureDescriptorIndex = g_textureDescriptorAllocator.allocate();
+            if (g_intermediaryBackBufferTextureDescriptorIndex == NULL)
+                g_intermediaryBackBufferTextureDescriptorIndex = g_textureDescriptorAllocator.allocate();
 
-                Video::WaitForGPU(); // Fine to wait for GPU, this'll only happen during resize.
+            Video::WaitForGPU(); // Fine to wait for GPU, this'll only happen during resize.
 
-                g_intermediaryBackBufferTexture = g_device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
-                g_textureDescriptorSet->setTexture(g_intermediaryBackBufferTextureDescriptorIndex, g_intermediaryBackBufferTexture.get(), RenderTextureLayout::SHADER_READ);
+            g_intermediaryBackBufferTexture = g_device->createTexture(RenderTextureDesc::Texture2D(width, height, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
+            g_textureDescriptorSet->setTexture(g_intermediaryBackBufferTextureDescriptorIndex, g_intermediaryBackBufferTexture.get(), RenderTextureLayout::SHADER_READ);
 
-                g_intermediaryBackBufferTextureWidth = width;
-                g_intermediaryBackBufferTextureHeight = height;
+            g_intermediaryBackBufferTextureWidth = width;
+            g_intermediaryBackBufferTextureHeight = height;
 
-                g_backBuffer->framebuffers.clear();
-            }
-
-            g_backBuffer->texture = g_intermediaryBackBufferTexture.get();
+            g_backBuffer->framebuffers.clear();
         }
-        else
-        {
-            g_backBuffer->texture = g_swapChain->getTexture(g_backBufferIndex);
-        }
+
+        g_backBuffer->texture = g_intermediaryBackBufferTexture.get();
     }
     else
     {
@@ -2983,9 +2973,7 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
         {
             struct
             {
-                float gammaR;
-                float gammaG;
-                float gammaB;
+                float gamma;
                 uint32_t textureDescriptorIndex;
 
                 int32_t viewportOffsetX;
@@ -2994,24 +2982,11 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
                 int32_t viewportHeight;
             } constants;
 
-            if (Config::XboxColorCorrection)
-            {
-                constants.gammaR = 1.2f;
-                constants.gammaG = 1.17f;
-                constants.gammaB = 0.98f;
-            }
-            else
-            {
-                constants.gammaR = 1.0f;
-                constants.gammaG = 1.0f;
-                constants.gammaB = 1.0f;
-            }
+            constants.gamma = 0.85f;
 
             float offset = (Config::Brightness - 0.5f) * 1.2f;
 
-            constants.gammaR = 1.0f / std::clamp(constants.gammaR + offset, 0.1f, 4.0f);
-            constants.gammaG = 1.0f / std::clamp(constants.gammaG + offset, 0.1f, 4.0f);
-            constants.gammaB = 1.0f / std::clamp(constants.gammaB + offset, 0.1f, 4.0f);
+            constants.gamma = 1.0f / std::clamp(constants.gamma + offset, 0.1f, 4.0f);
             constants.textureDescriptorIndex = g_intermediaryBackBufferTextureDescriptorIndex;
 
             constants.viewportOffsetX = (int32_t(g_swapChain->getWidth()) - int32_t(Video::s_viewportWidth)) / 2;
@@ -5456,73 +5431,6 @@ static void SetPixelShader(GuestDevice* device, GuestShader* shader)
 static void ProcSetPixelShader(const RenderCommand& cmd)
 {
     GuestShader* shader = cmd.setPixelShader.shader;
-    if (shader != nullptr && 
-        shader->shaderCacheEntry != nullptr)
-    {
-        if (shader->shaderCacheEntry->hash == 0x4294510C775F4EE8)
-        {
-            size_t shaderIndex = GAUSSIAN_BLUR_3X3;
-
-            switch (Config::DepthOfFieldQuality)
-            {
-            case EDepthOfFieldQuality::Low:
-                shaderIndex = GAUSSIAN_BLUR_3X3;
-                break;
-
-            case EDepthOfFieldQuality::Medium:
-                shaderIndex = GAUSSIAN_BLUR_5X5;
-                break;
-
-            case EDepthOfFieldQuality::High:
-                shaderIndex = GAUSSIAN_BLUR_7X7;
-                break;
-
-            case EDepthOfFieldQuality::Ultra:
-                shaderIndex = GAUSSIAN_BLUR_9X9;
-                break;
-
-            default:
-            {
-                if (g_aspectRatio >= WIDE_ASPECT_RATIO)
-                {
-                    size_t height = round(Video::s_viewportHeight * Config::ResolutionScale);
-
-                    if (height > 1440)
-                        shaderIndex = GAUSSIAN_BLUR_9X9;
-                    else if (height > 1080)
-                        shaderIndex = GAUSSIAN_BLUR_7X7;
-                    else if (height > 720)
-                        shaderIndex = GAUSSIAN_BLUR_5X5;
-                    else
-                        shaderIndex = GAUSSIAN_BLUR_3X3;
-                }
-                else
-                {
-                    // Narrow aspect ratios should check for width to account for VERT+.
-                    size_t width = round(Video::s_viewportWidth * Config::ResolutionScale);
-
-                    if (width > 2560)
-                        shaderIndex = GAUSSIAN_BLUR_9X9;
-                    else if (width > 1920)
-                        shaderIndex = GAUSSIAN_BLUR_7X7;
-                    else if (width > 1280)
-                        shaderIndex = GAUSSIAN_BLUR_5X5;
-                    else
-                        shaderIndex = GAUSSIAN_BLUR_3X3;
-                }
-
-                break;
-            }
-            }
-
-            shader = g_gaussianBlurShaders[shaderIndex].get();
-        }
-        else if (shader->shaderCacheEntry->hash == 0x6B9732B4CD7E7740 && Config::MotionBlur == EMotionBlur::Enhanced)
-        {
-            shader = g_enhancedMotionBlurShader.get();
-        }
-    }
-
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.pixelShader, shader);
 }
 

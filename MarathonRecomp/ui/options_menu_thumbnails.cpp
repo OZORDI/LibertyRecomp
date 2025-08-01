@@ -110,12 +110,10 @@ void LoadThumbnails()
     g_channelConfigurationThumbnails[EChannelConfiguration::Surround] = LOAD_ZSTD_TEXTURE(g_channel_surround);
 
     g_configThumbnails[&Config::MusicAttenuation] = LOAD_ZSTD_TEXTURE(g_music_attenuation);
-    g_configThumbnails[&Config::BattleTheme] = LOAD_ZSTD_TEXTURE(g_battle_theme);
     g_configThumbnails[&Config::WindowSize] = LOAD_ZSTD_TEXTURE(g_window_size);
     g_configThumbnails[&Config::Monitor] = LOAD_ZSTD_TEXTURE(g_monitor);
     g_configThumbnails[&Config::AspectRatio] = LOAD_ZSTD_TEXTURE(g_aspect_ratio);
     g_configThumbnails[&Config::Fullscreen] = LOAD_ZSTD_TEXTURE(g_fullscreen);
-    g_configThumbnails[&Config::XboxColorCorrection] = LOAD_ZSTD_TEXTURE(g_xbox_color_correction);
 
     g_vsyncThumbnails[false] = LOAD_ZSTD_TEXTURE(g_vsync_off);
     g_vsyncThumbnails[true] = LOAD_ZSTD_TEXTURE(g_vsync_on);
@@ -203,10 +201,6 @@ GuestTexture* GetThumbnail(const IConfigDef* cfg)
         {
             texture = isPlayStation ? g_backgroundInputPSThumbnail.get() : g_backgroundInputXBThumbnail.get();
         }
-        else if (cfg == &Config::TimeOfDayTransition)
-        {
-            TryGetValueThumbnail<ETimeOfDayTransition>(cfg, &g_timeOfDayTransitionThumbnails, &texture);
-        }
         else if (cfg == &Config::AntiAliasing)
         {
             TryGetValueThumbnail<EAntiAliasing>(cfg, &g_msaaAntiAliasingThumbnails, &texture);
@@ -222,14 +216,6 @@ GuestTexture* GetThumbnail(const IConfigDef* cfg)
         else if (cfg == &Config::GITextureFiltering)
         {
             TryGetValueThumbnail<EGITextureFiltering>(cfg, &g_giTextureFilteringThumbnails, &texture);
-        }
-        else if (cfg == &Config::MotionBlur)
-        {
-            TryGetValueThumbnail<EMotionBlur>(cfg, &g_motionBlurThumbnails, &texture);
-        }
-        else if (cfg == &Config::XboxColorCorrection)
-        {
-            TryGetValueThumbnail<bool>(cfg, &g_xboxColorCorrectionThumbnails, &texture);
         }
         else if (cfg == &Config::CutsceneAspectRatio)
         {

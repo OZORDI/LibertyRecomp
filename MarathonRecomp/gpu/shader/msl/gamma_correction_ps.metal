@@ -1,10 +1,10 @@
 #include "../../../../tools/XenosRecomp/XenosRecomp/shader_common.h"
 
-#define g_Gamma (*(reinterpret_cast<device float3*>(g_PushConstants.SharedConstants + 0)))
-#define g_TextureDescriptorIndex (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 12)))
+#define g_Gamma (*(reinterpret_cast<device float*>(g_PushConstants.SharedConstants + 0)))
+#define g_TextureDescriptorIndex (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 4)))
 
-#define g_ViewportOffset (*(reinterpret_cast<device int2*>(g_PushConstants.SharedConstants + 16)))
-#define g_ViewportSize (*(reinterpret_cast<device int2*>(g_PushConstants.SharedConstants + 24)))
+#define g_ViewportOffset (*(reinterpret_cast<device int2*>(g_PushConstants.SharedConstants + 8)))
+#define g_ViewportSize (*(reinterpret_cast<device int2*>(g_PushConstants.SharedConstants + 16)))
 
 [[fragment]]
 float4 shaderMain(float4 position [[position]],
