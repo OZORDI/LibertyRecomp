@@ -153,3 +153,9 @@ registers = ["r5", "r31"]
 name = "PostureDisableEdgeGrabLeftover"
 address = 0x82200568
 registers = ["r31"]
+
+[[midasm_hook]]
+name = "PedestrianAnimationLOD"
+address = 0x824C2808
+registers = ["r29"]
+after_instruction = true
