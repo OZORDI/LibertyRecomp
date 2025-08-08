@@ -1342,7 +1342,9 @@ static void ProcSetRenderState(const RenderCommand& cmd)
     }
     case D3DRS_SCISSORTESTENABLE:
     {
-        SetDirtyValue(g_dirtyStates.scissorRect, g_scissorTestEnable, value != 0);
+        // HACK: Ignore scissor test on depth-only draws to allow CSM:3 to properly scale
+        if (g_pipelineState.depthStencilFormat == RenderFormat::UNKNOWN || g_pipelineState.renderTargetFormat != RenderFormat::UNKNOWN)
+            SetDirtyValue(g_dirtyStates.scissorRect, g_scissorTestEnable, value != 0);
         break;
     }
     case D3DRS_SLOPESCALEDEPTHBIAS:
