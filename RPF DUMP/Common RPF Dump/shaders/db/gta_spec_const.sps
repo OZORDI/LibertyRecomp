@@ -1,1 +1,0 @@
-shader rage_default

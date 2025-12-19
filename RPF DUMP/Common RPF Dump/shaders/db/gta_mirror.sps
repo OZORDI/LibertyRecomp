@@ -1,2 +1,0 @@
-shader gta_reflect
-
