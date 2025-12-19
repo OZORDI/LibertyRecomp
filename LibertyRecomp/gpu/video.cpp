@@ -3166,21 +3166,20 @@ void Video::Present()
         return;
     }
 
-    // Clear disabled temporarily - causes crash in plume_metal.cpp clearColor
-    // The issue is swapchain exhaustion: after ~10 frames the backbuffer texture becomes invalid
-    // TODO: Fix frame pacing to prevent swapchain starvation
-    // {
-    //     RenderCommand clearCmd;
-    //     clearCmd.type = RenderCommandType::Clear;
-    //     clearCmd.clear.flags = D3DCLEAR_TARGET;
-    //     clearCmd.clear.color[0] = 0.1f;
-    //     clearCmd.clear.color[1] = 0.0f;
-    //     clearCmd.clear.color[2] = 0.2f;
-    //     clearCmd.clear.color[3] = 1.0f;
-    //     clearCmd.clear.z = 1.0f;
-    //     clearCmd.clear.stencil = 0;
-    //     g_renderQueue.enqueue(clearCmd);
-    // }
+    // Purple screen clear - visual heartbeat to confirm engine is running
+    // ProcClear has strict safety checks to prevent Metal crashes
+    {
+        RenderCommand clearCmd;
+        clearCmd.type = RenderCommandType::Clear;
+        clearCmd.clear.flags = D3DCLEAR_TARGET;
+        clearCmd.clear.color[0] = 0.1f;  // Purple
+        clearCmd.clear.color[1] = 0.0f;
+        clearCmd.clear.color[2] = 0.2f;
+        clearCmd.clear.color[3] = 1.0f;
+        clearCmd.clear.z = 1.0f;
+        clearCmd.clear.stencil = 0;
+        g_renderQueue.enqueue(clearCmd);
+    }
 
     RenderCommand cmd;
     cmd.type = RenderCommandType::ExecutePendingStretchRectCommands;
