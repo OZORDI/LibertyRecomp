@@ -273,4 +273,52 @@ namespace VFS
     {
         return g_stats;
     }
+    
+    std::shared_ptr<MappedFile> OpenMapped(const std::string& guestPath)
+    {
+        auto resolved = Resolve(guestPath);
+        if (resolved.empty())
+        {
+            return nullptr;
+        }
+        
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(resolved, ec))
+        {
+            return nullptr;
+        }
+        
+        auto size = std::filesystem::file_size(resolved, ec);
+        if (ec || size < MappedFile::MMAP_THRESHOLD)
+        {
+            return nullptr;  // Too small for mmap
+        }
+        
+        auto mapped = std::make_shared<MappedFile>();
+        if (!mapped->Open(resolved))
+        {
+            return nullptr;
+        }
+        
+        g_stats.mmapOpens++;
+        return mapped;
+    }
+    
+    bool ShouldUseMmap(const std::string& guestPath)
+    {
+        auto resolved = Resolve(guestPath);
+        if (resolved.empty())
+        {
+            return false;
+        }
+        
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(resolved, ec))
+        {
+            return false;
+        }
+        
+        auto size = std::filesystem::file_size(resolved, ec);
+        return !ec && size >= MappedFile::MMAP_THRESHOLD;
+    }
 }

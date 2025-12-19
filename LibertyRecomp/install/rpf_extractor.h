@@ -125,6 +125,27 @@ namespace RpfExtractor
     );
     
     /**
+     * Options for parallel extraction.
+     */
+    struct ParallelExtractionOptions
+    {
+        size_t numThreads = 0;           // 0 = auto (hardware concurrency)
+        size_t memoryBudgetMB = 512;     // Max memory for buffers
+    };
+    
+    /**
+     * Extract RPF archive using multiple threads.
+     * Significantly faster on multi-core systems.
+     */
+    ExtractionResult ExtractParallel(
+        const std::filesystem::path& rpfPath,
+        const std::filesystem::path& outputDir,
+        const std::vector<uint8_t>& aesKey = {},
+        const ParallelExtractionOptions& options = {},
+        const std::function<void(float)>& progressCallback = nullptr
+    );
+    
+    /**
      * Check if SparkCLI tool is available (fallback method).
      */
     bool IsSparkCliAvailable();

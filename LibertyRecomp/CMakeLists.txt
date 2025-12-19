@@ -78,6 +78,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/memory.cpp"
     "kernel/xam.cpp"
     "kernel/vfs.cpp"
+    "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
 )
 
@@ -181,6 +182,7 @@ set(LIBERTY_RECOMP_INSTALL_CXX_SOURCES
     "install/platform_paths.cpp"
     "install/rpf_extractor.cpp"
     "install/shader_converter.cpp"
+    "install/thread_pool.cpp"
     "install/update_checker.cpp"
     "install/xcontent_file_system.cpp"
     "install/hashes/game.cpp"

@@ -1,15 +1,21 @@
 #include "rpf_extractor.h"
+#include "thread_pool.h"
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <zlib.h>
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <wincrypt.h>
 #define popen _popen
 #define pclose _pclose
+#else
+#include <CommonCrypto/CommonCrypto.h>
 #endif
 
 namespace RpfExtractor
@@ -334,6 +340,285 @@ namespace RpfExtractor
         if (progressCallback)
         {
             progressCallback(1.0f);
+        }
+        
+        return result;
+    }
+    
+    // AES-256 decryption helper
+    static bool DecryptAES256(
+        std::vector<uint8_t>& data,
+        const std::vector<uint8_t>& key)
+    {
+        if (key.size() != 32 || data.empty())
+        {
+            return false;
+        }
+        
+#if defined(_WIN32)
+        HCRYPTPROV hProv = 0;
+        HCRYPTKEY hKey = 0;
+        
+        if (!CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+        {
+            return false;
+        }
+        
+        // Create key blob
+        struct {
+            BLOBHEADER header;
+            DWORD keySize;
+            BYTE keyData[32];
+        } keyBlob;
+        
+        keyBlob.header.bType = PLAINTEXTKEYBLOB;
+        keyBlob.header.bVersion = CUR_BLOB_VERSION;
+        keyBlob.header.reserved = 0;
+        keyBlob.header.aiKeyAlg = CALG_AES_256;
+        keyBlob.keySize = 32;
+        std::memcpy(keyBlob.keyData, key.data(), 32);
+        
+        if (!CryptImportKey(hProv, (BYTE*)&keyBlob, sizeof(keyBlob), 0, 0, &hKey))
+        {
+            CryptReleaseContext(hProv, 0);
+            return false;
+        }
+        
+        DWORD mode = CRYPT_MODE_ECB;
+        CryptSetKeyParam(hKey, KP_MODE, (BYTE*)&mode, 0);
+        
+        DWORD dataLen = static_cast<DWORD>(data.size());
+        if (!CryptDecrypt(hKey, 0, TRUE, 0, data.data(), &dataLen))
+        {
+            CryptDestroyKey(hKey);
+            CryptReleaseContext(hProv, 0);
+            return false;
+        }
+        
+        CryptDestroyKey(hKey);
+        CryptReleaseContext(hProv, 0);
+        return true;
+#else
+        // macOS/iOS CommonCrypto
+        size_t outLength = 0;
+        CCCryptorStatus status = CCCrypt(
+            kCCDecrypt,
+            kCCAlgorithmAES,
+            kCCOptionECBMode,
+            key.data(), kCCKeySizeAES256,
+            nullptr,  // No IV for ECB
+            data.data(), data.size(),
+            data.data(), data.size(),
+            &outLength);
+        
+        return status == kCCSuccess;
+#endif
+    }
+    
+    // Zlib decompression helper
+    static std::vector<uint8_t> DecompressZlib(
+        const std::vector<uint8_t>& compressed,
+        size_t expectedSize)
+    {
+        std::vector<uint8_t> decompressed(expectedSize);
+        
+        z_stream stream{};
+        stream.next_in = const_cast<Bytef*>(compressed.data());
+        stream.avail_in = static_cast<uInt>(compressed.size());
+        stream.next_out = decompressed.data();
+        stream.avail_out = static_cast<uInt>(expectedSize);
+        
+        if (inflateInit(&stream) != Z_OK)
+        {
+            return {};
+        }
+        
+        int result = inflate(&stream, Z_FINISH);
+        inflateEnd(&stream);
+        
+        if (result != Z_STREAM_END)
+        {
+            return {};
+        }
+        
+        decompressed.resize(stream.total_out);
+        return decompressed;
+    }
+    
+    ExtractionResult ExtractParallel(
+        const std::filesystem::path& rpfPath,
+        const std::filesystem::path& outputDir,
+        const std::vector<uint8_t>& aesKey,
+        const ParallelExtractionOptions& options,
+        const std::function<void(float)>& progressCallback)
+    {
+        ExtractionResult result;
+        
+        // Read header
+        RpfHeader header;
+        if (!ReadHeader(rpfPath, header))
+        {
+            result.errorMessage = "Failed to read RPF header";
+            return result;
+        }
+        
+        // Get entries (this is fast, single-threaded is fine)
+        auto entries = ListEntries(rpfPath, aesKey);
+        if (entries.empty())
+        {
+            result.errorMessage = "No entries found in RPF";
+            return result;
+        }
+        
+        // Create output directory
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        
+        // Pre-create directory structure
+        for (const auto& entry : entries)
+        {
+            if (entry.isDirectory)
+            {
+                std::filesystem::create_directories(outputDir / entry.name, ec);
+            }
+        }
+        
+        // Filter to file entries only
+        std::vector<RpfFileEntry> fileEntries;
+        for (const auto& entry : entries)
+        {
+            if (!entry.isDirectory)
+            {
+                fileEntries.push_back(entry);
+            }
+        }
+        
+        if (fileEntries.empty())
+        {
+            result.success = true;
+            result.extractedPath = outputDir;
+            return result;
+        }
+        
+        // Open RPF file with shared access
+        std::ifstream rpfFile(rpfPath, std::ios::binary);
+        if (!rpfFile)
+        {
+            result.errorMessage = "Failed to open RPF file";
+            return result;
+        }
+        std::mutex rpfMutex;
+        
+        // Create thread pool and memory budget
+        size_t numThreads = options.numThreads;
+        if (numThreads == 0)
+        {
+            numThreads = std::thread::hardware_concurrency();
+            if (numThreads == 0) numThreads = 4;
+        }
+        
+        Install::ThreadPool pool(numThreads);
+        Install::MemoryBudget memBudget(options.memoryBudgetMB * 1024 * 1024);
+        
+        // Progress tracking
+        std::atomic<uint64_t> filesExtracted{0};
+        std::atomic<uint64_t> bytesExtracted{0};
+        std::atomic<uint64_t> errors{0};
+        const size_t totalFiles = fileEntries.size();
+        
+        // Process files in parallel
+        std::vector<std::future<void>> futures;
+        
+        for (const auto& entry : fileEntries)
+        {
+            futures.push_back(pool.Enqueue([&, entry]()
+            {
+                // Acquire memory budget
+                size_t bufferSize = std::max(entry.size, entry.compressedSize);
+                memBudget.Acquire(bufferSize * 2);  // Input + output buffers
+                
+                try
+                {
+                    // Read compressed/encrypted data (locked)
+                    std::vector<uint8_t> data(entry.compressedSize > 0 ? 
+                        entry.compressedSize : entry.size);
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(rpfMutex);
+                        rpfFile.seekg(entry.offset);
+                        rpfFile.read(reinterpret_cast<char*>(data.data()), data.size());
+                    }
+                    
+                    // Decrypt if needed (unlocked, CPU-bound)
+                    if (entry.isEncrypted && !aesKey.empty())
+                    {
+                        DecryptAES256(data, aesKey);
+                    }
+                    
+                    // Decompress if needed (unlocked, CPU-bound)
+                    std::vector<uint8_t> output;
+                    if (entry.isCompressed && entry.compressedSize < entry.size)
+                    {
+                        output = DecompressZlib(data, entry.size);
+                        if (output.empty())
+                        {
+                            // Decompression failed, use raw data
+                            output = std::move(data);
+                        }
+                    }
+                    else
+                    {
+                        output = std::move(data);
+                    }
+                    
+                    // Write output (no lock needed, different files)
+                    std::filesystem::path outPath = outputDir / entry.name;
+                    std::filesystem::create_directories(outPath.parent_path(), ec);
+                    
+                    std::ofstream out(outPath, std::ios::binary);
+                    out.write(reinterpret_cast<const char*>(output.data()), output.size());
+                    
+                    filesExtracted++;
+                    bytesExtracted += output.size();
+                    
+                    // Update progress
+                    if (progressCallback)
+                    {
+                        float progress = static_cast<float>(filesExtracted.load()) / 
+                                        static_cast<float>(totalFiles);
+                        progressCallback(progress);
+                    }
+                }
+                catch (...)
+                {
+                    errors++;
+                }
+                
+                memBudget.Release(bufferSize * 2);
+            }));
+        }
+        
+        // Wait for all tasks
+        for (auto& f : futures)
+        {
+            f.wait();
+        }
+        
+        pool.Wait();
+        
+        if (progressCallback)
+        {
+            progressCallback(1.0f);
+        }
+        
+        result.success = errors == 0;
+        result.extractedPath = outputDir;
+        result.filesExtracted = filesExtracted.load();
+        result.bytesExtracted = bytesExtracted.load();
+        
+        if (errors > 0)
+        {
+            result.errorMessage = "Failed to extract " + std::to_string(errors.load()) + " files";
         }
         
         return result;
