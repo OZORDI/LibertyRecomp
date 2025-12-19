@@ -5244,6 +5244,63 @@ PPC_FUNC(sub_828507F8)
     __imp__sub_828507F8(ctx, base);
 }
 
+// Hook sub_827E8420 - Stream buffer reader
+// Validates stream struct pointers before dereferencing to prevent crash at 0x400000000
+// Stream struct layout: [0]=object ptr, [4]=ctx, [8]=buffer, [12]=pos, [16]=cursor, [20]=end, [24]=capacity
+extern "C" void __imp__sub_827E8420(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E8420)
+{
+    const uint32_t streamPtr = ctx.r3.u32;
+    
+    // Validate stream pointer is in valid guest memory range
+    if (streamPtr < 0x80000000 || streamPtr >= 0x90000000)
+    {
+        static int s_badStreamCount = 0;
+        if (++s_badStreamCount <= 5)
+        {
+            LOGF_WARNING("[sub_827E8420] Invalid stream pointer 0x{:08X}", streamPtr);
+        }
+        ctx.r3.s32 = -1;  // Return error
+        return;
+    }
+    
+    // Read object pointer at stream[0]
+    uint32_t objectPtr = PPC_LOAD_U32(streamPtr + 0);
+    
+    // Validate object pointer
+    if (objectPtr != 0 && (objectPtr < 0x80000000 || objectPtr >= 0x90000000))
+    {
+        static int s_badObjectCount = 0;
+        if (++s_badObjectCount <= 5)
+        {
+            LOGF_WARNING("[sub_827E8420] Invalid object pointer 0x{:08X} at stream 0x{:08X}", 
+                objectPtr, streamPtr);
+        }
+        ctx.r3.s32 = -1;  // Return error
+        return;
+    }
+    
+    // If object pointer is valid, validate vtable
+    if (objectPtr != 0)
+    {
+        uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+        if (vtablePtr != 0 && (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000))
+        {
+            static int s_badVtableCount = 0;
+            if (++s_badVtableCount <= 5)
+            {
+                LOGF_WARNING("[sub_827E8420] Invalid vtable 0x{:08X} at object 0x{:08X}", 
+                    vtablePtr, objectPtr);
+            }
+            ctx.r3.s32 = -1;  // Return error
+            return;
+        }
+    }
+    
+    // All pointers validated - call original implementation
+    __imp__sub_827E8420(ctx, base);
+}
+
 // Hook sub_82192100 - skip dirty disc error UI and limit retries
 PPC_FUNC(sub_82192100)
 {
@@ -5295,16 +5352,42 @@ PPC_FUNC(sub_829A1F00)
     const uint32_t offset = ctx.r6.u32;
     const uint32_t asyncInfo = ctx.r7.u32;
     
-    // Protect against NULL handle - return error instead of crashing
+    // Track last known common.rpf handle for NULL handle recovery
+    static uint32_t s_lastCommonHandle = 0;
+    
+    // Protect against NULL handle - try to recover using last known handle
     if (handle == 0)
     {
-        static int s_nullReadCount = 0;
-        if (++s_nullReadCount <= 10)
+        // If offset is in common.rpf range (0x9xxxx-0xAxxxx) and we have a cached handle, use it
+        if (offset >= 0x90000 && offset <= 0xB0000 && s_lastCommonHandle != 0)
         {
-            LOGF_WARNING("[GTA4_FileLoad] Error: Attempted read on NULL handle! Offset=0x{:X} Size=0x{:X}", offset, size);
+            static int s_recoveryCount = 0;
+            if (++s_recoveryCount <= 5)
+            {
+                LOGF_WARNING("[GTA4_FileLoad] NULL handle recovery: using cached handle 0x{:08X} for offset 0x{:X}",
+                    s_lastCommonHandle, offset);
+            }
+            // Use the cached handle instead
+            ctx.r3.u32 = s_lastCommonHandle;
+            // Fall through to normal processing with recovered handle
         }
-        ctx.r3.u32 = 0;  // Return 0 bytes read
-        return;
+        else
+        {
+            static int s_nullReadCount = 0;
+            if (++s_nullReadCount <= 10)
+            {
+                LOGF_WARNING("[GTA4_FileLoad] Error: Attempted read on NULL handle! Offset=0x{:X} Size=0x{:X}", offset, size);
+            }
+            ctx.r3.u32 = 0;  // Return 0 bytes read
+            return;
+        }
+    }
+    
+    // Cache handles that successfully read from common.rpf
+    const uint32_t activeHandle = (handle != 0) ? handle : s_lastCommonHandle;
+    if (offset >= 0x90000 && offset <= 0xB0000 && activeHandle != 0)
+    {
+        s_lastCommonHandle = activeHandle;
     }
     
     uint8_t* hostBuffer = reinterpret_cast<uint8_t*>(base + guestBuffer);

@@ -4147,6 +4147,12 @@ static void ProcClear(const RenderCommand& cmd)
     {
         return;
     }
+    
+    // Extra safety: if both render target and depth stencil are null, nothing to clear
+    if (g_renderTarget == nullptr && g_depthStencil == nullptr)
+    {
+        return;
+    }
 
     if (PopulateBarriersForStretchRect(g_renderTarget, g_depthStencil))
     {
@@ -4177,7 +4183,8 @@ static void ProcClear(const RenderCommand& cmd)
         }
 
         // Final safety check before clearColor - the actual crash point
-        if (g_framebuffer != nullptr)
+        // Re-verify framebuffer is valid after SetFramebuffer call (it can set g_framebuffer to null)
+        if (g_framebuffer != nullptr && g_renderTarget != nullptr && g_renderTarget->texture != nullptr)
         {
             commandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
         }
@@ -4191,7 +4198,11 @@ static void ProcClear(const RenderCommand& cmd)
             SetFramebuffer(nullptr, g_depthStencil, true);
         }
 
-        commandList->clearDepthStencil(clearDepth, clearStencil, args.z, args.stencil);
+        // Safety check for depth/stencil clear too
+        if (g_framebuffer != nullptr)
+        {
+            commandList->clearDepthStencil(clearDepth, clearStencil, args.z, args.stencil);
+        }
     }
 }
 
