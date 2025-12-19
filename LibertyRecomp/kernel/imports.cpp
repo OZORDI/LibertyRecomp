@@ -22,6 +22,7 @@
 #include <os/logger.h>
 
 #include "io/file_system.h"
+#include "vfs.h"
 
 #include <cerrno>
 #include <fstream>
@@ -1692,6 +1693,73 @@ uint32_t NtCreateFile
     // Fallback: treat unknown access flags as read.
     if ((mode & (std::ios::in | std::ios::out)) == 0)
         mode |= std::ios::in;
+
+    // === VFS-BASED FILE SERVING ===
+    // Try to serve files directly from extracted directory first.
+    // This bypasses the complex RPF offset-based reading that causes stream issues.
+    if (VFS::IsInitialized())
+    {
+        auto vfsResolved = VFS::Resolve(guestPath);
+        if (!vfsResolved.empty())
+        {
+            std::error_code ec;
+            bool vfsExists = std::filesystem::exists(vfsResolved, ec);
+            bool vfsIsDir = vfsExists && std::filesystem::is_directory(vfsResolved, ec);
+            
+            if (vfsExists && !ec)
+            {
+                if (vfsIsDir)
+                {
+                    // Return directory handle for VFS directory
+                    NtDirHandle* hDir = CreateKernelObject<NtDirHandle>();
+                    hDir->path = vfsResolved;
+                    
+                    const uint32_t handleValue = GetKernelHandle(hDir);
+                    g_ntDirHandles.emplace(handleValue, hDir);
+                    
+                    *FileHandle = handleValue;
+                    LOGF_IMPL(Utility, "NtCreateFile", "[VFS] Directory: '{}' -> {} (handle=0x{:08X})", 
+                        guestPath, vfsResolved.string(), handleValue);
+                    
+                    if (IoStatusBlock)
+                    {
+                        IoStatusBlock->Status = STATUS_SUCCESS;
+                        IoStatusBlock->Information = 1;
+                    }
+                    return STATUS_SUCCESS;
+                }
+                else
+                {
+                    // Open file directly from VFS
+                    std::fstream fileStream;
+                    fileStream.open(vfsResolved, mode);
+                    
+                    if (fileStream.is_open())
+                    {
+                        NtFileHandle* hFile = CreateKernelObject<NtFileHandle>();
+                        hFile->stream = std::move(fileStream);
+                        hFile->path = vfsResolved;
+                        hFile->isRpf = false;
+                        
+                        const uint32_t handleValue = GetKernelHandle(hFile);
+                        g_ntFileHandles.emplace(handleValue, hFile);
+                        
+                        *FileHandle = handleValue;
+                        LOGF_IMPL(Utility, "NtCreateFile", "[VFS] File: '{}' -> {} (handle=0x{:08X})", 
+                            guestPath, vfsResolved.string(), handleValue);
+                        
+                        if (IoStatusBlock)
+                        {
+                            IoStatusBlock->Status = STATUS_SUCCESS;
+                            IoStatusBlock->Information = 1;
+                        }
+                        return STATUS_SUCCESS;
+                    }
+                }
+            }
+        }
+    }
+    // === END VFS-BASED FILE SERVING ===
 
     std::filesystem::path resolved = ResolveGuestPathBestEffort(guestPath);
 

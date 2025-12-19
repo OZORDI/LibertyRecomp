@@ -10,6 +10,7 @@
 #include <kernel/heap.h>
 #include <kernel/xam.h>
 #include <kernel/io/file_system.h>
+#include <kernel/vfs.h>
 #include <file.h>
 #include <vector>
 #include <image.h>
@@ -139,6 +140,11 @@ void KiSystemStartup()
     LOGF_IMPL(Utility, "Main", "Registered common: -> {}", commonPath);
     LOGF_IMPL(Utility, "Main", "Registered platform: -> {}", platformPath);
     LOGF_IMPL(Utility, "Main", "Registered audio: -> {}", audioPath);
+
+    // Initialize Virtual File System for direct file serving
+    // This bypasses complex RPF offset-based reading that causes stream issues
+    VFS::Initialize(GetGamePath() / "extracted");
+    LOGF_IMPL(Utility, "Main", "VFS initialized with root: {}", extractedPath);
 
     std::error_code ec;
     for (auto& file : std::filesystem::directory_iterator(GetGamePath() / "dlc", ec))

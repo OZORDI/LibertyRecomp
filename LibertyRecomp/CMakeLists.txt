@@ -77,6 +77,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/heap.cpp"
     "kernel/memory.cpp"
     "kernel/xam.cpp"
+    "kernel/vfs.cpp"
     "kernel/io/file_system.cpp"
 )
 
