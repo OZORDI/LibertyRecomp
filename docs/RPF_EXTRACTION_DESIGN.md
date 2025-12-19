@@ -156,6 +156,48 @@ During installation:
 - Some files: zlib compressed
 - Key: Extractable from game executable
 
+## Implementation Status (December 2024)
+
+### Completed ✅
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `kernel/vfs.h` | Created | VFS interface - path resolution, file lookup |
+| `kernel/vfs.cpp` | Created | VFS implementation - 277 lines |
+| `docs/RPF_EXTRACTION_DESIGN.md` | Created | Design documentation |
+| `CMakeLists.txt` | Modified | Added vfs.cpp to build |
+| `kernel/imports.cpp` | Modified | Added VFS include + NtCreateFile integration |
+| `main.cpp` | Modified | Added VFS include + initialization |
+
+### Key Features Implemented
+
+1. **VFS Path Resolution** - Maps Xbox 360 paths to extracted files:
+   - `game:\` → `extracted/`
+   - `fxl_final\` → `extracted/common/shaders/fxl_final/`
+   - `common.rpf` → `extracted/common/`
+
+2. **Direct File Serving** - NtCreateFile now tries VFS first:
+   - If file exists in extracted directory, serves directly
+   - Bypasses complex RPF offset-based reading
+   - Falls back to legacy logic if VFS doesn't have the file
+
+3. **Automatic Initialization** - VFS initializes at startup with the extracted root
+
+### What This Solves
+
+The VFS approach eliminates the root cause of NULL stream pointers:
+
+| Before | After |
+|--------|-------|
+| Game reads RPF offsets → streaming system creates streams → NULL pointers → crash | Game requests file → VFS serves directly from extracted directory → no streaming system involved |
+
+### Build & Test
+
+```bash
+cd /Users/Ozordi/Downloads/MarathonRecomp
+cmake --build out/build/macos-debug --target LibertyRecomp -j8
+```
+
 ## Future Improvements
 
 1. **Lazy extraction**: Extract files on first access instead of upfront
