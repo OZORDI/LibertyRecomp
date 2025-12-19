@@ -168,6 +168,21 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
     memcpy(g_memory.Translate(image.base), image.data.get(), image.size);
     g_xdbfWrapper = XDBFWrapper(static_cast<uint8_t*>(g_memory.Translate(image.resource_offset)), image.resource_size);
 
+    // GTA IV Memory Layout Collision Fix
+    // Address 0x82003890 aliases with "common.rpf" string in image .rdata section.
+    // The game expects this to be heap-backed stream object storage.
+    // Xbox 360 kept these regions separate, but native recompilation does not.
+    // Fix: Zero the collision range and initialize with valid stream object pointer.
+    {
+        uint8_t* collisionBase = static_cast<uint8_t*>(g_memory.Translate(0x82003880));
+        memset(collisionBase, 0, 0x80);  // Zero 0x82003880 - 0x82003900
+        
+        // Initialize stream struct at 0x82003890 with valid object pointer
+        // The stream reader (sub_827E8420) validates vtable at offset 0
+        be<uint32_t>* streamPtr = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(0x82003890));
+        streamPtr[0] = 0x82A80A24;  // Valid object pointer (heap-backed)
+    }
+
     return image.entry_point;
 }
 

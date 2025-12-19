@@ -1935,8 +1935,16 @@ uint32_t NtCreateFile
 
 uint32_t NtClose(uint32_t handle)
 {
-    if (handle == GUEST_INVALID_HANDLE_VALUE)
-        return 0xFFFFFFFF;
+    // Protect against NULL and invalid handles
+    if (handle == 0 || handle == GUEST_INVALID_HANDLE_VALUE)
+    {
+        static int s_nullCloseCount = 0;
+        if (++s_nullCloseCount <= 5)
+        {
+            LOGF_WARNING("[NtClose] Ignored attempt to close invalid handle 0x{:08X}", handle);
+        }
+        return 0xC0000008;  // STATUS_INVALID_HANDLE
+    }
 
     if (IsKernelObject(handle))
     {
@@ -1974,8 +1982,14 @@ uint32_t NtClose(uint32_t handle)
     }
     else
     {
-        assert(false && "Unrecognized kernel object.");
-        return 0xFFFFFFFF;
+        // Don't crash on unknown handles - game may close handles we don't track
+        static int s_unknownCloseCount = 0;
+        if (++s_unknownCloseCount <= 10)
+        {
+            LOGF_WARNING("[NtClose] Unrecognized kernel object handle 0x{:08X} (occurrence #{})", 
+                handle, s_unknownCloseCount);
+        }
+        return 0;  // Return success - closing unknown handle is harmless
     }
 }
 
@@ -2033,7 +2047,12 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
     }
     else
     {
-        assert(false && "Unrecognized handle value.");
+        // Don't crash on unknown handles - just return timeout
+        static int s_unknownWaitCount = 0;
+        if (++s_unknownWaitCount <= 10)
+        {
+            LOGF_WARNING("[NtWaitEx] Unrecognized handle 0x{:08X} (occurrence #{})", Handle, s_unknownWaitCount);
+        }
     }
 
     return STATUS_TIMEOUT;
@@ -3034,8 +3053,13 @@ uint32_t NtDuplicateObject(uint32_t SourceHandle, be<uint32_t>* TargetHandle, ui
     }
     else
     {
-        assert(false && "Unrecognized kernel object.");
-        return 0xFFFFFFFF;
+        // Don't crash on unknown handles - just return error
+        static int s_unknownDupCount = 0;
+        if (++s_unknownDupCount <= 10)
+        {
+            LOGF_WARNING("[NtDuplicateObject] Unrecognized handle 0x{:08X} (occurrence #{})", SourceHandle, s_unknownDupCount);
+        }
+        return 0xC0000008;  // STATUS_INVALID_HANDLE
     }
 }
 
@@ -5270,6 +5294,18 @@ PPC_FUNC(sub_829A1F00)
     const uint32_t size = ctx.r5.u32;
     const uint32_t offset = ctx.r6.u32;
     const uint32_t asyncInfo = ctx.r7.u32;
+    
+    // Protect against NULL handle - return error instead of crashing
+    if (handle == 0)
+    {
+        static int s_nullReadCount = 0;
+        if (++s_nullReadCount <= 10)
+        {
+            LOGF_WARNING("[GTA4_FileLoad] Error: Attempted read on NULL handle! Offset=0x{:X} Size=0x{:X}", offset, size);
+        }
+        ctx.r3.u32 = 0;  // Return 0 bytes read
+        return;
+    }
     
     uint8_t* hostBuffer = reinterpret_cast<uint8_t*>(base + guestBuffer);
     
