@@ -20,19 +20,26 @@ namespace VFS
     
     void Initialize(const std::filesystem::path& extractedRoot)
     {
+        printf("[VFS] Initialize called with: %s\n", extractedRoot.string().c_str()); fflush(stdout);
+        
         std::lock_guard<std::mutex> lock(g_mutex);
+        printf("[VFS] Got mutex lock\n"); fflush(stdout);
         
         g_extractedRoot = extractedRoot;
         g_initialized = true;
         
         // Set up default path mappings for GTA IV
+        printf("[VFS] Calling ResetPathMappings...\n"); fflush(stdout);
         ResetPathMappings();
+        printf("[VFS] ResetPathMappings done\n"); fflush(stdout);
         
         // Build file index
+        printf("[VFS] Calling RebuildIndex...\n"); fflush(stdout);
         RebuildIndex();
+        printf("[VFS] RebuildIndex done\n"); fflush(stdout);
         
-        LOG_UTILITY("[VFS] Initialized with root: {}", extractedRoot.string());
-        LOG_UTILITY("[VFS] Indexed {} files, {} directories, {} bytes total",
+        LOGF_UTILITY("[VFS] Initialized with root: {}", extractedRoot.string());
+        LOGF_UTILITY("[VFS] Indexed {} files, {} directories, {} bytes total",
             g_stats.totalFiles, g_stats.totalDirectories, g_stats.totalBytes);
     }
     
@@ -202,7 +209,8 @@ namespace VFS
     
     void ResetPathMappings()
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
+        // Note: caller (Initialize) already holds g_mutex, don't lock again
+        // std::lock_guard<std::mutex> lock(g_mutex);
         g_pathMappings.clear();
         
         // Default GTA IV path mappings
@@ -225,7 +233,8 @@ namespace VFS
     
     void RebuildIndex()
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
+        // Note: caller (Initialize) already holds g_mutex, don't lock again
+        // std::lock_guard<std::mutex> lock(g_mutex);
         
         g_fileIndex.clear();
         g_stats = Stats{};
@@ -238,7 +247,7 @@ namespace VFS
         std::error_code ec;
         if (!std::filesystem::exists(g_extractedRoot, ec))
         {
-            LOG_WARNING("[VFS] Extracted root does not exist: {}", g_extractedRoot.string());
+            LOGF_WARNING("[VFS] Extracted root does not exist: {}", g_extractedRoot.string());
             return;
         }
         

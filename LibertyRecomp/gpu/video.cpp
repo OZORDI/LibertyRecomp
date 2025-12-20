@@ -1,5 +1,6 @@
 #include "video.h"
 
+#include "install/platform_paths.h"
 #include "imgui/imgui_common.h"
 #include "imgui/imgui_snapshot.h"
 #include "imgui/imgui_font_builder.h"
@@ -339,6 +340,13 @@ static Backend g_backend;
 #endif
 
 static bool g_triangleStripWorkaround = false;
+
+// Forward declarations for GTA IV default shaders (populated by EnsureAllShadersLoaded)
+static GuestShader* g_defaultVertexShader = nullptr;
+static GuestShader* g_defaultPixelShader = nullptr;
+
+// Forward declaration for vertex declaration creation
+static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexElement* vertexElements);
 
 static std::unique_ptr<RenderInterface> g_interface;
 static std::unique_ptr<RenderDevice> g_device;
@@ -832,29 +840,142 @@ static void FlushBarriers()
 }
 
 static std::unique_ptr<uint8_t[]> g_shaderCache;
+static size_t g_shaderCacheSize = 0;
+static bool g_usingDiskCache = false;
 static std::unique_ptr<uint8_t[]> g_buttonBcDiff;
 
-static void LoadEmbeddedResources()
+// Try to load shader cache from disk (install-time generated)
+// Returns true if successfully loaded, false to fall back to embedded
+static bool TryLoadDiskShaderCache()
 {
+    auto shaderCacheDir = PlatformPaths::GetShaderCacheDirectory();
+    std::filesystem::path cachePath;
+    size_t expectedSize = 0;
+    
     switch (g_backend)
     {
     case Backend::VULKAN:
-        g_shaderCache = std::make_unique<uint8_t[]>(g_spirvCacheDecompressedSize);
-        ZSTD_decompress(g_shaderCache.get(), g_spirvCacheDecompressedSize, g_compressedSpirvCache, g_spirvCacheCompressedSize);
+        cachePath = shaderCacheDir / "spirv.cache";
+        expectedSize = g_spirvCacheDecompressedSize;
         break;
 #if defined(LIBERTY_RECOMP_D3D12)
     case Backend::D3D12:
-        g_shaderCache = std::make_unique<uint8_t[]>(g_dxilCacheDecompressedSize);
-        ZSTD_decompress(g_shaderCache.get(), g_dxilCacheDecompressedSize, g_compressedDxilCache, g_dxilCacheCompressedSize);
+        cachePath = shaderCacheDir / "dxil.cache";
+        expectedSize = g_dxilCacheDecompressedSize;
         break;
 #elif defined(LIBERTY_RECOMP_METAL)
     case Backend::METAL:
-        g_shaderCache = std::make_unique<uint8_t[]>(g_airCacheDecompressedSize);
-        ZSTD_decompress(g_shaderCache.get(), g_airCacheDecompressedSize, g_compressedAirCache, g_airCacheCompressedSize);
+        cachePath = shaderCacheDir / "air.cache";
+        expectedSize = g_airCacheDecompressedSize;
         break;
 #endif
     default:
-        assert(false);
+        return false;
+    }
+    
+    if (!std::filesystem::exists(cachePath))
+    {
+        LOGF_WARNING("Disk shader cache not found at {}, using embedded", cachePath.string());
+        return false;
+    }
+    
+    std::error_code ec;
+    auto fileSize = std::filesystem::file_size(cachePath, ec);
+    if (ec || fileSize == 0)
+    {
+        LOG_WARNING("Disk shader cache invalid size, using embedded");
+        return false;
+    }
+    
+    std::ifstream file(cachePath, std::ios::binary);
+    if (!file.is_open())
+    {
+        LOG_WARNING("Failed to open disk shader cache, using embedded");
+        return false;
+    }
+    
+    g_shaderCache = std::make_unique<uint8_t[]>(fileSize);
+    file.read(reinterpret_cast<char*>(g_shaderCache.get()), fileSize);
+    
+    if (!file)
+    {
+        LOG_WARNING("Failed to read disk shader cache, using embedded");
+        g_shaderCache.reset();
+        return false;
+    }
+    
+    g_shaderCacheSize = fileSize;
+    g_usingDiskCache = true;
+    LOGF_WARNING("Loaded shader cache from disk: {} ({} bytes)", cachePath.string(), fileSize);
+    return true;
+}
+
+// Try to load embedded shader cache (build-time generated)
+// Returns true if successfully loaded, false to fall back to disk cache
+static bool TryLoadEmbeddedShaderCache()
+{
+    size_t decompressedSize = 0;
+    size_t compressedSize = 0;
+    const uint8_t* compressedData = nullptr;
+    
+    switch (g_backend)
+    {
+    case Backend::VULKAN:
+        decompressedSize = g_spirvCacheDecompressedSize;
+        compressedSize = g_spirvCacheCompressedSize;
+        compressedData = g_compressedSpirvCache;
+        break;
+#if defined(LIBERTY_RECOMP_D3D12)
+    case Backend::D3D12:
+        decompressedSize = g_dxilCacheDecompressedSize;
+        compressedSize = g_dxilCacheCompressedSize;
+        compressedData = g_compressedDxilCache;
+        break;
+#elif defined(LIBERTY_RECOMP_METAL)
+    case Backend::METAL:
+        decompressedSize = g_airCacheDecompressedSize;
+        compressedSize = g_airCacheCompressedSize;
+        compressedData = g_compressedAirCache;
+        break;
+#endif
+    default:
+        return false;
+    }
+    
+    // Check if embedded cache exists (non-empty)
+    if (decompressedSize == 0 || compressedSize == 0 || compressedData == nullptr)
+    {
+        LOG_WARNING("Embedded shader cache is empty for this platform");
+        return false;
+    }
+    
+    g_shaderCache = std::make_unique<uint8_t[]>(decompressedSize);
+    size_t result = ZSTD_decompress(g_shaderCache.get(), decompressedSize, compressedData, compressedSize);
+    
+    if (ZSTD_isError(result))
+    {
+        LOGF_WARNING("Failed to decompress embedded shader cache: {}", ZSTD_getErrorName(result));
+        g_shaderCache.reset();
+        return false;
+    }
+    
+    g_shaderCacheSize = decompressedSize;
+    g_usingDiskCache = false;
+    LOGF_WARNING("Using embedded shader cache ({} bytes)", g_shaderCacheSize);
+    return true;
+}
+
+static void LoadEmbeddedResources()
+{
+    // Try embedded cache first (build-time), fall back to disk cache (install-time)
+    if (!TryLoadEmbeddedShaderCache())
+    {
+        // Embedded cache failed or empty - try disk cache
+        if (!TryLoadDiskShaderCache())
+        {
+            LOG_ERROR("No shader cache available! Neither embedded nor disk cache found.");
+            LOG_ERROR("Run the installer to generate shader cache, or rebuild with shader_cache.cpp");
+        }
     }
 
     g_buttonBcDiff = decompressZstd(g_button_bc_diff, g_button_bc_diff_uncompressed_size);
@@ -3180,6 +3301,61 @@ void Video::Present()
         clearCmd.clear.stencil = 0;
         g_renderQueue.enqueue(clearCmd);
     }
+    
+    // AGGRESSIVE TEST: Force draw with cached shaders to verify pipeline
+    // This bypasses the game's render code entirely to prove shaders work
+    static bool s_testDrawLogged = false;
+    static GuestVertexDeclaration* s_testVertexDecl = nullptr;
+    
+    if (g_defaultVertexShader != nullptr && g_defaultPixelShader != nullptr && s_presentCount <= 200)
+    {
+        // Create a simple vertex declaration on first use
+        if (s_testVertexDecl == nullptr) {
+            // Simple vertex format: POSITION (float3) at offset 0
+            static GuestVertexElement testElements[] = {
+                { 0, 0, 0x2A23B9, 0, D3DDECLUSAGE_POSITION, 0, 0 },  // FLOAT3 position
+                { 255, 0, 0xFFFFFFFF, 0, 0, 0, 0 }  // D3DDECL_END
+            };
+            s_testVertexDecl = CreateVertexDeclarationWithoutAddRef(testElements);
+            LOGF_WARNING("Created test vertex declaration: {:p}", (void*)s_testVertexDecl);
+        }
+        
+        if (!s_testDrawLogged) {
+            LOGF_WARNING("FORCING TEST DRAW with cached shaders VS={:p} PS={:p} VDecl={:p}", 
+                        (void*)g_defaultVertexShader, (void*)g_defaultPixelShader, (void*)s_testVertexDecl);
+            s_testDrawLogged = true;
+        }
+        
+        // Bind vertex declaration
+        RenderCommand vdeclCmd;
+        vdeclCmd.type = RenderCommandType::SetVertexDeclaration;
+        vdeclCmd.setVertexDeclaration.vertexDeclaration = s_testVertexDecl;
+        g_renderQueue.enqueue(vdeclCmd);
+        
+        // Bind our cached shaders
+        RenderCommand vsCmd;
+        vsCmd.type = RenderCommandType::SetVertexShader;
+        vsCmd.setVertexShader.shader = g_defaultVertexShader;
+        g_renderQueue.enqueue(vsCmd);
+        
+        RenderCommand psCmd;
+        psCmd.type = RenderCommandType::SetPixelShader;
+        psCmd.setPixelShader.shader = g_defaultPixelShader;
+        g_renderQueue.enqueue(psCmd);
+        
+        // Force a simple test draw (just 3 vertices for a triangle)
+        // This tests if the rendering pipeline can actually execute draws
+        RenderCommand drawCmd;
+        drawCmd.type = RenderCommandType::DrawPrimitive;
+        drawCmd.drawPrimitive.primitiveType = 4; // Triangle list
+        drawCmd.drawPrimitive.startVertex = 0;
+        drawCmd.drawPrimitive.primitiveCount = 1; // 1 triangle
+        g_renderQueue.enqueue(drawCmd);
+        
+        if (s_presentCount == 1) {
+            LOGF_WARNING("TEST DRAW submitted: type={} primitiveCount={}", 4, 1);
+        }
+    }
 
     RenderCommand cmd;
     cmd.type = RenderCommandType::ExecutePendingStretchRectCommands;
@@ -4338,6 +4514,8 @@ static void ProcSetScissorRect(const RenderCommand& cmd)
 
 static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specConstants)
 {
+    static int s_loadCount = 0;
+    
     if (g_backend != Backend::D3D12 ||
         guestShader->shaderCacheEntry == nullptr || 
         guestShader->shaderCacheEntry->specConstantsMask == 0)
@@ -4347,6 +4525,7 @@ static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specCons
         if (guestShader->shader == nullptr)
         {
             assert(guestShader->shaderCacheEntry != nullptr);
+            ++s_loadCount;
 
             switch (g_backend) {
             case Backend::VULKAN:
@@ -4358,18 +4537,36 @@ static RenderShader* GetOrLinkShader(GuestShader* guestShader, uint32_t specCons
                 assert(result);
 
                 guestShader->shader = g_device->createShader(decoded.data(), decoded.size(), "shaderMain", RenderShaderFormat::SPIRV);
+                
+                if (s_loadCount <= 30) {
+                    LOGF_WARNING("GetOrLinkShader #{}: VULKAN loaded SPIR-V {} (offset={} size={})", 
+                              s_loadCount, guestShader->shaderCacheEntry->filename,
+                              guestShader->shaderCacheEntry->spirvOffset, guestShader->shaderCacheEntry->spirvSize);
+                }
                 break;
             }
             case Backend::D3D12:
             {
                 guestShader->shader = g_device->createShader(g_shaderCache.get() + guestShader->shaderCacheEntry->dxilOffset, 
                     guestShader->shaderCacheEntry->dxilSize, "shaderMain", RenderShaderFormat::DXIL);
+                
+                if (s_loadCount <= 30) {
+                    LOGF_WARNING("GetOrLinkShader #{}: D3D12 loaded DXIL {} (offset={} size={})", 
+                              s_loadCount, guestShader->shaderCacheEntry->filename,
+                              guestShader->shaderCacheEntry->dxilOffset, guestShader->shaderCacheEntry->dxilSize);
+                }
                 break;
             }
             case Backend::METAL:
             {
                 guestShader->shader = g_device->createShader(g_shaderCache.get() + guestShader->shaderCacheEntry->airOffset,
                     guestShader->shaderCacheEntry->airSize, "shaderMain", RenderShaderFormat::METAL);
+                
+                if (s_loadCount <= 30) {
+                    LOGF_WARNING("GetOrLinkShader #{}: METAL loaded AIR {} (offset={} size={})", 
+                              s_loadCount, guestShader->shaderCacheEntry->filename,
+                              guestShader->shaderCacheEntry->airOffset, guestShader->shaderCacheEntry->airSize);
+                }
                 break;
             }
             }
@@ -5167,7 +5364,17 @@ static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t 
 
 static void ProcDrawPrimitive(const RenderCommand& cmd)
 {
+    static uint32_t s_procDrawCount = 0;
+    ++s_procDrawCount;
+    
     const auto& args = cmd.drawPrimitive;
+    
+    if (s_procDrawCount <= 10 || (s_procDrawCount % 1000) == 0) {
+        LOGF_WARNING("ProcDrawPrimitive #{} type={} start={} count={} VS={:p} PS={:p} VDecl={:p}",
+            s_procDrawCount, args.primitiveType, args.startVertex, args.primitiveCount,
+            (void*)g_pipelineState.vertexShader, (void*)g_pipelineState.pixelShader,
+            (void*)g_pipelineState.vertexDeclaration);
+    }
 
     SetPrimitiveType(args.primitiveType);
 
@@ -5622,6 +5829,8 @@ static void ProcSetVertexDeclaration(const RenderCommand& cmd)
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexDeclaration, args.vertexDeclaration);
 }
 
+// NOTE: g_defaultVertexShader and g_defaultPixelShader are declared near top of file
+
 static ShaderCacheEntry* FindShaderCacheEntry(XXH64_hash_t hash)
 {
     auto end = g_shaderCacheEntries + g_shaderCacheEntryCount;
@@ -5714,11 +5923,29 @@ static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType reso
 
 static GuestShader* CreateVertexShader(const be<uint32_t>* function) 
 {
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0) {
+        LOGF_WARNING("[GTA4] CreateVertexShader #{} called!", s_count);
+    }
     return CreateShader(function, ResourceType::VertexShader);
 }
 
 static void SetVertexShader(GuestDevice* device, GuestShader* shader)
 {
+    static int s_count = 0;
+    ++s_count;
+    
+    // Substitute default shader if NULL is passed
+    if (shader == nullptr && g_defaultVertexShader != nullptr) {
+        shader = g_defaultVertexShader;
+        if (s_count <= 10) {
+            LOGF_WARNING("[GTA4] SetVertexShader #{} NULL -> using default VS", s_count);
+        }
+    } else if (s_count <= 20 || s_count % 100 == 0) {
+        LOGF_WARNING("[GTA4] SetVertexShader #{} shader={}", s_count, shader ? "OK" : "NULL");
+    }
+    
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetVertexShader;
     cmd.setVertexShader.shader = shader;
@@ -5796,6 +6023,19 @@ static GuestShader* CreatePixelShader(const be<uint32_t>* function)
 
 static void SetPixelShader(GuestDevice* device, GuestShader* shader)
 {
+    static int s_count = 0;
+    ++s_count;
+    
+    // Substitute default shader if NULL is passed
+    if (shader == nullptr && g_defaultPixelShader != nullptr) {
+        shader = g_defaultPixelShader;
+        if (s_count <= 10) {
+            LOGF_WARNING("[GTA4] SetPixelShader #{} NULL -> using default PS", s_count);
+        }
+    } else if (s_count <= 20 || s_count % 100 == 0) {
+        LOGF_WARNING("[GTA4] SetPixelShader #{} shader={}", s_count, shader ? "OK" : "NULL");
+    }
+    
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetPixelShader;
     cmd.setPixelShader.shader = shader;
@@ -8116,6 +8356,89 @@ GUEST_FUNCTION_HOOK(sub_829D87E8, CreateDevice);
 // - Offset 0x00: Flags or status (set to non-zero to indicate "loaded")
 // - Various other fields we don't fully understand
 //
+// Forward declarations for shader creation
+static GuestShader* CreateVertexShader(const be<uint32_t>* function);
+static GuestShader* CreatePixelShader(const be<uint32_t>* function);
+
+// Find and create all shaders for a given FXC file base name (e.g., "gta_default")
+// Returns number of shaders created
+static int CreateShadersForFxc(const char* fxcBaseName)
+{
+    int created = 0;
+    std::string prefix = fmt::format("shaders/{}/", fxcBaseName);
+    
+    for (size_t i = 0; i < g_shaderCacheEntryCount; i++) {
+        ShaderCacheEntry* entry = &g_shaderCacheEntries[i];
+        
+        // Check if this entry belongs to the requested FXC file
+        if (strncmp(entry->filename, prefix.c_str(), prefix.length()) == 0) {
+            if (entry->guestShader == nullptr) {
+                // Determine shader type from filename (_vs = vertex, _ps = pixel)
+                bool isPixelShader = strstr(entry->filename, "_ps") != nullptr;
+                ResourceType type = isPixelShader ? ResourceType::PixelShader : ResourceType::VertexShader;
+                
+                GuestShader* shader = g_userHeap.AllocPhysical<GuestShader>(type);
+                shader->shaderCacheEntry = entry;
+                entry->guestShader = shader;
+                ++created;
+                
+                // Set default shaders
+                if (!isPixelShader && g_defaultVertexShader == nullptr) {
+                    g_defaultVertexShader = shader;
+                }
+                if (isPixelShader && g_defaultPixelShader == nullptr) {
+                    g_defaultPixelShader = shader;
+                }
+            }
+        }
+    }
+    
+    return created;
+}
+
+// Pre-load ALL shaders from cache at startup
+static void EnsureAllShadersLoaded()
+{
+    static bool s_loaded = false;
+    if (s_loaded) return;
+    s_loaded = true;
+    
+    LOG_WARNING("[EffectManager] Pre-loading ALL shaders from cache...");
+    
+    int totalCreated = 0;
+    
+    // Create GuestShader objects for ALL cache entries
+    for (size_t i = 0; i < g_shaderCacheEntryCount; i++) {
+        ShaderCacheEntry* entry = &g_shaderCacheEntries[i];
+        
+        if (entry->guestShader == nullptr) {
+            // Determine shader type from filename (_vs = vertex, _ps = pixel)
+            bool isPixelShader = strstr(entry->filename, "_ps") != nullptr;
+            ResourceType type = isPixelShader ? ResourceType::PixelShader : ResourceType::VertexShader;
+            
+            GuestShader* shader = g_userHeap.AllocPhysical<GuestShader>(type);
+            shader->shaderCacheEntry = entry;
+            entry->guestShader = shader;
+            ++totalCreated;
+            
+            // Set default shaders (first VS and PS we find from gta_default)
+            if (strstr(entry->filename, "gta_default") != nullptr) {
+                if (!isPixelShader && g_defaultVertexShader == nullptr) {
+                    g_defaultVertexShader = shader;
+                }
+                if (isPixelShader && g_defaultPixelShader == nullptr) {
+                    g_defaultPixelShader = shader;
+                }
+            }
+        }
+    }
+    
+    LOGF_WARNING("[EffectManager] Pre-loaded {} shaders (VS={}, PS={})", 
+        totalCreated, 
+        g_defaultVertexShader ? "OK" : "NULL", 
+        g_defaultPixelShader ? "OK" : "NULL");
+}
+
 // By returning success with a "valid" structure, the game should proceed
 // instead of trying to enumerate directories.
 static uint32_t EffectManagerStub(be<uint32_t>* effectContext, be<uint32_t>* outputPtr)
@@ -8123,99 +8446,217 @@ static uint32_t EffectManagerStub(be<uint32_t>* effectContext, be<uint32_t>* out
     static int callCount = 0;
     ++callCount;
     
-    // Log first 10 calls and then every 100th call
-    if (callCount <= 10 || callCount % 100 == 0) {
-        LOGF_WARNING("EffectManager::Load STUBBED call #{} - ctx=0x{:08X} out=0x{:08X}", 
-            callCount, 
-            effectContext ? g_memory.MapVirtual(effectContext) : 0,
-            outputPtr ? g_memory.MapVirtual(outputPtr) : 0);
+    // Pre-load ALL shaders from cache on first call
+    EnsureAllShadersLoaded();
+    
+    uint32_t ctxAddr = effectContext ? g_memory.MapVirtual(effectContext) : 0;
+    uint32_t outAddr = outputPtr ? g_memory.MapVirtual(outputPtr) : 0;
+    
+    // Log first 20 calls
+    if (callCount <= 20) {
+        LOGF_WARNING("EffectManager::Load #{} ctx=0x{:08X} out=0x{:08X}", callCount, ctxAddr, outAddr);
     }
     
-    // The garbage path comes from the effectContext containing a filename.
-    // When we zeroed all of effectContext, the game hung - it needs some of that state.
-    // 
-    // Looking at the log: after EffectManager, the game tries to load "\\" (just backslash).
-    // This suggests there's a filename field in effectContext that got read.
-    // 
-    // Instead of zeroing everything, we need to find where the filename is stored.
-    // The effectContext is at 0x80268230. Let me log what's in it before and after.
+    // Return success with a minimal valid structure
+    // RAGE effect structure offsets (from RE):
+    // +0x00: status/flags (1 = loaded)
+    // +0x04: technique count
+    // +0x08: pass count  
+    // +0x0C: vertex shader handle
+    // +0x10: pixel shader handle
+    // +0x14-0x5F: other data
+    if (outputPtr) {
+        memset(outputPtr, 0, 0x60);
+        outputPtr[0] = 1;  // Status: loaded
+        outputPtr[1] = 1;  // 1 technique
+        outputPtr[2] = 1;  // 1 pass
+        // Leave shader handles as 0 for now - game should still render
+    }
     
-    if (callCount <= 3 && effectContext) {
-        // Log first few uint32s of effectContext
-        LOGF_WARNING("EffectManager - effectContext dwords: 0=0x{:08X} 1=0x{:08X} 2=0x{:08X} 3=0x{:08X}", 
-            effectContext[0].get(), effectContext[1].get(), effectContext[2].get(), effectContext[3].get());
-        LOGF_WARNING("EffectManager - effectContext dwords: 4=0x{:08X} 5=0x{:08X} 6=0x{:08X} 7=0x{:08X}", 
-            effectContext[4].get(), effectContext[5].get(), effectContext[6].get(), effectContext[7].get());
+    // Return 1 (success) - game should proceed with rendering
+    return 1;
+}
+
+// EffectManager stub that returns real shader handles from our cache
+// The original EffectManager hangs trying to do file I/O, so we bypass it
+// and return our pre-compiled shaders instead.
+static uint32_t EffectManagerWithCachedShaders(be<uint32_t>* effectContext, be<uint32_t>* outputPtr)
+{
+    static int callCount = 0;
+    ++callCount;
+    
+    // Ensure all shaders are pre-loaded from cache on first call
+    EnsureAllShadersLoaded();
+    
+    if (callCount <= 30 || callCount % 100 == 0) {
+        LOGF_WARNING("EffectManager::Load #{} - returning cached shaders (VS={} PS={})",
+                     callCount,
+                     g_defaultVertexShader ? "OK" : "NULL",
+                     g_defaultPixelShader ? "OK" : "NULL");
+    }
+    
+    // Return success with our cached shader handles
+    if (outputPtr) {
+        memset(outputPtr, 0, 0x60);
+        outputPtr[0] = 1;  // Status: loaded
+        outputPtr[1] = 1;  // 1 technique
+        outputPtr[2] = 1;  // 1 pass
         
-        // Try to read strings from the pointer addresses - may need to follow multiple levels
-        for (int i = 0; i < 8; i += 2) {
-            uint32_t guestPtr = effectContext[i].get();
-            if (guestPtr >= 0x80000000 && guestPtr < 0x90000000) {
-                // Valid guest address range, read bytes at that address
-                const uint8_t* hostPtr = reinterpret_cast<const uint8_t*>(g_memory.Translate(guestPtr));
-                if (hostPtr) {
-                    // Read as big-endian uint32s (these are likely more pointers)
-                    uint32_t val0 = (hostPtr[0] << 24) | (hostPtr[1] << 16) | (hostPtr[2] << 8) | hostPtr[3];
-                    uint32_t val1 = (hostPtr[4] << 24) | (hostPtr[5] << 16) | (hostPtr[6] << 8) | hostPtr[7];
+        // Return our cached shader handles
+        // The game expects valid shader pointers at these offsets
+        if (g_defaultVertexShader) {
+            outputPtr[3] = g_memory.MapVirtual(g_defaultVertexShader);  // VS handle at +0x0C
+        }
+        if (g_defaultPixelShader) {
+            outputPtr[4] = g_memory.MapVirtual(g_defaultPixelShader);   // PS handle at +0x10
+        }
+    }
+    
+    return 1;  // Success
+}
+
+GUEST_FUNCTION_HOOK(sub_8285E048, EffectManagerWithCachedShaders);
+
+// =============================================================================
+// GTA IV Shader Creation Hook (sub_829D1758)
+// This is the ACTUAL shader creation function called from FXC parsing.
+// Parameters: r3 = pointer to Xbox 360 shader container
+//   r3+0: flags (magic 0x102A11XX)
+//   r3+4: virtual size (big-endian)
+//   r3+8: physical size (big-endian)
+// Returns: shader handle in r3, or 0 on failure
+// =============================================================================
+extern "C" void __imp__sub_829D1758(PPCContext& ctx, uint8_t* base);
+
+static int s_createShaderFromBytecodeCount = 0;
+static int s_createShaderHits = 0;
+static int s_createShaderMisses = 0;
+
+PPC_FUNC(sub_829D1758)
+{
+    ++s_createShaderFromBytecodeCount;
+    
+    uint32_t bytecodeAddr = ctx.r3.u32;
+    
+    // Try to intercept and inject cached shader
+    if (bytecodeAddr != 0 && bytecodeAddr < 0xF0000000) {
+        uint8_t* bytecodePtr = static_cast<uint8_t*>(g_memory.Translate(bytecodeAddr));
+        
+        if (bytecodePtr != nullptr) {
+            const be<uint32_t>* shaderData = reinterpret_cast<const be<uint32_t>*>(bytecodePtr);
+            uint32_t flags = shaderData[0];
+            uint32_t virtualSize = shaderData[1];
+            uint32_t physicalSize = shaderData[2];
+            
+            // Check for valid Xbox 360 shader magic (0x102A11XX)
+            if ((flags & 0xFFFFFF00) == 0x102A1100 && virtualSize > 0 && physicalSize > 0) {
+                uint32_t totalSize = virtualSize + physicalSize;
+                
+                // Compute hash of shader bytecode
+                XXH64_hash_t hash = XXH3_64bits(shaderData, totalSize);
+                
+                // Lookup in shader cache
+                ShaderCacheEntry* entry = FindShaderCacheEntry(hash);
+                
+                if (entry != nullptr) {
+                    ++s_createShaderHits;
                     
-                    LOGF_WARNING("EffectManager - effectContext[{}]=0x{:08X} -> ptrs: 0x{:08X} 0x{:08X}",
-                        i, guestPtr, val0, val1);
+                    // Determine shader type from flags
+                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
                     
-                    // Follow the first pointer one more level
-                    if (val0 >= 0x80000000 && val0 < 0x90000000) {
-                        const char* strPtr = reinterpret_cast<const char*>(g_memory.Translate(val0));
-                        if (strPtr) {
-                            char buf[64] = {0};
-                            bool valid = true;
-                            for (int j = 0; j < 63 && strPtr[j]; ++j) {
-                                if (strPtr[j] < 32 || static_cast<unsigned char>(strPtr[j]) > 127) {
-                                    valid = false;
-                                    break;
-                                }
-                                buf[j] = strPtr[j];
-                            }
-                            if (valid && buf[0]) {
-                                LOGF_WARNING("EffectManager - effectContext[{}] -> *ptr0 = string: '{}'", i, buf);
-                            } else {
-                                // Dump hex if not valid string
-                                LOGF_WARNING("EffectManager - effectContext[{}] -> *ptr0 = hex: {:02X} {:02X} {:02X} {:02X}",
-                                    i, (uint8_t)strPtr[0], (uint8_t)strPtr[1], (uint8_t)strPtr[2], (uint8_t)strPtr[3]);
-                            }
-                        }
+                    // Create GuestShader if not already created
+                    if (entry->guestShader == nullptr) {
+                        entry->guestShader = g_userHeap.AllocPhysical<GuestShader>(type);
+                        entry->guestShader->shaderCacheEntry = entry;
+                    }
+                    
+                    if (s_createShaderFromBytecodeCount <= 50 || s_createShaderFromBytecodeCount % 200 == 0) {
+                        LOGF_WARNING("CreateShaderFromBytecode #{}: CACHE HIT hash=0x{:X} -> {} type={}",
+                                     s_createShaderFromBytecodeCount, hash, entry->filename,
+                                     type == ResourceType::VertexShader ? "VS" : "PS");
+                    }
+                    
+                    // Return the GuestShader address as the shader handle
+                    // The game expects a valid pointer - we return our GuestShader
+                    ctx.r3.u32 = g_memory.MapVirtual(entry->guestShader);
+                    return;
+                } else {
+                    ++s_createShaderMisses;
+                    if (s_createShaderMisses <= 30) {
+                        LOGF_WARNING("CreateShaderFromBytecode #{}: CACHE MISS hash=0x{:X} size={} flags=0x{:08X}",
+                                     s_createShaderFromBytecodeCount, hash, totalSize, flags);
                     }
                 }
+            } else if (s_createShaderFromBytecodeCount <= 20) {
+                LOGF_WARNING("CreateShaderFromBytecode #{}: Invalid magic addr=0x{:08X} flags=0x{:08X}",
+                             s_createShaderFromBytecodeCount, bytecodeAddr, flags);
             }
         }
     }
     
-    // The effectContext contains pointers at offsets 0, 2, 4, 6 (indices 0, 2, 4, 6)
-    // These point to guest memory which contains garbage (0xCDCDCDCD indicates uninitialized heap)
-    // 
-    // IMPORTANT: Don't zero these! Zeroing them causes the game to hang.
-    // The garbage path issue is now handled at the ResolvePath level where we
-    // detect and reject paths with garbage characters (>127 or <32).
-    //
-    // Let the effectContext pass through and rely on path validation to catch garbage.
-    
-    // Set up output structure to indicate success
-    if (outputPtr) {
-        memset(outputPtr, 0, 0x60);
-        // Set status to "loaded" so game proceeds with shader system
-        outputPtr[0] = 1;  // Status: loaded
-        
-        if (callCount <= 5) {
-            LOGF_WARNING("EffectManager::Load - Set up SUCCESS stub at 0x{:08X}", 
-                g_memory.MapVirtual(outputPtr));
-        }
+    // Log stats periodically
+    if (s_createShaderFromBytecodeCount % 500 == 0) {
+        LOGF_WARNING("CreateShaderFromBytecode Stats: total={} hits={} misses={}",
+                     s_createShaderFromBytecodeCount, s_createShaderHits, s_createShaderMisses);
     }
     
-    // Return 1 (success) to let the game proceed with shader loading
-    return 1;
+    // Fall through to original function if we didn't intercept
+    __imp__sub_829D1758(ctx, base);
 }
 
-// Stub the effect manager that causes infinite shader lookup loops
-// This is a temporary fix until proper shader loading is implemented
-GUEST_FUNCTION_HOOK(sub_8285E048, EffectManagerStub);
+// =============================================================================
+// GTA IV Render Path Tracing Hooks
+// These hooks detect if game code reaches the render functions
+// =============================================================================
+extern "C" void __imp__sub_829D8860(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829CD958(PPCContext& ctx, uint8_t* base);
+
+static int s_gtaDrawPrimitiveCount = 0;
+static int s_gtaRenderFuncCount = 0;
+
+// Hook sub_829CD958 - the render function that calls DrawPrimitive
+PPC_FUNC(sub_829CD958)
+{
+    ++s_gtaRenderFuncCount;
+    
+    if (s_gtaRenderFuncCount <= 30 || (s_gtaRenderFuncCount % 500) == 0) {
+        // Check device+12740 which controls if drawing happens
+        uint32_t deviceAddr = ctx.r3.u32;
+        uint32_t vertexCount = 0;
+        if (deviceAddr != 0 && deviceAddr < 0xF0000000) {
+            uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
+            if (devicePtr) {
+                vertexCount = *reinterpret_cast<be<uint32_t>*>(devicePtr + 12740);
+            }
+        }
+        LOGF_WARNING("[GTA4 RENDER] sub_829CD958 #{} device={:#x} vertexCount(+12740)={} LR={:#x}",
+            s_gtaRenderFuncCount, deviceAddr, vertexCount, ctx.lr);
+    }
+    
+    // Call original
+    __imp__sub_829CD958(ctx, base);
+}
+
+// Hook sub_829D8860 - DrawPrimitive
+PPC_FUNC(sub_829D8860)
+{
+    ++s_gtaDrawPrimitiveCount;
+    
+    if (s_gtaDrawPrimitiveCount <= 50 || (s_gtaDrawPrimitiveCount % 1000) == 0) {
+        uint32_t device = ctx.r3.u32;
+        uint32_t primType = ctx.r4.u32;
+        uint32_t startVert = ctx.r5.u32;
+        uint32_t primCount = ctx.r6.u32;
+        LOGF_WARNING("[GTA4 DRAW] sub_829D8860 #{} device={:#x} type={} start={} count={} LR={:#x}",
+            s_gtaDrawPrimitiveCount, device, primType, startVert, primCount, ctx.lr);
+    }
+    
+    // Call the standard DrawPrimitive function
+    GuestDevice* guestDevice = static_cast<GuestDevice*>(g_memory.Translate(ctx.r3.u32));
+    if (guestDevice) {
+        DrawPrimitive(guestDevice, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
+    }
+}
 
 // =============================================================================
 // GTA IV GPU Memory Allocation Stubs
@@ -8260,6 +8701,16 @@ static uint32_t GpuMemAllocStub(uint32_t size, be<uint32_t>* outOffset)
 
 // Hook the GPU memory allocation function that's causing the hang
 GUEST_FUNCTION_HOOK(sub_829DFAD8, GpuMemAllocStub);
+
+// =============================================================================
+// GTA IV Shader Binding - DISABLED PPC_FUNC hooks
+// Now using GUEST_FUNCTION_HOOK with standard SetVertexShader/SetPixelShader
+// The hooks are defined below with the other GTA IV hooks
+// =============================================================================
+#if 0  // DISABLED - Using GUEST_FUNCTION_HOOK instead
+// Old PPC_FUNC hooks removed - they conflicted with GUEST_FUNCTION_HOOK
+// and weren't working because the handles aren't bytecode pointers
+#endif
 
 // =============================================================================
 // GTA IV Resource Creation 
@@ -8423,6 +8874,17 @@ GUEST_FUNCTION_HOOK(sub_826FEC28, DrawPrimitive);
 GUEST_FUNCTION_HOOK(sub_826FF030, DrawIndexedPrimitive);
 GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 
+// =============================================================================
+// GTA IV D3D Function Hooks (AGGRESSIVE - Force rendering pipeline)
+// Based on renderer_analysis_claude.md and Xenia trace analysis
+// =============================================================================
+GUEST_FUNCTION_HOOK(sub_829D8860, DrawPrimitive);        // GTA IV DrawPrimitive (4 params)
+GUEST_FUNCTION_HOOK(sub_829D4EE0, DrawIndexedPrimitive); // GTA IV UnifiedDraw (handles both)
+GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);           // GTA IV SetIndices (device+13580)
+GUEST_FUNCTION_HOOK(sub_829C9070, SetStreamSource);      // GTA IV SetStreamSource0 (device+12020)
+GUEST_FUNCTION_HOOK(sub_829D3728, SetTexture);           // GTA IV SetTexture (called 20x/frame)
+GUEST_FUNCTION_HOOK(sub_829C9440, SetVertexDeclaration); // GTA IV SetVertexDeclaration (device+10456)
+
 GUEST_FUNCTION_HOOK(sub_82547118, CreateVertexDeclaration);
 GUEST_FUNCTION_HOOK(sub_825470F8, SetVertexDeclaration);
 
@@ -8434,6 +8896,10 @@ GUEST_FUNCTION_HOOK(sub_82543AC8, SetIndices);
 
 GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader);
 GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
+
+// GTA IV Shader binding hooks
+GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);      // GTA IV SetVertexShader (device+10932)
+GUEST_FUNCTION_HOOK(sub_829D6690, SetPixelShader);       // GTA IV SetPixelShader (device+10936)
 
 GUEST_FUNCTION_HOOK(sub_82636BF8, BeginConditionalSurvey);
 GUEST_FUNCTION_HOOK(sub_82636C08, EndConditionalSurvey);

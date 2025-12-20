@@ -10,27 +10,27 @@
 #include "iso_file_system.h"
 #include "xcontent_file_system.h"
 
-#include "hashes/episode_sonic.h"
-#include "hashes/episode_shadow.h"
-#include "hashes/episode_silver.h"
-#include "hashes/episode_amigo.h"
-#include "hashes/mission_sonic.h"
-#include "hashes/mission_shadow.h"
-#include "hashes/mission_silver.h"
+// GTA IV uses simplified hash validation - DLC hashes TBD
 #include "hashes/game.h"
 
 static const std::string GameDirectory = "game";
 static const std::string DLCDirectory = "dlc";
-static const std::string EpisodeSonicDirectory = DLCDirectory + "/Episode Sonic Boss Attack";
-static const std::string EpisodeShadowDirectory = DLCDirectory + "/Episode Shadow Boss Attack";
-static const std::string EpisodeSilverDirectory = DLCDirectory + "/Episode Silver Boss Attack";
-static const std::string EpisodeAmigoDirectory = DLCDirectory + "/Team Attack Amigo";
-static const std::string MissionSonicDirectory = DLCDirectory + "/Mission Pack Sonic Very Hard";
-static const std::string MissionShadowDirectory = DLCDirectory + "/Mission Pack Shadow Very Hard";
-static const std::string MissionSilverDirectory = DLCDirectory + "/Mission Pack Silver Very Hard";
+static const std::string TLADDirectory = DLCDirectory + "/TLAD";  // The Lost and Damned
+static const std::string TBOGTDirectory = DLCDirectory + "/TBOGT"; // The Ballad of Gay Tony
 static const std::string GameExecutableFile = "default.xex";
-static const std::string DLCValidationFile = "download.arc";
+static const std::string DLCValidationFile = "default.xex";  // GTA IV DLC uses xex as validation
 static const std::string ISOExtension = ".iso";
+static const std::string ZIPExtension = ".zip";
+
+// Temp directory for extracted ZIP files
+static std::filesystem::path g_tempExtractDir;
+
+// GTA IV RPF archives that need extraction
+static const std::vector<std::string> GameRpfArchives = {
+    "common.rpf",
+    "xbox360.rpf",
+    "audio.rpf"
+};
 
 static std::string fromU8(const std::u8string &str)
 {
@@ -47,8 +47,71 @@ static std::string toLower(std::string str) {
     return str;
 };
 
+// Extract ZIP file to temp directory and return extracted STFS path
+static std::filesystem::path extractZipToTemp(const std::filesystem::path &zipPath)
+{
+    // Create temp directory if needed
+    if (g_tempExtractDir.empty())
+    {
+        g_tempExtractDir = std::filesystem::temp_directory_path() / "LibertyRecomp_DLC";
+    }
+    
+    // Create unique extraction folder based on ZIP filename
+    std::string zipName = zipPath.stem().string();
+    std::filesystem::path extractDir = g_tempExtractDir / zipName;
+    
+    // Clean up any existing extraction
+    std::error_code ec;
+    if (std::filesystem::exists(extractDir))
+    {
+        std::filesystem::remove_all(extractDir, ec);
+    }
+    std::filesystem::create_directories(extractDir, ec);
+    
+    // Use system unzip command (available on macOS/Linux)
+    std::string cmd = fmt::format("unzip -q -o \"{}\" -d \"{}\"", 
+        zipPath.string(), extractDir.string());
+    int result = std::system(cmd.c_str());
+    
+    if (result != 0)
+    {
+        return {};
+    }
+    
+    // Find the STFS file inside (usually in a subfolder like 545407F2/00000002/...)
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(extractDir))
+    {
+        if (entry.is_regular_file() && XContentFileSystem::check(entry.path()))
+        {
+            return entry.path();
+        }
+    }
+    
+    // If no STFS found, return the extract dir itself (might be a folder-based DLC)
+    return extractDir;
+}
+
 static std::unique_ptr<VirtualFileSystem> createFileSystemFromPath(const std::filesystem::path &path)
 {
+    // Check for ZIP files first - extract and then parse
+    if (toLower(fromPath(path.extension())) == ZIPExtension)
+    {
+        std::filesystem::path extractedPath = extractZipToTemp(path);
+        if (!extractedPath.empty())
+        {
+            // Try to create file system from extracted content
+            if (XContentFileSystem::check(extractedPath))
+            {
+                return XContentFileSystem::create(extractedPath);
+            }
+            else if (std::filesystem::is_directory(extractedPath))
+            {
+                return DirectoryFileSystem::create(extractedPath);
+            }
+        }
+        return nullptr;
+    }
+    
     if (XContentFileSystem::check(path))
     {
         return XContentFileSystem::create(path);
@@ -223,45 +286,32 @@ static bool copyFile(const FilePair &pair, const uint64_t *fileHashes, VirtualFi
 
 static DLC detectDLC(const std::filesystem::path &sourcePath, VirtualFileSystem &sourceVfs, Journal &journal)
 {
-    std::string name;
-    std::ifstream dlcFile(sourcePath);
-
-    dlcFile.seekg(0x412, std::ios::beg);
-
-    char ch;
-    while (dlcFile.get(ch) && ch != '\0') {
-        // If we're reading an invalid file, don't keep reading
-        // past the maximum length of a valid DLC file name
-        if (name.length() > 41) {
-            break;
-        }
-
-        name += ch;
-        // DLC file names have one character proceeded by null,
-        // so we skip every other byte to read a continuous string
-        dlcFile.seekg(1, std::ios::cur);
+    // GTA IV DLC detection - check for specific files
+    // TLAD has tlad.rpf, TBOGT has tbogt.rpf
+    if (sourceVfs.exists("tlad.rpf") || sourceVfs.exists("TLAD/tlad.rpf"))
+    {
+        return DLC::TheLostAndDamned;
     }
-
-    dlcFile.close();
-
-    if (name == "Additional Episode \"Sonic Boss Attack\"") {
-        return DLC::EpisodeSonic;
-    } else if (name == "Additional Episode \"Shadow Boss Attack\"") {
-        return DLC::EpisodeShadow;
-    } else if (name == "Additional Episode \"Silver Boss Attack\"") {
-        return DLC::EpisodeSilver;
-    } else if (name == "Additional Episode \"Team Attack Amigo\"") {
-        return DLC::EpisodeAmigo;
-    } else if (name == "Additional Mission Pack \"Sonic/Very Hard") {
-        return DLC::MissionSonic;
-    } else if (name == "Additional Mission Pack \"Shadow/Very Har") {
-        return DLC::MissionShadow;
-    } else if (name == "Additional Mission Pack \"Silver/Very Har") {
-        return DLC::MissionSilver;
+    else if (sourceVfs.exists("tbogt.rpf") || sourceVfs.exists("TBOGT/tbogt.rpf"))
+    {
+        return DLC::TheBalladOfGayTony;
+    }
+    
+    // Try to detect by folder name
+    std::string pathStr = sourcePath.filename().string();
+    std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
+    
+    if (pathStr.find("lost") != std::string::npos || pathStr.find("tlad") != std::string::npos)
+    {
+        return DLC::TheLostAndDamned;
+    }
+    else if (pathStr.find("ballad") != std::string::npos || pathStr.find("tbogt") != std::string::npos || pathStr.find("gay tony") != std::string::npos)
+    {
+        return DLC::TheBalladOfGayTony;
     }
 
     journal.lastResult = Journal::Result::UnknownDLCType;
-    journal.lastErrorMessage = fmt::format("DLC type for {} is unknown.", name);
+    journal.lastErrorMessage = fmt::format("Could not detect GTA IV DLC type for {}.", sourcePath.string());
     return DLC::Unknown;
 }
 
@@ -269,40 +319,17 @@ static bool fillDLCSource(DLC dlc, Installer::DLCSource &dlcSource)
 {
     switch (dlc)
     {
-    case DLC::EpisodeSonic:
-        dlcSource.filePairs = { EpisodeSonicFiles, EpisodeSonicFilesSize };
-        dlcSource.fileHashes = EpisodeSonicHashes;
-        dlcSource.targetSubDirectory = EpisodeSonicDirectory;
+    case DLC::TheLostAndDamned:
+        // TLAD uses same file structure - will need TLAD-specific hashes later
+        dlcSource.filePairs = { }; // Empty for now - DLC support TBD
+        dlcSource.fileHashes = nullptr;
+        dlcSource.targetSubDirectory = TLADDirectory;
         return true;
-    case DLC::EpisodeShadow:
-        dlcSource.filePairs = { EpisodeShadowFiles, EpisodeShadowFilesSize };
-        dlcSource.fileHashes = EpisodeShadowHashes;
-        dlcSource.targetSubDirectory = EpisodeShadowDirectory;
-        return true;
-    case DLC::EpisodeSilver:
-        dlcSource.filePairs = { EpisodeSilverFiles, EpisodeSilverFilesSize };
-        dlcSource.fileHashes = EpisodeSilverHashes;
-        dlcSource.targetSubDirectory = EpisodeSilverDirectory;
-        return true;
-    case DLC::EpisodeAmigo:
-        dlcSource.filePairs = { EpisodeAmigoFiles, EpisodeAmigoFilesSize };
-        dlcSource.fileHashes = EpisodeAmigoHashes;
-        dlcSource.targetSubDirectory = EpisodeAmigoDirectory;
-        return true;
-    case DLC::MissionSonic:
-        dlcSource.filePairs = { MissionSonicFiles, MissionSonicFilesSize };
-        dlcSource.fileHashes = MissionSonicHashes;
-        dlcSource.targetSubDirectory = MissionSonicDirectory;
-        return true;
-    case DLC::MissionShadow:
-        dlcSource.filePairs = { MissionShadowFiles, MissionShadowFilesSize };
-        dlcSource.fileHashes = MissionShadowHashes;
-        dlcSource.targetSubDirectory = MissionShadowDirectory;
-        return true;
-    case DLC::MissionSilver:
-        dlcSource.filePairs = { MissionSilverFiles, MissionSilverFilesSize };
-        dlcSource.fileHashes = MissionSilverHashes;
-        dlcSource.targetSubDirectory = MissionSilverDirectory;
+    case DLC::TheBalladOfGayTony:
+        // TBOGT uses same file structure - will need TBOGT-specific hashes later
+        dlcSource.filePairs = { }; // Empty for now - DLC support TBD
+        dlcSource.fileHashes = nullptr;
+        dlcSource.targetSubDirectory = TBOGTDirectory;
         return true;
     default:
         return false;
@@ -323,20 +350,10 @@ bool Installer::checkDLCInstall(const std::filesystem::path &baseDirectory, DLC 
 {
     switch (dlc)
     {
-    case DLC::EpisodeSonic:
-        return std::filesystem::exists(baseDirectory / EpisodeSonicDirectory / DLCValidationFile);
-    case DLC::EpisodeShadow:
-        return std::filesystem::exists(baseDirectory / EpisodeShadowDirectory / DLCValidationFile);
-    case DLC::EpisodeSilver:
-        return std::filesystem::exists(baseDirectory / EpisodeSilverDirectory / DLCValidationFile);
-    case DLC::EpisodeAmigo:
-        return std::filesystem::exists(baseDirectory / EpisodeAmigoDirectory / DLCValidationFile);
-    case DLC::MissionSonic:
-        return std::filesystem::exists(baseDirectory / MissionSonicDirectory / DLCValidationFile);
-    case DLC::MissionShadow:
-        return std::filesystem::exists(baseDirectory / MissionShadowDirectory / DLCValidationFile);
-    case DLC::MissionSilver:
-        return std::filesystem::exists(baseDirectory / MissionSilverDirectory / DLCValidationFile);
+    case DLC::TheLostAndDamned:
+        return std::filesystem::exists(baseDirectory / TLADDirectory / DLCValidationFile);
+    case DLC::TheBalladOfGayTony:
+        return std::filesystem::exists(baseDirectory / TBOGTDirectory / DLCValidationFile);
     default:
         return false;
     }
@@ -484,6 +501,21 @@ bool Installer::parseSources(const Input &input, Journal &journal, Sources &sour
         }
     }
 
+    // Parse the contents of the title update (GTA IV uses full XEX replacement).
+    if (!input.updateSource.empty())
+    {
+        if (!parseContent(input.updateSource, sources.update, journal))
+        {
+            return false;
+        }
+        
+        // Title update contains replacement default.xex - add its size
+        if (sources.update->exists(GameExecutableFile))
+        {
+            sources.totalSize += sources.update->getSize(GameExecutableFile);
+        }
+    }
+
     // Parse the contents of the DLC Packs.
     for (const auto &path : input.dlcSources)
     {
@@ -543,11 +575,112 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
         return false;
     }
     
+    // If title update provided, replace default.xex with updated version
+    // GTA IV title updates are full XEX replacements (not .xexp patches)
+    if (sources.update != nullptr && sources.update->exists(GameExecutableFile))
+    {
+        std::filesystem::path gameXexPath = targetDirectory / GameDirectory / GameExecutableFile;
+        std::vector<uint8_t> updateXex;
+        if (sources.update->load(GameExecutableFile, updateXex))
+        {
+            std::ofstream outFile(gameXexPath, std::ios::binary);
+            if (outFile.is_open())
+            {
+                outFile.write(reinterpret_cast<const char*>(updateXex.data()), updateXex.size());
+                journal.progressCounter += updateXex.size();
+            }
+        }
+    }
+    
     // Ensure platform directories exist
     PlatformPaths::EnsureDirectoriesExist();
     
-    // Scan for shaders - first check if already extracted, then try RPF extraction
+    // Auto-copy AES key if found in source or game directory
+    // Check multiple possible locations for the AES key
+    std::filesystem::path aesKeyDest = PlatformPaths::GetAesKeyPath();
+    if (!std::filesystem::exists(aesKeyDest))
+    {
+        std::error_code ec;
+        // Try to find aes_key.bin in common locations
+        std::vector<std::filesystem::path> aesKeySearchPaths = {
+            targetDirectory / GameDirectory / "aes_key.bin",
+            targetDirectory / "aes_key.bin",
+            std::filesystem::current_path() / "aes_key.bin",
+            std::filesystem::current_path().parent_path() / "aes_key.bin"
+        };
+        
+        // Also try source VFS
+        if (sources.game && sources.game->exists("aes_key.bin"))
+        {
+            std::vector<uint8_t> keyData;
+            if (sources.game->load("aes_key.bin", keyData) && keyData.size() >= 32)
+            {
+                std::ofstream outFile(aesKeyDest, std::ios::binary);
+                if (outFile.is_open())
+                {
+                    outFile.write(reinterpret_cast<const char*>(keyData.data()), keyData.size());
+                }
+            }
+        }
+        else
+        {
+            // Search filesystem paths
+            for (const auto& searchPath : aesKeySearchPaths)
+            {
+                if (std::filesystem::exists(searchPath, ec) && std::filesystem::file_size(searchPath, ec) >= 32)
+                {
+                    std::filesystem::copy_file(searchPath, aesKeyDest, std::filesystem::copy_options::overwrite_existing, ec);
+                    if (!ec) break;
+                }
+            }
+        }
+    }
+    
+    // Extract RPF archives (GTA IV specific)
+    // This extracts common.rpf, xbox360.rpf, audio.rpf to their respective folders
     std::filesystem::path gameDir = targetDirectory / GameDirectory;
+    {
+        std::vector<uint8_t> aesKey;
+        std::filesystem::path aesKeyPath = PlatformPaths::GetAesKeyPath();
+        if (std::filesystem::exists(aesKeyPath))
+        {
+            RpfExtractor::LoadAesKey(aesKeyPath, aesKey);
+        }
+        
+        for (const auto& rpfName : GameRpfArchives)
+        {
+            std::filesystem::path rpfPath = gameDir / rpfName;
+            if (!std::filesystem::exists(rpfPath))
+            {
+                continue; // RPF not found, skip
+            }
+            
+            // Determine output directory based on RPF name
+            std::string baseName = rpfName.substr(0, rpfName.find('.'));
+            std::filesystem::path outputDir = gameDir / baseName;
+            
+            // Skip if already extracted
+            if (std::filesystem::exists(outputDir) && !std::filesystem::is_empty(outputDir))
+            {
+                continue;
+            }
+            
+            // Extract RPF contents
+            std::error_code ec;
+            std::filesystem::create_directories(outputDir, ec);
+            
+            RpfExtractor::ExtractionResult result = RpfExtractor::Extract(
+                rpfPath,
+                outputDir,
+                aesKey
+            );
+            
+            // RPF extraction failure is non-fatal for now
+            // Game may have pre-extracted files
+        }
+    }
+    
+    // Scan for shaders - first check if already extracted, then try RPF extraction
     std::filesystem::path shaderCacheDir = targetDirectory / "shader_cache";
     std::filesystem::path extractedDir = shaderCacheDir / "extracted";
     
@@ -651,4 +784,37 @@ DLC Installer::parseDLC(const std::filesystem::path &sourcePath)
     }
 
     return detectDLC(sourcePath, *sourceVfs, journal);
+}
+
+bool Installer::parseUpdate(const std::filesystem::path &sourcePath)
+{
+    // GTA IV title updates contain a full XEX replacement (not .xexp patch)
+    std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
+    if (sourceVfs == nullptr)
+    {
+        return false;
+    }
+
+    // Title updates contain default.xex as full replacement
+    return sourceVfs->exists(GameExecutableFile);
+}
+
+TitleUpdate Installer::detectUpdateVersion(const std::filesystem::path &sourcePath)
+{
+    // Detect title update version from file name or content
+    std::string filename = sourcePath.filename().string();
+    std::transform(filename.begin(), filename.end(), filename.begin(), ::tolower);
+    
+    if (filename.find("v8") != std::string::npos)
+        return TitleUpdate::V8;
+    if (filename.find("v7") != std::string::npos)
+        return TitleUpdate::V7;
+    if (filename.find("v6") != std::string::npos)
+        return TitleUpdate::V6;
+    if (filename.find("v5") != std::string::npos)
+        return TitleUpdate::V5;
+    if (filename.find("v4") != std::string::npos)
+        return TitleUpdate::V4;
+    
+    return TitleUpdate::Unknown;
 }

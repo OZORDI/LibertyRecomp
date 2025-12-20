@@ -112,6 +112,30 @@ This document describes the comprehensive installation flow that handles:
 
 ---
 
+## Optional: Install-Time PPC Recompilation (XenonRecomp)
+
+Because GTA IV title updates are distributed as **full `default.xex` replacements**, supporting multiple update versions cleanly can require recompiling against the specific XEX the user provides.
+
+Recent testing indicates XenonRecomp can run fast enough on modern machines that it is reasonable to support an **install-time (or first-run) PPC recompilation** mode. This can allow consumer distributions to avoid shipping the generated `ppc_recomp.*.cpp` sources.
+
+### High-Level Concept
+
+1. User selects base game source and optionally a title update source
+2. Installer extracts/copies the chosen XEX into the install directory
+3. Installer runs `XenonAnalyse` (if switch tables are not provided) and then `XenonRecomp` against the chosen XEX
+4. The generated PPC C++ sources are compiled into the host binary (or into a loadable module, depending on the final architecture)
+
+### Important Constraint
+
+XenonRecomp outputs **C++ source**; it does not produce native machine code by itself. Therefore, install-time PPC recompilation is only viable if the installer can:
+
+1. Bundle a compatible C++ toolchain for the platform, or
+2. Require a system toolchain (macOS: Xcode Command Line Tools; Windows: MSVC Build Tools; Linux: clang/gcc + build essentials)
+
+If neither is acceptable for the target audience, the alternative is to ship pre-generated PPC sources (or separate builds) for the supported XEX versions.
+
+---
+
 ## Key Components
 
 ### Platform Paths (`install/platform_paths.h/cpp`)

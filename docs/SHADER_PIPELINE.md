@@ -224,6 +224,37 @@ if (findResult == nullptr) {
 
 > **Note:** There is no runtime fallback. All shaders must be pre-compiled at build time.
 
+## Current Status
+
+| Platform | Embedded Cache | Status |
+|----------|---------------|--------|
+| macOS (Metal/AIR) | ✅ 8 MB compressed → 29 MB | Ready |
+| Linux (Vulkan/SPIR-V) | ✅ 703 KB compressed → 5.5 MB | Ready |
+| Windows (D3D12/DXIL) | ❌ Empty | Needs generation |
+
+### Generating DXIL for Windows
+
+DXIL can only be generated on Windows. To regenerate `shader_cache.cpp` with DXIL:
+
+1. Extract GTA IV shaders on any platform:
+   ```bash
+   # From extracted game files
+   tools/rage_fxc_extractor --batch path/to/common/shaders/fxl_final output_dir
+   ```
+
+2. Build XenosRecomp on Windows:
+   ```bash
+   cd tools/XenosRecomp
+   mkdir build && cd build
+   cmake .. -DXENOS_RECOMP_DXIL=ON
+   cmake --build . --config Release
+   ```
+
+3. Run XenosRecomp to generate shader_cache.cpp:
+   ```bash
+   XenosRecomp.exe path/to/extracted/shaders LibertyRecompLib/shader/shader_cache.cpp tools/XenosRecomp/XenosRecomp/shader_common.h
+   ```
+
 ## Statistics
 
 From the 79 `.fxc` files in GTA IV:
@@ -236,6 +267,7 @@ From the 79 `.fxc` files in GTA IV:
 | Pixel shaders | ~530 |
 | AIR cache (macOS) | 8 MB compressed → 29 MB decompressed |
 | SPIR-V cache (Linux) | 703 KB compressed → 5.5 MB decompressed |
+| DXIL cache (Windows) | Not yet generated |
 
 ## Error Handling
 

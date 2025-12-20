@@ -5,16 +5,23 @@
 
 #include "virtual_file_system.h"
 
+// GTA IV DLC types
 enum class DLC {
     Unknown,
-    EpisodeSonic,
-    EpisodeShadow,
-    EpisodeSilver,
-    EpisodeAmigo,
-    MissionSonic,
-    MissionShadow,
-    MissionSilver,
-    Count = MissionSilver
+    TheLostAndDamned,   // TLAD - The Lost and Damned (~1.8GB)
+    TheBalladOfGayTony, // TBOGT - The Ballad of Gay Tony (~1.9GB)
+    Count = TheBalladOfGayTony
+};
+
+// GTA IV Title Update versions
+enum class TitleUpdate {
+    Unknown,
+    None,       // Base game (v1.0)
+    V4,         // Title Update v4
+    V5,         // Title Update v5
+    V6,         // Title Update v6
+    V7,         // Title Update v7 (Europe only)
+    V8,         // Title Update v8 (latest)
 };
 
 struct Journal
@@ -50,6 +57,7 @@ struct Installer
     struct Input
     {
         std::filesystem::path gameSource;
+        std::filesystem::path updateSource;  // Title update STFS container
         std::list<std::filesystem::path> dlcSources;
     };
 
@@ -63,6 +71,7 @@ struct Installer
     struct Sources 
     {
         std::unique_ptr<VirtualFileSystem> game;
+        std::unique_ptr<VirtualFileSystem> update;  // Title update container
         std::vector<DLCSource> dlc;
         uint64_t totalSize = 0;
     };
@@ -81,6 +90,12 @@ struct Installer
 
     // Convenience method for checking if the specified file contains the game. This should be used when the user selects the file.
     static bool parseGame(const std::filesystem::path &sourcePath);
+
+    // Convenience method for checking if the specified file contains a title update. This should be used when the user selects the file.
+    static bool parseUpdate(const std::filesystem::path &sourcePath);
+    
+    // Detect which title update version is in the STFS container
+    static TitleUpdate detectUpdateVersion(const std::filesystem::path &sourcePath);
 
     // Convenience method for the installer to check which DLC the file that was specified corresponds to. This should be used when the user selects the file.
     static DLC parseDLC(const std::filesystem::path &sourcePath);
