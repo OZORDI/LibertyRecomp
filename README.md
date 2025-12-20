@@ -41,10 +41,10 @@ This project is in **early development**. Current progress:
 - [ ] Game-specific patches and fixes
 
 ### TODO
-- [ ] Audio system implementation
-- [ ] Save data handling
-- [ ] Input remapping for GTA IV controls
-- [ ] Network/multiplayer stubs
+- [x] Audio system implementation (XMA decoder, SDL2 driver)
+- [ ] Save data handling (basic stubs exist, full implementation pending)
+- [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
+- [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
 
 ## Installation
 
@@ -93,6 +93,18 @@ cmake --build ./out/build/macos-release --target LibertyRecomp
 | [Dumping Guide](/docs/DUMPING-en.md) | How to extract game files from Xbox 360 |
 | [Shader Pipeline](/docs/SHADER_PIPELINE.md) | RAGE FXC → platform shader conversion |
 | [Installation Architecture](/docs/INSTALLATION_ARCHITECTURE.md) | Platform paths and install flow |
+
+## Performance Comparison
+
+Performance comparison of GTA IV running on macOS using different methods:
+
+| Method | Screenshot |
+|--------|------------|
+| **Crossover (Wine)** | ![Crossover Performance](docs/images/perf_crossover.png) |
+| **Xenia (Xbox 360 Emulator)** | ![Xenia Performance](docs/images/perf_xenia.png) |
+| **RPCS3 (PS3 Emulator)** | ![RPCS3 Performance](docs/images/perf_rpcs3.png) |
+
+> **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
 
 ## Credits
 
