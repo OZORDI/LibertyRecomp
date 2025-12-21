@@ -4429,6 +4429,812 @@ sub_82120FB8 (Main Game Setup) - COMPLETE SUBSYSTEM LIST
 
 ---
 
+## 24. UI Menu System Deep Traces ★ CUSTOM TOGGLES/SLIDERS
+
+This section documents the complete UI menu framework for **adding custom toggles, sliders, and menu options**.
+
+### 24.1 Menu System Architecture Overview
+
+```
+UI Menu Framework (0x8274xxxx)
+    │
+    ├── Menu Context (38,496 bytes)
+    │   ├── Tab Array (16 bytes per tab)
+    │   ├── Item Arrays (per tab)
+    │   ├── Option Arrays (per item)
+    │   └── Navigation Map (2 bytes per item)
+    │
+    ├── Panel Context (112 bytes)
+    │   └── Per-panel state and rendering
+    │
+    └── Menu Slots (21,888 bytes × 12)
+        └── Pre-allocated menu buffers
+
+Global Pointers:
+├── 0x81323088 → Main menu manager
+├── 0x8132308C → Secondary panel
+└── 0x81323038 → Slot array (12 × 4 bytes)
+```
+
+---
+
+### 24.2 sub_8274F568 (0x8274F568) - Menu Context Constructor
+
+**Location:** `ppc_recomp.57.cpp:37524`
+**Allocation:** 38,496 bytes via `sub_8218BE28()`
+
+```
+sub_8274F568 (Menu Context Constructor)
+    │
+    ├── Args:
+    │   └── r3 = pointer to store result
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: GLOBAL STATE RESET
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r31 = r3 (save output ptr)
+    ├── r30 = 0 (null constant)
+    ├── r28 = 1 (enabled constant)
+    │
+    ├── [r31+44] = 0                      // Clear state
+    ├── [r31+48] = 0 (16-bit)             // Clear count
+    ├── [r31+50] = 0 (16-bit)             // Clear index
+    │
+    ├── Global[0x813201B0] = 0            // Menu state 1
+    ├── Global[0x813201C8] = 0            // Menu state 2
+    ├── Global[0x813201D7] = 0            // Menu flag 1
+    ├── Global[0x813201D8] = 0            // Menu flag 2
+    ├── Global[0x813201D5] = 0            // Menu flag 3
+    │
+    ├── Global[0x8130E004] = 1            // Enable flag 1
+    ├── Global[0x8130E005] = 1            // Enable flag 2
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: CONTEXT INIT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── [r31+38] = 1                      // Active flag
+    ├── [r31+39] = 0                      // State 1
+    ├── [r31+40] = 0                      // State 2
+    ├── [r31+41] = 0                      // State 3
+    ├── [r31+42] = 0                      // State 4
+    │
+    ├── Global[0x813201CC] = 0            // Clear pending
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: BUFFER ALLOCATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8218BE28(0)                   // Alloc (size from context)
+    │
+    ├── Global[0x813201D0] = result       // Store buffer ptr
+    │
+    ├── [r31+12] = 0                      // Clear ptr 1
+    ├── [r31+16] = 0                      // Clear ptr 2
+    ├── [r31+20] = 0                      // Clear tab array
+    ├── [r31+24] = 0                      // Clear vector data
+    ├── [r31+36] = 0                      // Clear state
+    ├── [r31+37] = 1                      // Set ready flag
+    │
+    ├── Check: Global[0x813201CC]
+    │   └── [r31+6806] = (result != 0) ? 0 : 1
+    │
+    ├── [r31+32] = 0                      // Clear scale
+    ├── [r31+28] = 0                      // Clear nav map
+    ├── [r31+0] = 0                       // Clear slot 0
+    ├── [r31+4] = 0                       // Clear slot 1
+    ├── [r31+8] = 0                       // Clear slot 2
+    │
+    └── Return r3 (context pointer)
+```
+
+**Menu Context Structure (52+ bytes core):**
+```
+Offset  Size  Field                    Purpose
+------  ----  -----                    -------
+0x00    4     Slot 0 pointer
+0x04    4     Slot 1 pointer
+0x08    4     Slot 2 pointer
+0x0C    4     Reserved ptr 1
+0x10    4     Reserved ptr 2
+0x14    4     Tab array pointer        ★ TABS START HERE
+0x18    4     Vector data pointer
+0x1C    4     Navigation map pointer   ★ NAV MAP
+0x20    4     Scale factor (float)
+0x24    1     State byte 1
+0x25    1     Ready flag (1=ready)
+0x26    1     Active flag (1=active)
+0x27    1     State byte 2
+0x28    1     State byte 3
+0x29    1     State byte 4
+0x2A    1     State byte 5
+0x2C    4     Pending state
+0x30    2     Item count (16-bit)
+0x32    2     Current index (16-bit)
+```
+
+---
+
+### 24.3 sub_8274E0B0 (0x8274E0B0) - Panel Context Init
+
+**Location:** `ppc_recomp.57.cpp:34471`
+**Size:** 112 bytes
+
+```
+sub_8274E0B0 (Panel Context Init)
+    │
+    ├── Args:
+    │   └── r3 = panel context pointer (112 bytes)
+    │
+    ├── f0 = [0x81200BFC] (default scale, float)
+    │
+    ├── [r3+32] = f0                      // Scale factor
+    ├── [r3+36] = 0                       // State 1
+    ├── [r3+38] = 0                       // State 2
+    ├── [r3+37] = 0                       // State 3
+    ├── [r3+28] = 0                       // Nav ptr
+    ├── [r3+20] = 0                       // Tab array
+    ├── [r3+16] = 0                       // Reserved
+    ├── [r3+24] = 0                       // Vector data
+    ├── [r3+104] = 1                      // Enabled flag
+    │
+    └── Return
+```
+
+**Panel Context Structure (112 bytes):**
+```
+Offset  Size  Field                    Purpose
+------  ----  -----                    -------
+0x10    4     Reserved pointer
+0x14    4     Tab array pointer
+0x18    4     Vector data pointer
+0x1C    4     Navigation map pointer
+0x20    4     Scale factor (float)
+0x24    1     State byte 1
+0x25    1     State byte 2
+0x26    1     State byte 3
+0x68    1     Enabled flag (1=enabled)
+```
+
+---
+
+### 24.4 sub_8274E518 (0x8274E518) - Create Menu Slot
+
+**Location:** `ppc_recomp.57.cpp:35187`
+**Slot Size:** 21,888 bytes each (128 × 171 bytes)
+
+```
+sub_8274E518 (Create Menu Slot)
+    │
+    ├── Args:
+    │   ├── r3 = slot output pointer
+    │   └── r4 = slot index (0-11)
+    │
+    ├── r31 = r3 (save output)
+    ├── r30 = r4 (save index)
+    │
+    ├── r11 = [r13+0] (TLS base)
+    ├── r10 = 1676 (TLS offset)
+    │
+    ├── r3 = [TLS+1676] (heap manager)
+    ├── r4 = r30 × 21888                  // Slot size calculation
+    │
+    ├── Call vtable[8] on heap:           // Allocate slot buffer
+    │   └── 128 items × 171 bytes = 21,888 bytes
+    │
+    ├── [r31+0] = result                  // Store slot ptr
+    ├── [r31+8] = r30                     // Store slot index
+    ├── [r31+4] = 0                       // Clear counter
+    │
+    └── Return
+```
+
+**Slot Entry Structure (12 bytes per slot ref):**
+```
+Offset  Size  Field
+------  ----  -----
+0x00    4     Slot buffer pointer (21,888 bytes)
+0x04    4     Item counter
+0x08    4     Slot index
+```
+
+---
+
+### 24.5 sub_8274E428 (0x8274E428) - Initialize Tab Array ★ KEY FOR ADDING TABS
+
+**Location:** `ppc_recomp.57.cpp:35028`
+
+```
+sub_8274E428 (Initialize Tab Array)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   └── r4 = tab count (max tabs)
+    │
+    ├── r31 = r3 (context)
+    ├── r30 = r4 (count)
+    ├── r29 = 0x0FFFFFFF (max check)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: ALLOCATE TAB ARRAY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── [r31+38] = r30                    // Store tab count
+    │
+    ├── r3 = r30 × 16                     // 16 bytes per tab
+    ├── If r30 > 0x0FFFFFFF: r3 = -1      // Overflow check
+    │
+    ├── sub_8218BE28(r3)                  // Allocate tab array
+    │
+    ├── [r31+20] = result                 // Store tab array ptr
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: INIT EACH TAB ENTRY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── If r30 <= 0: skip init
+    │
+    ├── r10 = 0, r9 = r30, r8 = 0
+    │
+    │loc_loop:
+    ├── r11 = [r31+20] + r8               // Tab entry address
+    │
+    ├── [r11+5] = 0                       // Item count = 0
+    ├── [r11+8] = 0                       // Sub-items ptr = NULL
+    ├── [r11+12] = 0                      // Options ptr = NULL
+    ├── [r11+0] = 0                       // Tab ID = 0
+    │
+    ├── r9--, r8 += 16
+    ├── If r9 != 0: goto loc_loop
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: ALLOCATE VECTOR DATA
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r3 = r30 × 16                     // Vector size
+    ├── sub_8218BE28(r3)
+    │
+    ├── [r31+16] = result                 // Store vector ptr
+    │
+    └── Return 1 (success)
+```
+
+**Tab Entry Structure (16 bytes):**
+```
+Offset  Size  Field                    Purpose
+------  ----  -----                    -------
+0x00    4     Tab ID / state flags     ★ VISIBILITY FLAGS
+0x04    1     Enabled flag             ★ SHOW/HIDE TAB
+0x05    1     Item count               ★ NUMBER OF ITEMS
+0x06    2     Reserved
+0x08    4     Sub-items array ptr      ★ ITEM VALUES (toggles/sliders)
+0x0C    4     Options array ptr        ★ ITEM OPTIONS (choices)
+```
+
+---
+
+### 24.6 sub_8274E190 (0x8274E190) - Add Tab to Menu ★ USE THIS TO ADD CUSTOM TABS
+
+**Location:** `ppc_recomp.57.cpp:34614`
+
+```
+sub_8274E190 (Add Tab to Menu)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   ├── r4 = tab index (0-based)
+    │   └── r5 = item count for this tab
+    │
+    ├── r31 = r3 (context)
+    ├── r30 = r4 × 16                     // Tab offset (16 bytes each)
+    ├── r29 = r5 (item count)
+    │
+    ├── ═══════════════════════════════════════════
+    │   STORE ITEM COUNT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r11 = [r31+20] (tab array)
+    ├── r11 = r11 + r30                   // Tab entry
+    ├── [r11+5] = r29                     // ★ Set item count
+    │
+    ├── ═══════════════════════════════════════════
+    │   ALLOCATE SUB-ITEMS ARRAY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r3 = r29                          // Size = item count
+    ├── sub_8218BE28(r3)
+    │
+    ├── r10 = [r31+20] + r30
+    ├── [r10+8] = result                  // ★ Store sub-items ptr
+    │
+    ├── ═══════════════════════════════════════════
+    │   ALLOCATE OPTIONS ARRAY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r3 = r29                          // Size = item count
+    ├── sub_8218BE28(r3)
+    │
+    ├── r11 = [r31+20] + r30
+    ├── [r11+12] = result                 // ★ Store options ptr
+    │
+    ├── r11 = [r31+20]
+    ├── [r11 + r30] = 0                   // Clear tab state
+    │
+    └── Return
+```
+
+**Usage Example (Adding a Tab with 4 Items):**
+```cpp
+// r3 = menu context, r4 = tab 6, r5 = 4 items
+sub_8274E190(menu_ctx, 6, 4);  // Creates tab 6 with 4 items
+```
+
+---
+
+### 24.7 sub_8274E1F8 (0x8274E1F8) - Enable/Disable Tab ★ TOGGLE VISIBILITY
+
+**Location:** `ppc_recomp.57.cpp:34679`
+
+```
+sub_8274E1F8 (Enable/Disable Tab)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   ├── r4 = tab index
+    │   └── r5 = enabled (0=hidden, 1+=visible)
+    │
+    ├── r10 = [r3+20]                     // Tab array
+    ├── r11 = r4 × 16                     // Tab offset
+    ├── r11 = r11 + r10                   // Tab entry
+    │
+    ├── r9 = (r5 >= 1) ? 1 : 0            // Normalize to 0/1
+    │
+    ├── [r11+4] = r9                      // ★ ENABLED FLAG
+    │
+    └── Return
+```
+
+**Usage Example (Show/Hide Tab):**
+```cpp
+// Show tab 0
+sub_8274E1F8(menu_ctx, 0, 1);
+
+// Hide tab 3
+sub_8274E1F8(menu_ctx, 3, 0);
+```
+
+---
+
+### 24.8 sub_8274E340 (0x8274E340) - Set Item Value ★ FOR SLIDERS/TOGGLES
+
+**Location:** `ppc_recomp.57.cpp:34876`
+
+```
+sub_8274E340 (Set Item Value)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   ├── r4 = tab index
+    │   ├── r5 = item index within tab
+    │   └── r6 = value (byte, 0-255)
+    │
+    ├── r10 = [r3+20]                     // Tab array
+    ├── r11 = r4 × 16                     // Tab offset
+    ├── r11 = r11 + r10                   // Tab entry
+    ├── r11 = [r11+8]                     // Sub-items array
+    │
+    ├── [r11 + r5] = r6                   // ★ STORE VALUE AT ITEM INDEX
+    │
+    └── Return
+```
+
+**Usage Examples:**
+```cpp
+// Set tab 0, item 2 to value 5 (e.g., slider position)
+sub_8274E340(menu_ctx, 0, 2, 5);
+
+// Set tab 1, item 0 to value 1 (e.g., toggle ON)
+sub_8274E340(menu_ctx, 1, 0, 1);
+
+// Set tab 1, item 0 to value 0 (e.g., toggle OFF)
+sub_8274E340(menu_ctx, 1, 0, 0);
+```
+
+---
+
+### 24.9 sub_8274E328 (0x8274E328) - Set Item Option ★ FOR MULTI-CHOICE
+
+**Location:** `ppc_recomp.57.cpp:34856`
+
+```
+sub_8274E328 (Set Item Option)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   ├── r4 = tab index
+    │   ├── r5 = item index within tab
+    │   └── r6 = option value (byte)
+    │
+    ├── r10 = [r3+20]                     // Tab array
+    ├── r11 = r4 × 16                     // Tab offset
+    ├── r11 = r11 + r10                   // Tab entry
+    ├── r11 = [r11+12]                    // ★ OPTIONS ARRAY (not sub-items!)
+    │
+    ├── [r11 + r5] = r6                   // Store option at item index
+    │
+    └── Return
+```
+
+**Difference from sub_8274E340:**
+- `sub_8274E340` → Sets **value** (slider position, toggle state)
+- `sub_8274E328` → Sets **option** (which choice is selected in multi-choice)
+
+---
+
+### 24.10 sub_8274E4C8 (0x8274E4C8) - Set Navigation Map ★ D-PAD NAVIGATION
+
+**Location:** `ppc_recomp.57.cpp:35127`
+
+```
+sub_8274E4C8 (Set Navigation Map)
+    │
+    ├── Args:
+    │   ├── r3 = menu context pointer
+    │   ├── r4 = item index (global)
+    │   ├── r5 = up/left neighbor
+    │   └── r6 = down/right neighbor
+    │
+    ├── r10 = [r3+28]                     // Navigation map ptr
+    ├── r11 = r4 × 2                      // 2 bytes per item
+    │
+    ├── [r10 + r11 + 0] = r5              // Up/Left neighbor index
+    ├── [r10 + r11 + 1] = r6              // Down/Right neighbor index
+    │
+    └── Return
+```
+
+**Navigation Map Entry (2 bytes per item):**
+```
+Byte 0: Index of item when pressing UP/LEFT
+Byte 1: Index of item when pressing DOWN/RIGHT
+```
+
+---
+
+### 24.11 sub_8274E358 (0x8274E358) - Set Tab Count
+
+**Location:** `ppc_recomp.57.cpp:34896`
+
+```
+sub_8274E358 (Set Tab Count)
+    │
+    ├── Args:
+    │   ├── r3 = panel context pointer
+    │   └── r4 = tab count
+    │
+    ├── r31 = r4, r30 = r3
+    │
+    ├── r3 = r31 × 16                     // Alloc size
+    ├── If r31 > 0x0FFFFFFF: r3 = -1
+    │
+    ├── sub_8218BE28(r3)                  // Allocate
+    │
+    ├── If result != 0:
+    │   ├── [r30+37] = r31                // Store count
+    │   ├── [r30+24] = result             // Store vector ptr
+    │   └── Return 1
+    │
+    └── Return r3
+```
+
+---
+
+### 24.12 sub_8274E3C0 (0x8274E3C0) - Set Navigation Count
+
+**Location:** `ppc_recomp.57.cpp:34962`
+
+```
+sub_8274E3C0 (Set Navigation Count)
+    │
+    ├── Args:
+    │   ├── r3 = panel context pointer
+    │   └── r4 = nav item count
+    │
+    ├── r3 = r4 × 2                       // 2 bytes per nav entry
+    ├── sub_8218BE28(r3)
+    │
+    ├── [r30+36] = r31                    // Store count
+    ├── [r30+28] = result                 // Store nav map ptr
+    │
+    └── Return 1
+```
+
+---
+
+### 24.13 sub_82258100 (0x82258100) - Complete Menu System Init
+
+**Location:** `ppc_recomp.9.cpp:43650`
+**Stack Frame:** 160 bytes
+
+This is the main menu initialization that sets up 6 tabs with 4 items each (24 total menu items).
+
+```
+sub_82258100 (Menu System Init) - COMPLETE TRACE
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: MAIN MENU MANAGER (38,496 bytes)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8218BE28(38496)               // Allocate menu context
+    │
+    ├── If success:
+    │   └── sub_8274F568(result)          // Init context
+    │
+    ├── r30 = 0x81323088                  // Global menu ptr
+    ├── [r30] = result                    // Store manager
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: CREATE 12 MENU SLOTS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E518([r30], 12)           // 12 slots
+    │
+    ├── r29 = 0x81323038                  // Slot array base
+    ├── r31 = r29
+    │
+    ├── Loop 12 times:
+    │   ├── sub_8274E588([r30])           // Get next slot
+    │   ├── [r31] = result                // Store slot ptr
+    │   └── r31 += 4
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: PANEL CONTEXT (112 bytes)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8218BE28(112)
+    │
+    ├── If success:
+    │   └── sub_8274E0B0(result)          // Init panel
+    │
+    ├── r31 = 0x8132308C                  // Secondary panel ptr
+    ├── [r31] = result
+    │
+    ├── sub_8274E358([r31], 8)            // 8 tabs for panel
+    ├── sub_8274E3C0([r31], 12)           // 12 nav items
+    ├── sub_8274E428([r31], 6)            // 6 tab slots
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 4: INIT 8 VECTOR SLOTS (float3 each)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── f31 = [0x81200BFC] (scale)
+    │
+    ├── For i = 0..7:
+    │   ├── [r11+24][i×16+0] = f31        // X
+    │   ├── [r11+24][i×16+4] = f31        // Y
+    │   └── [r11+24][i×16+8] = f31        // Z
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 5: NAVIGATION MAPPING (12 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Navigation setup (up/down pairs):
+    │   │
+    │   ├── Item 0: up=0, down=1
+    │   ├── Item 1: up=2, down=3
+    │   ├── Item 2: up=4, down=5
+    │   ├── Item 3: up=6, down=7
+    │   ├── Item 4: up=0, down=2
+    │   ├── Item 5: up=1, down=3
+    │   ├── Item 6: up=2, down=4
+    │   ├── Item 7: up=3, down=5
+    │   ├── Item 8: up=4, down=6
+    │   ├── Item 9: up=5, down=7
+    │   ├── Item 10: up=6, down=0
+    │   └── Item 11: up=7, down=1
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 6: TAB 0 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 0, 4)         // Tab 0: 4 items
+    ├── sub_8274E1F8([r31], 0, 0)         // Tab 0: visible
+    │
+    ├── sub_8274E340([r31], 0, 0, 2)      // Item 0: value=2
+    ├── sub_8274E340([r31], 0, 1, 3)      // Item 1: value=3
+    ├── sub_8274E340([r31], 0, 2, 1)      // Item 2: value=1
+    ├── sub_8274E340([r31], 0, 3, 0)      // Item 3: value=0
+    │
+    ├── sub_8274E328([r31], 0, 0, 1)      // Item 0: option=1
+    ├── sub_8274E328([r31], 0, 1, 5)      // Item 1: option=5
+    ├── sub_8274E328([r31], 0, 2, 0)      // Item 2: option=0
+    ├── sub_8274E328([r31], 0, 3, 4)      // Item 3: option=4
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 7: TAB 1 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 1, 4)
+    ├── sub_8274E1F8([r31], 1, 0)
+    │
+    ├── sub_8274E340([r31], 1, 0, 4)
+    ├── sub_8274E340([r31], 1, 1, 5)
+    ├── sub_8274E340([r31], 1, 2, 3)
+    ├── sub_8274E340([r31], 1, 3, 2)
+    │
+    ├── sub_8274E328([r31], 1, 0, 2)
+    ├── sub_8274E328([r31], 1, 1, 7)
+    ├── sub_8274E328([r31], 1, 2, 1)
+    ├── sub_8274E328([r31], 1, 3, 6)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 8: TAB 2 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 2, 4)
+    ├── sub_8274E1F8([r31], 2, 0)
+    │
+    ├── sub_8274E340([r31], 2, 0, 6)
+    ├── sub_8274E340([r31], 2, 1, 7)
+    ├── sub_8274E340([r31], 2, 2, 5)
+    ├── sub_8274E340([r31], 2, 3, 4)
+    │
+    ├── sub_8274E328([r31], 2, 0, 3)
+    ├── sub_8274E328([r31], 2, 1, 9)
+    ├── sub_8274E328([r31], 2, 2, 2)
+    ├── sub_8274E328([r31], 2, 3, 8)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 9: TAB 3 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 3, 4)
+    ├── sub_8274E1F8([r31], 3, 0)
+    │
+    ├── sub_8274E340([r31], 3, 0, 0)
+    ├── sub_8274E340([r31], 3, 1, 1)
+    ├── sub_8274E340([r31], 3, 2, 7)
+    ├── sub_8274E340([r31], 3, 3, 6)
+    │
+    ├── sub_8274E328([r31], 3, 0, 0)
+    ├── sub_8274E328([r31], 3, 1, 11)
+    ├── sub_8274E328([r31], 3, 2, 3)
+    ├── sub_8274E328([r31], 3, 3, 10)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 10: TAB 4 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 4, 4)
+    ├── sub_8274E1F8([r31], 4, 0)
+    │
+    ├── sub_8274E340([r31], 4, 0, 3)
+    ├── sub_8274E340([r31], 4, 1, 5)
+    ├── sub_8274E340([r31], 4, 2, 7)
+    ├── sub_8274E340([r31], 4, 3, 1)
+    │
+    ├── sub_8274E328([r31], 4, 0, 7)
+    ├── sub_8274E328([r31], 4, 1, 9)
+    ├── sub_8274E328([r31], 4, 2, 11)
+    ├── sub_8274E328([r31], 4, 3, 5)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 11: TAB 5 SETUP (4 items)
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E190([r31], 5, 4)
+    ├── sub_8274E1F8([r31], 5, 0)
+    │
+    ├── sub_8274E340([r31], 5, 0, 4)
+    ├── sub_8274E340([r31], 5, 1, 2)
+    ├── sub_8274E340([r31], 5, 2, 0)
+    ├── sub_8274E340([r31], 5, 3, 6)
+    │
+    ├── sub_8274E328([r31], 5, 0, 6)
+    ├── sub_8274E328([r31], 5, 1, 4)
+    ├── sub_8274E328([r31], 5, 2, 10)
+    ├── sub_8274E328([r31], 5, 3, 8)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 12: FINALIZE AND UPDATE
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8274E5A0([r31])               // Compute normals
+    ├── sub_8274E220([r31])               // Update nav state
+    │
+    ├── f30 = [0x8120E670] (final scale)
+    ├── [r31+32] = f30                    // Set scale
+    │
+    ├── ... (Second panel setup similar) ...
+    │
+    └── Return
+```
+
+---
+
+### 24.14 Hook Points for Custom Menu Options
+
+#### Adding a New Toggle:
+```cpp
+// 1. Find menu context at 0x8132308C
+uint32_t menu_ctx = PPC_LOAD_U32(0x8132308C);
+
+// 2. Add a new tab (index 6) with 2 items
+sub_8274E190(menu_ctx, 6, 2);
+
+// 3. Enable the tab
+sub_8274E1F8(menu_ctx, 6, 1);
+
+// 4. Set initial toggle values
+sub_8274E340(menu_ctx, 6, 0, 0);  // Toggle 1: OFF
+sub_8274E340(menu_ctx, 6, 1, 1);  // Toggle 2: ON
+```
+
+#### Adding a Slider:
+```cpp
+// Sliders use the same sub_8274E340 with value 0-255
+sub_8274E340(menu_ctx, 6, 0, 128);  // Slider at 50%
+sub_8274E340(menu_ctx, 6, 0, 255);  // Slider at 100%
+```
+
+#### Reading Current Value:
+```cpp
+// Get tab array
+uint32_t tab_array = PPC_LOAD_U32(menu_ctx + 20);
+
+// Get tab 6 entry
+uint32_t tab_entry = tab_array + (6 * 16);
+
+// Get sub-items array
+uint32_t items = PPC_LOAD_U32(tab_entry + 8);
+
+// Read item 0 value
+uint8_t value = PPC_LOAD_U8(items + 0);
+```
+
+---
+
+### 24.15 Settings Storage Analysis
+
+Settings are stored via the save system. Key observation from traces:
+
+**Settings Save Path:**
+1. Menu values at `[menu_ctx+20]` → tab array
+2. Tab entry `[tab+8]` → sub-items (values)
+3. Tab entry `[tab+12]` → options (choices)
+
+**To Persist Custom Settings:**
+Hook into save system at `sub_82124540` to write custom menu values.
+
+---
+
+### 24.16 Summary Table
+
+| Function | Purpose | Key Args |
+|----------|---------|----------|
+| `sub_8274F568` | Create menu context | ptr (returns 38KB) |
+| `sub_8274E0B0` | Init panel context | ptr (112 bytes) |
+| `sub_8274E518` | Create menu slot | ptr, index |
+| `sub_8274E428` | Init tab array | ctx, count |
+| `sub_8274E190` | **Add tab** | ctx, tab_idx, item_count |
+| `sub_8274E1F8` | **Enable/disable tab** | ctx, tab_idx, enabled |
+| `sub_8274E340` | **Set item value** | ctx, tab, item, value |
+| `sub_8274E328` | **Set item option** | ctx, tab, item, option |
+| `sub_8274E4C8` | Set navigation | ctx, item, up, down |
+| `sub_8274E220` | Update menu state | ctx |
+| `sub_8274E5A0` | Finalize/compute | ctx |
+
+**Global Addresses:**
+| Address | Content |
+|---------|---------|
+| `0x81323088` | Main menu manager (38,496 bytes) |
+| `0x8132308C` | Secondary panel (112 bytes) |
+| `0x81323038` | Slot array (12 × 4 bytes) |
+| `0x813201B0` | Menu state flags |
+
+---
+
 ## Document History
 - 2025-12-20: Consolidated `MODULE_REWRITE_INDEX.md` + `REWRITE_HANDOFF.md` into this playbook.
 - 2025-12-20: Added comprehensive per-module handoff documentation with function tables, test cases, and implementation notes.
@@ -4445,3 +5251,4 @@ sub_82120FB8 (Main Game Setup) - COMPLETE SUBSYSTEM LIST
 - 2025-12-21: **Added Online/Achievement/Leaderboard Traces (§21)** - Deep traces for `sub_8219ADF0` (online system init with 228 config entries), `sub_8212EDC8` (achievement tracking with 50+ trackers, 508-byte structures, 6 achievement types), `sub_8212F578` (leaderboard init with 27 categories), `sub_82199658` (tracker factory). Includes tracker structure layout and implementation hooks.
 - 2025-12-21: **Added Xbox 360 Hardware-Tied Functions (§22)** - Critical rewrite documentation for `sub_827D89B8` call tree: cmdline parser, XNet init/cleanup, thread events (256 kernel events), core engine init (D3D, GPU), game subsystem init (944B manager, 352B world), profile/save loading (XContent APIs). Includes rewrite priority matrix and cross-platform implementation strategies.
 - 2025-12-21: **Added Game Init Deep Traces (§23)** - Complete execution traces for `sub_8218C600` (14-phase core engine init: D3D, GPU, TLS, render buffers), `sub_82120EE8` (game manager 944B, world context 352B), `sub_821250B0` (memory pool allocator with bitmap), `sub_82318F60` (RAGE string tables), `sub_82124080` (7-phase profile/save init with XContent), `sub_82120FB8` (**63 subsystem init** with complete order list).
+- 2025-12-21: **Added UI Menu System Deep Traces (§24)** - Complete menu framework for custom toggles/sliders: `sub_8274F568` (38KB context), `sub_8274E0B0` (112B panel), `sub_8274E518` (21KB slots), `sub_8274E428` (tab array init), `sub_8274E190` (★add tab), `sub_8274E1F8` (★enable/disable), `sub_8274E340` (★set value for sliders/toggles), `sub_8274E328` (★set option for multi-choice), `sub_8274E4C8` (D-pad nav). Includes complete `sub_82258100` trace (12 phases, 6 tabs × 4 items), hook examples, and global addresses (0x81323088 manager, 0x8132308C panel).
