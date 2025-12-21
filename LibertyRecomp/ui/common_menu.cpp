@@ -1,6 +1,7 @@
 #include "common_menu.h"
 #include <patches/aspect_ratio_patches.h>
 #include <ui/imgui_utils.h>
+#include <ui/gta4_style.h>
 #include <app.h>
 
 static constexpr double ANIMATION_DURATION = 10.0;
@@ -32,7 +33,8 @@ void CommonMenu::Draw()
     auto redStripCornerUVs = PIXELS_TO_UV_COORDS(1024, 1024, 0, 301, 300, 50);
     auto redStripLeftStretchUVs = PIXELS_TO_UV_COORDS(1024, 1024, 0, 301, 150, 50);
     auto redStripRightStretchUVs = PIXELS_TO_UV_COORDS(1024, 1024, 300, 301, 300, 50);
-    auto redStripColour = IM_COL32(168, 15, 15, 255);
+    // GTA IV Style: Orange strip instead of red
+    auto redStripColour = GTA4Style::Colors::Orange;
     auto redStripOffsetY = Scale(81.5, true);
     auto redStripHeight = Scale(50, true);
     auto redStripMotion = topPlateMotion + redStripOffsetY;
@@ -41,69 +43,21 @@ void CommonMenu::Draw()
     ImVec2 redStripCornerMin = { min.x - Scale(43.5, true), redStripMotion };
     ImVec2 redStripCornerMax = { redStripCornerMin.x + Scale(300, true), redStripMotion + redStripHeight };
 
-    auto gradientTop = IM_COL32(0, 103, 255, 255);
-    auto gradientBottom = IM_COL32(0, 92, 229, 255);
+    // GTA IV Style: Dark background with subtle gradient
+    auto gradientTop = GTA4Style::Colors::BackgroundDark;
+    auto gradientBottom = GTA4Style::Colors::Background;
     auto gradientHeight = Scale(120, true);
 
     // Draw gradient to fill gap between red strip and top metal plates.
-    if (!ReduceDraw)
-        drawList->AddRectFilledMultiColor({ 0.0f, topPlateMotion }, { res.x, topPlateMotion + gradientHeight }, gradientTop, gradientTop, gradientBottom, gradientBottom);
-
+    // GTA IV Style: Solid black background - no textures
     if (!ReduceDraw)
     {
-        // Draw corner left red strip.
-        drawList->AddImage(g_upTexMainMenu1.get(), redStripCornerMin, redStripCornerMax, GET_UV_COORDS(redStripCornerUVs), redStripColour);
+        // Draw solid black header area
+        drawList->AddRectFilled({ 0.0f, 0.0f }, { res.x, topPlateMotion + gradientHeight }, GTA4Style::Colors::Background);
+        
+        // Draw orange accent strip (simple solid rectangle)
+        drawList->AddRectFilled({ 0.0f, redStripCornerMin.y }, { res.x, redStripCornerMax.y }, redStripColour);
 
-        // Draw left stretched red strip.
-        drawList->AddImage(g_upTexMainMenu1.get(), { 0.0f, redStripCornerMin.y }, { redStripCornerMin.x, redStripCornerMax.y }, GET_UV_COORDS(redStripLeftStretchUVs), redStripColour);
-
-        // Draw right stretched red strip.
-        drawList->AddImage(g_upTexMainMenu1.get(), { redStripCornerMax.x, redStripCornerMin.y }, { res.x, redStripCornerMax.y }, GET_UV_COORDS(redStripRightStretchUVs), redStripColour);
-
-        auto redStripHighlightWidth = Scale(270, true);
-        auto redStripHighlightHeight = Scale(48, true);
-        auto redStripHighlightY = redStripCornerMin.y - Scale(3, true);
-
-        auto drawRedStripHighlight = [&](ImVec2 redStripHighlightMin, uint32_t tlColour, uint32_t brColour)
-        {
-            auto redStripHighlightUVs = PIXELS_TO_UV_COORDS(1024, 1024, 201, 501, 264, 50);
-
-            ImVec2 redStripHighlightMax = { redStripHighlightMin.x + redStripHighlightWidth, redStripHighlightMin.y + redStripHighlightHeight };
-
-            SetAdditive(true);
-            SetHorizontalGradient(redStripHighlightMin, redStripHighlightMax, tlColour, brColour);
-
-            drawList->AddImage(g_upTexMainMenu1.get(), redStripHighlightMin, redStripHighlightMax, GET_UV_COORDS(redStripHighlightUVs));
-
-            ResetGradient();
-            ResetAdditive();
-        };
-
-        // Draw fixed highlights for red strip.
-        drawRedStripHighlight({ redStripCornerMax.x + Scale(68, true), redStripHighlightY }, IM_COL32(255, 172, 0, 0), IM_COL32(255, 172, 0, 67));
-        drawRedStripHighlight({ redStripCornerMax.x + Scale(-43.5, true), redStripHighlightY }, IM_COL32(255, 89, 0, 0), IM_COL32(255, 89, 0, 20));
-
-        auto redStripHighlightMotionOffsetX = Scale(63, true);
-        auto redStripHighlightMotionX1Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 10 : 0, 10, m_isClosing);
-        auto redStripHighlightMotionX2Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 12 : 2, 10, m_isClosing);
-        auto redStripHighlightMotionAlphaIn1Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 10 : 0, 8, m_isClosing);
-        auto redStripHighlightMotionAlphaIn2Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 12 : 2, 8, m_isClosing);
-        auto redStripHighlightMotionAlphaOut1Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 18 : 8, 2, m_isClosing);
-        auto redStripHighlightMotionAlphaOut2Time = ComputeLinearMotion(m_titleTime, PlayTransitions ? 20 : 2, 2, m_isClosing);
-        auto redStripHighlightMotionX1 = Lerp(res.x + redStripHighlightWidth, min.x + redStripHighlightMotionOffsetX, redStripHighlightMotionX1Time);
-        auto redStripHighlightMotionX2 = Lerp(res.x + redStripHighlightWidth, min.x + redStripHighlightMotionOffsetX, redStripHighlightMotionX2Time);
-        auto redStripHighlightMotionAlpha1 = Lerp(0.0, 100.0, redStripHighlightMotionAlphaIn1Time);
-        auto redStripHighlightMotionAlpha2 = Lerp(0.0, 100.0, redStripHighlightMotionAlphaIn2Time);
-
-        if (redStripHighlightMotionAlphaIn1Time >= 1.0)
-            redStripHighlightMotionAlpha1 = Lerp(100.0, 0.0, redStripHighlightMotionAlphaOut1Time);
-
-        if (redStripHighlightMotionAlphaIn2Time >= 1.0)
-            redStripHighlightMotionAlpha2 = Lerp(100.0, 0.0, redStripHighlightMotionAlphaOut2Time);
-
-        // Draw animated highlights for title animation.
-        drawRedStripHighlight({ redStripHighlightMotionX1, redStripHighlightY }, IM_COL32(255, 172, 0, 0), IM_COL32(255, 172, 0, redStripHighlightMotionAlpha1));
-        drawRedStripHighlight({ redStripHighlightMotionX2, redStripHighlightY }, IM_COL32(255, 172, 0, 0), IM_COL32(255, 172, 0, redStripHighlightMotionAlpha2));
     }
 
     auto titleText = Title.empty() ? "DUMMY" : Title.data();
@@ -125,34 +79,7 @@ void CommonMenu::Draw()
     // Draw title.
     drawList->AddText(g_pFntNewRodin, titleFontSize, { titleOffsetXMotion, titleOffsetY }, IM_COL32(255, 255, 255, 255 * titleMotionTime), titleText);
 
-    if (!ReduceDraw)
-    {
-        // Draw top left corner metal plate.
-        drawList->AddImage(g_upTexMainMenu1.get(), topPlateCornerMin, topPlateCornerMax, GET_UV_COORDS(topPlateCornerUVs));
-
-        // Draw top right stretched metal plate.
-        SetHorizontalGradient(topPlateStretchMin, topPlateStretchMax, IM_COL32_WHITE, IM_COL32(200, 200, 200, 255));
-        drawList->AddImage(g_upTexMainMenu1.get(), topPlateStretchMin, topPlateStretchMax, GET_UV_COORDS(topPlateRightStretchUVs));
-        ResetGradient();
-
-        // Draw top left stretched metal plate for ultrawide.
-        if (g_aspectRatio > WIDE_ASPECT_RATIO)
-            AddImageFlipped(g_upTexMainMenu1.get(), { 0.0f, topPlateCornerMin.y }, { topPlateCornerMin.x + Scale(2, true), topPlateCornerMax.y }, GET_UV_COORDS(topPlateLeftStretchUVs), IM_COL32_WHITE, true);
-
-        // Draw flipped metal plates for narrow aspect ratios.
-        if (g_aspectRatio < WIDE_ASPECT_RATIO)
-        {
-            ImVec2 topPlateCornerExtendMin = { topPlateCornerMin.x, topPlateCornerMin.y - topPlateHeight };
-            ImVec2 topPlateCornerExtendMax = { topPlateCornerMax.x, topPlateCornerMin.y + Scale(1, true) };
-            ImVec2 topPlateStretchExtendMin = { topPlateStretchMin.x, topPlateStretchMin.y - topPlateHeight };
-            ImVec2 topPlateStretchExtendMax = { topPlateStretchMax.x, topPlateStretchMin.y + Scale(1, true) };
-
-            AddImageFlipped(g_upTexMainMenu1.get(), topPlateCornerExtendMin, topPlateCornerExtendMax, GET_UV_COORDS(topPlateCornerUVs), IM_COL32_WHITE, false, true);
-            SetHorizontalGradient(topPlateStretchExtendMin, topPlateStretchExtendMax, IM_COL32_WHITE, IM_COL32(200, 200, 200, 255));
-            AddImageFlipped(g_upTexMainMenu1.get(), topPlateStretchExtendMin, topPlateStretchExtendMax, GET_UV_COORDS(topPlateRightStretchUVs), IM_COL32_WHITE, false, true);
-            ResetGradient();
-        }
-    }
+    // GTA IV Style: No metal plates - just solid black background (already drawn above)
 
     auto textCoverCornerUVs = PIXELS_TO_UV_COORDS(1024, 1024, 801, 400, 150, 150);
     auto textCoverCornerExtendUVs = PIXELS_TO_UV_COORDS(1024, 1024, 801, 400, 125, 150);
@@ -162,7 +89,8 @@ void CommonMenu::Draw()
     auto textCoverWidth = Scale(149.5, true);
     auto textCoverHeight = Scale(150, true);
     auto textCoverMotion = Lerp(max.y + textCoverHeight, max.y - textCoverOffsetY - textCoverHeight, borderMotionTime);
-    auto textCoverColour = IM_COL32(0, 23, 57, 255);
+    // GTA IV Style: Dark panel color
+    auto textCoverColour = GTA4Style::Colors::BackgroundPanel;
 
     ImVec2 textCoverCornerLeftMin = { min.x, textCoverMotion };
     ImVec2 textCoverCornerLeftMax = { textCoverCornerLeftMin.x + textCoverWidth, textCoverCornerLeftMin.y + textCoverHeight };
@@ -276,16 +204,8 @@ void CommonMenu::Draw()
         // Draw description.
         drawList->AddText(g_pFntRodin, descFontSize, m_descPos, IM_COL32(255, 255, 255, Lerp(0, 255, descAlphaMotionTime)), Description.data());
 
-        // Draw left text cover.
-        drawList->AddImage(g_upTexMainMenu1.get(), { 0.0f, textCoverCornerLeftMin.y }, { textCoverCornerLeftMin.x + textCoverCornerUVCompensation, textCoverCornerLeftMax.y }, GET_UV_COORDS(textCoverCornerExtendUVs), textCoverColour);
-        drawList->AddImage(g_upTexMainMenu1.get(), textCoverCornerLeftMin, textCoverCornerLeftMax, GET_UV_COORDS(textCoverCornerUVs), textCoverColour);
-
-        // Draw centre text cover.
-        drawList->AddImage(g_upTexMainMenu1.get(), textCoverCentreMin, textCoverCentreMax, GET_UV_COORDS(textCoverCentreUVs), textCoverColour);
-
-        // Draw right text cover.
-        AddImageFlipped(g_upTexMainMenu1.get(), { textCoverCornerRightMax.x - textCoverCornerUVCompensation, textCoverCornerRightMin.y }, { res.x, textCoverCornerRightMax.y }, GET_UV_COORDS(textCoverCornerExtendUVs), textCoverColour);
-        AddImageFlipped(g_upTexMainMenu1.get(), textCoverCornerRightMin, textCoverCornerRightMax, GET_UV_COORDS(textCoverCornerUVs), textCoverColour, true);
+        // GTA IV Style: Simple dark text cover (solid rectangle, no texture)
+        drawList->AddRectFilled({ 0.0f, textCoverCornerLeftMin.y }, { res.x, textCoverCornerLeftMax.y }, textCoverColour);
     }
     else
     {
@@ -299,46 +219,10 @@ void CommonMenu::Draw()
     }
     else
     {
-        auto bottomPlateUVs = PIXELS_TO_UV_COORDS(1024, 1024, 1, -17, 700, 145);
-        auto bottomPlateStretchUVs = PIXELS_TO_UV_COORDS(1024, 1024, 1, -17, 128, 145);
-        auto bottomPlateOffsetX = Scale(-60, true);
-        auto bottomPlateOffsetY = Scale(12, true);
-        auto bottomPlateWidth = Scale(700, true);
+        // GTA IV Style: Solid black footer area - no metal plates
         auto bottomPlateHeight = Scale(145, true);
-        auto bottomPlateMotion = Lerp(max.y + bottomPlateHeight, (max.y + bottomPlateOffsetY) - bottomPlateHeight, borderMotionTime);
-
-        ImVec2 bottomPlateLeftMin = { min.x + bottomPlateOffsetX, bottomPlateMotion };
-        ImVec2 bottomPlateLeftMax = { bottomPlateLeftMin.x + bottomPlateWidth, bottomPlateMotion + bottomPlateHeight };
-        ImVec2 bottomPlateRightMin = { max.x - bottomPlateWidth - bottomPlateOffsetX, bottomPlateLeftMin.y };
-        ImVec2 bottomPlateRightMax = { bottomPlateRightMin.x + bottomPlateWidth, bottomPlateLeftMax.y };
-        
-        // Draw bottom left metal plate.
-        drawList->AddImage(g_upTexMainMenu1.get(), bottomPlateLeftMin, bottomPlateLeftMax, GET_UV_COORDS(bottomPlateUVs));
-
-        // Draw bottom right metal plate.
-        AddImageFlipped(g_upTexMainMenu1.get(), bottomPlateRightMin, bottomPlateRightMax, GET_UV_COORDS(bottomPlateUVs), IM_COL32_WHITE, true);
-
-        // Draw stretched metal plates for ultrawide.
-        if (g_aspectRatio > WIDE_ASPECT_RATIO)
-        {
-            // Draw bottom left stretched metal plate.
-            AddImageFlipped(g_upTexMainMenu1.get(), { 0.0f, bottomPlateLeftMin.y }, { bottomPlateLeftMin.x, bottomPlateLeftMax.y }, GET_UV_COORDS(bottomPlateStretchUVs), IM_COL32_WHITE, true);
-
-            // Draw bottom right stretched metal plate.
-            AddImageFlipped(g_upTexMainMenu1.get(), { bottomPlateRightMax.x, bottomPlateRightMin.y }, { res.x, bottomPlateRightMax.y }, GET_UV_COORDS(bottomPlateStretchUVs), IM_COL32_WHITE, true);
-        }
-
-        // Draw flipped metal plates for narrow aspect ratios.
-        if (g_aspectRatio < WIDE_ASPECT_RATIO)
-        {
-            ImVec2 bottomPlateLeftExtendMin = { bottomPlateLeftMin.x, bottomPlateLeftMax.y };
-            ImVec2 bottomPlateLeftExtendMax = { bottomPlateLeftMax.x, bottomPlateRightMax.y + bottomPlateHeight };
-            ImVec2 bottomPlateRightExtendMin = { bottomPlateRightMin.x, bottomPlateRightMax.y };
-            ImVec2 bottomPlateRightExtendMax = { bottomPlateRightMax.x, bottomPlateRightMax.y + bottomPlateHeight };
-
-            AddImageFlipped(g_upTexMainMenu1.get(), bottomPlateLeftExtendMin, bottomPlateLeftExtendMax, GET_UV_COORDS(bottomPlateUVs), IM_COL32_WHITE, false, true);
-            AddImageFlipped(g_upTexMainMenu1.get(), bottomPlateRightExtendMin, bottomPlateRightExtendMax, GET_UV_COORDS(bottomPlateUVs), IM_COL32_WHITE, true, true);
-        }
+        auto bottomPlateMotion = Lerp(max.y + bottomPlateHeight, max.y - bottomPlateHeight + Scale(12, true), borderMotionTime);
+        drawList->AddRectFilled({ 0.0f, bottomPlateMotion }, { res.x, res.y }, GTA4Style::Colors::Background);
     }
 
     if (App::s_isInit)

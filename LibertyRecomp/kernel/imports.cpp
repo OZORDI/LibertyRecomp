@@ -28,6 +28,7 @@
 #include <fstream>
 #include <algorithm>
 #include <vector>
+#include <mutex>
 
 #if defined(__APPLE__)
 #include <CommonCrypto/CommonCryptor.h>
@@ -155,7 +156,43 @@ namespace
     static std::unordered_map<uint32_t, NtDirHandle*> g_ntDirHandles;
     static std::unordered_map<uint32_t, NtVirtFileHandle*> g_ntVirtFileHandles;
     
-    // GPU Ring Buffer state for fake GPU consumption
+    // PM4 Packet Types (Xbox 360 GPU command buffer format)
+    enum PM4PacketType {
+        PM4_TYPE0 = 0,  // Register writes
+        PM4_TYPE1 = 1,  // Two register writes  
+        PM4_TYPE2 = 2,  // Filler/NOP
+        PM4_TYPE3 = 3,  // Commands
+    };
+    
+    // PM4 Type 3 Opcodes (from Xenia xenos.h)
+    enum PM4Type3Opcode {
+        PM4_ME_INIT               = 0x48,
+        PM4_NOP                   = 0x10,
+        PM4_INDIRECT_BUFFER       = 0x3f,
+        PM4_WAIT_REG_MEM          = 0x3c,
+        PM4_REG_RMW               = 0x21,
+        PM4_REG_TO_MEM            = 0x3e,
+        PM4_MEM_WRITE             = 0x3d,
+        PM4_COND_WRITE            = 0x45,
+        PM4_EVENT_WRITE           = 0x46,
+        PM4_EVENT_WRITE_SHD       = 0x58,
+        PM4_EVENT_WRITE_EXT       = 0x5a,
+        PM4_EVENT_WRITE_ZPD       = 0x5b,
+        PM4_DRAW_INDX             = 0x22,
+        PM4_DRAW_INDX_2           = 0x36,
+        PM4_VIZ_QUERY             = 0x23,
+        PM4_SET_CONSTANT          = 0x2d,
+        PM4_SET_CONSTANT2         = 0x55,
+        PM4_SET_SHADER_CONSTANTS  = 0x56,
+        PM4_IM_LOAD               = 0x27,
+        PM4_IM_LOAD_IMMEDIATE     = 0x2b,
+        PM4_INVALIDATE_STATE      = 0x3b,
+        PM4_SET_SHADER_BASES      = 0x4A,
+        PM4_INTERRUPT             = 0x54,
+        PM4_XE_SWAP               = 0x64,
+    };
+    
+    // GPU Ring Buffer state for GPU command processing
     struct GpuRingBufferState {
         uint32_t ringBufferBase = 0;      // Physical address of ring buffer
         uint32_t ringBufferSize = 0;      // Size in bytes (1 << size_log2)
@@ -171,8 +208,93 @@ namespace
         bool enginesInitialized = false;
         bool edramTrainingComplete = false;
         bool interruptSeen = false;
+        
+        // PM4 command processing state
+        uint32_t lastKnownWritePtr = 0;   // Last write pointer we saw
+        uint32_t processedReadPtr = 0;    // Where we've processed up to
+        
+        // Diagnostic counters
+        uint32_t pm4DrawCount = 0;
+        uint32_t pm4ShaderLoadCount = 0;
+        uint32_t pm4SetConstantCount = 0;
+        uint32_t pm4SwapCount = 0;
+        uint32_t pm4OtherCount = 0;
     };
     static GpuRingBufferState g_gpuRingBuffer;
+    
+    // PM4 opcode name for logging
+    static const char* GetPM4OpcodeName(uint32_t opcode) {
+        switch (opcode) {
+            case PM4_ME_INIT: return "ME_INIT";
+            case PM4_NOP: return "NOP";
+            case PM4_INDIRECT_BUFFER: return "INDIRECT_BUFFER";
+            case PM4_WAIT_REG_MEM: return "WAIT_REG_MEM";
+            case PM4_REG_RMW: return "REG_RMW";
+            case PM4_REG_TO_MEM: return "REG_TO_MEM";
+            case PM4_MEM_WRITE: return "MEM_WRITE";
+            case PM4_COND_WRITE: return "COND_WRITE";
+            case PM4_EVENT_WRITE: return "EVENT_WRITE";
+            case PM4_EVENT_WRITE_SHD: return "EVENT_WRITE_SHD";
+            case PM4_EVENT_WRITE_EXT: return "EVENT_WRITE_EXT";
+            case PM4_EVENT_WRITE_ZPD: return "EVENT_WRITE_ZPD";
+            case PM4_DRAW_INDX: return "DRAW_INDX";
+            case PM4_DRAW_INDX_2: return "DRAW_INDX_2";
+            case PM4_VIZ_QUERY: return "VIZ_QUERY";
+            case PM4_SET_CONSTANT: return "SET_CONSTANT";
+            case PM4_SET_CONSTANT2: return "SET_CONSTANT2";
+            case PM4_SET_SHADER_CONSTANTS: return "SET_SHADER_CONSTANTS";
+            case PM4_IM_LOAD: return "IM_LOAD";
+            case PM4_IM_LOAD_IMMEDIATE: return "IM_LOAD_IMMEDIATE";
+            case PM4_INVALIDATE_STATE: return "INVALIDATE_STATE";
+            case PM4_SET_SHADER_BASES: return "SET_SHADER_BASES";
+            case PM4_INTERRUPT: return "INTERRUPT";
+            case PM4_XE_SWAP: return "XE_SWAP";
+            default: return "UNKNOWN";
+        }
+    }
+    
+    // PPC function call tracking for D3D address identification
+    static std::unordered_map<uint32_t, uint32_t> g_ppcFunctionCallCounts;
+    static std::mutex g_ppcCallCountMutex;
+    static uint32_t g_ppcCallTrackingEnabled = 0;  // 0=off, 1=tracking, 2=reported
+    
+    void TrackPPCFunctionCall(uint32_t address) {
+        if (g_ppcCallTrackingEnabled != 1) return;
+        if (address < 0x82000000 || address > 0x82FFFFFF) return;  // Only track game code
+        
+        std::lock_guard<std::mutex> lock(g_ppcCallCountMutex);
+        g_ppcFunctionCallCounts[address]++;
+    }
+    
+    void ReportHotPPCFunctions() {
+        if (g_ppcCallTrackingEnabled != 1) return;
+        g_ppcCallTrackingEnabled = 2;  // Mark as reported to prevent repeated reports
+        
+        std::lock_guard<std::mutex> lock(g_ppcCallCountMutex);
+        
+        // Find functions in the D3D address ranges that are called frequently
+        std::vector<std::pair<uint32_t, uint32_t>> hotFunctions;
+        for (const auto& [addr, count] : g_ppcFunctionCallCounts) {
+            // Focus on 0x829Dxxxx (GTA IV D3D wrapper) and 0x826Fxxxx (possible draw functions)
+            if ((addr >= 0x829D0000 && addr <= 0x829EFFFF) ||
+                (addr >= 0x826F0000 && addr <= 0x826FFFFF) ||
+                (addr >= 0x82540000 && addr <= 0x8254FFFF)) {
+                if (count >= 100) {
+                    hotFunctions.push_back({addr, count});
+                }
+            }
+        }
+        
+        // Sort by count descending
+        std::sort(hotFunctions.begin(), hotFunctions.end(),
+            [](const auto& a, const auto& b) { return a.second > b.second; });
+        
+        // Log top 20 hot D3D functions
+        LOGF_WARNING("[HOT PPC FUNCTIONS] Found {} hot functions in D3D ranges:", hotFunctions.size());
+        for (size_t i = 0; i < std::min(hotFunctions.size(), size_t(20)); i++) {
+            LOGF_WARNING("  0x{:08X}: {} calls", hotFunctions[i].first, hotFunctions[i].second);
+        }
+    }
     
     // Global RPF streams for translation layer - opened once, used for all reads
     struct RpfStreamInfo {
@@ -730,7 +852,7 @@ namespace
         return (value + (align - 1)) & ~(align - 1);
     }
 
-    // AES key for RPF TOC decryption (loaded from RPF DUMP/aes_key.bin)
+    // AES key for RPF TOC decryption (loaded from install directory)
     static std::vector<uint8_t> g_aesKey;
 
     static void LoadAesKeyIfNeeded()
@@ -738,7 +860,27 @@ namespace
         if (!g_aesKey.empty())
             return;
 
-        const auto keyPath = GetGamePath() / "RPF DUMP" / "aes_key.bin";
+        // Try multiple locations for AES key
+        std::vector<std::filesystem::path> keyPaths = {
+            GetGamePath().parent_path() / "aes_key.bin",  // Install dir
+            GetGamePath() / "aes_key.bin",                 // Game dir
+            std::filesystem::current_path() / "aes_key.bin"  // Current dir
+        };
+        
+        std::filesystem::path keyPath;
+        for (const auto& path : keyPaths)
+        {
+            if (std::filesystem::exists(path))
+            {
+                keyPath = path;
+                break;
+            }
+        }
+        
+        if (keyPath.empty())
+        {
+            keyPath = GetGamePath().parent_path() / "aes_key.bin";  // Default for error message
+        }
         std::error_code ec;
         if (!std::filesystem::exists(keyPath, ec))
         {
@@ -1297,6 +1439,9 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 
     uint32_t Wait(uint32_t timeout) override
     {
+        static int s_waitCount = 0;
+        ++s_waitCount;
+        
         if (timeout == 0)
         {
             uint32_t currentCount = count.load();
@@ -1311,16 +1456,24 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
         else if (timeout == INFINITE)
         {
             uint32_t currentCount;
+            int loopCount = 0;
             while (true)
             {
                 currentCount = count.load();
                 if (currentCount != 0)
                 {
                     if (count.compare_exchange_weak(currentCount, currentCount - 1))
+                    {
+                        if (s_waitCount <= 30)
+                            LOGF_WARNING("[SemWait] #{} acquired count={} after {} loops", s_waitCount, currentCount, loopCount);
                         return STATUS_SUCCESS;
+                    }
                 }
                 else
                 {
+                    if (loopCount == 0 && s_waitCount <= 30)
+                        LOGF_WARNING("[SemWait] #{} blocking on count=0 (max={})...", s_waitCount, maximumCount);
+                    ++loopCount;
                     count.wait(0);
                 }
             }
@@ -2091,6 +2244,9 @@ uint32_t XamLoaderSetLaunchData()
     return 0;
 }
 
+// Forward declaration for PM4 scanning (defined later)
+void ScanRingBufferForPM4Packets();
+
 uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
     if (Handle == GUEST_INVALID_HANDLE_VALUE)
@@ -2108,10 +2264,136 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
         LOGF_IMPL(Utility, "NtWaitEx", "#{} handle=0x{:08X} timeout={} caller=0x{:08X}",
                   s_waitCount, Handle, timeout, callerLR);
     }
+    
+    // VBlank Heartbeat Injection - Fire at 60Hz from guest thread context
+    // This is safe here because NtWaitEx is called by valid Guest Threads with TLS setup
+    uint32_t vblankCallback = g_gpuRingBuffer.interruptCallback;
+    
+    if (vblankCallback != 0)
+    {
+        static int s_vblankCount = 0;
+        static int s_callsSinceVBlank = 0;
+        ++s_callsSinceVBlank;
+        
+        // Fire VBlank every 3 NtWaitEx calls to ensure steady heartbeat
+        // Game has blocking waits so need aggressive firing
+        if (s_callsSinceVBlank >= 3)
+        {
+            s_callsSinceVBlank = 0;
+            ++s_vblankCount;
+            
+            // Scan ring buffer for PM4 packets (diagnostic)
+            ScanRingBufferForPM4Packets();
+            
+            // Enable PPC call tracking after VBlank 10, report at VBlank 300
+            if (s_vblankCount == 10) {
+                g_ppcCallTrackingEnabled = 1;
+                LOGF_WARNING("[DIAG] Enabled PPC function call tracking at VBlank #{}", s_vblankCount);
+            }
+            if (s_vblankCount == 300) {
+                ReportHotPPCFunctions();
+            }
+            
+            if (s_vblankCount <= 20 || s_vblankCount % 60 == 0)
+            {
+                LOGF_IMPL(Utility, "VBlank", "Firing #{} from NtWaitEx (call-based)", s_vblankCount);
+            }
+            
+            // Execute the game's interrupt handler
+            auto func = g_memory.FindFunction(vblankCallback);
+            if (func)
+            {
+                PPCContext tempCtx = *g_ppcContext;
+                tempCtx.r3.u32 = 0;  // Interrupt Type 0 = VBlank
+                tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                func(tempCtx, g_memory.base);
+            }
+        }
+    }
 
     if (IsKernelObject(Handle))
     {
-        return GetKernelObject(Handle)->Wait(timeout);
+        // FIX: Handle can be either:
+        // 1. A kernel object handle (from NtCreateSemaphore/NtCreateEvent) - directly a KernelObject*
+        // 2. A guest dispatcher object address (XKSEMAPHORE/XKEVENT from KeInitialize*) - needs QueryKernelObject
+        
+        // Check if this is a guest dispatcher object by looking at the header
+        XDISPATCHER_HEADER* header = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Handle));
+        uint8_t objType = header->Type;
+        
+        KernelObject* obj = nullptr;
+        
+        // Type 5 = Semaphore, Type 0/1 = Event (synchronization/notification)
+        if (objType == 5)
+        {
+            // Guest XKSEMAPHORE - use QueryKernelObject to get actual Semaphore
+            obj = QueryKernelObject<Semaphore>(*header);
+            if (s_waitCount <= 30 || (Handle >= 0xEB2D0000 && Handle < 0xEB2E0000))
+            {
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKSEMAPHORE, queried kernel obj={}", 
+                            s_waitCount, Handle, obj ? "OK" : "NULL");
+            }
+        }
+        else if (objType == 0 || objType == 1)
+        {
+            // Guest XKEVENT - use QueryKernelObject to get actual Event
+            obj = QueryKernelObject<Event>(*header);
+            if (s_waitCount <= 30)
+            {
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKEVENT type={}, queried kernel obj={}", 
+                            s_waitCount, Handle, objType, obj ? "OK" : "NULL");
+            }
+        }
+        else
+        {
+            // Likely a direct kernel object handle (from NtCreate*)
+            obj = GetKernelObject(Handle);
+        }
+        
+        if (!obj)
+        {
+            LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} type={} - no kernel object found!", s_waitCount, Handle, objType);
+            return STATUS_TIMEOUT;
+        }
+        
+        // Force-succeed worker semaphore waits to allow workers to do their tasks
+        // Workers are waiting for work signals - force them to run so they can 
+        // potentially unblock the main thread which is stuck in sub_82273988
+        // Main thread is NOT in these waits - it's busy-waiting on memory inside sub_82273988
+        bool isWorkerSem = (Handle >= 0xEB2C0000 && Handle <= 0xEB2DFFFF) ||
+                           (Handle == 0xA82487B0 || Handle == 0xA82487F0 ||
+                            Handle == 0xA8240270 || Handle == 0xA82402B0);
+        if (isWorkerSem)
+        {
+            static int s_forceCount = 0;
+            if (++s_forceCount <= 30 || s_forceCount % 500 == 0)
+            {
+                LOGF_WARNING("[NtWaitEx] FORCE WORKER #{} sem 0x{:08X} timeout={}", 
+                            s_forceCount, Handle, timeout);
+            }
+            return STATUS_SUCCESS;
+        }
+        
+        // Log all other timeout=0 waits to find blocking handles
+        if (timeout == 0)
+        {
+            static int s_poll = 0;
+            if (++s_poll <= 50 || s_poll % 500 == 0)
+            {
+                LOGF_WARNING("[NtWaitEx] POLL #{} handle=0x{:08X} (not in force list)", s_poll, Handle);
+            }
+        }
+        
+        // Log ALL waits that actually reach Wait() - these are potential blocking points
+        static int s_actualWait = 0;
+        ++s_actualWait;
+        if (s_actualWait <= 50 || timeout == INFINITE)
+        {
+            LOGF_WARNING("[NtWaitEx] ACTUAL WAIT #{} handle=0x{:08X} timeout={} - WILL BLOCK!", 
+                        s_actualWait, Handle, timeout);
+        }
+        
+        return obj->Wait(timeout);
     }
     else
     {
@@ -2944,7 +3226,7 @@ void NtReadFileScatter()
 
 uint32_t NtReadFile(
     uint32_t FileHandle,
-    uint32_t /*Event*/,
+    uint32_t Event,  // IMPORTANT: Signal this event on completion for async I/O
     uint32_t /*ApcRoutine*/,
     uint32_t /*ApcContext*/,
     XIO_STATUS_BLOCK* IoStatusBlock,
@@ -2953,13 +3235,35 @@ uint32_t NtReadFile(
     be<int64_t>* ByteOffset)
 {
     static int s_readCount = 0;
+    static int s_eventSignalCount = 0;
     ++s_readCount;
     
     const uint64_t offset = ByteOffset ? static_cast<uint64_t>(ByteOffset->get()) : 0ull;
     if (s_readCount <= 50 || s_readCount % 500 == 0)
     {
-        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X}", s_readCount, FileHandle, Length, offset);
+        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X} event=0x{:08X}", 
+                  s_readCount, FileHandle, Length, offset, Event);
     }
+    
+    // Helper lambda to signal completion event if provided
+    auto signalCompletionEvent = [&]() {
+        if (Event != 0 && Event != GUEST_INVALID_HANDLE_VALUE && IsKernelObject(Event))
+        {
+            ++s_eventSignalCount;
+            if (s_eventSignalCount <= 20 || s_eventSignalCount % 100 == 0)
+            {
+                LOGF_WARNING("[ASYNC COMPLETE] NtReadFile signaling event 0x{:08X} (count={})", 
+                            Event, s_eventSignalCount);
+            }
+            
+            // Signal the event to wake any waiters
+            XDISPATCHER_HEADER* eventObj = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Event));
+            if (eventObj && (eventObj->Type == 0 || eventObj->Type == 1))
+            {
+                QueryKernelObject<::Event>(*eventObj)->Set();
+            }
+        }
+    };
     
     // Pump SDL events to keep window responsive
     PumpSdlEventsIfNeeded();
@@ -3010,6 +3314,7 @@ uint32_t NtReadFile(
 
         IoStatusBlock->Status = STATUS_SUCCESS;
         IoStatusBlock->Information = toCopy;
+        signalCompletionEvent();
         return STATUS_SUCCESS;
     }
 
@@ -3074,6 +3379,7 @@ uint32_t NtReadFile(
     {
         IoStatusBlock->Status = STATUS_END_OF_FILE;
         IoStatusBlock->Information = 0;
+        signalCompletionEvent();
         return STATUS_END_OF_FILE;
     }
 
@@ -3099,6 +3405,10 @@ uint32_t NtReadFile(
     const bool ok = !hFile->stream.bad();
     IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
     IoStatusBlock->Information = ok ? bytesRead : 0;
+    
+    // Signal completion event for async I/O
+    signalCompletionEvent();
+    
     return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
 }
 
@@ -3280,12 +3590,18 @@ void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 
 void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    static int s_count = 0;
+    static int s_waitCount = 0;
+    ++s_count;
+    
     uint32_t thisThread = g_ppcContext->r13.u32;
-    // printf("RtlEnterCriticalSection %x %x %x %x\n", thisThread, cs->OwningThread, cs->LockCount, cs->RecursionCount);
     assert(thisThread != NULL);
 
     std::atomic_ref owningThread(cs->OwningThread);
-
+    
+    int loopCount = 0;
+    constexpr int MAX_SPIN_LOOPS = 50;  // Very low - yield() is slow, force-acquire quickly
+    
     while (true) 
     {
         uint32_t previousOwner = 0;
@@ -3296,9 +3612,30 @@ void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
             return;
         }
 
-        // printf("wait start %x\n", cs);
-        owningThread.wait(previousOwner);
-        // printf("wait end\n");
+        // Log when we're waiting on a lock held by another thread
+        if (loopCount == 0) {
+            ++s_waitCount;
+            if (s_waitCount <= 20) {
+                LOGF_WARNING("[LOCK] RtlEnterCriticalSection #{} thisThread=0x{:08X} WAITING on owner=0x{:08X} cs=0x{:08X}",
+                             s_count, thisThread, previousOwner, reinterpret_cast<uintptr_t>(cs) & 0xFFFFFFFF);
+            }
+        }
+        ++loopCount;
+        
+        // After many spins, force acquire the lock to prevent deadlock
+        // This is a workaround for init-time deadlocks where owner is blocked
+        if (loopCount > MAX_SPIN_LOOPS) {
+            if (s_waitCount <= 30) {
+                LOGF_WARNING("[LOCK] FORCE ACQUIRE cs=0x{:08X} after {} spins (owner=0x{:08X} may be blocked)",
+                             reinterpret_cast<uintptr_t>(cs) & 0xFFFFFFFF, loopCount, previousOwner);
+            }
+            owningThread.store(thisThread);
+            cs->RecursionCount = 1;
+            return;
+        }
+        
+        // Brief yield instead of blocking wait
+        std::this_thread::yield();
     }
 }
 
@@ -3507,6 +3844,188 @@ void VdInitializeRingBuffer(uint32_t physAddr, uint32_t sizeLog2)
                  physAddr, sizeLog2, g_gpuRingBuffer.ringBufferSize);
 }
 
+// Scan a command buffer for PM4 packets (helper function)
+// Returns number of packets found
+static uint32_t ScanPM4Buffer(uint32_t* buffer, uint32_t bufferDwords, bool isIndirect, uint32_t scanCount) {
+    static bool s_loggedIndirect = false;
+    uint32_t packetsFound = 0;
+    uint32_t pos = 0;
+    uint32_t maxScan = std::min(bufferDwords, 512u);
+    
+    while (pos < maxScan && packetsFound < 100) {
+        uint32_t packet = ByteSwap(buffer[pos]);
+        uint32_t type = (packet >> 30) & 0x3;
+        
+        if (type == PM4_TYPE3) {
+            uint32_t opcode = (packet >> 8) & 0x7F;
+            uint32_t count = ((packet >> 16) & 0x3FFF) + 1;
+            
+            // Log ALL packets from indirect buffers for first few scans
+            if (isIndirect && !s_loggedIndirect && scanCount < 3) {
+                LOGF_WARNING("[PM4-IB] opcode=0x{:02X}({}) count={} pos={}",
+                    opcode, GetPM4OpcodeName(opcode), count, pos);
+            }
+            
+            // Count by type
+            switch (opcode) {
+                case PM4_DRAW_INDX:
+                case PM4_DRAW_INDX_2:
+                    g_gpuRingBuffer.pm4DrawCount++;
+                    break;
+                case PM4_IM_LOAD:
+                case PM4_IM_LOAD_IMMEDIATE:
+                    g_gpuRingBuffer.pm4ShaderLoadCount++;
+                    break;
+                case PM4_SET_CONSTANT:
+                case PM4_SET_CONSTANT2:
+                case PM4_SET_SHADER_CONSTANTS:
+                    g_gpuRingBuffer.pm4SetConstantCount++;
+                    break;
+                case PM4_XE_SWAP:
+                    g_gpuRingBuffer.pm4SwapCount++;
+                    break;
+                default:
+                    g_gpuRingBuffer.pm4OtherCount++;
+                    break;
+            }
+            
+            packetsFound++;
+            pos += 1 + count;
+        }
+        else if (type == PM4_TYPE0) {
+            // Register write: extract register index and count
+            uint32_t regIndex = packet & 0x7FFF;
+            uint32_t count = ((packet >> 16) & 0x3FFF) + 1;
+            
+            // Log first few TYPE0 packets from indirect buffers
+            if (isIndirect && !s_loggedIndirect && scanCount < 2 && packetsFound < 10) {
+                LOGF_WARNING("[PM4-IB] TYPE0 reg=0x{:04X} count={} pos={}",
+                    regIndex, count, pos);
+            }
+            
+            pos += 1 + count;
+            packetsFound++;
+        }
+        else if (type == PM4_TYPE2) {
+            pos++;
+        }
+        else {
+            pos++;
+        }
+    }
+    
+    if (isIndirect && packetsFound > 0) {
+        s_loggedIndirect = true;
+    }
+    
+    return packetsFound;
+}
+
+// Scan the GPU ring buffer for PM4 packets and log what commands the game writes
+// This is diagnostic - helps determine if GTA IV uses GPU command buffer or D3D API
+void ScanRingBufferForPM4Packets()
+{
+    if (!g_gpuRingBuffer.initialized || g_gpuRingBuffer.ringBufferBase == 0)
+        return;
+    
+    // Get pointer to ring buffer in host memory
+    uint32_t* ringBuffer = reinterpret_cast<uint32_t*>(
+        g_memory.Translate(g_gpuRingBuffer.ringBufferBase));
+    if (!ringBuffer)
+        return;
+    
+    uint32_t ringBufferDwords = g_gpuRingBuffer.ringBufferSize / 4;
+    if (ringBufferDwords == 0)
+        return;
+    
+    static bool s_scannedOnce = false;
+    static uint32_t s_scanCount = 0;
+    static bool s_loggedIndirectBuffers = false;
+    
+    // First pass: scan primary ring buffer and collect INDIRECT_BUFFER addresses
+    std::vector<std::pair<uint32_t, uint32_t>> indirectBuffers;  // address, size
+    uint32_t packetsFound = 0;
+    uint32_t pos = 0;
+    uint32_t maxScan = std::min(ringBufferDwords, 256u);
+    
+    while (pos < maxScan && packetsFound < 20) {
+        uint32_t packet = ByteSwap(ringBuffer[pos]);
+        uint32_t type = (packet >> 30) & 0x3;
+        
+        if (type == PM4_TYPE3) {
+            uint32_t opcode = (packet >> 8) & 0x7F;
+            uint32_t count = ((packet >> 16) & 0x3FFF) + 1;
+            
+            // Log the first few packets we find
+            if (!s_scannedOnce || s_scanCount < 5) {
+                LOGF_WARNING("[PM4] pos={} type=3 opcode=0x{:02X}({}) count={}",
+                    pos, opcode, GetPM4OpcodeName(opcode), count);
+            }
+            
+            // Capture INDIRECT_BUFFER addresses
+            if (opcode == PM4_INDIRECT_BUFFER && count >= 2) {
+                uint32_t ibAddr = ByteSwap(ringBuffer[pos + 1]);
+                uint32_t ibSize = ByteSwap(ringBuffer[pos + 2]) & 0xFFFFF;  // Size in dwords
+                indirectBuffers.push_back({ibAddr, ibSize});
+                
+                if (!s_loggedIndirectBuffers && s_scanCount < 3) {
+                    LOGF_WARNING("[PM4] INDIRECT_BUFFER addr=0x{:08X} size={} dwords",
+                        ibAddr, ibSize);
+                }
+            }
+            
+            // Count by type (primary buffer)
+            g_gpuRingBuffer.pm4OtherCount++;
+            
+            packetsFound++;
+            pos += 1 + count;
+        }
+        else if (type == PM4_TYPE0) {
+            uint32_t count = ((packet >> 16) & 0x3FFF) + 1;
+            pos += 1 + count;
+            packetsFound++;
+        }
+        else if (type == PM4_TYPE2) {
+            pos++;
+        }
+        else {
+            pos++;
+        }
+    }
+    
+    // Second pass: scan indirect buffers for actual draw/shader commands
+    for (const auto& [ibAddr, ibSize] : indirectBuffers) {
+        if (ibAddr == 0 || ibSize == 0) continue;
+        
+        uint32_t* ibBuffer = reinterpret_cast<uint32_t*>(g_memory.Translate(ibAddr));
+        if (ibBuffer) {
+            uint32_t ibPackets = ScanPM4Buffer(ibBuffer, ibSize, true, s_scanCount);
+            packetsFound += ibPackets;
+        }
+    }
+    
+    if (!indirectBuffers.empty()) {
+        s_loggedIndirectBuffers = true;
+    }
+    
+    // Log summary periodically
+    if (packetsFound > 0 && (s_scanCount % 100 == 0 || !s_scannedOnce)) {
+        LOGF_WARNING("[PM4 SUMMARY] scan={} found={} draws={} shaders={} constants={} swaps={} other={} IB={}",
+            s_scanCount, packetsFound,
+            g_gpuRingBuffer.pm4DrawCount,
+            g_gpuRingBuffer.pm4ShaderLoadCount,
+            g_gpuRingBuffer.pm4SetConstantCount,
+            g_gpuRingBuffer.pm4SwapCount,
+            g_gpuRingBuffer.pm4OtherCount,
+            indirectBuffers.size());
+    }
+    
+    if (packetsFound > 0) {
+        s_scannedOnce = true;
+    }
+    s_scanCount++;
+}
+
 uint32_t MmGetPhysicalAddress(uint32_t address)
 {
     LOGF_UTILITY("0x{:x}", address);
@@ -3571,6 +4090,7 @@ void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
     g_gpuRingBuffer.interruptUserData = userData;
     
     LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X}", callback, userData);
+    LOG_WARNING("[VBlank] Interrupt callback registered - VBlank will fire from NtWaitEx");
 }
 
 uint32_t VdInitializeEngines()
@@ -3732,6 +4252,15 @@ bool KeResetEvent(XKEVENT* pEvent)
 static std::atomic<uint32_t> g_lastAsyncInfo{0};
 static std::atomic<int> g_asyncReadCount{0};
 
+// =============================================================================
+// WAIT TRACKING: Find the exact handle blocking Frame 1
+// This tracks repeated waits on the same handle to identify the missing signal
+// =============================================================================
+static std::mutex g_waitTrackMutex;
+static std::unordered_map<uint32_t, int> g_handleWaitCounts;  // handle -> count
+static uint32_t g_mostWaitedHandle = 0;
+static int g_mostWaitedCount = 0;
+
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
     static int s_waitCount = 0;
@@ -3741,6 +4270,39 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
     const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
     const uint32_t caller = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     const uint32_t objAddr = Object ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Object) - reinterpret_cast<uintptr_t>(g_memory.base)) : 0;
+    
+    // TRACK REPEATED WAITS: Find the handle that's blocking
+    // Exclude GPU fence handles (0x8006F844, 0x8006F7F4) and GPU thread (0x829DDD48) - already handled
+    bool isGpuWait = (objAddr == 0x8006F844 || objAddr == 0x8006F7F4 || caller == 0x829DDD48);
+    
+    // Get thread ID for tracking
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    // Log ALL infinite waits with thread info to find the blocking main thread
+    if (timeout == INFINITE && !isGpuWait)
+    {
+        static int s_infiniteNonGpu = 0;
+        ++s_infiniteNonGpu;
+        if (s_infiniteNonGpu <= 30 || s_infiniteNonGpu % 100 == 0)
+        {
+            LOGF_WARNING("[INFINITE WAIT] #{} thread=0x{:04X} handle=0x{:08X} type={} caller=0x{:08X}", 
+                        s_infiniteNonGpu, threadId, objAddr, Object ? Object->Type : -1, caller);
+        }
+    }
+    
+    if (objAddr != 0 && !isGpuWait)
+    {
+        std::lock_guard<std::mutex> lock(g_waitTrackMutex);
+        int& count = g_handleWaitCounts[objAddr];
+        ++count;
+        
+        // Update most-waited handle (non-GPU)
+        if (count > g_mostWaitedCount)
+        {
+            g_mostWaitedCount = count;
+            g_mostWaitedHandle = objAddr;
+        }
+    }
     
     // =========================================================================
     // GPU FENCE BYPASS: Auto-signal the GPU fence to unblock the boot sequence
@@ -3804,6 +4366,18 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
                 s_lastVBlank = now;
                 ++s_vblankCount;
                 
+                // Scan ring buffer for PM4 packets (diagnostic)
+                ScanRingBufferForPM4Packets();
+                
+                // Enable PPC call tracking after VBlank 10, report at VBlank 300
+                if (s_vblankCount == 10) {
+                    g_ppcCallTrackingEnabled = 1;
+                    LOGF_WARNING("[DIAG] Enabled PPC function call tracking at VBlank #{}", s_vblankCount);
+                }
+                if (s_vblankCount == 300) {
+                    ReportHotPPCFunctions();
+                }
+                
                 if (s_vblankCount <= 10 || s_vblankCount % 60 == 0)
                 {
                     LOGF_IMPL(Utility, "VBlank", "Firing VBlank #{} callback=0x{:08X}", 
@@ -3833,6 +4407,40 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
         }
         
         return STATUS_SUCCESS;
+    }
+    
+    // Fire VBlank from ANY wait once GPU is initialized (not just GPU thread waits)
+    // This ensures the game's render loop progresses
+    if (g_gpuRingBuffer.enginesInitialized && 
+        g_gpuRingBuffer.edramTrainingComplete && 
+        g_gpuRingBuffer.interruptCallback != 0)
+    {
+        static auto s_lastVBlankAny = std::chrono::steady_clock::now();
+        static int s_vblankAnyCount = 0;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastVBlankAny).count();
+        
+        if (elapsed >= 16)
+        {
+            s_lastVBlankAny = now;
+            ++s_vblankAnyCount;
+            
+            if (s_vblankAnyCount <= 10 || s_vblankAnyCount % 60 == 0)
+            {
+                LOGF_IMPL(Utility, "VBlankAny", "Firing VBlank #{} from wait caller=0x{:08X}", 
+                          s_vblankAnyCount, caller);
+            }
+            
+            // Call the guest interrupt callback
+            auto func = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
+            if (func)
+            {
+                PPCContext tempCtx = *g_ppcContext;
+                tempCtx.r3.u32 = 0;  // VBlank interrupt type
+                tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                func(tempCtx, g_memory.base);
+            }
+        }
     }
     
     // Log ALL waits for async IO debugging - exclude GPU poll thread (0x829DDD48)
@@ -4298,28 +4906,79 @@ uint32_t NtSetEvent(Event* handle, uint32_t* previousState)
 
 uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttributes, uint32_t InitialCount, uint32_t MaximumCount)
 {
-    *Handle = GetKernelHandle(CreateKernelObject<Semaphore>(InitialCount, MaximumCount));
+    static int s_count = 0; ++s_count;
+    Semaphore* sem = CreateKernelObject<Semaphore>(InitialCount, MaximumCount);
+    *Handle = GetKernelHandle(sem);
+    uint32_t handle = *Handle;
+    
+    // Log semaphore creation - EXPERIMENT ROLLED BACK (force signal only helped once)
+    if (s_count <= 50 || (handle >= 0xEB2D0000 && handle <= 0xEB2E0000)) {
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={}", 
+                     s_count, handle, InitialCount, MaximumCount);
+    }
+    
     return STATUS_SUCCESS;
 }
 
-uint32_t NtReleaseSemaphore(Semaphore* Handle, uint32_t ReleaseCount, int32_t* PreviousCount)
+uint32_t NtReleaseSemaphore(uint32_t Handle, uint32_t ReleaseCount, int32_t* PreviousCount)
 {
     static int s_count = 0;
     ++s_count;
     
-    if (s_count <= 20 || s_count % 100 == 0)
+    // FIX: Handle is a guest address that needs to be resolved via kernel object system
+    // Previously this took Semaphore* directly which caused signals to go to wrong objects
+    if (!IsKernelObject(Handle))
     {
-        uint32_t curCount = Handle->count.load();
-        LOGF_IMPL(Utility, "Semaphore", "NtReleaseSemaphore #{} release={} count={}/{}", 
-                  s_count, ReleaseCount, curCount, Handle->maximumCount);
+        if (s_count <= 20 || s_count % 100 == 0)
+        {
+            LOGF_WARNING("[NtReleaseSemaphore] #{} Invalid handle 0x{:08X}", s_count, Handle);
+        }
+        return STATUS_INVALID_HANDLE;
+    }
+    
+    KernelObject* obj = GetKernelObject(Handle);
+    if (!obj)
+    {
+        LOGF_WARNING("[NtReleaseSemaphore] #{} Null kernel object for handle 0x{:08X}", s_count, Handle);
+        return STATUS_INVALID_HANDLE;
+    }
+    
+    // Check if this is actually a semaphore
+    Semaphore* sem = dynamic_cast<Semaphore*>(obj);
+    if (!sem)
+    {
+        // Not a semaphore - might be an event, try to signal it as an event
+        Event* evt = dynamic_cast<Event*>(obj);
+        if (evt)
+        {
+            if (s_count <= 30 || s_count % 100 == 0)
+            {
+                LOGF_WARNING("[NtReleaseSemaphore] #{} handle=0x{:08X} is EVENT, signaling as event", s_count, Handle);
+            }
+            evt->Set();
+            return STATUS_SUCCESS;
+        }
+        
+        LOGF_WARNING("[NtReleaseSemaphore] #{} handle=0x{:08X} is not a semaphore or event", s_count, Handle);
+        return STATUS_INVALID_HANDLE;  // Object type mismatch
+    }
+    
+    // Always log releases for blocking semaphores, otherwise limit logging
+    bool isBlockingSemaphore = (Handle >= 0xEB2D0000 && Handle <= 0xEB2E0000);
+    if (s_count <= 30 || isBlockingSemaphore || s_count % 100 == 0)
+    {
+        uint32_t curCount = sem->count.load();
+        LOGF_WARNING("[NtReleaseSemaphore] #{} handle=0x{:08X} release={} count={}/{}{}", 
+                  s_count, Handle, ReleaseCount, curCount, sem->maximumCount,
+                  isBlockingSemaphore ? " *** BLOCKING SEM ***" : "");
     }
     
     // the game releases semaphore with 1 maximum number of releases more than once
-    if (Handle->count + ReleaseCount > Handle->maximumCount)
+    if (sem->count + ReleaseCount > sem->maximumCount)
         return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
 
     uint32_t previousCount;
-    Handle->Release(ReleaseCount, &previousCount);
+    sem->Release(ReleaseCount, &previousCount);
 
     if (PreviousCount != nullptr)
         *PreviousCount = ByteSwap(previousCount);
@@ -4514,6 +5173,8 @@ uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* 
             ByteSwap(ctxMem[0]), ByteSwap(ctxMem[1]), ByteSwap(ctxMem[2]), ByteSwap(ctxMem[3]));
     }
 
+    LOGF_WARNING("[ExCreateThread] Creating thread entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", 
+                 entry, r3, r4, creationFlags);
     *handle = GetKernelHandle(GuestThread::Start({ entry, r3, r4, creationFlags }, &hostThreadId));
     LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X} {:X}",
         (intptr_t)handle, stackSize, (intptr_t)threadId, xApiThreadStartup, startAddress, startContext, creationFlags, hostThreadId);
@@ -4633,6 +5294,17 @@ uint32_t NetDll_XNetGetTitleXnAddr(uint32_t pAddr)
 uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* Objects, uint32_t WaitType, uint32_t WaitReason, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
     // FIXME: This function is only accounting for events.
+    static int s_callCount = 0;
+    ++s_callCount;
+    
+    uint32_t caller = g_ppcContext ? g_ppcContext->lr : 0;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    if (s_callCount <= 20 || s_callCount % 100 == 0)
+    {
+        LOGF_WARNING("[KeWaitMultiple] #{} thread=0x{:04X} count={} waitType={} caller=0x{:08X}", 
+                    s_callCount, threadId, Count, WaitType, caller);
+    }
 
     const uint64_t timeout = GuestTimeoutToMilliseconds(Timeout);
     assert(timeout == INFINITE);
@@ -4650,8 +5322,16 @@ uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* 
         for (size_t i = 0; i < Count; i++)
             s_events[i] = QueryKernelObject<Event>(*Objects[i]);
 
+        int loopCount = 0;
         while (true)
         {
+            ++loopCount;
+            if (loopCount <= 5 || loopCount % 1000 == 0)
+            {
+                LOGF_WARNING("[KeWaitMultiple] Loop #{} thread=0x{:04X} waiting on {} objects", 
+                            loopCount, threadId, Count);
+            }
+            
             uint32_t generation = g_keSetEventGeneration.load();
 
             for (size_t i = 0; i < Count; i++)
@@ -4678,18 +5358,19 @@ void KfLowerIrql() { }
 
 uint32_t KeReleaseSemaphore(XKSEMAPHORE* semaphore, uint32_t increment, uint32_t adjustment, uint32_t wait)
 {
-    static int s_count = 0;
-    ++s_count;
+    static int s_count = 0; ++s_count;
     
-    auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
-    
-    if (s_count <= 20 || s_count % 100 == 0)
-    {
-        uint32_t curCount = object->count.load();
-        LOGF_IMPL(Utility, "Semaphore", "KeReleaseSemaphore #{} adj={} count={}/{}", 
-                  s_count, adjustment, curCount, object->maximumCount);
+    // Log all releases to see if blocking semaphores are ever signaled
+    uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
+    if (s_count <= 30 || (semAddr >= 0xEB2D0000 && semAddr <= 0xEB2E0000)) {
+        LOGF_WARNING("[KeReleaseSemaphore] #{} sem=0x{:08X} adj={}", s_count, semAddr, adjustment);
     }
     
+    auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+    if (!object) {
+        LOGF_WARNING("[KeReleaseSemaphore] #{} sem=0x{:08X} QueryKernelObject returned NULL!", s_count, semAddr);
+        return STATUS_INVALID_HANDLE;
+    }
     object->Release(adjustment, nullptr);
     return STATUS_SUCCESS;
 }
@@ -4707,8 +5388,11 @@ uint32_t XAudioGetVoiceCategoryVolumeChangeMask(uint32_t Driver, be<uint32_t>* M
 
 uint32_t KeResumeThread(GuestThreadHandle* object)
 {
+    static int s_count = 0; ++s_count;
     assert(object != GetKernelObject(CURRENT_THREAD_HANDLE));
 
+    LOGF_WARNING("[RESUME] KeResumeThread #{} thread=0x{:08X}", s_count, reinterpret_cast<uintptr_t>(object) & 0xFFFFFFFF);
+    
     object->suspended = false;
     object->suspended.notify_all();
     return 0;
@@ -4716,11 +5400,20 @@ uint32_t KeResumeThread(GuestThreadHandle* object)
 
 void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limit)
 {
+    static int s_count = 0; ++s_count;
+    
     semaphore->Header.Type = 5;
     semaphore->Header.SignalState = count;
     semaphore->Limit = limit;
 
     auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+    
+    // Log semaphore initialization to trace blocking semaphores
+    uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
+    if (s_count <= 30 || (semAddr >= 0xEB2D0000 && semAddr <= 0xEB2E0000)) {
+        LOGF_WARNING("[KeInitializeSemaphore] #{} sem=0x{:08X} count={} limit={} object={}", 
+                     s_count, semAddr, count, limit, object ? "OK" : "NULL");
+    }
 }
 
 void XMAReleaseContext()
@@ -4765,7 +5458,7 @@ void XapiInitProcess()
 
 // GTA IV specific stubs
 // XamTaskSchedule - schedule an async task
-// For now, just return success with a valid handle - tasks aren't fully implemented
+// CRITICAL FIX: Actually execute the task function so completion signals fire
 uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId,
                          uint32_t stackSize, uint32_t priority, uint32_t flags,
                          be<uint32_t>* phTask)
@@ -4774,10 +5467,9 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
     static uint32_t s_nextHandle = 0x80001000;
     
     ++s_count;
-    if (s_count <= 20)
+    if (s_count <= 30 || s_count % 100 == 0)
     {
-        LOGF_IMPL(Utility, "XamTaskSchedule", 
-                  "#{} func=0x{:08X} ctx=0x{:08X} stack={} prio={} flags=0x{:X}",
+        LOGF_WARNING("[XamTaskSchedule] #{} func=0x{:08X} ctx=0x{:08X} stack={} prio={} flags=0x{:X}",
                   s_count, funcAddr, context, stackSize, priority, flags);
     }
     
@@ -4786,6 +5478,35 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
     if (phTask)
     {
         *phTask = taskHandle;
+    }
+    
+    // ACTUALLY EXECUTE THE TASK FUNCTION
+    // Without this, tasks are "scheduled" but never run, so completion signals never fire
+    // This is likely why the scheduler blocks forever
+    if (funcAddr != 0 && funcAddr >= 0x82000000 && funcAddr < 0x83000000)
+    {
+        auto func = g_memory.FindFunction(funcAddr);
+        if (func)
+        {
+            if (s_count <= 20)
+            {
+                LOGF_WARNING("[XamTaskSchedule] EXECUTING task func=0x{:08X} ctx=0x{:08X}", funcAddr, context);
+            }
+            
+            // Execute the task function with context as r3
+            PPCContext taskCtx = *g_ppcContext;
+            taskCtx.r3.u32 = context;
+            func(taskCtx, g_memory.base);
+            
+            if (s_count <= 20)
+            {
+                LOGF_WARNING("[XamTaskSchedule] Task func=0x{:08X} COMPLETED", funcAddr);
+            }
+        }
+        else
+        {
+            LOGF_WARNING("[XamTaskSchedule] Could not find function at 0x{:08X}", funcAddr);
+        }
     }
     
     return ERROR_SUCCESS;
@@ -5170,6 +5891,782 @@ PPC_FUNC(sub_829A9738)
     }
 }
 
+// =============================================================================
+// INITIALIZATION FLOW TRACING
+// Call chain: sub_827D89B8 → sub_8218BEB0 → sub_82120000 → sub_8218C600
+// sub_8218C600 is ONE-TIME initialization - if it returns 0, game fails to init
+// =============================================================================
+extern "C" void __imp__sub_8218C600(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82120000(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218BEB0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827D89B8(PPCContext& ctx, uint8_t* base);
+
+// Hook sub_8218C600 - Core initialization function
+PPC_FUNC(sub_8218C600)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_8218C600 ENTER #{} thread=0x{:04X}", s_count, threadId);
+    
+    __imp__sub_8218C600(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_8218C600 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.u32);
+}
+
+// Hook sub_82120000 - ONE-TIME initialization, cache result for subsequent calls
+static std::atomic<int> g_initResult{-999};  // -999 = not initialized yet
+
+PPC_FUNC(sub_82120000)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    // Return cached result if already initialized
+    if (g_initResult.load() != -999)
+    {
+        ctx.r3.s32 = g_initResult.load();
+        if (s_count <= 10 || s_count % 100 == 0)
+        {
+            LOGF_WARNING("[INIT] sub_82120000 #{} CACHED r3={}", s_count, ctx.r3.s32);
+        }
+        return;
+    }
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} (first call)", s_count, threadId);
+    
+    __imp__sub_82120000(ctx, base);
+    
+    // Cache the result
+    g_initResult.store(ctx.r3.s32);
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
+}
+
+// Trace functions called after sub_8218C600 succeeds
+extern "C" void __imp__sub_82120EE8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821250B0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82318F60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82124080(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82120FB8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82120EE8)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82120EE8 ENTER #{}", s_count);
+    __imp__sub_82120EE8(ctx, base);
+    LOGF_WARNING("[INIT] sub_82120EE8 EXIT #{}", s_count);
+}
+
+// Trace functions inside sub_82120EE8 to find the blocker
+extern "C" void __imp__sub_821207B0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82673718(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82269098(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_822054F8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821DE390(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8221F8A8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82273988(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_821207B0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_821207B0 ENTER #{}", s_count);
+    __imp__sub_821207B0(ctx, base);
+    LOGF_WARNING("[INIT] sub_821207B0 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82673718) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82673718 ENTER #{}", s_count);
+    __imp__sub_82673718(ctx, base);
+    LOGF_WARNING("[INIT] sub_82673718 EXIT #{}", s_count);
+}
+
+// Trace functions inside sub_82673718 to find exact blocker
+extern "C" void __imp__sub_8297B8C0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829735C8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82974F90(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82670660(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82976570(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8297AD60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8297B260(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_8297B8C0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8297B8C0 ENTER #{}", s_count);
+    __imp__sub_8297B8C0(ctx, base);
+    LOGF_WARNING("[INIT] sub_8297B8C0 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_829735C8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829735C8 ENTER #{}", s_count);
+    __imp__sub_829735C8(ctx, base);
+    LOGF_WARNING("[INIT] sub_829735C8 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82974F90) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82974F90 ENTER #{}", s_count);
+    __imp__sub_82974F90(ctx, base);
+    LOGF_WARNING("[INIT] sub_82974F90 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82670660) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82670660 ENTER #{}", s_count);
+    __imp__sub_82670660(ctx, base);
+    LOGF_WARNING("[INIT] sub_82670660 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82976570) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82976570 ENTER #{}", s_count);
+    __imp__sub_82976570(ctx, base);
+    LOGF_WARNING("[INIT] sub_82976570 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8297AD60) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8297AD60 ENTER #{}", s_count);
+    __imp__sub_8297AD60(ctx, base);
+    LOGF_WARNING("[INIT] sub_8297AD60 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8297B260) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8297B260 ENTER #{}", s_count);
+    __imp__sub_8297B260(ctx, base);
+    LOGF_WARNING("[INIT] sub_8297B260 EXIT #{}", s_count);
+}
+
+// More functions after sub_8297B260 in sub_82673718
+extern "C" void __imp__sub_82975608(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8296C060(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82671E40(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82672E50(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82975608) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82975608 ENTER #{}", s_count);
+    __imp__sub_82975608(ctx, base);
+    LOGF_WARNING("[INIT] sub_82975608 EXIT #{}", s_count);
+}
+
+// Functions inside sub_82975608
+extern "C" void __imp__sub_829748D0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82974FF8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_829748D0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829748D0 ENTER #{}", s_count);
+    __imp__sub_829748D0(ctx, base);
+    LOGF_WARNING("[INIT] sub_829748D0 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+// Functions inside sub_829748D0
+extern "C" void __imp__sub_829A1950(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8298E810(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829A1958(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_829A1950) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829A1950 ENTER #{} r3={}", s_count, ctx.r3.u32);
+    __imp__sub_829A1950(ctx, base);
+    LOGF_WARNING("[INIT] sub_829A1950 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8298E810) {
+    static int s_count = 0; ++s_count;
+    // r3=context struct, r4=task function, r5=stack size, r6=flags
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t taskFunc = ctx.r4.u32;
+    LOGF_WARNING("[INIT_WORKER] sub_8298E810 #{} ENTER ctx=0x{:08X} taskFunc=0x{:08X}", 
+                 s_count, contextAddr, taskFunc);
+    __imp__sub_8298E810(ctx, base);
+    LOGF_WARNING("[INIT_WORKER] sub_8298E810 #{} EXIT result={}", s_count, ctx.r3.u32);
+}
+
+// Functions inside sub_8298E810 - trace to find blocker on 2nd call
+extern "C" void __imp__sub_827DAC78(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DAF50(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DACD8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DADB0(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_827DAC78) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t originalCount = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    if (s_count <= 30)
+        LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} ENTER count={} LR=0x{:08X}", s_count, originalCount, callerLR);
+    
+    __imp__sub_827DAC78(ctx, base);
+    
+    uint32_t resultHandle = ctx.r3.u32;
+    
+    // Log ALL semaphore creations during init to trace the flow
+    if (s_count <= 30) {
+        LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} EXIT handle=0x{:08X} (count={}, caller=0x{:08X})", 
+                     s_count, resultHandle, originalCount, callerLR);
+    }
+}
+
+PPC_FUNC(sub_827DAF50) {
+    static int s_count = 0; ++s_count;
+    // r3=class/entry, r4=context, r5=stackSize, r6=flags, r7=taskFunc, r8=suspend
+    uint32_t classAddr = ctx.r3.u32;
+    uint32_t contextAddr = ctx.r4.u32;
+    uint32_t taskFunc = ctx.r7.u32;
+    uint32_t suspendFlag = ctx.r8.u32;
+    LOGF_WARNING("[THREAD_CREATE] sub_827DAF50 #{} ENTER class=0x{:08X} ctx=0x{:08X} taskFunc=0x{:08X} suspend={}", 
+                 s_count, classAddr, contextAddr, taskFunc, suspendFlag);
+    __imp__sub_827DAF50(ctx, base);
+    LOGF_WARNING("[THREAD_CREATE] sub_827DAF50 #{} EXIT threadHandle=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_827DACD8) {
+    static int s_count = 0; ++s_count;
+    uint32_t semHandle = ctx.r3.u32;
+    
+    // Log ALL semaphore waits for first 50 calls to trace init flow
+    if (s_count <= 50) {
+        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ENTERING wait on semaphore 0x{:08X} (LR=0x{:08X})", 
+                     s_count, semHandle, (uint32_t)ctx.lr);
+    }
+    
+    __imp__sub_827DACD8(ctx, base);
+    
+    if (s_count <= 50) {
+        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} PASSED wait on semaphore 0x{:08X}", s_count, semHandle);
+    }
+}
+
+// Render worker task function - trace entry and progress
+extern "C" void __imp__sub_827DE858(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DE858) {
+    static int s_count = 0; ++s_count;
+    uint32_t workerId = ctx.r3.u32;
+    LOGF_WARNING("[RENDER WORKER] sub_827DE858 ENTER #{} workerId={}", s_count, workerId);
+    __imp__sub_827DE858(ctx, base);
+    LOGF_WARNING("[RENDER WORKER] sub_827DE858 EXIT #{}", s_count);
+}
+
+// Helper to mark init complete - called when sub_82673718 exits
+void MarkInitComplete() {
+    // This will be called from sub_82673718 hook when it exits
+    extern void SetInitComplete();
+}
+
+PPC_FUNC(sub_827DADB0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_827DADB0 ENTER #{}", s_count);
+    __imp__sub_827DADB0(ctx, base);
+    LOGF_WARNING("[INIT] sub_827DADB0 EXIT #{}", s_count);
+}
+
+// Trace functions called by sub_8218C600 to find blocking point
+extern "C" void __imp__sub_829A0A48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A0A48) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8218C600] sub_829A0A48 ENTER #{}", s_count);
+    __imp__sub_829A0A48(ctx, base);
+    LOGF_WARNING("[sub_8218C600] sub_829A0A48 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827DF248(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DF248) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8218C600] sub_827DF248 ENTER #{}", s_count);
+    __imp__sub_827DF248(ctx, base);
+    LOGF_WARNING("[sub_8218C600] sub_827DF248 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82192578(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192578) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8218C600] sub_82192578 ENTER #{}", s_count);
+    __imp__sub_82192578(ctx, base);
+    LOGF_WARNING("[sub_8218C600] sub_82192578 EXIT #{}", s_count);
+}
+
+// More sub_8218C600 call chain - find the blocking function
+extern "C" void __imp__sub_82851548(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82851548) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82851548 ENTER #{}", s_count);
+    __imp__sub_82851548(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82851548 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82856C38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82856C38) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C38 ENTER #{}", s_count);
+    __imp__sub_82856C38(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C38 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82285F90(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82285F90) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82285F90 ENTER #{}", s_count);
+    __imp__sub_82285F90(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82285F90 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_822214E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822214E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_822214E0 ENTER #{}", s_count);
+    __imp__sub_822214E0(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_822214E0 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82193BC0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82193BC0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82193BC0 ENTER #{}", s_count);
+    __imp__sub_82193BC0(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82193BC0 EXIT #{}", s_count);
+}
+
+// Functions between sub_822214E0 and sub_82193BC0 in sub_8218C600
+extern "C" void __imp__sub_823193A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_823193A8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_823193A8 ENTER #{}", s_count);
+    __imp__sub_823193A8(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_823193A8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_821EC3E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821EC3E8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_821EC3E8 ENTER #{}", s_count);
+    __imp__sub_821EC3E8(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_821EC3E8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827EED88(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EED88) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EED88 ENTER #{}", s_count);
+    __imp__sub_827EED88(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EED88 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827EEB48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EEB48) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EEB48 ENTER #{}", s_count);
+    __imp__sub_827EEB48(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EEB48 EXIT #{}", s_count);
+}
+
+// sub_82197338 - last call in sub_8218C600 before return
+extern "C" void __imp__sub_82197338(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82197338) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82197338 ENTER #{}", s_count);
+    __imp__sub_82197338(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82197338 EXIT #{}", s_count);
+}
+
+// sub_821915F8 - first call in sub_82197338
+extern "C" void __imp__sub_821915F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821915F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_82197338] sub_821915F8 ENTER #{}", s_count);
+    __imp__sub_821915F8(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_82197338] sub_821915F8 EXIT #{}", s_count);
+}
+
+// sub_82897760 - called by sub_821915F8
+extern "C" void __imp__sub_82897760(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82897760) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_82897760 ENTER #{}", s_count);
+    __imp__sub_82897760(ctx, base);
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_82897760 EXIT #{}", s_count);
+}
+
+// sub_822DE5F0 - called by sub_821915F8 (potential blocker)
+extern "C" void __imp__sub_822DE5F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822DE5F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_822DE5F0 ENTER #{}", s_count);
+    __imp__sub_822DE5F0(ctx, base);
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_822DE5F0 EXIT #{}", s_count);
+}
+
+// sub_827D9C50 - called for large memory allocations, potential blocker
+extern "C" void __imp__sub_827D9C50(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D9C50) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D9C50 #{} ENTER size={}", s_count, allocSize);
+    }
+    __imp__sub_827D9C50(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D9C50 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827DA8E0 - allocator function called via vtable for large allocs
+extern "C" void __imp__sub_827DA8E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DA8E0) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827DA8E0 #{} ENTER size={}", s_count, allocSize);
+    }
+    __imp__sub_827DA8E0(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827DA8E0 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827D8AF8 - indirect call target for large allocations, trace what IT calls
+extern "C" void __imp__sub_827D8AF8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D8AF8) {
+    static int s_count = 0; ++s_count;
+    
+    // r4 contains allocation size
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    // Trace the indirect call target this function will call
+    uint32_t r6 = ctx.r6.u32;
+    uint32_t r3_in = ctx.r3.u32;
+    uint32_t idx = ((r6 + 1) << 2) & 0xFFFFFFFC;
+    uint32_t r3_new = PPC_LOAD_U32(idx + r3_in);
+    uint32_t vtable = PPC_LOAD_U32(r3_new + 0);
+    uint32_t funcPtr = PPC_LOAD_U32(vtable + 8);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D8AF8 #{} ENTER size={} r6={} -> indirect_target=0x{:08X}", 
+                     s_count, allocSize, r6, funcPtr);
+    }
+    __imp__sub_827D8AF8(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D8AF8 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827DAD60 - called by worker thread 0x8298E700 at start - might signal "ready"
+extern "C" void __imp__sub_827DAD60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DAD60) {
+    static int s_count = 0; ++s_count;
+    uint32_t handle = ctx.r3.u32;
+    if (s_count <= 30 || s_count % 100 == 0) {
+        LOGF_WARNING("[SIGNAL] sub_827DAD60 #{} handle=0x{:08X} (worker thread startup signal?)", s_count, handle);
+    }
+    __imp__sub_827DAD60(ctx, base);
+    if (s_count <= 30 || s_count % 100 == 0) {
+        LOGF_WARNING("[SIGNAL] sub_827DAD60 #{} EXIT", s_count);
+    }
+}
+
+// sub_8298E700 - worker thread task function that should call sub_827DAD60 at start
+extern "C" void __imp__sub_8298E700(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8298E700) {
+    static int s_count = 0; ++s_count;
+    uint32_t ctx_ptr = ctx.r3.u32;
+    
+    // Read semaphore handles from context struct (offsets +36 and +40)
+    uint32_t sem1 = 0, sem2 = 0;
+    if (ctx_ptr >= 0x82000000 && ctx_ptr < 0x90000000) {
+        sem1 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 36)); // wait semaphore
+        sem2 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 40)); // signal semaphore
+    }
+    
+    LOGF_WARNING("[WORKER_TASK] sub_8298E700 #{} ENTER ctx=0x{:08X} sem1(wait)=0x{:08X} sem2(signal)=0x{:08X}", 
+                 s_count, ctx_ptr, sem1, sem2);
+    __imp__sub_8298E700(ctx, base);
+    LOGF_WARNING("[WORKER_TASK] sub_8298E700 #{} EXIT", s_count);
+}
+
+PPC_FUNC(sub_829A1958) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829A1958 ENTER #{}", s_count);
+    __imp__sub_829A1958(ctx, base);
+    LOGF_WARNING("[INIT] sub_829A1958 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82974FF8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 50 == 0)
+        LOGF_WARNING("[INIT] sub_82974FF8 ENTER #{}", s_count);
+    __imp__sub_82974FF8(ctx, base);
+    if (s_count <= 10 || s_count % 50 == 0)
+        LOGF_WARNING("[INIT] sub_82974FF8 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8296C060) {
+    static int s_count = 0; ++s_count;
+    // Reduce noise - only log first 3 and every 100th
+    if (s_count <= 3 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_8296C060 #{}", s_count);
+    __imp__sub_8296C060(ctx, base);
+}
+
+PPC_FUNC(sub_82671E40) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_82671E40 ENTER #{}", s_count);
+    __imp__sub_82671E40(ctx, base);
+    if (s_count <= 20 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_82671E40 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82672E50) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82672E50 ENTER #{}", s_count);
+    __imp__sub_82672E50(ctx, base);
+    LOGF_WARNING("[INIT] sub_82672E50 EXIT #{}", s_count);
+}
+
+// Functions in sub_82672E50's busy-wait loops
+extern "C" void __imp__sub_82672AA8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82973598(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829736F8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82672AA8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82672AA8 #{} (loop1 - checking 0x832A5F20)", s_count);
+    // Yield to let worker threads complete their tasks
+    std::this_thread::yield();
+    __imp__sub_82672AA8(ctx, base);
+}
+
+PPC_FUNC(sub_82973598) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{}", s_count);
+    __imp__sub_82973598(ctx, base);
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_829736F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_829736F8 #{} (loop2 iteration)", s_count);
+    // Yield to let worker threads complete their tasks
+    std::this_thread::yield();
+    __imp__sub_829736F8(ctx, base);
+}
+
+// sub_829A97A0 - creates threads via ExCreateThread - suspected blocker
+extern "C" void __imp__sub_829A97A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A97A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[THREAD] sub_829A97A0 ENTER #{} - calling ExCreateThread", s_count);
+    __imp__sub_829A97A0(ctx, base);
+    LOGF_WARNING("[THREAD] sub_829A97A0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_829B08E0 - Thread entry stub (called by GuestThread::Start)
+// This is called with r3=actual_worker_func, r4=context
+// It should call the worker function - trace to see if it's blocking
+extern "C" void __imp__sub_829B08E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829B08E0) {
+    static int s_count = 0; ++s_count;
+    uint32_t workerFunc = ctx.r3.u32;
+    uint32_t workerCtx = ctx.r4.u32;
+    LOGF_WARNING("[THREAD_STUB] sub_829B08E0 ENTER #{} workerFunc=0x{:08X} ctx=0x{:08X}", 
+                 s_count, workerFunc, workerCtx);
+    __imp__sub_829B08E0(ctx, base);
+    LOGF_WARNING("[THREAD_STUB] sub_829B08E0 EXIT #{}", s_count);
+}
+
+// sub_8218BE28 - called after sub_82673718 in sub_82120EE8
+extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8218BE28) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r3.u32;
+    
+    // For large allocations (>500KB), trace the indirect call target
+    if (allocSize > 500000) {
+        // Pre-compute the indirect call target like the original function does
+        uint32_t r11 = PPC_LOAD_U32(ctx.r13.u32 + 0);
+        uint32_t r3 = PPC_LOAD_U32(1676 + r11);
+        uint32_t vtable = PPC_LOAD_U32(r3 + 0);
+        uint32_t funcPtr = PPC_LOAD_U32(vtable + 8);
+        LOGF_WARNING("[ALLOC] sub_8218BE28 #{} LARGE alloc size={} indirect_target=0x{:08X}", 
+                     s_count, allocSize, funcPtr);
+    }
+    
+    if (s_count <= 20 || s_count % 200 == 0 || allocSize > 500000) {
+        LOGF_WARNING("[INIT] sub_8218BE28 ENTER #{} r3={}", s_count, allocSize);
+    }
+    __imp__sub_8218BE28(ctx, base);
+    if (s_count <= 20 || s_count % 200 == 0 || allocSize > 500000) {
+        LOGF_WARNING("[INIT] sub_8218BE28 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_8296BE18 - called after sub_8218BE28
+extern "C" void __imp__sub_8296BE18(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296BE18) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8296BE18 ENTER #{}", s_count);
+    __imp__sub_8296BE18(ctx, base);
+    LOGF_WARNING("[INIT] sub_8296BE18 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82269098) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82269098 ENTER #{}", s_count);
+    __imp__sub_82269098(ctx, base);
+    LOGF_WARNING("[INIT] sub_82269098 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_822054F8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_822054F8 ENTER #{}", s_count);
+    __imp__sub_822054F8(ctx, base);
+    LOGF_WARNING("[INIT] sub_822054F8 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_821DE390) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_821DE390 ENTER #{}", s_count);
+    __imp__sub_821DE390(ctx, base);
+    LOGF_WARNING("[INIT] sub_821DE390 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8221F8A8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8221F8A8 ENTER #{}", s_count);
+    __imp__sub_8221F8A8(ctx, base);
+    LOGF_WARNING("[INIT] sub_8221F8A8 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82273988) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82273988 ENTER #{}", s_count);
+    __imp__sub_82273988(ctx, base);
+    LOGF_WARNING("[INIT] sub_82273988 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_821250B0)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_821250B0 ENTER #{}", s_count);
+    __imp__sub_821250B0(ctx, base);
+    LOGF_WARNING("[INIT] sub_821250B0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82318F60)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82318F60 ENTER #{}", s_count);
+    __imp__sub_82318F60(ctx, base);
+    LOGF_WARNING("[INIT] sub_82318F60 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82124080)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82124080 ENTER #{} r3={} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_82124080(ctx, base);
+    LOGF_WARNING("[INIT] sub_82124080 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82120FB8)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82120FB8 ENTER #{}", s_count);
+    __imp__sub_82120FB8(ctx, base);
+    LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{}", s_count);
+}
+
+// Hook sub_8218BEB0 - Calls sub_82120000, returns -1 on failure
+PPC_FUNC(sub_8218BEB0)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_8218BEB0 ENTER #{} thread=0x{:04X}", s_count, threadId);
+    
+    __imp__sub_8218BEB0(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_8218BEB0 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.s32);
+}
+
+// Hook sub_827D89B8 - Frame tick function  
+PPC_FUNC(sub_827D89B8)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    if (s_count <= 5 || s_count % 100 == 0)
+    {
+        LOGF_WARNING("[FRAME] sub_827D89B8 #{} thread=0x{:04X}", s_count, threadId);
+    }
+    
+    __imp__sub_827D89B8(ctx, base);
+}
+
+// Hook sub_8218BEA8 - Main entry point, implement game loop
+// Xbox 360 runtime called this repeatedly; recomp needs to emulate that
+extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_8218BEA8)
+{
+    static int s_entered = 0;
+    ++s_entered;
+    if (s_entered == 1)
+    {
+        LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{}", s_entered);
+    }
+    
+    // Main game loop - call sub_827D89B8 (frame tick) repeatedly
+    int frameCount = 0;
+    while (true)
+    {
+        ++frameCount;
+        
+        // Call the frame tick function
+        __imp__sub_827D89B8(ctx, base);
+        
+        // Check return value - negative means exit
+        if (ctx.r3.s32 < 0)
+        {
+            LOGF_WARNING("[MAIN] Frame {} returned {} - exiting", frameCount, ctx.r3.s32);
+            break;
+        }
+        
+        // Log progress
+        if (frameCount <= 5 || frameCount % 500 == 0)
+        {
+            LOGF_WARNING("[MAIN] Frame {} r3={}", frameCount, ctx.r3.s32);
+        }
+        
+        // Small sleep to prevent CPU spinning (16ms ~ 60fps)
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    
+    LOGF_WARNING("[MAIN] Loop exited after {} frames", frameCount);
+}
+
 // Hook sub_829D5388 - D3D Present wrapper that calls VdSwap
 extern "C" void __imp__sub_829D5388(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D5388)
@@ -5190,75 +6687,36 @@ PPC_FUNC(sub_829D5388)
     }
 }
 
-// Hook sub_829D4C48 - Frame swap/Present function called from VBlank
-extern "C" void __imp__sub_829D4C48(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_829D4C48)
+// Hook sub_828E0AB8 - Scheduler loop (just trace, don't force VdSwap)
+extern "C" void __imp__sub_828E0AB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828E0AB8)
 {
     static int s_count = 0;
     ++s_count;
     
-    // r3 = userData pointer (0x8006CB00)
-    // The swap callback is at userData + 16528 (0x4090)
-    uint32_t userData = ctx.r3.u32;
-    uint32_t swapCallbackAddr = userData + 16528;
-    uint32_t swapCallback = ByteSwap(*reinterpret_cast<uint32_t*>(base + swapCallbackAddr));
-    
-    if (s_count <= 10 || s_count % 60 == 0)
+    // Log with thread ID to understand who's calling
+    uint32_t threadId = ctx.r13.u32 & 0xFFFF;
+    if (s_count <= 10 || s_count % 5000 == 0)
     {
-        LOGF_IMPL(Utility, "FrameSwap", "#{} userData=0x{:08X} swapCallback@0x{:08X}=0x{:08X}", 
-                  s_count, userData, swapCallbackAddr, swapCallback);
+        LOGF_WARNING("[Scheduler] sub_828E0AB8 #{} thread=0x{:04X}", s_count, threadId);
     }
     
-    // The internal logic of sub_829D4C48 has complex conditions that prevent
-    // the swap callback from being called on subsequent frames.
-    // Force VdSwap to be called directly on every frame to complete the frame cycle.
-    
-    // Call the original function first
+    __imp__sub_828E0AB8(ctx, base);
+}
+
+// Hook sub_829D4C48 - Frame swap/Present function called from VBlank
+extern "C" void __imp__sub_829D4C48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D4C48)
+{
+    // Let the game's native render loop handle VdSwap - don't force it
     __imp__sub_829D4C48(ctx, base);
-    
-    // Then force VdSwap to ensure frame completion
-    static int s_vdSwapForced = 0;
-    ++s_vdSwapForced;
-    
-    if (s_vdSwapForced <= 10 || s_vdSwapForced % 60 == 0)
-    {
-        LOGF_IMPL(Utility, "FrameSwap", "Forcing VdSwap call #{} to complete frame", s_vdSwapForced);
-    }
-    
-    // Call VdSwap directly
-    VdSwap();
 }
 
 // Hook sub_829D7368 - VBlank interrupt callback
 extern "C" void __imp__sub_829D7368(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D7368)
 {
-    static int s_count = 0;
-    ++s_count;
-    
-    uint32_t interruptType = ctx.r3.u32;
-    uint32_t userData = ctx.r4.u32;
-    
-    // Check the flag at 0x7FC86544 that controls frame swap
-    uint32_t flagAddr = 0x7FC86544;
-    uint32_t flagValue = ByteSwap(*reinterpret_cast<uint32_t*>(base + flagAddr));
-    
-    if (s_count <= 10 || s_count % 60 == 0)
-    {
-        LOGF_IMPL(Utility, "VBlankCallback", "#{} type={} userData=0x{:08X} flag@0x{:08X}=0x{:08X}",
-                  s_count, interruptType, userData, flagAddr, flagValue);
-    }
-    
-    // Force the flag to enable frame swap if it's not set
-    if ((flagValue & 1) == 0)
-    {
-        *reinterpret_cast<uint32_t*>(base + flagAddr) = ByteSwap(flagValue | 1);
-        if (s_count <= 10)
-        {
-            LOGF_IMPL(Utility, "VBlankCallback", "Forced flag bit 0 -> 0x{:08X}", flagValue | 1);
-        }
-    }
-    
+    // Let the game control its own VBlank flags - don't force them
     __imp__sub_829D7368(ctx, base);
 }
 
@@ -5316,9 +6774,35 @@ PPC_FUNC(sub_828507F8)
 // Validates stream struct pointers before dereferencing to prevent crash at 0x400000000
 // Stream struct layout: [0]=object ptr, [4]=ctx, [8]=buffer, [12]=pos, [16]=cursor, [20]=end, [24]=capacity
 extern "C" void __imp__sub_827E8420(PPCContext& ctx, uint8_t* base);
+
+// Helper to repair corrupted stream at 0x82003890
+static void RepairCorruptedStream(uint32_t streamPtr)
+{
+    static int s_repairCount = 0;
+    be<uint32_t>* stream = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(streamPtr));
+    stream[0] = 0x82A80A24;  // Valid object pointer
+    stream[1] = 0;
+    stream[2] = 0;
+    stream[3] = 0;
+    stream[4] = 0;
+    stream[5] = 0;
+    stream[6] = 0;
+    if (++s_repairCount <= 10) {
+        LOGF_WARNING("[sub_827E8420] Repaired corrupted stream at 0x{:08X} (repair #{})", streamPtr, s_repairCount);
+    }
+}
+
 PPC_FUNC(sub_827E8420)
 {
     const uint32_t streamPtr = ctx.r3.u32;
+    
+    // Handle NULL stream pointer - just return 0 (EOF/no data) silently
+    // This happens when the game's streaming system hasn't initialized a stream yet
+    if (streamPtr == 0)
+    {
+        ctx.r3.s32 = 0;  // Return 0 = no data/EOF
+        return;
+    }
     
     // Validate stream pointer is in valid guest memory range
     if (streamPtr < 0x80000000 || streamPtr >= 0x90000000)
@@ -5334,6 +6818,19 @@ PPC_FUNC(sub_827E8420)
     
     // Read object pointer at stream[0]
     uint32_t objectPtr = PPC_LOAD_U32(streamPtr + 0);
+    
+    // MEMORY PATCH: If this is the known-corrupted stream at 0x82003890, repair it
+    // The corruption happens when "common.rpf" string overwrites the stream object
+    if (streamPtr == 0x82003890 || (streamPtr >= 0x82003880 && streamPtr < 0x82003900))
+    {
+        // Check if corrupted (objectPtr looks like ASCII text "comm" = 0x636F6D6D)
+        if (objectPtr == 0x636F6D6D || objectPtr == 0x6D6F6E2E || // "comm" or "mon."
+            (objectPtr < 0x80000000 && objectPtr != 0))
+        {
+            RepairCorruptedStream(streamPtr);
+            objectPtr = 0x82A80A24;  // Use the repaired value
+        }
+    }
     
     // Validate object pointer
     if (objectPtr != 0 && (objectPtr < 0x80000000 || objectPtr >= 0x90000000))

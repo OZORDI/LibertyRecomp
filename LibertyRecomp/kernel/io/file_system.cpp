@@ -410,7 +410,8 @@ std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool
     LOGF_IMPL(Utility, "Game", "Loading file: \"{}\"", path);
     
     // Static path to extracted folder (computed once)
-    static std::filesystem::path s_extractedPath = GetGamePath() / "extracted";
+    // Note: Game files are in "game" subdirectory, not "extracted"
+    static std::filesystem::path s_extractedPath = GetGamePath() / "game";
     
     // Special handling for shader paths - redirect to extracted shader location
     std::string_view pathView = path;

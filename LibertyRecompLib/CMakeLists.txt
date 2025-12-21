@@ -21,20 +21,24 @@ set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp_shared.h"
 )
 
-foreach(i RANGE 0 169)
+foreach(i RANGE 0 86)
     list(APPEND LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp.${i}.cpp")
 endforeach()
 
-add_custom_command(
-    OUTPUT 
-        ${LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES}
-    COMMAND 
-        $<TARGET_FILE:XenonRecomp>
-    DEPENDS 
-        "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xex"
-        "${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml"
-    USES_TERMINAL
-)
+# XenonRecomp custom command disabled - PPC files already generated
+# To regenerate, run manually:
+#   cd LibertyRecompLib/config && /path/to/XenonRecomp ./GTA4.toml ../../LibertyRecomp/cpu/ppc_context.h
+#
+# add_custom_command(
+#     OUTPUT 
+#         ${LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES}
+#     COMMAND 
+#         $<TARGET_FILE:XenonRecomp>
+#     DEPENDS 
+#         "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xex"
+#         "${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml"
+#     USES_TERMINAL
+# )
 
 # NOTE: GTA IV shader handling is different from Sonic '06
 # The shader.arc/shader_lt.arc extraction is disabled for GTA IV

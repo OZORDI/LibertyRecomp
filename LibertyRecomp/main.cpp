@@ -121,13 +121,12 @@ void KiSystemStartup()
     XamContentCreateEx(0, "D", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
 
     // GTA IV uses "common:" and "platform:" root paths
-    // common: -> extracted/common/ (extracted from common.rpf)
-    // platform: -> extracted/xbox360/ (extracted from xbox360.rpf)
-    // We use the "extracted" folder which has proper structure from RPF extraction
-    const std::string extractedPath = (const char*)(GetGamePath() / "extracted").u8string().c_str();
-    const std::string commonPath = (const char*)(GetGamePath() / "extracted" / "common").u8string().c_str();
-    const std::string platformPath = (const char*)(GetGamePath() / "extracted" / "xbox360").u8string().c_str();
-    const std::string audioPath = (const char*)(GetGamePath() / "extracted" / "audio").u8string().c_str();
+    // All game files are in: GetGamePath() / "game" / (common/, xbox360/, audio/)
+    // Structure: ~/Library/Application Support/LibertyRecomp/game/common/, etc.
+    const auto gameRoot = GetGamePath() / "game";
+    const std::string commonPath = (const char*)(gameRoot / "common").u8string().c_str();
+    const std::string platformPath = (const char*)(gameRoot / "xbox360").u8string().c_str();
+    const std::string audioPath = (const char*)(gameRoot / "audio").u8string().c_str();
     
     // Register main root paths
     XamRootCreate("common", commonPath);
@@ -137,14 +136,15 @@ void KiSystemStartup()
     // Also register alternate names the game might use
     XamRootCreate("xbox360", platformPath);  // Some code uses xbox360: instead of platform:
     
+    LOGF_IMPL(Utility, "Main", "Game root: {}", gameRoot.string());
     LOGF_IMPL(Utility, "Main", "Registered common: -> {}", commonPath);
     LOGF_IMPL(Utility, "Main", "Registered platform: -> {}", platformPath);
     LOGF_IMPL(Utility, "Main", "Registered audio: -> {}", audioPath);
 
     // Initialize Virtual File System for direct file serving
     // This bypasses complex RPF offset-based reading that causes stream issues
-    VFS::Initialize(GetGamePath() / "extracted");
-    LOGF_IMPL(Utility, "Main", "VFS initialized with root: {}", extractedPath);
+    VFS::Initialize(gameRoot);
+    LOGF_IMPL(Utility, "Main", "VFS initialized with root: {}", gameRoot.string());
 
     std::error_code ec;
     for (auto& file : std::filesystem::directory_iterator(GetGamePath() / "dlc", ec))
@@ -364,6 +364,11 @@ int main(int argc, char *argv[])
     std::filesystem::path modulePath;
     bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
+    
+    // TEMPORARY: Force installer UI to always show for preview
+    // TODO: Remove this line after UI preview is done
+    runInstallerWizard = true;
+    
      if (runInstallerWizard)
      {
          if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
@@ -380,17 +385,23 @@ int main(int argc, char *argv[])
 
     // ModLoader::Init();
 
+    printf("[Main] Calling KiSystemStartup...\n"); fflush(stdout);
     KiSystemStartup();
+    printf("[Main] KiSystemStartup done\n"); fflush(stdout);
 
+    printf("[Main] Loading module: %s\n", modulePath.string().c_str()); fflush(stdout);
     uint32_t entry = LdrLoadModule(modulePath);
+    printf("[Main] Module loaded, entry=0x%08X\n", entry); fflush(stdout);
 
     if (!runInstallerWizard)
     {
+        printf("[Main] Creating video device...\n"); fflush(stdout);
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
             std::_Exit(1);
         }
+        printf("[Main] Video device created\n"); fflush(stdout);
     }
     LOGN_WARNING("Start Guest Thread");
     LOGN_WARNING(modulePath.string());

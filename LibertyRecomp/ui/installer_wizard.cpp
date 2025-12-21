@@ -19,6 +19,9 @@
 #include <sdl_listener.h>
 
 #include <res/images/common/libertyrecomp.dds.h>
+#include <res/images/installer/gta4_logo.dds.h>
+#include <res/images/installer/DLC/tlad_logo.dds.h>
+#include <res/images/installer/DLC/tbogt_logo.dds.h>
 #include <res/images/installer/install_001.dds.h>
 #include <res/images/installer/install_002.dds.h>
 #include <res/images/installer/install_003.dds.h>
@@ -28,6 +31,7 @@
 #include <res/images/installer/install_007.dds.h>
 #include <res/images/installer/install_008.dds.h>
 #include <res/credits.h>
+#include <ui/gta4_style.h>
 
 // One Shot Animations Constants
 static constexpr double SCANLINES_ANIMATION_TIME = 0.0;
@@ -48,14 +52,16 @@ static constexpr double CONTAINER_INNER_DURATION = 15.0;
 static constexpr double ALL_ANIMATIONS_FULL_DURATION = CONTAINER_INNER_TIME + CONTAINER_INNER_DURATION;
 static constexpr double QUITTING_EXTRA_DURATION = 60.0;
 
-constexpr float IMAGE_WIDTH = 1000.0f;
-constexpr float IMAGE_HEIGHT = 1000.0f;
+// GTA IV character images - proper aspect ratio (taller than wide)
+constexpr float IMAGE_WIDTH = 600.0f;
+constexpr float IMAGE_HEIGHT = 800.0f;
 
-constexpr float CONTAINER_X = 650.0f;
-constexpr float CONTAINER_Y = 226.0f;
-constexpr float CONTAINER_WIDTH = 526.5f;
-constexpr float CONTAINER_HEIGHT = 246.0f;
-constexpr float CONTAINER_PADDING = 25.0f;
+// GTA IV Style: Container positioned far right, clear of character
+constexpr float CONTAINER_X = 620.0f;  // Far right to clear character image
+constexpr float CONTAINER_Y = 180.0f;  // Position for content
+constexpr float CONTAINER_WIDTH = 480.0f;  // Width that fits on right side
+constexpr float CONTAINER_HEIGHT = 380.0f;  // Taller for content
+constexpr float CONTAINER_PADDING = 25.0f;  // Standard padding
 constexpr float SIDE_CONTAINER_WIDTH = CONTAINER_WIDTH / 2.0f;
 
 constexpr float BOTTOM_X_GAP = 4.0f;
@@ -84,6 +90,9 @@ static std::array<std::filesystem::path, int(DLC::Count)> g_dlcSourcePaths;
 static std::array<bool, int(DLC::Count)> g_dlcInstalled = {};
 static std::array<std::unique_ptr<GuestTexture>, 8> g_installTextures;
 static std::unique_ptr<GuestTexture> g_upLibertyDev;
+static std::unique_ptr<GuestTexture> g_upGTA4Logo;
+static std::unique_ptr<GuestTexture> g_upTLADLogo;
+static std::unique_ptr<GuestTexture> g_upTBOGTLogo;
 static Journal g_installerJournal;
 static Installer::Sources g_installerSources;
 static uint64_t g_installerAvailableSize = 0;
@@ -98,12 +107,13 @@ static std::atomic<bool> g_installerCancelled = false;
 static bool g_installerFailed = false;
 static std::string g_installerErrorMessage;
 
-static std::array<ImVec2, 8> g_installTexturePositions = { ImVec2(120.0f, 90.0f),    // Sonic
-                                                           ImVec2(100.0f, 80.0f),    // Tails
-                                                           ImVec2(120.0f, 90.0f),    // Amy
-                                                           ImVec2(10.0f, 90.0f),     // Shadow
-                                                           ImVec2(120.0f, 90.0f),    // Rouge
-                                                           ImVec2(120.0f, 10.0f),    // Silver
+// GTA IV Style: Character images at absolute left edge
+static std::array<ImVec2, 8> g_installTexturePositions = { ImVec2(-100.0f, 120.0f),   // Niko 1
+                                                           ImVec2(-100.0f, 120.0f),   // Niko 2
+                                                           ImVec2(-100.0f, 120.0f),   // Character 3
+                                                           ImVec2(-100.0f, 120.0f),   // Character 4
+                                                           ImVec2(-100.0f, 120.0f),   // Character 5
+                                                           ImVec2(-100.0f, 120.0f),   // Character 6
                                                            ImVec2(10.0f, 140.0f),    // Eggman
                                                            ImVec2(200.0f, 140.0f) }; // Elise
 
@@ -149,6 +159,17 @@ static bool g_currentCursorBack = false;
 static std::vector<std::pair<ImVec2, ImVec2>> g_currentCursorRects;
 static std::string g_creditsStr;
 
+// DLC Selection state (declared early for use in event listener)
+static int g_dlcSelectionIndex = 1; // 0=TBOGT, 1=GTA IV, 2=TLAD (center selected by default)
+
+// Hold-to-skip ESC functionality
+static bool g_escHeld = false;
+static double g_escHoldStartTime = 0.0;
+static constexpr double ESC_HOLD_DURATION = 1.5; // Hold for 1.5 seconds to skip
+
+// Forward declaration for file picker
+static void PickerShow(bool folderMode);
+
 class SDLEventListenerForInstaller : public SDLEventListener
 {
 public:
@@ -184,8 +205,30 @@ public:
                 switch (event->key.keysym.scancode)
                 {
                     case SDL_SCANCODE_LEFT:
+                    case SDL_SCANCODE_A:
+                        // Special handling for DLC selection page
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            g_dlcSelectionIndex = (g_dlcSelectionIndex + 2) % 3; // Wrap left
+                            Game_PlaySound("cursor2");  // Play select sound
+                        }
+                        else
+                        {
+                            tapDirection.x = -1.0f;
+                        }
+                        break;
                     case SDL_SCANCODE_RIGHT:
-                        tapDirection.x = (event->key.keysym.scancode == SDL_SCANCODE_RIGHT) ? 1.0f : -1.0f;
+                    case SDL_SCANCODE_D:
+                        // Special handling for DLC selection page
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            g_dlcSelectionIndex = (g_dlcSelectionIndex + 1) % 3; // Wrap right
+                            Game_PlaySound("cursor2");  // Play select sound
+                        }
+                        else
+                        {
+                            tapDirection.x = 1.0f;
+                        }
                         break;
                     case SDL_SCANCODE_UP:
                     case SDL_SCANCODE_DOWN:
@@ -193,13 +236,46 @@ public:
                         break;
                     case SDL_SCANCODE_RETURN:
                     case SDL_SCANCODE_KP_ENTER:
-                        g_currentCursorAccepted = (g_currentCursorIndex >= 0);
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            // For DLC selection, open file picker if a DLC is selected (not base game)
+                            if (g_dlcSelectionIndex == 0 || g_dlcSelectionIndex == 2) {
+                                // DLC selected - open folder picker
+                                Game_PlaySound("deside");
+                                PickerShow(true);
+                            } else {
+                                // Base game selected - proceed to next step
+                                g_currentCursorAccepted = true;
+                            }
+                        }
+                        else
+                        {
+                            g_currentCursorAccepted = (g_currentCursorIndex >= 0);
+                        }
                         break;
                     case SDL_SCANCODE_ESCAPE:
-                        g_currentCursorBack = true;
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            // Start ESC hold timer for DLC skip
+                            g_escHeld = true;
+                            g_escHoldStartTime = ImGui::GetTime();
+                        }
+                        else
+                        {
+                            g_currentCursorBack = true;
+                        }
                         break;
                 }
 
+                break;
+            }
+            
+            case SDL_KEYUP:
+            {
+                if (event->key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+                {
+                    g_escHeld = false;
+                }
                 break;
             }
 
@@ -208,10 +284,27 @@ public:
                 switch (event->cbutton.button)
                 {
                     case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-                        tapDirection = { -1.0f, 0.0f };
+                        // Special handling for DLC selection page
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            g_dlcSelectionIndex = (g_dlcSelectionIndex + 2) % 3;
+                            Game_PlaySound("cursor2");  // Play select sound
+                        }
+                        else
+                        {
+                            tapDirection = { -1.0f, 0.0f };
+                        }
                         break;
                     case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-                        tapDirection = { 1.0f, 0.0f };
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            g_dlcSelectionIndex = (g_dlcSelectionIndex + 1) % 3;
+                            Game_PlaySound("cursor2");  // Play select sound
+                        }
+                        else
+                        {
+                            tapDirection = { 1.0f, 0.0f };
+                        }
                         break;
                     case SDL_CONTROLLER_BUTTON_DPAD_UP:
                         tapDirection = { 0.0f, -1.0f };
@@ -220,7 +313,20 @@ public:
                         tapDirection = { 0.0f, 1.0f };
                         break;
                     case SDL_CONTROLLER_BUTTON_A:
-                        g_currentCursorAccepted = (g_currentCursorIndex >= 0);
+                        if (g_currentPage == WizardPage::SelectDLC)
+                        {
+                            // For DLC selection, open file picker if a DLC is selected
+                            if (g_dlcSelectionIndex == 0 || g_dlcSelectionIndex == 2) {
+                                Game_PlaySound("deside");
+                                PickerShow(true);
+                            } else {
+                                g_currentCursorAccepted = true;
+                            }
+                        }
+                        else
+                        {
+                            g_currentCursorAccepted = (g_currentCursorIndex >= 0);
+                        }
                         break;
                     case SDL_CONTROLLER_BUTTON_B:
                         g_currentCursorBack = true;
@@ -379,15 +485,11 @@ const ELanguage LANGUAGE_ENUM[] =
     ELanguage::Japanese,
 };
 
+// GTA IV DLC names for selection screen
 const char *DLC_SOURCE_TEXT[] =
 {
-    "SONIC BOSS ATTACK",
-    "SHADOW BOSS ATTACK",
-    "SILVER BOSS ATTACK",
-    "TEAM ATTACK AMIGO",
-    "SONIC VERY HARD",
-    "SHADOW VERY HARD",
-    "SILVER VERY HARD",
+    "THE LOST AND DAMNED",
+    "THE BALLAD OF GAY TONY",
 };
 
 static int DLCIndex(DLC dlc)
@@ -466,10 +568,53 @@ static void DrawBackground()
     auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
 
-    const uint32_t TOP = IM_COL32(0, 103, 255, 255);
-    const uint32_t BOTTOM = IM_COL32(0, 40, 100, 255);
+    // GTA IV Style: Solid black background
+    drawList->AddRectFilled({ 0.0, 0.0 }, res, GTA4Style::Colors::Background);
+}
 
-    drawList->AddRectFilledMultiColor({ 0.0, 0.0 }, res, TOP, TOP, BOTTOM, BOTTOM);
+static void DrawGTA4Logo()
+{
+    if (!g_upGTA4Logo)
+        return;
+    
+    auto &res = ImGui::GetIO().DisplaySize;
+    auto drawList = ImGui::GetBackgroundDrawList();
+    
+    // Draw GTA IV logo in top-left corner - original aspect ratio
+    float logoWidth = Scale(180);
+    float logoHeight = Scale(90);
+    float padding = Scale(20);
+    
+    ImVec2 logoMin = { padding, padding };
+    ImVec2 logoMax = { logoMin.x + logoWidth, logoMin.y + logoHeight };
+    
+    float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
+    ImU32 logoColor = IM_COL32(255, 255, 255, 255 * alpha);
+    
+    drawList->AddImage(g_upGTA4Logo.get(), logoMin, logoMax, { 0, 0 }, { 1, 1 }, logoColor);
+}
+
+// GTA IV Style simple header - replaces common_menu Sonic textures
+static void DrawGTA4Header()
+{
+    auto &res = ImGui::GetIO().DisplaySize;
+    auto drawList = ImGui::GetBackgroundDrawList();
+    
+    float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
+    
+    // Draw orange accent strip at top
+    float stripHeight = Scale(50);
+    float stripY = Scale(120);
+    drawList->AddRectFilled({ 0, stripY }, { res.x, stripY + stripHeight }, GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha));
+    
+    // Draw title text "INSTALLER" on the strip
+    const char* title = "INSTALLER";
+    float titleFontSize = Scale(28);
+    ImVec2 titleSize = g_pFntNewRodin->CalcTextSizeA(titleFontSize, FLT_MAX, 0.0f, title);
+    float titleX = Scale(220);  // After logo
+    float titleY = stripY + (stripHeight - titleSize.y) / 2.0f;
+    
+    drawList->AddText(g_pFntNewRodin, titleFontSize, { titleX, titleY }, IM_COL32(255, 255, 255, 255 * alpha), title);
 }
 
 static void DrawArrows()
@@ -645,12 +790,17 @@ static void DrawDescriptionContainer()
 
 static void DrawButtonContainer(ImVec2 min, ImVec2 max, int baser, int baseg, float alpha)
 {
-    auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
 
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(baser, baseg + 130, 0, 223 * alpha), IM_COL32(baser, baseg + 130, 0, 178 * alpha), IM_COL32(baser, baseg + 130, 0, 223 * alpha), IM_COL32(baser, baseg + 130, 0, 178 * alpha));
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(baser, baseg, 0, 13 * alpha), IM_COL32(baser, baseg, 0, 0), IM_COL32(baser, baseg, 0, 55 * alpha), IM_COL32(baser, baseg, 0, 6 * alpha));
-    drawList->AddRectFilledMultiColor(min, max, IM_COL32(baser, baseg + 130, 0, 13 * alpha), IM_COL32(baser, baseg + 130, 0, 111 * alpha), IM_COL32(baser, baseg + 130, 0, 0), IM_COL32(baser, baseg + 130, 0, 55 * alpha));
+    // GTA IV Style: Simple dark row with subtle highlight on hover - no borders
+    bool isHovered = (baser != 0 || baseg != 0);
+    
+    // Simple dark background row
+    ImU32 bgColor = isHovered 
+        ? GTA4Style::WithAlpha(IM_COL32(50, 50, 50, 255), alpha)
+        : GTA4Style::WithAlpha(IM_COL32(30, 30, 30, 200), alpha);
+    
+    drawList->AddRectFilled(min, max, bgColor);
 }
 
 static ImVec2 ComputeTextSize(ImFont *font, const char *text, float size, float &squashRatio, float maxTextWidth = FLT_MAX)
@@ -672,7 +822,6 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
 {
     buttonPressed = false;
 
-    auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
     float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
     if (!buttonEnabled)
@@ -682,6 +831,7 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
 
     int baser = 0;
     int baseg = 0;
+    bool isHovered = false;
     if (g_currentMessagePrompt.empty() && !g_currentPickerVisible && !sourceButton && buttonEnabled && (alpha >= 1.0f))
     {
         bool cursorOnButton = PushCursorRect(min, max, buttonPressed, makeDefault);
@@ -689,6 +839,7 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
         {
             baser = 48;
             baseg = 32;
+            isHovered = true;
         }
     }
 
@@ -704,14 +855,12 @@ static void DrawButton(ImVec2 min, ImVec2 max, const char *buttonText, bool sour
     SetOrigin({ min.x + textSize.x / 2.0f, min.y });
     SetScale({ squashRatio, 1.0f });
 
-    DrawTextBasic
-    (
-        font,
-        size,
-        min,
-        IM_COL32(255, 255, 255, 255 * alpha),
-        buttonText
-    );
+    // GTA IV Style: Orange text for selected, white/gray for normal
+    ImU32 textColor = isHovered 
+        ? GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha)
+        : IM_COL32(255, 255, 255, 255 * alpha);
+
+    DrawTextBasic(font, size, min, textColor, buttonText);
 
     SetScale({ 1.0f, 1.0f });
     SetOrigin({ 0.0f, 0.0f });
@@ -764,14 +913,19 @@ static void DrawProgressBar(float progressRatio)
     auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
     float alpha = 1.0;
-    const uint32_t innerColor0 = IM_COL32(0, 65, 0, 255 * alpha);
-    const uint32_t innerColor1 = IM_COL32(0, 32, 0, 255 * alpha);
+    
+    // GTA IV Style: Orange progress bar
+    const uint32_t innerColor0 = GTA4Style::Colors::ProgressBg;
+    const uint32_t innerColor1 = GTA4Style::Colors::BackgroundDark;
+    
     float xPadding = Scale(4);
     float yPadding = Scale(3);
     ImVec2 min = { g_aspectRatioOffsetX + Scale(CONTAINER_X) + BOTTOM_X_GAP + Scale(1), g_aspectRatioOffsetY + Scale(CONTAINER_Y + CONTAINER_HEIGHT + BOTTOM_Y_GAP)};
     ImVec2 max = { g_aspectRatioOffsetX + Scale(CONTAINER_X + CONTAINER_WIDTH - BOTTOM_X_GAP), g_aspectRatioOffsetY + Scale(CONTAINER_Y + CONTAINER_HEIGHT + BOTTOM_Y_GAP + BUTTON_HEIGHT) };
 
-    DrawButtonContainer(min, max, 0, 0, alpha);
+    // Background container
+    drawList->AddRectFilled(min, max, GTA4Style::Colors::BackgroundPanel);
+    drawList->AddRect(min, max, GTA4Style::Colors::Border);
 
     drawList->AddRectFilledMultiColor
     (
@@ -783,8 +937,9 @@ static void DrawProgressBar(float progressRatio)
         innerColor1
     );
 
-    const uint32_t sliderColor0 = IM_COL32(57, 241, 0, 255 * alpha);
-    const uint32_t sliderColor1 = IM_COL32(2, 106, 0, 255 * alpha);
+    // GTA IV orange progress fill
+    const uint32_t sliderColor0 = GTA4Style::Colors::ProgressFill;
+    const uint32_t sliderColor1 = GTA4Style::Colors::ProgressFillDark;
     xPadding += Scale(1.5f);
     yPadding += Scale(1.5f);
 
@@ -1005,6 +1160,181 @@ static void DrawSourcePickers()
     }
 }
 
+// GTA IV Style DLC Selection - Three column layout with character images and logos
+static void DrawGTA4DLCSelection()
+{
+    auto &res = ImGui::GetIO().DisplaySize;
+    auto drawList = ImGui::GetBackgroundDrawList();
+    float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
+    
+    // Calculate column positions (3 columns: TBOGT | GTA IV | TLAD)
+    float columnWidth = res.x / 3.0f;
+    float logoAreaY = res.y * 0.70f;
+    
+    // Selection titles
+    const char* titles[] = { "THE BALLAD OF GAY TONY", "GRAND THEFT AUTO IV", "THE LOST AND DAMNED" };
+    // DLC indices: 0=TBOGT, 1=GTA IV (skip), 2=TLAD
+    // Map to DLC enum: TBOGT=1, TLAD=0
+    
+    // Draw each column
+    for (int i = 0; i < 3; i++)
+    {
+        float columnX = columnWidth * i;
+        float columnCenterX = columnX + columnWidth / 2.0f;
+        
+        bool isSelected = (g_dlcSelectionIndex == i);
+        bool isHovered = false;
+        bool isDLC = (i != 1); // 0=TBOGT, 2=TLAD are DLCs
+        
+        // Check for mouse hover and click
+        ImVec2 columnMin = { columnX, 0 };
+        ImVec2 columnMax = { columnX + columnWidth, res.y - Scale(60) };
+        if (ImGui::IsMouseHoveringRect(columnMin, columnMax))
+        {
+            isHovered = true;
+            if (ImGui::IsMouseClicked(0))
+            {
+                if (g_dlcSelectionIndex == i && isDLC)
+                {
+                    // Already selected DLC - open file picker
+                    Game_PlaySound("deside");
+                    PickerShow(true);
+                }
+                else
+                {
+                    // Select this column
+                    g_dlcSelectionIndex = i;
+                    Game_PlaySound("cursor2");
+                }
+            }
+        }
+        
+        // Draw character image (use existing install textures)
+        // TBOGT uses install_002, GTA IV uses install_001, TLAD uses install_003
+        int textureIndex = (i == 0) ? 1 : (i == 1) ? 0 : 2;
+        if (g_installTextures[textureIndex])
+        {
+            float imgScale = isSelected ? 1.0f : 0.85f;
+            float imgWidth = Scale(300) * imgScale;
+            float imgHeight = Scale(500) * imgScale;
+            
+            ImVec2 imgMin = { columnCenterX - imgWidth / 2.0f, Scale(80) };
+            ImVec2 imgMax = { imgMin.x + imgWidth, imgMin.y + imgHeight };
+            
+            // Dim non-selected characters
+            ImU32 imgColor = isSelected ? IM_COL32(255, 255, 255, 255 * alpha) : IM_COL32(128, 128, 128, 200 * alpha);
+            
+            drawList->AddImage(g_installTextures[textureIndex].get(), imgMin, imgMax, { 0, 0 }, { 1, 1 }, imgColor);
+        }
+        
+        // Draw logo image for all columns (DLC logos or GTA IV logo)
+        ImFont* font = g_pFntNewRodin;
+        float logoScale = isSelected ? 1.0f : 0.8f;
+        float logoWidth = Scale(180) * logoScale;
+        float logoHeight = Scale(180) * logoScale;
+        
+        // Get the appropriate logo texture
+        GuestTexture* logoTexture = nullptr;
+        if (i == 0 && g_upTBOGTLogo) logoTexture = g_upTBOGTLogo.get();      // TBOGT
+        else if (i == 1 && g_upGTA4Logo) logoTexture = g_upGTA4Logo.get();   // GTA IV (center)
+        else if (i == 2 && g_upTLADLogo) logoTexture = g_upTLADLogo.get();   // TLAD
+        
+        if (logoTexture)
+        {
+            // Adjust aspect ratio for GTA IV logo (it's wider)
+            float actualLogoWidth = logoWidth;
+            float actualLogoHeight = logoHeight;
+            if (i == 1) {
+                actualLogoWidth = Scale(200) * logoScale;
+                actualLogoHeight = Scale(100) * logoScale;
+            }
+            
+            // Draw logo image
+            ImVec2 logoMin = { columnCenterX - actualLogoWidth / 2.0f, logoAreaY - Scale(20) };
+            ImVec2 logoMax = { logoMin.x + actualLogoWidth, logoMin.y + actualLogoHeight };
+            
+            ImU32 logoColor = isSelected ? IM_COL32(255, 255, 255, 255 * alpha) : IM_COL32(180, 180, 180, 200 * alpha);
+            if (isHovered && !isSelected)
+                logoColor = IM_COL32(255, 200, 150, 230 * alpha);
+            
+            drawList->AddImage(logoTexture, logoMin, logoMax, { 0, 0 }, { 1, 1 }, logoColor);
+            
+            // Draw selection indicator (orange underline for selected)
+            if (isSelected)
+            {
+                float underlineY = logoMax.y + Scale(8);
+                ImVec2 lineMin = { columnCenterX - actualLogoWidth / 2.0f, underlineY };
+                ImVec2 lineMax = { columnCenterX + actualLogoWidth / 2.0f, underlineY + Scale(3) };
+                drawList->AddRectFilled(lineMin, lineMax, GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha));
+            }
+            
+            // Draw "ADD DLC" button below logo for DLC columns only
+            if (isSelected && isDLC)
+            {
+                float buttonY = logoMax.y + Scale(20);
+                int dlcIdx = (i == 0) ? 1 : 0;  // TBOGT=1, TLAD=0 in DLC enum
+                bool dlcAdded = !g_dlcSourcePaths[dlcIdx].empty();
+                
+                const char* buttonText = dlcAdded ? "DLC ADDED" : "[CLICK] ADD DLC";
+                float buttonFontSize = Scale(14);
+                ImVec2 buttonSize = font->CalcTextSizeA(buttonFontSize, FLT_MAX, 0.0f, buttonText);
+                ImVec2 buttonPos = { columnCenterX - buttonSize.x / 2.0f, buttonY };
+                
+                ImU32 buttonColor = dlcAdded ? GTA4Style::Colors::TextGreen : GTA4Style::Colors::TextOrange;
+                drawList->AddText(font, buttonFontSize, buttonPos, GTA4Style::WithAlpha(buttonColor, alpha), buttonText);
+            }
+        }
+    }
+    
+    // Check ESC hold progress and skip if complete
+    if (g_escHeld)
+    {
+        double holdTime = ImGui::GetTime() - g_escHoldStartTime;
+        if (holdTime >= ESC_HOLD_DURATION)
+        {
+            // Skip to next page
+            g_escHeld = false;
+            SetCurrentPage(WizardPage::CheckSpace);
+            Game_PlaySound("deside");
+            return;
+        }
+    }
+    
+    // Draw navigation hints and SKIP button at bottom
+    float hintY = res.y - Scale(40);
+    ImFont* hintFont = g_pFntRodin;
+    float hintFontSize = Scale(14);
+    
+    // Left side: SKIP button with hold progress
+    if (g_escHeld)
+    {
+        double holdTime = ImGui::GetTime() - g_escHoldStartTime;
+        float progress = std::min(1.0f, (float)(holdTime / ESC_HOLD_DURATION));
+        
+        // Draw progress bar
+        float barWidth = Scale(200);
+        float barHeight = Scale(6);
+        ImVec2 barMin = { Scale(40), hintY + Scale(20) };
+        ImVec2 barMax = { barMin.x + barWidth, barMin.y + barHeight };
+        
+        drawList->AddRectFilled(barMin, barMax, GTA4Style::WithAlpha(IM_COL32(60, 60, 60, 255), alpha));
+        drawList->AddRectFilled(barMin, { barMin.x + barWidth * progress, barMax.y }, GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha));
+        
+        const char* skipText = "HOLD ESC TO SKIP...";
+        drawList->AddText(hintFont, hintFontSize, { Scale(40), hintY }, GTA4Style::WithAlpha(GTA4Style::Colors::TextOrange, alpha), skipText);
+    }
+    else
+    {
+        const char* skipText = "[HOLD ESC] SKIP DLC";
+        drawList->AddText(hintFont, hintFontSize, { Scale(40), hintY }, GTA4Style::WithAlpha(GTA4Style::Colors::TextGray, alpha), skipText);
+    }
+    
+    // Right side: navigation hints
+    float hintX = res.x - Scale(200);
+    const char* hintText = "[CLICK] SELECT";
+    drawList->AddText(hintFont, hintFontSize, { hintX, hintY }, GTA4Style::WithAlpha(GTA4Style::Colors::TextGray, alpha), hintText);
+}
+
 static void DrawSources()
 {
     if (g_currentPage == WizardPage::SelectGame)
@@ -1014,10 +1344,8 @@ static void DrawSources()
 
     if (g_currentPage == WizardPage::SelectDLC)
     {
-        for (int i = 0; i < 7; i++)
-        {
-            DrawSourceButton((i == 3) ? ButtonColumnMiddle : (i < 3) ? ButtonColumnLeft : ButtonColumnRight, 3 - float(i % 4), DLC_SOURCE_TEXT[i], !g_dlcSourcePaths[i].empty() || g_dlcInstalled[i]);
-        }
+        // Use new GTA IV style DLC selection
+        DrawGTA4DLCSelection();
     }
 }
 
@@ -1187,23 +1515,22 @@ static void DrawNavigationButton()
         }
         else if (g_currentPage == WizardPage::SelectGame)
         {
-            // GTA IV: Skip DLC selection and go directly to source validation and install
+            // Validate game source first
             std::string sourcesErrorMessage;
             if (!InstallerParseSources(sourcesErrorMessage))
             {
-                // Some of the sources that were provided to the installer are not valid.
                 std::stringstream stringStream;
                 stringStream << Localise("Installer_Message_InvalidFiles");
                 if (!sourcesErrorMessage.empty()) {
                     stringStream << std::endl << std::endl << sourcesErrorMessage;
                 }
-
                 g_currentMessagePrompt = stringStream.str();
                 g_currentMessagePromptConfirmation = false;
             }
             else
             {
-                SetCurrentPage(WizardPage::CheckSpace);
+                // GTA IV: Go to DLC/Update selection after game selection
+                SetCurrentPage(WizardPage::SelectDLC);
             }
         }
         else
@@ -1396,6 +1723,9 @@ void InstallerWizard::Init()
     g_installTextures[6] = LOAD_ZSTD_TEXTURE(g_install_007);
     g_installTextures[7] = LOAD_ZSTD_TEXTURE(g_install_008);
     g_upLibertyDev = LOAD_ZSTD_TEXTURE(g_libertyrecomp);
+    g_upGTA4Logo = LOAD_ZSTD_TEXTURE(g_gta4_logo);
+    g_upTLADLogo = LOAD_ZSTD_TEXTURE(g_tlad_logo);
+    g_upTBOGTLogo = LOAD_ZSTD_TEXTURE(g_tbogt_logo);
 
     for (int i = 0; i < g_credits.size(); i++)
     {
@@ -1411,15 +1741,30 @@ void InstallerWizard::Draw()
 
     ResetCursorRects();
     DrawBackground();
-    DrawArrows();
-    DrawLeftImage();
-    g_commonMenu.Draw();
-    DrawDescriptionContainer();
-    DrawLanguagePicker();
-    DrawSourcePickers();
-    DrawSources();
-    DrawInstallingProgress();
-    DrawNavigationButton();
+    DrawGTA4Logo();
+    
+    // For DLC selection page, use full-screen GTA IV style layout
+    bool isDLCSelectionPage = (g_currentPage == WizardPage::SelectDLC);
+    
+    if (!isDLCSelectionPage)
+    {
+        // GTA IV Style: No chevron arrows - skip DrawArrows()
+        DrawLeftImage();
+        // GTA IV Style: Use simple header instead of common_menu with Sonic textures
+        DrawGTA4Header();
+        DrawDescriptionContainer();
+        DrawLanguagePicker();
+        DrawSourcePickers();
+    }
+    
+    DrawSources(); // This now handles the GTA IV DLC selection screen
+    
+    if (!isDLCSelectionPage)
+    {
+        DrawInstallingProgress();
+        DrawNavigationButton();
+    }
+    
     CheckCancelAction();
     DrawMessagePrompt();
     PickerDrawForeground();

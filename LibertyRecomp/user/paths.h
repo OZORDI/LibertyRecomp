@@ -17,11 +17,14 @@ const std::filesystem::path& GetUserPath();
 
 inline std::filesystem::path GetGamePath()
 {
-    // Point to the project folder - the installer expects a "game" subdirectory
-    // containing default.xex, so we return the parent of the actual game folder.
-    // The game files are in: MarathonRecomp/Grand Theft Auto IV (USA) (En,Fr,De,Es,It)/
-    // We need to create a "game" symlink or adjust paths
-    return "/Users/Ozordi/Downloads/MarathonRecomp";
+    // Returns the game install directory
+    // macOS: ~/Library/Application Support/LibertyRecomp/
+    // Structure:
+    //   game/           - extracted game files (common/, xbox360/, audio/)
+    //   game/default.xex - the executable
+    //   shader_cache/   - compiled shaders
+    //   saves/          - save files
+    return GetUserPath();
 }
 
 inline std::filesystem::path GetSavePath(bool checkForMods)

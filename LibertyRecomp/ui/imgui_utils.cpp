@@ -3,6 +3,7 @@
 #include <hid/hid.h>
 #include <patches/aspect_ratio_patches.h>
 #include <ui/black_bar.h>
+#include <ui/gta4_style.h>
 #include <app.h>
 #include <decompressor.h>
 #include <version.h>
@@ -28,6 +29,7 @@ std::unique_ptr<GuestTexture> g_upTexArrow;
 
 void InitImGuiUtils()
 {
+    // TODO: Replace with europa-grotesk after regenerating font atlas
     g_pFntRodin = ImFontAtlasSnapshot::GetFont("FOT-RodinPro-DB.otf");
     g_pFntNewRodin = ImFontAtlasSnapshot::GetFont("FOT-NewRodinPro-UB.otf");
 
@@ -376,29 +378,15 @@ void DrawContainerBox(ImVec2 min, ImVec2 max, float alpha)
 {
     auto drawList = ImGui::GetBackgroundDrawList();
 
-    auto commonWidth = Scale(50);
-    auto commonHeight = Scale(50);
-    auto bottomHeight = Scale(5);
-
-    auto tl = PIXELS_TO_UV_COORDS(1024, 1024, 0, 400, 50, 50);
-    auto tc = PIXELS_TO_UV_COORDS(1024, 1024, 50, 400, 50, 50);
-    auto cl = PIXELS_TO_UV_COORDS(1024, 1024, 0, 450, 50, 50);
-    auto cc = PIXELS_TO_UV_COORDS(1024, 1024, 50, 450, 50, 50);
-    auto bl = PIXELS_TO_UV_COORDS(1024, 1024, 0, 500, 50, 50);
-    auto bc = PIXELS_TO_UV_COORDS(1024, 1024, 50, 500, 50, 50);
-
-    auto color = IM_COL32(255, 255, 255, 100 * alpha);
-
-    SetHorizontalGradient({ max.x - commonWidth, min.y }, max, IM_COL32_WHITE, IM_COL32(255, 255, 255, 0));
-
-    drawList->AddImage(g_upTexMainMenu1.get(), min, { min.x + commonWidth, min.y + commonHeight }, GET_UV_COORDS(tl), color);
-    drawList->AddImage(g_upTexMainMenu1.get(), { min.x + commonWidth, min.y }, { max.x, min.y + commonHeight }, GET_UV_COORDS(tc), color);
-    drawList->AddImage(g_upTexMainMenu1.get(), { min.x, min.y + commonHeight }, { min.x + commonWidth, max.y - commonHeight }, GET_UV_COORDS(cl), color);
-    drawList->AddImage(g_upTexMainMenu1.get(), { min.x + commonWidth, min.y + commonHeight }, { max.x, max.y - commonHeight }, GET_UV_COORDS(cc), color);
-    drawList->AddImage(g_upTexMainMenu1.get(), { min.x, max.y - commonHeight }, { min.x + commonWidth, max.y + bottomHeight }, GET_UV_COORDS(bl), color);
-    drawList->AddImage(g_upTexMainMenu1.get(), { min.x + commonWidth, max.y - commonHeight }, { max.x, max.y + bottomHeight }, GET_UV_COORDS(bc), color);
-
-    ResetGradient();
+    // GTA IV Style: Clean dark panel with subtle border - no orange
+    auto bgColor = GTA4Style::WithAlpha(GTA4Style::Colors::BackgroundPanel, alpha);
+    auto borderColor = GTA4Style::WithAlpha(GTA4Style::Colors::Border, 0.4f * alpha);
+    
+    // Draw filled background
+    drawList->AddRectFilled(min, max, bgColor);
+    
+    // Draw subtle gray border (thin line)
+    drawList->AddRect(min, max, borderColor, 0.0f, 0, 1.0f);
 }
 
 void DrawTextBasic(const ImFont* font, float fontSize, const ImVec2& pos, ImU32 colour, const char* text)

@@ -74,14 +74,14 @@ namespace VFS
         
         if (m_fileHandle == INVALID_HANDLE_VALUE)
         {
-            LOG_ERROR("[MappedFile] Failed to open file: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to open file: {}", path.string());
             return false;
         }
         
         LARGE_INTEGER fileSize;
         if (!GetFileSizeEx(m_fileHandle, &fileSize))
         {
-            LOG_ERROR("[MappedFile] Failed to get file size: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to get file size: {}", path.string());
             CloseHandle(m_fileHandle);
             m_fileHandle = INVALID_HANDLE_VALUE;
             return false;
@@ -104,7 +104,7 @@ namespace VFS
         
         if (!m_mapHandle)
         {
-            LOG_ERROR("[MappedFile] Failed to create file mapping: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to create file mapping: {}", path.string());
             CloseHandle(m_fileHandle);
             m_fileHandle = INVALID_HANDLE_VALUE;
             return false;
@@ -119,7 +119,7 @@ namespace VFS
         
         if (!m_data)
         {
-            LOG_ERROR("[MappedFile] Failed to map view of file: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to map view of file: {}", path.string());
             CloseHandle(m_mapHandle);
             CloseHandle(m_fileHandle);
             m_mapHandle = nullptr;
@@ -132,14 +132,14 @@ namespace VFS
         m_fd = open(path.c_str(), O_RDONLY);
         if (m_fd < 0)
         {
-            LOG_ERROR("[MappedFile] Failed to open file: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to open file: {}", path.string());
             return false;
         }
         
         struct stat st;
         if (fstat(m_fd, &st) < 0)
         {
-            LOG_ERROR("[MappedFile] Failed to stat file: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to stat file: {}", path.string());
             close(m_fd);
             m_fd = -1;
             return false;
@@ -162,7 +162,7 @@ namespace VFS
         
         if (m_data == MAP_FAILED)
         {
-            LOG_ERROR("[MappedFile] Failed to mmap file: {}", path.string());
+            LOGF_ERROR("[MappedFile] Failed to mmap file: {}", path.string());
             m_data = nullptr;
             close(m_fd);
             m_fd = -1;
@@ -173,7 +173,7 @@ namespace VFS
         madvise(m_data, m_size, MADV_SEQUENTIAL);
 #endif
         
-        LOG_UTILITY("[MappedFile] Mapped {} ({} bytes)", path.string(), m_size);
+        LOGF_UTILITY("[MappedFile] Mapped {} ({} bytes)", path.string(), m_size);
         return true;
     }
     

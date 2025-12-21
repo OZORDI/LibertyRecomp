@@ -14,7 +14,7 @@ namespace Install
             }
         }
         
-        LOG_UTILITY("[ThreadPool] Creating pool with {} threads", numThreads);
+        LOGF_UTILITY("[ThreadPool] Creating pool with {} threads", numThreads);
         
         for (size_t i = 0; i < numThreads; i++)
         {
@@ -49,7 +49,7 @@ namespace Install
                     }
                     catch (const std::exception& e)
                     {
-                        LOG_ERROR("[ThreadPool] Task exception: {}", e.what());
+                        LOGF_ERROR("[ThreadPool] Task exception: {}", e.what());
                     }
                     catch (...)
                     {

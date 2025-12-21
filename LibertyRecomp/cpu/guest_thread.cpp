@@ -5,6 +5,10 @@
 #include <kernel/heap.h>
 #include <kernel/function.h>
 #include "ppc_context.h"
+#include <SDL.h>
+
+// Forward declaration from imports.cpp
+extern void PumpSdlEventsIfNeeded();
 
 constexpr size_t PCR_SIZE = 0xAB0;
 constexpr size_t TLS_SIZE = 0x100;
@@ -73,7 +77,14 @@ static void* GuestThreadFunc(void* arg)
 static void* GuestThreadFunc(GuestThreadHandle* hThread)
 {
 #endif
-    hThread->suspended.wait(true);
+    bool wasSuspended = hThread->suspended.load();
+    fprintf(stderr, "[GuestThreadFunc] Thread starting, suspended=%d, waiting...\n", wasSuspended ? 1 : 0);
+    if (wasSuspended) {
+        hThread->suspended.wait(true);
+        fprintf(stderr, "[GuestThreadFunc] Thread RESUMED after wait\n");
+    } else {
+        fprintf(stderr, "[GuestThreadFunc] Thread NOT suspended, running immediately\n");
+    }
     GuestThread::Start(hThread->params);
     // HACK(1)
     hThread->isFinished = true;
@@ -84,6 +95,11 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
     : params(params), suspended((params.flags & 0x1) != 0)
 #ifdef USE_PTHREAD
 {
+    // Debug: verify flags and suspended state before creating thread
+    bool shouldBeSuspended = (params.flags & 0x1) != 0;
+    fprintf(stderr, "[GuestThreadHandle] CTOR flags=0x%X shouldSuspend=%d suspended=%d\n",
+            params.flags, shouldBeSuspended ? 1 : 0, suspended.load() ? 1 : 0);
+    
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, GetStackSize());
@@ -171,6 +187,9 @@ uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 
 uint32_t GuestThread::Start(const GuestThreadParams& params)
 {
+    // Pump SDL events before starting guest code to make window responsive
+    PumpSdlEventsIfNeeded();
+    
     const auto procMask = (uint8_t)(params.flags >> 24);
     const auto cpuNumber = procMask == 0 ? 0 : 7 - std::countl_zero(procMask);
 
@@ -178,8 +197,24 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
     ctx.ppcContext.r3.u64 = params.value;
     ctx.ppcContext.r4.u64 = params.value2;
 
-    g_memory.FindFunction(params.function)(ctx.ppcContext, g_memory.base);
+    printf("[GuestThread] Starting guest code at 0x%08X\n", params.function);
+    fflush(stdout);
+    
+    auto func = g_memory.FindFunction(params.function);
+    if (func == nullptr) {
+        printf("[GuestThread] ERROR: Function not found at 0x%08X\n", params.function);
+        fflush(stdout);
+        return 0;
+    }
+    
+    printf("[GuestThread] Calling function...\n");
+    fflush(stdout);
+    
+    func(ctx.ppcContext, g_memory.base);
 
+    printf("[GuestThread] Guest code returned\n");
+    fflush(stdout);
+    
     return ctx.ppcContext.r3.u32;
 }
 

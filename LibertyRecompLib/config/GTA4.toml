@@ -16,15 +16,6 @@ cr_as_local = false
 non_argument_as_local = false
 non_volatile_as_local = false
 
-# Debug/scaling options
-verbose = true                       # Print progress messages
-progress_every = 1000                # Print progress every N functions
-skip_auto_discovery = false          # Set to true to skip .pdata and branch scanning
-cpp_chunk_functions = 256            # Functions per .cpp chunk (lower = less RAM, more files)
-disable_identical_file_check = true  # Skip file comparison to save RAM
-use_lightweight_analysis = true      # Use memory-efficient analysis (HIGHLY RECOMMENDED)
-max_functions_in_memory = 1000       # Max functions to hold during recompilation
-
 # Register save/restore function addresses
 # Found using FindPatterns tool on GTA IV XEX
 restgprlr_14_address = 0x8298EB30

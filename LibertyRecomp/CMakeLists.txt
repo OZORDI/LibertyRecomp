@@ -567,6 +567,9 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/comm
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/common/select_arrow.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/common/select_arrow.dds" ARRAY_NAME "g_select_arrow" COMPRESSION_TYPE "zstd")
 
 ## Installer ##
+BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/gta4_logo.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/gta4_logo.dds" ARRAY_NAME "g_gta4_logo" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/DLC/tlad_logo.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/DLC/tlad_logo.dds" ARRAY_NAME "g_tlad_logo" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/DLC/tbogt_logo.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/DLC/tbogt_logo.dds" ARRAY_NAME "g_tbogt_logo" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_001.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_001.dds" ARRAY_NAME "g_install_001" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_002.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_002.dds" ARRAY_NAME "g_install_002" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_003.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_003.dds" ARRAY_NAME "g_install_003" COMPRESSION_TYPE "zstd")
