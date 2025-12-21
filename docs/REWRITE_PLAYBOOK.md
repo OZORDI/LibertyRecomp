@@ -3566,6 +3566,869 @@ class SaveManager {
 
 ---
 
+## 23. Game Init (sub_82120000) Deep Execution Traces
+
+These traces document the complete game initialization sequence - **critical for understanding Xbox 360 dependencies**.
+
+### 23.1 sub_8218C600 (0x8218C600) - Core Engine Initialization
+
+**Location:** `ppc_recomp.3.cpp:2250`
+**Stack Frame:** 128 bytes
+**Xbox 360 Dependency:** **CRITICAL**
+
+This is the master engine initialization function - sets up D3D, GPU, threading, and all core systems.
+
+```
+sub_8218C600 (Core Engine Init) - COMPLETE TRACE
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: THREAD PROCESSOR AFFINITY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Args: r3 = XEX path string ("game:\\default.xex")
+    ├── r28 = r3 (save path)
+    │
+    ├── ★ sub_829A0A48(-2, 2)             // XSetThreadProcessor
+    │   ├── r3 = -2 (current thread)
+    │   └── r4 = 2 (processor mask)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: GLOBAL STATE INITIALIZATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r30 = 1 (success flag)
+    │
+    ├── Global[0x813257AA] = 1            // Engine init started
+    ├── Global[0x81334044] = -1           // Player state = invalid
+    ├── Global[0x813357A4] = -1           // Session state = invalid
+    ├── Global[0x81337764] = -1           // Network state = invalid
+    ├── Global[0x8132504C] = 0x81835054   // Main vtable pointer
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: DIRECT3D DEVICE CREATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── ★ sub_827DF248(383, 2, 0)         // D3DDevice::Create
+    │   ├── r3 = 383 (adapter)
+    │   ├── r4 = 2 (device type)
+    │   └── r5 = 0 (behavior flags)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 4: THREAD LOCAL STORAGE SETUP
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r11 = [r13+0] (TLS base pointer)
+    ├── Global[0x81330A20] = 64           // TLS buffer size
+    ├── [TLS+8] |= 6                      // Enable thread flags
+    ├── [TLS+12] = 1                      // Thread state = active
+    │
+    ├── sub_82192578()                    // TLS init helper
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 5: STRING TABLE INITIALIZATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r11 = 0x81200A40 (-28864)         // Default string
+    │
+    ├── Store string tables:
+    │   ├── Global[0x81326CC4] = "DefaultString"
+    │   └── Global[0x81326CD4] = "DefaultString"
+    │
+    ├── Check path tables:
+    │   ├── If Global[0x81326CC4+4] == 0:
+    │   │   └── Store: 0x812009E0
+    │   └── If Global[0x81326D24+4] == 0:
+    │       └── Store: 0x812009DC
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 6: GPU INITIALIZATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── ★ sub_82850AF0()                  // Check GPU ready
+    │   └── Returns: bool (GPU available)
+    │
+    ├── If GPU not ready:
+    │   └── ★ sub_82850B60(0)             // Init GPU mode
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 7: ENGINE CONTEXT ALLOCATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Check override: Global[0x813257F8+4]
+    │   ├── If set: r30 = 0 (use existing)
+    │   └── If not: use Global[0x813257D4+4]
+    │
+    ├── sub_8218BE28(472)                 // Allocate 472-byte context
+    ├── r29 = result
+    │
+    ├── If allocation succeeded:
+    │   │
+    │   ├── ★ sub_82857028()              // Init D3D context
+    │   │
+    │   ├── [r29+0] = 0x81200970          // Store vtable
+    │   │
+    │   ├── r31 = 0x8133826C
+    │   └── Global[0x8133826C] = r29      // Store context ptr
+    │
+    ├── Else:
+    │   └── Global[0x8133826C] = 0
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 8: RENDER STATE SETUP
+    ├── ═══════════════════════════════════════════
+    │
+    ├── ★ sub_82851548(2, 0)              // Set render mode
+    │
+    ├── r3 = [r31] (context)
+    ├── r4 = 0x81301D38 (render params)
+    ├── r5 = r28 (XEX path)
+    │
+    ├── Global[0x81333E80] = 0x812009C4   // Render callback
+    │
+    ├── ★ sub_82856C38(ctx, params, path) // Configure renderer
+    │
+    ├── sub_8285A0E0(0x812009B4)          // Set shader path
+    │
+    ├── ★ sub_82850748(32, 11264, 16, 1)  // Alloc render buffers
+    │   ├── r3 = 32 (count)
+    │   ├── r4 = 11264 (size each)
+    │   ├── r5 = 16 (alignment)
+    │   └── r6 = 1 (flags)
+    │
+    ├── ★ sub_82856C90(ctx, r30, 0)       // Final render init
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 9: VTABLE METHOD CALL
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r3 = [r31] (context)
+    ├── r11 = [r3+0] (vtable)
+    ├── r11 = [r11+4] (method @ offset 4)
+    ├── CALL [r11]                        // context->Init()
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 10: SUBSYSTEM INITIALIZATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_82285F90()                    // Input init
+    ├── sub_8219FC80(r30)                 // Timer init
+    ├── sub_822214E0()                    // Audio init
+    │
+    ├── Check: Global[0x81333DD0+4]
+    │
+    ├── sub_823193A8(0x81386348)          // Resource paths
+    ├── sub_821EC3E8()                    // Script system
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 11: CAMERA CONTEXT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r31 = 0x81328CDC
+    │
+    ├── If Global[0x81328CDC] == 0:
+    │   │
+    │   ├── sub_8218BE28(48)              // Alloc 48 bytes
+    │   ├── r30 = result
+    │   │
+    │   ├── If success:
+    │   │   ├── sub_827EB6E0()            // Init camera
+    │   │   └── Global[0x81328CDC] = r30
+    │   │
+    │   └── Else:
+    │       └── Global[0x81328CDC] = 0
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 12: THREAD POOL
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_827EED88()                    // Get thread pool
+    │
+    ├── r3 = Global[0x81328CDC]
+    ├── r4 = Global[0x81330C98] (64-bit)
+    │
+    ├── sub_827EB748(camera, params)      // Configure camera
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 13: WORKER THREADS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_827EEB48(params, 65536, 32768, 1, 7, 0)
+    │   ├── r3 = 0x812009A8 (thread params)
+    │   ├── r4 = 65536 (stack size)
+    │   ├── r5 = 32768 (heap size)
+    │   ├── r6 = 1 (thread count)
+    │   ├── r7 = 7 (priority)
+    │   └── r8 = 0 (flags)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 14: FINAL SETUP
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_82193BC0(0x81333DE8)          // Save context init
+    ├── sub_82197338(0x8134B360)          // Config init
+    │
+    └── Return 1 (success)
+```
+
+**Key Allocations:**
+| Size | Purpose | Global |
+|------|---------|--------|
+| 472 bytes | Engine context | `0x8133826C` |
+| 48 bytes | Camera context | `0x81328CDC` |
+| 32 × 11264 | Render buffers | Internal |
+
+**Xbox 360 APIs Used:**
+| Address | API | Purpose |
+|---------|-----|---------|
+| `sub_829A0A48` | `XSetThreadProcessor()` | CPU affinity |
+| `sub_827DF248` | `IDirect3D9::CreateDevice()` | D3D device |
+| `sub_82850AF0` | GPU check | Xenos validation |
+| `sub_82857028` | D3D context init | Xenos setup |
+
+---
+
+### 23.2 sub_82120EE8 (0x82120EE8) - Core Engine Init
+
+**Location:** `ppc_recomp.0.cpp:2398`
+**Stack Frame:** 112 bytes
+
+Allocates game manager and world context structures.
+
+```
+sub_82120EE8 (Core Engine Init)
+    │
+    ├── r31 = 0x81328B30 (globals base)
+    ├── r29 = 0 (NULL constant)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: GAME MANAGER ALLOCATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Check: Global[0x81328B34] (game manager)
+    │
+    ├── If NULL:
+    │   │
+    │   ├── sub_8218BE28(944)             // Allocate 944 bytes
+    │   ├── r30 = result
+    │   │
+    │   ├── If success:
+    │   │   ├── sub_821207B0()            // Initialize manager
+    │   │   └── Global[0x81328B34] = r30
+    │   │
+    │   └── Else:
+    │       └── Global[0x81328B34] = 0
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: PHYSICS ENGINE CHECK
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Check: Global[0x81320004+4] (physics engine)
+    │
+    ├── If NULL:
+    │   └── sub_82673718()                // Init physics engine
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: WORLD CONTEXT ALLOCATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r30 = 0x81328B30
+    │
+    ├── Check: Global[0x81328B38] (world context)
+    │
+    ├── If NULL:
+    │   │
+    │   ├── sub_8218BE28(352)             // Allocate 352 bytes
+    │   ├── r31 = result
+    │   │
+    │   ├── If success:
+    │   │   ├── [r31+324] = 0             // Clear flags
+    │   │   ├── [r31+328] = 0             // Clear count (16-bit)
+    │   │   ├── [r31+330] = 0             // Clear index (16-bit)
+    │   │   │
+    │   │   ├── sub_8296BE18(r31+336)     // Init physics world
+    │   │   │
+    │   │   └── Global[0x81328B38] = r31
+    │   │
+    │   └── Else:
+    │       └── Global[0x81328B38] = 0
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 4: RESOURCE SYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_82269098()                    // Resource manager
+    │
+    ├── sub_822054F8()                    // Asset manager
+    │
+    ├── sub_821DE390()                    // Script manager
+    │
+    ├── sub_8221F8A8()                    // Audio manager
+    │
+    ├── sub_82273988(0x81323100, 1)       // Final setup
+    │   ├── r3 = 0x81323100 (context)
+    │   └── r4 = 1 (enable flag)
+    │
+    └── Return
+```
+
+**Key Structures:**
+| Size | Purpose | Global |
+|------|---------|--------|
+| 944 bytes | Game Manager | `0x81328B34` |
+| 352 bytes | World Context | `0x81328B38` |
+
+**World Context Layout:**
+```
+Offset  Size  Field
+------  ----  -----
+0x000   324   Main data
+0x144   4     Flags
+0x148   2     Count
+0x14A   2     Index
+0x150   ?     Physics world (via sub_8296BE18)
+```
+
+---
+
+### 23.3 sub_821250B0 (0x821250B0) - Memory Pool Allocator
+
+**Location:** `ppc_recomp.0.cpp:12583`
+**No stack frame** (leaf function)
+
+Circular buffer allocator for game objects.
+
+```
+sub_821250B0 (Memory Pool Allocator)
+    │
+    ├── Args:
+    │   └── r3 = pool struct pointer
+    │
+    ├── Pool struct layout:
+    │   ├── [+0]  = data base pointer
+    │   ├── [+4]  = allocation bitmap
+    │   ├── [+8]  = capacity
+    │   ├── [+12] = element size
+    │   ├── [+16] = current index
+    │   └── [+20] = allocation count
+    │
+    ├── r11 = [r3+16] (current index)
+    ├── r10 = 0 (wrapped flag)
+    ├── r9 = [r3+8] (capacity)
+    │
+    ├── ═══════════════════════════════════════════
+    │   SEARCH LOOP: Find free slot
+    ├── ═══════════════════════════════════════════
+    │
+    │loc_821250BC:
+    ├── r11++ (advance index)
+    │
+    ├── If r11 == r9 (wrapped):
+    │   ├── r10 = r10 & 0xFF
+    │   ├── r11 = 0 (reset to start)
+    │   │
+    │   ├── If r10 != 0 (already wrapped once):
+    │   │   └── CALL sub_82125154() → return 0 (pool full)
+    │   │
+    │   └── r10 = 1 (mark wrapped)
+    │
+    ├── r8 = [r3+4] (bitmap base)
+    ├── r8 = [r8 + r11] (byte at index)
+    ├── r8 = r8 & 0xFFFFFF80 (check high bit = in use)
+    │
+    ├── If r8 == 0 (slot free):
+    │   └── Continue loop → loc_821250BC
+    │
+    ├── ═══════════════════════════════════════════
+    │   FOUND FREE SLOT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r10 = [r3+4] (bitmap)
+    ├── r9 = [bitmap + r11] & 0x7F (clear in-use bit)
+    ├── [bitmap + r11] = r9
+    │
+    ├── r9 = ([bitmap + r11] & 0x7F) + 1
+    ├── r9 = r9 & 0x7F (ref count, max 127)
+    │
+    ├── If r9 <= 1:
+    │   └── r9 = 1 (minimum ref count)
+    │
+    ├── r8 = [bitmap + r11] & 0xFFFFFF80 (preserve in-use)
+    ├── r9 = r8 | r9 (combine)
+    ├── [bitmap + r11] = r9
+    │
+    ├── ═══════════════════════════════════════════
+    │   CALCULATE RETURN ADDRESS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r10 = [r3+20] (alloc count)
+    ├── r8 = [r3+12] (element size)
+    ├── r7 = r10 + 1
+    ├── r9 = [r3+0] (data base)
+    ├── r10 = r8 * r11 (offset)
+    │
+    ├── [r3+16] = r11 (update current index)
+    ├── [r3+20] = r7 (increment alloc count)
+    │
+    ├── r3 = r10 + r9 (data base + offset)
+    │
+    └── Return r3 (pointer to allocated element)
+```
+
+**Pool Structure (24 bytes):**
+```
+Offset  Size  Field
+------  ----  -----
+0x00    4     Data base pointer
+0x04    4     Allocation bitmap pointer
+0x08    4     Capacity (max elements)
+0x0C    4     Element size (bytes)
+0x10    4     Current search index
+0x14    4     Total allocation count
+```
+
+---
+
+### 23.4 sub_82318F60 (0x82318F60) - RAGE String Table Init
+
+**Location:** `ppc_recomp.14.cpp:71443`
+**Leaf function** (tail call)
+
+Simple wrapper that initializes a RAGE engine string table.
+
+```
+sub_82318F60 (RAGE String Table Init)
+    │
+    ├── Args:
+    │   └── r3 = string table name (e.g. "SaveData")
+    │
+    ├── r4 = 0 (default flags)
+    │
+    └── TAIL CALL → sub_827DF490 (string parser)
+```
+
+**sub_827DF490 (String Parser):**
+```
+sub_827DF490 (String Table Parser)
+    │
+    ├── Args:
+    │   ├── r3 = string pointer
+    │   └── r4 = flags
+    │
+    ├── r8 = r4 (save flags)
+    │
+    ├── r11 = [r3+0] (first char)
+    ├── r11 = sign_extend(r11)
+    ├── r11 = r11 - 34 (check for '"')
+    ├── r7 = count_leading_zeros(r11) >> 5 & 1
+    │
+    ├── If r7 != 0 (quoted string):
+    │   └── r3++ (skip opening quote)
+    │
+    ├── r10 = [r3+0] (current char)
+    ├── r9 = sign_extend(r10)
+    │
+    ├── If r9 == 0 (empty string):
+    │   └── Return (error)
+    │
+    ├── If quoted AND r9 == 34 (closing quote):
+    │   └── Return (error - empty quoted)
+    │
+    ├── Process character:
+    │   ├── r3++ (advance)
+    │   │
+    │   ├── If char >= 'A' (65) AND char <= 'Z' (90):
+    │   │   └── r11 = char + 32 (to lowercase)
+    │   │
+    │   └── Continue parsing...
+    │
+    └── Return string hash/index
+```
+
+---
+
+### 23.5 sub_82124080 (0x82124080) - Profile/Save Subsystem Init
+
+**Location:** `ppc_recomp.0.cpp:10159`
+**Stack Frame:** 224 bytes
+**Xbox 360 Dependency:** **HIGH** - Profile APIs
+
+```
+sub_82124080 (Profile/Save Subsystem Init)
+    │
+    ├── Args:
+    │   ├── r3 = sign-in required flag
+    │   └── r4 = auto-save flag
+    │
+    ├── r26 = 0x81327BA8 (profile base)
+    │
+    ├── Check: [r26-1] (already initialized)
+    │
+    ├── If initialized:
+    │   └── Return early
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: PROFILE STATE INIT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r29 = 0x81327BA0 (profile state)
+    ├── r31 = 0x81327BAA (sign-in flag)
+    ├── r28 = 0x81327BA9 (auto-save flag)
+    ├── r27 = 0x8133369C (save context)
+    │
+    ├── Global[0x81327BC0] = 0            // Clear profile data
+    ├── [r29+31692] = r4                  // Store auto-save flag
+    ├── [r31+31690] = r3                  // Store sign-in flag
+    ├── [r28+31689] = r3                  // Copy sign-in flag
+    │
+    ├── f0 = [0x8120E0E4] (float constant)
+    ├── [r26+0] = f0                      // Init timer
+    │
+    ├── Global[0x81327BC4] = 0            // Clear state
+    ├── Global[0x81327BA8] = 0            // Clear profile
+    ├── Global[0x8133369C] = 1            // Enable save system
+    ├── Global[0x81327BAB] = 1            // Ready flag
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: TIMESTAMP CAPTURE
+    ├── ═══════════════════════════════════════════
+    │
+    │loc_821240F4:
+    ├── ★ MFTB r9                         // Read time base register
+    ├── r11 = rotate(r9, 0)
+    │
+    ├── If r11 == 0:
+    │   └── Retry → loc_821240F4
+    │
+    ├── Global[0x81327CF0] = r9 (64-bit)  // Store timestamp
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: SAVE PATH SETUP
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_827DB118(&stack[80], 0, "SaveGames", 0, 0)
+    │   └── Build save game path
+    │
+    ├── r4 = stack[80..96] (path struct)
+    ├── stack[92] = 0x812031E8 (path suffix)
+    │
+    ├── r30 = 0x81333DE8 (save context)
+    │
+    ├── sub_82192EB8(r30, path64, path32) // Set save paths
+    │
+    ├── sub_82192E00(r30)                 // ★ XContentCreate
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 4: USER PROFILE QUERY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r3 = ([r28+31689] == 0) ? 1 : 0
+    │
+    ├── sub_82124268(r3)                  // Query user state
+    │
+    ├── r31 = [0x81327BAA+31690] (sign-in)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 5: PROFILE NAME SETUP
+    ├── ═══════════════════════════════════════════
+    │
+    ├── If r31 != 0 (sign-in required):
+    │   │
+    │   ├── sub_82990830(&stack[96], "SIGNED_IN_USER", 36)
+    │   │   └── Copy profile name template
+    │   │
+    │   └── Continue
+    │
+    ├── Else:
+    │   │
+    │   └── sub_82990830(&stack[96], "LOCAL_PROFILE_USER", 43)
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 6: WORLD PROFILE COPY
+    ├── ═══════════════════════════════════════════
+    │
+    ├── If r31 == 0 AND [r29+31692] != 0:
+    │   │
+    │   ├── r7 = Global[0x81328B38] (world context)
+    │   │
+    │   ├── If r7 != 0:
+    │   │   │
+    │   │   ├── r11 = [r7+328] (profile count)
+    │   │   │
+    │   │   ├── If r11 != 0:
+    │   │   │   │
+    │   │   │   ├── Loop over profiles (636 bytes each):
+    │   │   │   │   │
+    │   │   │   │   ├── r11 = [r7+324] + r8 (profile base)
+    │   │   │   │   ├── Check [r11+630] (valid flag)
+    │   │   │   │   ├── Check [r11+496] (name set)
+    │   │   │   │   │
+    │   │   │   │   ├── If valid:
+    │   │   │   │   │   ├── Copy name to stack[96]
+    │   │   │   │   │   └── Character by character
+    │   │   │   │   │
+    │   │   │   │   └── r8 += 636
+    │   │   │   │
+    │   │   │   └── End loop
+    │   │   │
+    │   │   └── Continue
+    │   │
+    │   └── Continue
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 7: SAVE FILE CREATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_82124540(&stack[96])          // Create save file
+    │
+    ├── If [r28+31689] == 0:
+    │   │
+    │   ├── sub_82123E20(1, 1)            // ★ Enable autosave
+    │   │
+    │   └── Global[0x8133369C] = 0        // Mark complete
+    │
+    ├── sub_821244B8()                    // Finalize
+    │
+    ├── [r26-1] = 1                       // Mark initialized
+    │
+    └── Return
+```
+
+**Profile Structure:**
+```
+Global Base: 0x81327BA0
+Offset  Size  Field
+------  ----  -----
+-1      1     Initialized flag
++0      4     Timer (float)
++8      1     Auto-save flag
++9      1     Sign-in required
++10     1     Sign-in state
++11     1     Ready flag
++32     4     Profile data ptr
++36     4     State flags
+```
+
+---
+
+### 23.6 sub_82120FB8 (0x82120FB8) - Main Game Setup ★ CRITICAL
+
+**Location:** `ppc_recomp.0.cpp:2531`
+**Stack Frame:** 144 bytes
+
+This is the **main game initialization function** - initializes ~50 subsystems!
+
+```
+sub_82120FB8 (Main Game Setup) - COMPLETE SUBSYSTEM LIST
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 1: INITIAL STATE
+    ├── ═══════════════════════════════════════════
+    │
+    ├── Global[0x81327674] = 0            // Clear game state
+    ├── Global[0x81327694] = 0            // Clear flags
+    ├── Global[0x81327696] = 0            // Clear flags
+    │
+    ├── ★ XNotifyPositionUI(1)            // Set notification position
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 2: CORE SUBSYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_822C1A30()  // [1] Streaming init
+    ├── sub_82679950()  // [2] Physics world
+    ├── sub_8221D880()  // [3] Audio system
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 3: PATH CONFIGURATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_827DB118(&stack[80], 0, "Models", 0, 0)
+    │   └── Build models path
+    │
+    ├── sub_827DB118(&stack[96], 0, "Textures", 0, 0)
+    │   └── Build textures path
+    │
+    ├── Store paths to globals:
+    │   ├── Global[0x81330328] = stack[80..96]
+    │   └── Global[0x81330338] = stack[96..112]
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 4: GAME SYSTEMS INIT
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8219FD88()  // [4] Timer system
+    │
+    ├── Check startup save:
+    │   ├── r11 = Global[0x81302D04]
+    │   ├── If r11 != -1:
+    │   │   └── Configure startup from save
+    │   └── Continue
+    │
+    ├── sub_822F8980()  // [5] Resource streamer
+    ├── sub_828E0AB8()  // [6] ★ Frame tick
+    ├── sub_822EEDB8()  // [7] World streamer
+    ├── sub_82270170()  // [8] Entity system
+    ├── sub_828E0AB8()  // [9] ★ Frame tick
+    │
+    ├── sub_822FD328(2000)  // [10] Pool init (size=2000)
+    ├── sub_822EFF40()  // [11] Map loader
+    ├── sub_82120C48()  // [12] Game config
+    ├── sub_82221410()  // [13] UI system
+    ├── sub_8226CB50()  // [14] Camera system
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 5: MISSION/SCRIPT SYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_821A8868()  // [15] Mission manager
+    ├── sub_821A8278("MissionData", 50)  // [16] Mission loader
+    │   ├── r3 = "MissionData" path
+    │   └── r4 = 50 (max missions)
+    │
+    ├── sub_821BC9E0()  // [17] Script compiler
+    ├── sub_822DB4B0()  // [18] Event system
+    ├── sub_821B7218()  // [19] Trigger system
+    ├── sub_822498F8()  // [20] Checkpoint system
+    ├── sub_828E0AB8()  // [21] ★ Frame tick
+    │
+    ├── sub_8225DC40()  // [22] Cutscene system
+    ├── sub_828E0AB8()  // [23] ★ Frame tick
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 6: WORLD SYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_821E24E0()  // [24] Weather system
+    ├── sub_821DFD18()  // [25] Time of day
+    ├── sub_8220E108()  // [26] Traffic system
+    ├── sub_828E0AB8()  // [27] ★ Frame tick
+    ├── sub_828E0AB8()  // [28] ★ Frame tick
+    │
+    ├── sub_821AB5F8()  // [29] Pedestrian system
+    ├── sub_828E0AB8()  // [30] ★ Frame tick
+    ├── sub_828E0AB8()  // [31] ★ Frame tick
+    │
+    ├── sub_821D8358()  // [32] Vehicle system
+    ├── sub_821EA0B8()  // [33] Garage system
+    ├── sub_82122CA0()  // [34] Player spawn
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 7: ONLINE/ACHIEVEMENT SYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_821AA660(0x81302E40)  // [35] Stats system
+    ├── sub_82200EB8()  // [36] Profile system
+    ├── sub_8212FB78()  // [37] Unlocks system
+    │
+    ├── ★ sub_8219ADF0()  // [38] Online system init
+    ├── ★ sub_8212F578()  // [39] Leaderboard init
+    ├── ★ sub_8212EDC8()  // [40] Achievement init
+    │
+    ├── sub_82138710()  // [41] Replay system
+    ├── sub_821B2ED8()  // [42] Radio system
+    ├── sub_828E0AB8()  // [43] ★ Frame tick
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 8: INPUT/CONTROLLER
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_822467B8()  // [44] Input mapper
+    ├── sub_82208460()  // [45] Controller config
+    ├── sub_821B9DA8()  // [46] Vibration system
+    ├── sub_828E0AB8()  // [47] ★ Frame tick
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 9: MENUS/UI
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_82258100()  // [48] Menu system
+    ├── sub_821A03A0()  // [49] HUD system
+    ├── sub_8232A2C0()  // [50] Minimap
+    ├── sub_828E0AB8()  // [51] ★ Frame tick
+    ├── sub_828E0AB8()  // [52] ★ Frame tick
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 10: FINALIZATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_821B5DE8()  // [53] Weapon system
+    ├── sub_821D8058()  // [54] Wanted system
+    ├── sub_822868C8()  // [55] Phone system
+    ├── sub_82289698(0x81309290)  // [56] Contact list
+    ├── sub_82125478()  // [57] Startup handler
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 11: THREAD REGISTRATION
+    ├── ═══════════════════════════════════════════
+    │
+    ├── r31 = 0x81328CD4 (game thread context)
+    │
+    ├── Check: Global[0x81328CF4] & 1
+    │
+    ├── If not registered:
+    │   │
+    │   ├── Global[0x81328CF4] |= 1
+    │   │
+    │   ├── [r31+0] = 0x812012F4 (vtable)
+    │   ├── [r31+260] = 0
+    │   │
+    │   ├── sub_8298ED98(0x81300BD0)      // Thread name
+    │   │
+    │   └── Continue
+    │
+    ├── sub_827E0C30(r31, "GameThread", 1)
+    │   └── Register main game thread
+    │
+    ├── sub_827E0CF8(r31, "GameLoop")
+    │   └── Set thread function
+    │
+    ├── ═══════════════════════════════════════════
+    │   PHASE 12: FINAL SYSTEMS
+    ├── ═══════════════════════════════════════════
+    │
+    ├── sub_8227AC28()  // [58] Network manager
+    ├── sub_828E0AB8()  // [59] ★ Frame tick
+    ├── sub_82272290()  // [60] Session manager
+    ├── sub_82212450()  // [61] Voice chat
+    ├── sub_822C5768()  // [62] DLC manager
+    ├── sub_822D4C68()  // [63] Content manager
+    │
+    └── Return
+```
+
+**Subsystem Init Order (63 systems):**
+| # | Address | System |
+|---|---------|--------|
+| 1 | `sub_822C1A30` | Streaming |
+| 2 | `sub_82679950` | Physics |
+| 3 | `sub_8221D880` | Audio |
+| 4 | `sub_8219FD88` | Timer |
+| 5 | `sub_822F8980` | Resource Streamer |
+| 6-9 | `sub_828E0AB8` | Frame Ticks |
+| 10 | `sub_822FD328` | Memory Pools |
+| 11 | `sub_822EFF40` | Map Loader |
+| 12 | `sub_82120C48` | Game Config |
+| 13 | `sub_82221410` | UI |
+| 14 | `sub_8226CB50` | Camera |
+| 15-16 | `sub_821A8xxx` | Missions |
+| 17 | `sub_821BC9E0` | Scripts |
+| 18-20 | Various | Events/Triggers/Checkpoints |
+| 21-23 | Frame Ticks | --- |
+| 24-26 | Weather/ToD/Traffic | World Systems |
+| 27-31 | Frame Ticks | --- |
+| 32-34 | Vehicles/Garage/Spawn | Player Systems |
+| 35-37 | Stats/Profile/Unlocks | Progress |
+| **38** | `sub_8219ADF0` | **Online System** |
+| **39** | `sub_8212F578` | **Leaderboards** |
+| **40** | `sub_8212EDC8` | **Achievements** |
+| 41-43 | Replay/Radio | Media |
+| 44-47 | Input/Controller | Controls |
+| 48-52 | Menus/HUD/Minimap | UI |
+| 53-56 | Weapons/Wanted/Phone | Gameplay |
+| 57-63 | Network/Voice/DLC | Online |
+
+---
+
 ## Document History
 - 2025-12-20: Consolidated `MODULE_REWRITE_INDEX.md` + `REWRITE_HANDOFF.md` into this playbook.
 - 2025-12-20: Added comprehensive per-module handoff documentation with function tables, test cases, and implementation notes.
@@ -3581,3 +4444,4 @@ class SaveManager {
 - 2025-12-21: **Added Extended Boot Traces (§17.4-17.8)** - Deep traces for `sub_829A7EA8` (init table executor), `sub_829A7DC8` (C++ constructors with 1338 init functions!), `sub_829A27D8` (cmdline access), `sub_8218BEA8` (game entry), `sub_827D89B8` (8-phase game init wrapper with network, argc/argv, engine vtable calls).
 - 2025-12-21: **Added Online/Achievement/Leaderboard Traces (§21)** - Deep traces for `sub_8219ADF0` (online system init with 228 config entries), `sub_8212EDC8` (achievement tracking with 50+ trackers, 508-byte structures, 6 achievement types), `sub_8212F578` (leaderboard init with 27 categories), `sub_82199658` (tracker factory). Includes tracker structure layout and implementation hooks.
 - 2025-12-21: **Added Xbox 360 Hardware-Tied Functions (§22)** - Critical rewrite documentation for `sub_827D89B8` call tree: cmdline parser, XNet init/cleanup, thread events (256 kernel events), core engine init (D3D, GPU), game subsystem init (944B manager, 352B world), profile/save loading (XContent APIs). Includes rewrite priority matrix and cross-platform implementation strategies.
+- 2025-12-21: **Added Game Init Deep Traces (§23)** - Complete execution traces for `sub_8218C600` (14-phase core engine init: D3D, GPU, TLS, render buffers), `sub_82120EE8` (game manager 944B, world context 352B), `sub_821250B0` (memory pool allocator with bitmap), `sub_82318F60` (RAGE string tables), `sub_82124080` (7-phase profile/save init with XContent), `sub_82120FB8` (**63 subsystem init** with complete order list).
