@@ -3,6 +3,7 @@
 #include "iso_extractor.h"
 #include "rpf_extractor.h"
 #include "platform_paths.h"
+#include "xbox360/title_update_manager.h"
 
 #include <xxh3.h>
 

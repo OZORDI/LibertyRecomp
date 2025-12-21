@@ -59,13 +59,23 @@ This document describes the comprehensive installation flow that handles:
 │                          INSTALLATION WIZARD                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  1. SELECT SOURCE                                                       │
+│  1. SELECT GAME SOURCE                                                  │
 │     User selects:                                                       │
 │     ├── ISO file (.iso)                                                │
 │     ├── Extracted folder                                               │
 │     └── XContent package                                               │
 │                                                                         │
-│  2. DETECT SOURCE TYPE                                                  │
+│  2. SELECT TITLE UPDATE (NEW)                                           │
+│     ├── Scans 'GAME UPDATES/' folder for STFS packages                 │
+│     ├── Scans install path 'updates/' folder                           │
+│     ├── User selects: No Update (v1.0) or detected TU version          │
+│     └── Selected version stored in config for reference                │
+│                                                                         │
+│  3. SELECT DLC (Optional)                                               │
+│     ├── The Lost and Damned (TLAD)                                     │
+│     └── The Ballad of Gay Tony (TBOGT)                                 │
+│                                                                         │
+│  4. DETECT SOURCE TYPE                                                  │
 │     ┌─────────────────┐                                                │
 │     │ Is it an ISO?   │──YES──► Run extract-xiso                       │
 │     └────────┬────────┘         └── Extract to temp directory          │
@@ -78,37 +88,93 @@ This document describes the comprehensive installation flow that handles:
 │              ▼                                                          │
 │     Use DirectoryFileSystem (already extracted)                        │
 │                                                                         │
-│  3. COPY GAME FILES                                                     │
+│  5. COPY GAME FILES                                                     │
 │     Copy essential files to platform install directory:                │
 │     ├── default.xex                                                    │
 │     ├── xbox360.rpf                                                    │
 │     ├── common.rpf                                                     │
 │     └── other required files                                           │
 │                                                                         │
-│  4. SCAN FOR SHADERS                                                    │
+│  6. APPLY TITLE UPDATE (if selected)                                    │
+│     ├── Extract .xexp from STFS container                              │
+│     ├── Apply patch to default.xex                                     │
+│     └── Fallback to xextool if native patching fails                   │
+│                                                                         │
+│  7. SCAN FOR SHADERS                                                    │
 │     Look for .fxc files in:                                            │
 │     ├── Extracted game folders directly                                │
 │     └── Inside RPF archives (extract if needed)                        │
 │                                                                         │
-│  5. EXTRACT & CONVERT SHADERS                                           │
+│  8. EXTRACT & CONVERT SHADERS                                           │
 │     For each .fxc file found:                                          │
 │     ├── Parse RAGE FXC container (magic: 0x61786772 "rgxa")            │
 │     ├── Extract Xbox 360 shader binaries (magic: 0x102A11XX)           │
 │     └── Store in shader_cache/extracted/                               │
 │                                                                         │
-│  6. COMPILE SHADER CACHE                                                │
+│  9. COMPILE SHADER CACHE                                                │
 │     Detect platform and compile:                                       │
 │     ├── Windows: HLSL → DXIL (DXC)                                     │
 │     ├── Linux: HLSL → SPIR-V (DXC)                                     │
 │     └── macOS: HLSL → AIR (Metal compiler)                             │
 │                                                                         │
-│  7. FINALIZE                                                            │
-│     ├── Write shader_cache.marker                                      │
-│     ├── Clean up temp files                                            │
-│     └── Signal completion                                              │
+│  10. FINALIZE                                                           │
+│      ├── Write shader_cache.marker                                     │
+│      ├── Save installed TU version to config                           │
+│      ├── Clean up temp files                                           │
+│      └── Signal completion                                             │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Title Update System
+
+GTA IV Xbox 360 Title Updates are distributed as STFS packages containing `.xexp` patch files.
+
+### Title Update Detection
+
+The installer automatically scans for Title Updates in:
+- `GAME UPDATES/` folder (relative to application)
+- `<install_path>/updates/` folder
+
+### Supported Formats
+
+| Format | Description |
+|--------|-------------|
+| STFS (CON/LIVE/PIRS) | Xbox 360 content package containing .xexp |
+| Raw .xexp | Direct patch file (less common) |
+
+### Components
+
+```
+LibertyRecomp/install/xbox360/
+├── stfs_parser.h/cpp          # STFS container parsing
+├── xex_patcher.h/cpp          # XEX/XEXP patch application  
+└── title_update_manager.h/cpp # High-level TU management
+```
+
+### Usage
+
+```cpp
+#include "install/xbox360/title_update_manager.h"
+
+liberty::install::TitleUpdateManager manager;
+
+// Scan for updates
+manager.ScanDirectory("GAME UPDATES/");
+
+// Display available updates
+for (const auto& update : manager.GetDetectedUpdates()) {
+    printf("%s\n", TitleUpdateManager::GetUpdateDisplayName(update.info).c_str());
+}
+
+// Select and apply
+manager.SelectUpdate(0);
+auto result = manager.ApplySelectedUpdate(baseXexPath, outputDir);
+```
+
+See [TITLE_UPDATE_SYSTEM.md](TITLE_UPDATE_SYSTEM.md) for detailed documentation.
 
 ---
 

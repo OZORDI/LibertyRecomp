@@ -102,3 +102,5 @@ CONFIG_DEFINE_HIDDEN("Codes", bool, UnlimitedAntigravity, false, false);
 CONFIG_DEFINE_HIDDEN("Codes", bool, UseOfficialTitleOnTitleBar, false, true);
 
 CONFIG_DEFINE("Update", time_t, LastChecked, 0, false);
+
+CONFIG_DEFINE_HIDDEN("Install", uint32_t, InstalledTitleUpdateVersion, 0, false);
