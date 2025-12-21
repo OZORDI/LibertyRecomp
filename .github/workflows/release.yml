@@ -396,6 +396,7 @@ jobs:
     env:
       FLATPAK_ID: io.github.ozordi.libertyrecomp
       FREEDESKTOP_VERSION: 23.08
+      LLVM_VERSION: 18
 
     steps:
       - name: Checkout Repository
@@ -433,6 +434,88 @@ jobs:
           path: ./${{ env.FLATPAK_ID }}.flatpak
 
   # ============================================================================
+  # Generate Windows DXIL Shader Cache
+  # ============================================================================
+  generate-dxil-cache:
+    name: Generate DXIL Shader Cache (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      SHADER_INPUT: tools/rage_fxc_extractor/extracted_shaders
+      SHADER_OUTPUT: LibertyRecompLib/shader/shader_cache.cpp
+      SHADER_COMMON: tools/XenosRecomp/XenosRecomp/shader_common.h
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify Extracted Shaders Exist
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${{ env.SHADER_INPUT }}")) {
+            Write-Error "Shader directory not found: ${{ env.SHADER_INPUT }}"
+            exit 1
+          }
+          $binFiles = Get-ChildItem -Path "${{ env.SHADER_INPUT }}" -Filter "*.bin" -Recurse
+          $count = $binFiles.Count
+          Write-Host "Found $count shader binary files"
+          if ($count -lt 1000) {
+            Write-Error "Expected at least 1000 shader files, found $count"
+            exit 1
+          }
+
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Configure XenosRecomp
+        shell: pwsh
+        run: |
+          $buildDir = "build_xenosrecomp_dxil_release"
+          New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+          cmake -S tools/XenosRecomp -B $buildDir `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DXENOS_RECOMP_DXIL=ON `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_C_COMPILER=cl
+
+      - name: Build XenosRecomp
+        shell: pwsh
+        run: cmake --build build_xenosrecomp_dxil_release --config Release --parallel
+
+      - name: Generate Shader Cache with DXIL
+        shell: pwsh
+        run: |
+          $xenosRecomp = "build_xenosrecomp_dxil_release/XenosRecomp.exe"
+          if (-not (Test-Path $xenosRecomp)) {
+            Write-Error "XenosRecomp.exe not found at $xenosRecomp"
+            exit 1
+          }
+          & $xenosRecomp "${{ env.SHADER_INPUT }}" "${{ env.SHADER_OUTPUT }}" "${{ env.SHADER_COMMON }}"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "XenosRecomp failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+
+      - name: Package DXIL Cache
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "${{ env.SHADER_OUTPUT }}" -DestinationPath DXIL-shader-cache.zip -Force
+
+      - name: Upload DXIL Cache Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DXIL-shader-cache
+          path: DXIL-shader-cache.zip
+
+  # ============================================================================
   # Create GitHub Release
   # ============================================================================
   create-release:
@@ -446,6 +529,7 @@ jobs:
       - build-macos-arm64
       - build-macos-x64
       - build-flatpak
+      - generate-dxil-cache
     permissions:
       contents: write
 
@@ -465,6 +549,7 @@ jobs:
           cp artifacts/LibertyRecomp-macOS-ARM64/LibertyRecomp-macOS-ARM64.zip release-files/
           cp artifacts/LibertyRecomp-macOS-x64/LibertyRecomp-macOS-x64.zip release-files/
           cp artifacts/LibertyRecomp-Flatpak/*.flatpak release-files/
+          cp artifacts/DXIL-shader-cache/DXIL-shader-cache.zip release-files/ || true
           ls -la release-files/
 
       - name: Get Version
@@ -492,6 +577,7 @@ jobs:
             release-files/LibertyRecomp-macOS-ARM64.zip
             release-files/LibertyRecomp-macOS-x64.zip
             release-files/*.flatpak
+            release-files/DXIL-shader-cache.zip
           body: |
             ## Liberty Recompiled ${{ steps.version.outputs.version }}
             
