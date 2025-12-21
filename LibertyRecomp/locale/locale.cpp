@@ -384,6 +384,28 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
         }
     },
     {
+        "Installer_Page_SelectTitleUpdate",
+        {
+            { ELanguage::English,  "Select a Title Update to apply.\nUpdates contain bug fixes and improvements." },
+            { ELanguage::Japanese, "適用するタイトルアップデートを選択\nアップデートにはバグ修正と改善が含まれます" },
+            { ELanguage::German,   "Wähle ein Title Update aus.\nUpdates enthalten Fehlerbehebungen und Verbesserungen." },
+            { ELanguage::French,   "Sélectionner une mise à jour.\nLes mises à jour contiennent des correctifs." },
+            { ELanguage::Spanish,  "Selecciona una actualización.\nLas actualizaciones contienen correcciones." },
+            { ELanguage::Italian,  "Seleziona un aggiornamento.\nGli aggiornamenti contengono correzioni." }
+        }
+    },
+    {
+        "Installer_TitleUpdate_None",
+        {
+            { ELanguage::English,  "No Update (Original v1.0)" },
+            { ELanguage::Japanese, "アップデートなし（オリジナルv1.0）" },
+            { ELanguage::German,   "Kein Update (Original v1.0)" },
+            { ELanguage::French,   "Pas de mise à jour (Original v1.0)" },
+            { ELanguage::Spanish,  "Sin actualización (Original v1.0)" },
+            { ELanguage::Italian,  "Nessun aggiornamento (Originale v1.0)" }
+        }
+    },
+    {
         "Installer_Page_SelectDLC",
         {
             { ELanguage::English,  "Add the sources for the DLC." },

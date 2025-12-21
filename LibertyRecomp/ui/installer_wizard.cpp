@@ -4,6 +4,7 @@
 
 #include <apu/embedded_player.h>
 #include <install/installer.h>
+#include <install/xbox360/title_update_manager.h>
 #include <gpu/video.h>
 #include <gpu/imgui/imgui_snapshot.h>
 #include <hid/hid.h>
@@ -122,6 +123,7 @@ enum class WizardPage
     SelectLanguage,
     Introduction,
     SelectGame,
+    SelectTitleUpdate,
     SelectDLC,
     CheckSpace,
     Installing,
@@ -161,6 +163,11 @@ static std::string g_creditsStr;
 
 // DLC Selection state (declared early for use in event listener)
 static int g_dlcSelectionIndex = 1; // 0=TBOGT, 1=GTA IV, 2=TLAD (center selected by default)
+
+// Title Update selection state
+static liberty::install::TitleUpdateManager g_titleUpdateManager;
+static int g_selectedTitleUpdateIndex = -1;  // -1 = no update (base game)
+static bool g_titleUpdatesScanned = false;
 
 // Hold-to-skip ESC functionality
 static bool g_escHeld = false;
@@ -442,6 +449,7 @@ static std::string& GetWizardText(WizardPage page)
         case WizardPage::SelectLanguage: return Localise("Installer_Page_SelectLanguage");
         case WizardPage::Introduction: return Localise("Installer_Page_Introduction");
         case WizardPage::SelectGame: return Localise("Installer_Page_SelectGame");
+        case WizardPage::SelectTitleUpdate: return Localise("Installer_Page_SelectTitleUpdate");
         case WizardPage::SelectDLC: return Localise("Installer_Page_SelectDLC");
         case WizardPage::CheckSpace: return Localise("Installer_Page_CheckSpace");
         case WizardPage::Installing: return Localise("Installer_Page_Installing");
@@ -457,6 +465,7 @@ static const int WIZARD_INSTALL_TEXTURE_INDEX[] =
     0,
     1,
     2,
+    3,  // SelectTitleUpdate
     3,
     4,
     5,
@@ -1335,11 +1344,119 @@ static void DrawGTA4DLCSelection()
     drawList->AddText(hintFont, hintFontSize, { hintX, hintY }, GTA4Style::WithAlpha(GTA4Style::Colors::TextGray, alpha), hintText);
 }
 
+static void ScanForTitleUpdates()
+{
+    if (g_titleUpdatesScanned)
+        return;
+    
+    g_titleUpdateManager.Clear();
+    g_selectedTitleUpdateIndex = -1;
+    
+    // Scan GAME UPDATES folder in project directory
+    std::filesystem::path updatesDir = std::filesystem::current_path() / "GAME UPDATES";
+    if (std::filesystem::exists(updatesDir))
+    {
+        g_titleUpdateManager.ScanDirectory(updatesDir);
+    }
+    
+    // Also scan install path's updates folder
+    std::filesystem::path installUpdatesDir = g_installPath / "updates";
+    if (std::filesystem::exists(installUpdatesDir))
+    {
+        g_titleUpdateManager.ScanDirectory(installUpdatesDir);
+    }
+    
+    g_titleUpdatesScanned = true;
+}
+
+static void DrawTitleUpdateSelection()
+{
+    auto &res = ImGui::GetIO().DisplaySize;
+    auto drawList = ImGui::GetBackgroundDrawList();
+    float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
+    
+    // Scan for updates on first entry to this page
+    ScanForTitleUpdates();
+    
+    const auto& updates = g_titleUpdateManager.GetDetectedUpdates();
+    
+    float buttonY = g_aspectRatioOffsetY + Scale(CONTAINER_Y + 20.0f);
+    float buttonX = g_aspectRatioOffsetX + Scale(CONTAINER_X + 20.0f);
+    float buttonWidth = Scale(CONTAINER_WIDTH - 40.0f);
+    float buttonHeight = Scale(28.0f);
+    float buttonSpacing = Scale(8.0f);
+    
+    // "No Update (Original)" option
+    {
+        ImVec2 min = { buttonX, buttonY };
+        ImVec2 max = { buttonX + buttonWidth, buttonY + buttonHeight };
+        
+        bool isSelected = (g_selectedTitleUpdateIndex == -1);
+        bool buttonPressed = false;
+        
+        std::string label = isSelected ? "[X] " : "[ ] ";
+        label += Localise("Installer_TitleUpdate_None");
+        
+        DrawButton(min, max, label.c_str(), false, true, buttonPressed, buttonWidth - Scale(20.0f), isSelected);
+        
+        if (buttonPressed)
+        {
+            g_selectedTitleUpdateIndex = -1;
+            g_titleUpdateManager.SelectUpdate(-1);
+        }
+        
+        buttonY += buttonHeight + buttonSpacing;
+    }
+    
+    // List detected updates
+    int index = 0;
+    for (const auto& update : updates)
+    {
+        if (buttonY > g_aspectRatioOffsetY + Scale(CONTAINER_Y + CONTAINER_HEIGHT - 40.0f))
+            break;  // Don't overflow container
+            
+        ImVec2 min = { buttonX, buttonY };
+        ImVec2 max = { buttonX + buttonWidth, buttonY + buttonHeight };
+        
+        bool isSelected = (g_selectedTitleUpdateIndex == index);
+        bool buttonPressed = false;
+        
+        std::string label = isSelected ? "[X] " : "[ ] ";
+        label += liberty::install::TitleUpdateManager::GetUpdateDisplayName(update.info);
+        
+        DrawButton(min, max, label.c_str(), false, true, buttonPressed, buttonWidth - Scale(20.0f), isSelected);
+        
+        if (buttonPressed)
+        {
+            g_selectedTitleUpdateIndex = index;
+            g_titleUpdateManager.SelectUpdate(index);
+        }
+        
+        buttonY += buttonHeight + buttonSpacing;
+        index++;
+    }
+    
+    // Show hint if no updates found
+    if (updates.empty())
+    {
+        float hintY = buttonY + Scale(20.0f);
+        const char* hintText = "Place Title Update files in 'GAME UPDATES' folder";
+        float hintFontSize = Scale(14.0f);
+        drawList->AddText(g_pFntRodin, hintFontSize, { buttonX, hintY }, 
+            GTA4Style::WithAlpha(GTA4Style::Colors::TextGray, alpha), hintText);
+    }
+}
+
 static void DrawSources()
 {
     if (g_currentPage == WizardPage::SelectGame)
     {
         DrawSourceButton(ButtonColumnMiddle, 0, Localise("Installer_Step_Game").c_str(), !g_gameSourcePath.empty());
+    }
+
+    if (g_currentPage == WizardPage::SelectTitleUpdate)
+    {
+        DrawTitleUpdateSelection();
     }
 
     if (g_currentPage == WizardPage::SelectDLC)
@@ -1529,9 +1646,14 @@ static void DrawNavigationButton()
             }
             else
             {
-                // GTA IV: Go to DLC/Update selection after game selection
-                SetCurrentPage(WizardPage::SelectDLC);
+                // GTA IV: Go to Title Update selection after game selection
+                SetCurrentPage(WizardPage::SelectTitleUpdate);
             }
+        }
+        else if (g_currentPage == WizardPage::SelectTitleUpdate)
+        {
+            // Proceed to DLC selection
+            SetCurrentPage(WizardPage::SelectDLC);
         }
         else
         {
