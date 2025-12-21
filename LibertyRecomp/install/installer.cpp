@@ -336,6 +336,78 @@ static bool fillDLCSource(DLC dlc, Installer::DLCSource &dlcSource)
     }
 }
 
+// Copy all files from a VFS to a target directory (used for DLC installation)
+static bool copyAllFiles(VirtualFileSystem &sourceVfs, const std::filesystem::path &targetDirectory, Journal &journal, const std::function<bool()> &progressCallback)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(targetDirectory) && !std::filesystem::create_directories(targetDirectory, ec))
+    {
+        journal.lastResult = Journal::Result::DirectoryCreationFailed;
+        journal.lastErrorMessage = "Unable to create directory at " + fromPath(targetDirectory);
+        return false;
+    }
+
+    std::vector<std::string> fileList = sourceVfs.getFileList();
+    std::vector<uint8_t> fileData;
+    
+    for (const std::string &filename : fileList)
+    {
+        if (!sourceVfs.load(filename, fileData))
+        {
+            journal.lastResult = Journal::Result::FileReadFailed;
+            journal.lastErrorMessage = fmt::format("Failed to read file {} from {}.", filename, sourceVfs.getName());
+            return false;
+        }
+
+        std::filesystem::path targetPath = targetDirectory / std::filesystem::path(std::u8string_view((const char8_t *)(filename.c_str())));
+        std::filesystem::path parentPath = targetPath.parent_path();
+        if (!std::filesystem::exists(parentPath))
+        {
+            std::filesystem::create_directories(parentPath, ec);
+        }
+        
+        while (!parentPath.empty()) {
+            journal.createdDirectories.insert(parentPath);
+
+            if (parentPath != targetDirectory) {
+                parentPath = parentPath.parent_path();
+            }
+            else {
+                parentPath = std::filesystem::path();
+            }
+        }
+
+        std::ofstream outStream(targetPath, std::ios::binary);
+        if (!outStream.is_open())
+        {
+            journal.lastResult = Journal::Result::FileCreationFailed;
+            journal.lastErrorMessage = fmt::format("Failed to create file at {}.", fromPath(targetPath));
+            return false;
+        }
+
+        journal.createdFiles.push_back(targetPath);
+
+        outStream.write((const char *)(fileData.data()), fileData.size());
+        if (outStream.bad())
+        {
+            journal.lastResult = Journal::Result::FileWriteFailed;
+            journal.lastErrorMessage = fmt::format("Failed to write file at {}.", fromPath(targetPath));
+            return false;
+        }
+
+        journal.progressCounter += fileData.size();
+        
+        if (!progressCallback())
+        {
+            journal.lastResult = Journal::Result::Cancelled;
+            journal.lastErrorMessage = "Installation was cancelled.";
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Installer::checkGameInstall(const std::filesystem::path &baseDirectory, std::filesystem::path &modulePath)
 {
     modulePath = baseDirectory / GameDirectory / GameExecutableFile;
@@ -495,9 +567,19 @@ bool Installer::parseSources(const Input &input, Journal &journal, Sources &sour
             return false;
         }
 
-        if (!computeTotalSize({ GameFiles, GameFilesSize }, GameHashes, *sources.game, journal, sources.totalSize))
+        // Use actual directory size instead of just the predefined file list
+        uint64_t gameSize = sources.game->getTotalSize();
+        if (gameSize > 0)
         {
-            return false;
+            sources.totalSize += gameSize;
+        }
+        else
+        {
+            // Fallback to file list if getTotalSize not supported
+            if (!computeTotalSize({ GameFiles, GameFilesSize }, GameHashes, *sources.game, journal, sources.totalSize))
+            {
+                return false;
+            }
         }
     }
 
@@ -532,9 +614,19 @@ bool Installer::parseSources(const Input &input, Journal &journal, Sources &sour
             return false;
         }
 
-        if (!computeTotalSize(dlcSource.filePairs, dlcSource.fileHashes, *dlcSource.sourceVfs, journal, sources.totalSize))
+        // Use getTotalSize() to get actual DLC size instead of empty filePairs
+        uint64_t dlcSize = dlcSource.sourceVfs->getTotalSize();
+        if (dlcSize > 0)
         {
-            return false;
+            sources.totalSize += dlcSize;
+        }
+        else if (!dlcSource.filePairs.empty())
+        {
+            // Fallback to file list if getTotalSize not supported
+            if (!computeTotalSize(dlcSource.filePairs, dlcSource.fileHashes, *dlcSource.sourceVfs, journal, sources.totalSize))
+            {
+                return false;
+            }
         }
     }
 
@@ -557,9 +649,21 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
 
     for (const DLCSource &dlcSource : sources.dlc)
     {
-        if (!copyFiles(dlcSource.filePairs, dlcSource.fileHashes, *dlcSource.sourceVfs, targetDirectory / dlcSource.targetSubDirectory, DLCValidationFile, skipHashChecks, journal, progressCallback))
+        // If we have a predefined file list, use it; otherwise copy all files from VFS
+        if (!dlcSource.filePairs.empty())
         {
-            return false;
+            if (!copyFiles(dlcSource.filePairs, dlcSource.fileHashes, *dlcSource.sourceVfs, targetDirectory / dlcSource.targetSubDirectory, DLCValidationFile, skipHashChecks, journal, progressCallback))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            // Copy all files from DLC VFS
+            if (!copyAllFiles(*dlcSource.sourceVfs, targetDirectory / dlcSource.targetSubDirectory, journal, progressCallback))
+            {
+                return false;
+            }
         }
     }
 

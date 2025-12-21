@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <vector>
 
 struct VirtualFileSystem {
     virtual ~VirtualFileSystem() { };
@@ -9,6 +10,8 @@ struct VirtualFileSystem {
     virtual size_t getSize(const std::string &path) const = 0;
     virtual bool exists(const std::string &path) const = 0;
     virtual const std::string &getName() const = 0;
+    virtual uint64_t getTotalSize() const { return 0; } // Override in subclasses that support enumeration
+    virtual std::vector<std::string> getFileList() const { return {}; } // Override in subclasses that support enumeration
 
     // Concrete implementation shortcut.
     bool load(const std::string &path, std::vector<uint8_t> &fileData)

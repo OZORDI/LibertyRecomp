@@ -57,6 +57,27 @@ struct XContentFileSystem : VirtualFileSystem
     bool exists(const std::string &path) const override;
     const std::string &getName() const override;
     bool empty() const;
+    
+    uint64_t getTotalSize() const override
+    {
+        uint64_t total = 0;
+        for (const auto& entry : fileMap)
+        {
+            total += entry.second.size;
+        }
+        return total;
+    }
+    
+    std::vector<std::string> getFileList() const override
+    {
+        std::vector<std::string> files;
+        files.reserve(fileMap.size());
+        for (const auto& entry : fileMap)
+        {
+            files.push_back(entry.first);
+        }
+        return files;
+    }
 
     static std::unique_ptr<XContentFileSystem> create(const std::filesystem::path &contentPath);
     static bool check(const std::filesystem::path &contentPath);

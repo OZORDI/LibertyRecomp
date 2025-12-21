@@ -58,6 +58,39 @@ struct DirectoryFileSystem : VirtualFileSystem
         return name;
     }
 
+    uint64_t getTotalSize() const override
+    {
+        uint64_t total = 0;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(directoryPath, ec))
+        {
+            if (entry.is_regular_file())
+            {
+                total += entry.file_size();
+            }
+        }
+        return total;
+    }
+    
+    std::vector<std::string> getFileList() const override
+    {
+        std::vector<std::string> files;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(directoryPath, ec))
+        {
+            if (entry.is_regular_file())
+            {
+                // Get relative path from directoryPath
+                std::filesystem::path relativePath = std::filesystem::relative(entry.path(), directoryPath, ec);
+                if (!ec)
+                {
+                    files.push_back(relativePath.string());
+                }
+            }
+        }
+        return files;
+    }
+
     static std::unique_ptr<VirtualFileSystem> create(const std::filesystem::path &directoryPath)
     {
         if (std::filesystem::exists(directoryPath))

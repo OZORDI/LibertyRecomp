@@ -580,13 +580,13 @@ static void DrawGTA4Logo()
     auto &res = ImGui::GetIO().DisplaySize;
     auto drawList = ImGui::GetBackgroundDrawList();
     
-    // Draw GTA IV logo in top-left corner - original aspect ratio
-    float logoWidth = Scale(180);
-    float logoHeight = Scale(90);
+    // Draw GTA IV logo in top-right corner - smaller size
+    float logoWidth = Scale(140);
+    float logoHeight = Scale(70);
     float padding = Scale(20);
     
-    ImVec2 logoMin = { padding, padding };
-    ImVec2 logoMax = { logoMin.x + logoWidth, logoMin.y + logoHeight };
+    ImVec2 logoMin = { res.x - logoWidth - padding, padding };
+    ImVec2 logoMax = { res.x - padding, logoMin.y + logoHeight };
     
     float alpha = ComputeMotionInstaller(g_appearTime, g_disappearTime, CONTAINER_INNER_TIME, CONTAINER_INNER_DURATION);
     ImU32 logoColor = IM_COL32(255, 255, 255, 255 * alpha);

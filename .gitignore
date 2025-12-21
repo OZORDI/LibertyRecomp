@@ -13,6 +13,12 @@ gta4/
 game/
 game
 
+# GTA IV DLC ZIP files - DO NOT COMMIT (Copyrighted)
+GAME DLC/*.zip
+
+# GTA IV Title Updates - DO NOT COMMIT (Copyrighted)
+GAME UPDATES/
+
 # RPF Archives and Extracted Content - DO NOT COMMIT (Copyrighted)
 RPF DUMP/
 extracted/
