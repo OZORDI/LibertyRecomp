@@ -26,6 +26,11 @@ extracted/
 
 # Development Notes - Private
 NOTES.md
+docs/REWRITE_PLAYBOOK.md
+docs/DOCS_INDEX.md
+docs/ARCHITECTURE_REFERENCE.md
+docs/RUNTIME_BEHAVIOR.md
+docs/TITLE_UPDATE_SYSTEM.md
 
 # Sample/Reference Projects - Not part of this repo
 Sample Recomp Projects/
