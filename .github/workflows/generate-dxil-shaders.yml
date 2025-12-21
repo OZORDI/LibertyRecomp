@@ -1,0 +1,199 @@
+name: Generate DXIL Shaders
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_directly:
+        description: 'Commit directly to current branch (otherwise creates PR)'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: generate-dxil-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-dxil:
+    name: Generate Windows DXIL Shader Cache
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify Extracted Shaders Exist
+        shell: pwsh
+        run: |
+          $shaderDir = "tools/rage_fxc_extractor/extracted_shaders"
+          if (-not (Test-Path $shaderDir)) {
+            Write-Error "Shader directory not found: $shaderDir"
+            exit 1
+          }
+          
+          $binFiles = Get-ChildItem -Path $shaderDir -Filter "*.bin" -Recurse
+          $count = $binFiles.Count
+          Write-Host "Found $count shader binary files"
+          
+          if ($count -lt 1000) {
+            Write-Error "Expected at least 1000 shader files, found $count"
+            exit 1
+          }
+          
+          Write-Host "✅ Shader verification passed"
+
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Configure XenosRecomp
+        shell: pwsh
+        run: |
+          $buildDir = "build_xenosrecomp_dxil"
+          New-Item -ItemType Directory -Path $buildDir -Force
+          
+          cmake -S tools/XenosRecomp -B $buildDir `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DXENOS_RECOMP_DXIL=ON `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_C_COMPILER=cl
+
+      - name: Build XenosRecomp
+        shell: pwsh
+        run: |
+          cmake --build build_xenosrecomp_dxil --config Release --parallel
+
+      - name: Generate Shader Cache with DXIL
+        shell: pwsh
+        run: |
+          $xenosRecomp = "build_xenosrecomp_dxil/XenosRecomp.exe"
+          $shaderInput = "tools/rage_fxc_extractor/extracted_shaders"
+          $shaderOutput = "LibertyRecompLib/shader/shader_cache.cpp"
+          $shaderCommon = "tools/XenosRecomp/XenosRecomp/shader_common.h"
+          
+          if (-not (Test-Path $xenosRecomp)) {
+            Write-Error "XenosRecomp.exe not found at $xenosRecomp"
+            exit 1
+          }
+          
+          Write-Host "Running XenosRecomp..."
+          Write-Host "  Input: $shaderInput"
+          Write-Host "  Output: $shaderOutput"
+          Write-Host "  Include: $shaderCommon"
+          
+          & $xenosRecomp $shaderInput $shaderOutput $shaderCommon
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "XenosRecomp failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+          
+          Write-Host "✅ Shader cache generated successfully"
+
+      - name: Verify DXIL Cache Generated
+        shell: pwsh
+        run: |
+          $cacheFile = "LibertyRecompLib/shader/shader_cache.cpp"
+          
+          if (-not (Test-Path $cacheFile)) {
+            Write-Error "shader_cache.cpp not found"
+            exit 1
+          }
+          
+          $content = Get-Content $cacheFile -Raw
+          
+          if ($content -match "g_compressedDxilCache\[\]") {
+            Write-Host "✅ DXIL cache array found in shader_cache.cpp"
+          } else {
+            Write-Error "g_compressedDxilCache not found - DXIL generation may have failed"
+            exit 1
+          }
+          
+          if ($content -match "g_dxilCacheDecompressedSize = (\d+)") {
+            $size = $Matches[1]
+            Write-Host "✅ DXIL cache size: $size bytes"
+            
+            if ([int]$size -lt 1000000) {
+              Write-Warning "DXIL cache seems small ($size bytes), expected several MB"
+            }
+          }
+
+      - name: Check for Changes
+        id: check_changes
+        shell: pwsh
+        run: |
+          git diff --quiet LibertyRecompLib/shader/shader_cache.cpp
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No changes to shader_cache.cpp"
+            echo "has_changes=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "shader_cache.cpp has been modified"
+            echo "has_changes=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Commit Changes Directly
+        if: steps.check_changes.outputs.has_changes == 'true' && inputs.commit_directly == true
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add LibertyRecompLib/shader/shader_cache.cpp
+          git commit -m "Generate Windows DXIL shader cache
+
+          - Generated by GitHub Actions workflow
+          - Contains compiled DXIL bytecode for D3D12 renderer
+          - Signed with dxil.dll on Windows runner"
+          
+          git push
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.has_changes == 'true' && inputs.commit_directly == false
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Generate Windows DXIL shader cache"
+          title: "🎮 Update Windows DXIL Shader Cache"
+          body: |
+            ## Automated DXIL Shader Generation
+            
+            This PR was automatically generated by the `generate-dxil-shaders` workflow.
+            
+            ### Changes
+            - Updated `LibertyRecompLib/shader/shader_cache.cpp` with compiled DXIL bytecode
+            - DXIL shaders are signed and ready for D3D12 renderer on Windows
+            
+            ### Verification
+            - [ ] Build passes on Windows
+            - [ ] Shaders load correctly at runtime
+          branch: auto/dxil-shader-update
+          delete-branch: true
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "  DXIL Shader Generation Summary"
+          Write-Host "========================================="
+          Write-Host ""
+          
+          if ("${{ steps.check_changes.outputs.has_changes }}" -eq "true") {
+            if ("${{ inputs.commit_directly }}" -eq "true") {
+              Write-Host "✅ Changes committed directly to branch"
+            } else {
+              Write-Host "✅ Pull request created for review"
+            }
+          } else {
+            Write-Host "ℹ️ No changes needed - shader cache is up to date"
+          }
