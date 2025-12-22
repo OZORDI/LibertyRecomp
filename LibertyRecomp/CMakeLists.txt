@@ -80,6 +80,9 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/vfs.cpp"
     "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
+    "kernel/io/gta_file_system.cpp"
+    "kernel/io/net_socket.cpp"
+    "kernel/io/net_session.cpp"
     "kernel/game_init.cpp"
 )
 
@@ -180,6 +183,7 @@ set(LIBERTY_RECOMP_INSTALL_CXX_SOURCES
     "install/installer.cpp"
     "install/iso_file_system.cpp"
     "install/iso_extractor.cpp"
+    "install/nebula_manager.cpp"
     "install/platform_paths.cpp"
     "install/rpf_extractor.cpp"
     "install/shader_converter.cpp"
