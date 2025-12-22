@@ -17,6 +17,15 @@ namespace VFS
     
     // Statistics
     static Stats g_stats;
+
+    // GTA IV file extensions to try when path doesn't include extension
+    static const std::vector<std::string> g_gtaExtensions = {
+        ".xtd", ".wtd", ".xbd", ".wbd", ".xdr", ".wdr", 
+        ".xft", ".wft", ".xad", ".wad", ".xmd", ".wmd",
+        ".xcd", ".wcd", ".xpd", ".wpd", ".xnd", ".wnd",
+        ".xvd", ".wvd", ".xdd", ".wdd", ".xld", ".wld"
+    };
+
     
     void Initialize(const std::filesystem::path& extractedRoot)
     {
@@ -103,6 +112,14 @@ namespace VFS
         std::string normalized = NormalizePath(guestPath);
         std::string stripped = StripDrivePrefix(normalized);
         
+        static int s_resolveCount = 0;
+        ++s_resolveCount;
+        if (s_resolveCount <= 30) {
+            printf("[VFS] Resolve #%d: '%s' -> normalized='%s' stripped='%s'\n", 
+                   s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
+            fflush(stdout);
+        }
+        
         // Check path mappings first
         for (const auto& mapping : g_pathMappings)
         {
@@ -133,6 +150,18 @@ namespace VFS
                     g_stats.cacheHits++;
                     return resolved;
                 }
+                
+                // Try with GTA IV extensions
+                for (const auto& ext : g_gtaExtensions)
+                {
+                    std::filesystem::path withExt = resolved;
+                    withExt += ext;
+                    if (std::filesystem::exists(withExt, ec))
+                    {
+                        g_stats.cacheHits++;
+                        return withExt;
+                    }
+                }
             }
         }
         
@@ -153,6 +182,32 @@ namespace VFS
             {
                 g_stats.cacheHits++;
                 return it->second;
+            }
+        }
+        
+        // Try with GTA IV extensions if path has no extension
+        if (stripped.find('.') == std::string::npos || 
+            stripped.rfind('.') < stripped.rfind('/'))
+        {
+            for (const auto& ext : g_gtaExtensions)
+            {
+                std::filesystem::path withExt = g_extractedRoot / (stripped + ext);
+                std::error_code ec;
+                if (std::filesystem::exists(withExt, ec))
+                {
+                    g_stats.cacheHits++;
+                    return withExt;
+                }
+                
+                // Also try in file index
+                std::string indexKey = stripped + ext;
+                std::lock_guard<std::mutex> lock(g_mutex);
+                auto it = g_fileIndex.find(indexKey);
+                if (it != g_fileIndex.end())
+                {
+                    g_stats.cacheHits++;
+                    return it->second;
+                }
             }
         }
         
@@ -229,6 +284,12 @@ namespace VFS
         g_pathMappings.push_back({"common/", "common/"});
         g_pathMappings.push_back({"data/", "common/data/"});
         g_pathMappings.push_back({"text/", "common/text/"});
+        
+        // Platform-specific paths (platform: → xbox360/)
+        // GTA IV uses "platform:/textures/fonts" etc. for Xbox 360 platform assets
+        g_pathMappings.push_back({"textures", "xbox360/textures"});
+        g_pathMappings.push_back({"models", "xbox360/models"});
+        g_pathMappings.push_back({"anim", "xbox360/anim"});
     }
     
     void RebuildIndex()

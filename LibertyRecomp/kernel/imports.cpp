@@ -6764,67 +6764,6 @@ extern "C" void __imp__sub_8249BE88(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_827EDED0(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_8249BDC8(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_8249BE88) {
-    static int s_count = 0; ++s_count;
-    
-    // Save original inputs
-    uint32_t origR3 = ctx.r3.u32;  // context pointer
-    uint32_t origR4 = ctx.r4.u32;  // path string pointer
-    uint32_t origR5 = ctx.r5.u32;  // additional path data  
-    uint32_t origR6 = ctx.r6.u32;  // expected bytes
-    
-    // Read path directly from r4 (the source path string)
-    char pathBuf[260] = {0};
-    if (origR4 != 0) {
-        for (int i = 0; i < 259; i++) {
-            uint8_t c = PPC_LOAD_U8(origR4 + i);
-            if (c == 0) break;
-            pathBuf[i] = c;
-        }
-    }
-    
-    if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] sub_8249BE88 #{} path='{}' expectedBytes={}", 
-                     s_count, pathBuf, origR6);
-    }
-    
-    // Resolve path via VFS
-    std::string guestPath(pathBuf);
-    
-    if (!VFS::Exists(guestPath)) {
-        if (s_count <= 20) {
-            LOGF_WARNING("[STORAGE] sub_8249BE88 #{} -> file not found, returning 1", s_count);
-        }
-        ctx.r3.s64 = 1;  // Return 1 = not found
-        return;
-    }
-    
-    // Get file size
-    uint64_t fileSize = VFS::GetFileSize(guestPath);
-    
-    if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] sub_8249BE88 #{} -> found, size={} bytes", s_count, fileSize);
-    }
-    
-    // Check if file size matches expected bytes
-    if (static_cast<uint32_t>(fileSize) == origR6) {
-        // Success path: call sub_8249BDC8 with context and file size
-        ctx.r3.u32 = origR3;
-        ctx.r4.u32 = static_cast<uint32_t>(fileSize);
-        __imp__sub_8249BDC8(ctx, base);
-        
-        if (s_count <= 20) {
-            LOGF_WARNING("[STORAGE] sub_8249BE88 #{} -> success, called sub_8249BDC8", s_count);
-        }
-    } else {
-        // Size mismatch - return 1
-        if (s_count <= 20) {
-            LOGF_WARNING("[STORAGE] sub_8249BE88 #{} -> size mismatch ({} != {}), returning 1", 
-                         s_count, fileSize, origR6);
-        }
-        ctx.r3.s64 = 1;
-    }
-}
 
 // =============================================================================
 // sub_82205390 - String Table Load (calls sub_827EE218, sub_82147C10)
