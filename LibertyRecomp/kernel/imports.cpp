@@ -23,7 +23,10 @@
 
 #include "io/file_system.h"
 #include "vfs.h"
+#include "io/gta_file_system.h"
 #include "game_init.h"
+#include "io/net_socket.h"
+#include "io/net_session.h"
 
 #include <cerrno>
 #include <fstream>
@@ -2270,51 +2273,8 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
                   s_waitCount, Handle, timeout, callerLR);
     }
     
-    // VBlank Heartbeat Injection - Fire at 60Hz from guest thread context
-    // This is safe here because NtWaitEx is called by valid Guest Threads with TLS setup
-    uint32_t vblankCallback = g_gpuRingBuffer.interruptCallback;
-    
-    if (vblankCallback != 0)
-    {
-        static int s_vblankCount = 0;
-        static int s_callsSinceVBlank = 0;
-        ++s_callsSinceVBlank;
-        
-        // Fire VBlank every 3 NtWaitEx calls to ensure steady heartbeat
-        // Game has blocking waits so need aggressive firing
-        if (s_callsSinceVBlank >= 3)
-        {
-            s_callsSinceVBlank = 0;
-            ++s_vblankCount;
-            
-            // Scan ring buffer for PM4 packets (diagnostic)
-            ScanRingBufferForPM4Packets();
-            
-            // Enable PPC call tracking after VBlank 10, report at VBlank 300
-            if (s_vblankCount == 10) {
-                g_ppcCallTrackingEnabled = 1;
-                LOGF_WARNING("[DIAG] Enabled PPC function call tracking at VBlank #{}", s_vblankCount);
-            }
-            if (s_vblankCount == 300) {
-                ReportHotPPCFunctions();
-            }
-            
-            if (s_vblankCount <= 20 || s_vblankCount % 60 == 0)
-            {
-                LOGF_IMPL(Utility, "VBlank", "Firing #{} from NtWaitEx (call-based)", s_vblankCount);
-            }
-            
-            // Execute the game's interrupt handler
-            auto func = g_memory.FindFunction(vblankCallback);
-            if (func)
-            {
-                PPCContext tempCtx = *g_ppcContext;
-                tempCtx.r3.u32 = 0;  // Interrupt Type 0 = VBlank
-                tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
-                func(tempCtx, g_memory.base);
-            }
-        }
-    }
+    // VBlank removed - following UnleashedRecomp pattern (no force-firing)
+    // Game progresses naturally without interrupt-driven timing
 
     if (IsKernelObject(Handle))
     {
@@ -4089,13 +4049,11 @@ void VdSetDisplayMode()
 
 void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
 {
-    // r3 = callback function pointer
-    // r4 = user data passed to callback
+    // Following UnleashedRecomp pattern: Store but never fire
     g_gpuRingBuffer.interruptCallback = callback;
     g_gpuRingBuffer.interruptUserData = userData;
     
-    LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X}", callback, userData);
-    LOG_WARNING("[VBlank] Interrupt callback registered - VBlank will fire from NtWaitEx");
+    LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X} - STORED BUT WILL NOT FIRE (Sonic pattern)", callback, userData);
 }
 
 uint32_t VdInitializeEngines()
@@ -4360,47 +4318,7 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
                 LOGF_IMPL(Utility, "FenceBypass", "GPU init complete - starting VBlank heartbeat (after {} waits)", s_fenceBypassCount);
             }
             
-            // Fire VBlank interrupt periodically (~60 FPS = 16ms)
-            static auto s_lastVBlank = std::chrono::steady_clock::now();
-            static int s_vblankCount = 0;
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastVBlank).count();
-            
-            if (elapsed >= 16 && g_gpuRingBuffer.interruptCallback != 0)
-            {
-                s_lastVBlank = now;
-                ++s_vblankCount;
-                
-                // Scan ring buffer for PM4 packets (diagnostic)
-                ScanRingBufferForPM4Packets();
-                
-                // Enable PPC call tracking after VBlank 10, report at VBlank 300
-                if (s_vblankCount == 10) {
-                    g_ppcCallTrackingEnabled = 1;
-                    LOGF_WARNING("[DIAG] Enabled PPC function call tracking at VBlank #{}", s_vblankCount);
-                }
-                if (s_vblankCount == 300) {
-                    ReportHotPPCFunctions();
-                }
-                
-                if (s_vblankCount <= 10 || s_vblankCount % 60 == 0)
-                {
-                    LOGF_IMPL(Utility, "VBlank", "Firing VBlank #{} callback=0x{:08X}", 
-                              s_vblankCount, g_gpuRingBuffer.interruptCallback);
-                }
-                
-                // Call the guest interrupt callback function
-                // r3 = interrupt type (0 = VBlank, 1 = other)
-                // r4 = user data pointer
-                auto func = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
-                if (func)
-                {
-                    PPCContext tempCtx = *g_ppcContext;
-                    tempCtx.r3.u32 = 0;  // Interrupt type: 0 = VBlank
-                    tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
-                    func(tempCtx, g_memory.base);
-                }
-            }
+            // VBlank removed - following UnleashedRecomp pattern
             
             // Short sleep to prevent tight spinning
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -4414,39 +4332,6 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
         return STATUS_SUCCESS;
     }
     
-    // Fire VBlank from ANY wait once GPU is initialized (not just GPU thread waits)
-    // This ensures the game's render loop progresses
-    if (g_gpuRingBuffer.enginesInitialized && 
-        g_gpuRingBuffer.edramTrainingComplete && 
-        g_gpuRingBuffer.interruptCallback != 0)
-    {
-        static auto s_lastVBlankAny = std::chrono::steady_clock::now();
-        static int s_vblankAnyCount = 0;
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastVBlankAny).count();
-        
-        if (elapsed >= 16)
-        {
-            s_lastVBlankAny = now;
-            ++s_vblankAnyCount;
-            
-            if (s_vblankAnyCount <= 10 || s_vblankAnyCount % 60 == 0)
-            {
-                LOGF_IMPL(Utility, "VBlankAny", "Firing VBlank #{} from wait caller=0x{:08X}", 
-                          s_vblankAnyCount, caller);
-            }
-            
-            // Call the guest interrupt callback
-            auto func = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
-            if (func)
-            {
-                PPCContext tempCtx = *g_ppcContext;
-                tempCtx.r3.u32 = 0;  // VBlank interrupt type
-                tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
-                func(tempCtx, g_memory.base);
-            }
-        }
-    }
     
     // Log ALL waits for async IO debugging - exclude GPU poll thread (0x829DDD48)
     static int s_asyncWaitLogCount = 0;
@@ -4655,70 +4540,14 @@ void XamUserReadProfileSettings
     }
 }
 
-void NetDll_WSAStartup()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_WSACleanup()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_socket()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_closesocket()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_setsockopt()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_bind()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_connect()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_listen()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_accept()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_select()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_recv()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_send()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_inet_addr()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
+// =============================================================================
+// Network Socket Functions - Now implemented in kernel/io/net_socket.cpp
+// =============================================================================
+// The following functions were stubs and are now replaced with real implementations:
+// NetDll_WSAStartup, NetDll_WSACleanup, NetDll_socket, NetDll_closesocket,
+// NetDll_setsockopt, NetDll_bind, NetDll_connect, NetDll_listen, NetDll_accept,
+// NetDll_select, NetDll_recv, NetDll_send, NetDll_inet_addr
+// =============================================================================
 
 void NetDll___WSAFDIsSet()
 {
@@ -5249,11 +5078,6 @@ void IoRemoveShareAccess()
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void NetDll_XNetStartup()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
 // XNetGetTitleXnAddr - Return fake IP to unblock network wait
 // The game loops on this until it gets a valid network state
 // Return value: 0=Pending, 1=None, 2=Ethernet (connected)
@@ -5702,11 +5526,6 @@ void XNotifyPositionUI(uint32_t position)
     LOG_UTILITY("!!! STUB !!!");
 }
 
-void NetDll_XNetCleanup()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
 int32_t NetDll_getsockname(uint32_t socket, void* name, void* namelen)
 {
     LOG_UTILITY("!!! STUB !!!");
@@ -5796,41 +5615,6 @@ int32_t NetDll_WSAGetLastError()
 {
     LOG_UTILITY("!!! STUB !!!");
     return 0;
-}
-
-void NetDll_XNetQosListen()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetQosLookup()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetQosRelease()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetServerToInAddr()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetXnAddrToInAddr()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetGetConnectStatus()
-{
-    LOG_UTILITY("!!! STUB !!!");
-}
-
-void NetDll_XNetUnregisterInAddr()
-{
-    LOG_UTILITY("!!! STUB !!!");
 }
 
 // =============================================================================
@@ -6760,8 +6544,13 @@ PPC_FUNC(sub_827DB2A8) {
 // Our implementation:
 //   - Format path, resolve via VFS, return file info
 // =============================================================================
-extern "C" void __imp__sub_8249BE88(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_827EDED0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EDED0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[PATH_FMT] sub_827EDED0 ENTER #{} r3=0x{:08X} r4={} r5=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    __imp__sub_827EDED0(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[PATH_FMT] sub_827EDED0 EXIT #{}", s_count);
+}
 extern "C" void __imp__sub_8249BDC8(PPCContext& ctx, uint8_t* base);
 
 
@@ -7239,7 +7028,7 @@ constexpr uint32_t STORAGE_DEVICE_READ_ADDR = 0x82A13D00;
 //   r4 = path buffer (null-terminated string in guest memory)
 //   r5 = output pointer (where to write result data pointer)
 // Returns:
-//   r3 = bytes read (or 0 if file not found)
+//   r3 = VALIDATION TOKEN (7) on success, 0 on failure
 //   Writes data pointer to [r5]
 // =============================================================================
 static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
@@ -7257,10 +7046,8 @@ static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
         pathBuf[i] = c;
     }
     
-    if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] vtable[27] ReadFile #{} path='{}' device=0x{:08X} output=0x{:08X}",
-                     s_count, pathBuf, devicePtr, outputAddr);
-    }
+    LOGF_WARNING("[VTABLE27] CALLED #{} path='{}' device=0x{:08X} output=0x{:08X} LR=0x{:08X}",
+                 s_count, pathBuf, devicePtr, outputAddr, ctx.lr);
     
     // Resolve path via VFS
     std::string guestPath(pathBuf);
@@ -7282,18 +7069,18 @@ static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
     uint64_t fileSize = VFS::GetFileSize(guestPath);
     
     if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] vtable[27] ReadFile #{} -> found, size={} bytes", s_count, fileSize);
+        LOGF_WARNING("[STORAGE] vtable[27] ReadFile #{} -> found, size={} bytes, returning token=7", s_count, fileSize);
     }
     
-    // For now, we return the file size as "bytes read"
-    // The output pointer gets the path length or a handle value
-    // Based on sub_8249BE88 usage, it loads [output] into r4 for sub_8249BDC8
+    // Write file size to output pointer - this is what sub_8249BDC8 uses
     if (outputAddr != 0) {
-        // Write path length or handle value
         PPC_STORE_U32(outputAddr, static_cast<uint32_t>(fileSize));
     }
     
-    ctx.r3.s64 = static_cast<int64_t>(fileSize);  // Return bytes read
+    // CRITICAL FIX: Return validation token (7), NOT file size
+    // sub_8249BE88 compares return with r31 (token saved from r6=7)
+    // If return != 7, it fails. The file size goes to the output pointer.
+    ctx.r3.s64 = 7;  // Return validation token for success
 }
 
 // Helper to dynamically register a function in the PPC function table
@@ -7366,8 +7153,9 @@ PPC_FUNC(sub_827E1EC0) {
     // Initialize PC storage device if needed
     InitializePCStorageDevice(base);
     
-    // r3 = path string, r4 = flags
+    // r3 = path buffer pointer, r4 = flags
     uint32_t pathAddr = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32;
     
     // Read path string for logging
     char pathBuf[256] = {0};
@@ -7377,10 +7165,16 @@ PPC_FUNC(sub_827E1EC0) {
         pathBuf[i] = c;
     }
     
-    if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] sub_827E1EC0 #{} path='{}' -> returning PC device 0x{:08X}", 
-                     s_count, pathBuf, StorageConstants::PC_STORAGE_DEVICE_ADDR);
+    // Also dump first 32 bytes as hex to see what's actually there
+    char hexBuf[128] = {0};
+    for (int i = 0; i < 16 && i < 255; i++) {
+        uint8_t c = PPC_LOAD_U8(pathAddr + i);
+        sprintf(hexBuf + i*3, "%02X ", c);
+        if (c == 0) break;
     }
+    
+    LOGF_WARNING("[STORAGE] sub_827E1EC0 #{} r3=0x{:08X} r4={} path='{}' hex=[{}] LR=0x{:08X}", 
+                 s_count, pathAddr, flags, pathBuf, hexBuf, ctx.lr);
     
     // Return our PC storage device for ALL paths
     // The VFS system handles path resolution internally
@@ -7553,6 +7347,33 @@ PPC_FUNC(sub_82856BA8) {
     
     // Return immediately - shader setup handled by host shader cache
     // Shaders are loaded on-demand via GetOrLinkShader() during rendering
+    return;
+}
+
+// =============================================================================
+// sub_8285AF80 - GPU Sync/Fence Operation (BYPASSED)
+// =============================================================================
+// This function performs GPU synchronization with a retry loop.
+// After 25 failed retries (counter at offset 30780 >= 25), it enters an
+// infinite loop at loc_8285B214: goto loc_8285B214;
+// 
+// Problem: Xbox GPU fence/sync operations don't work on PC, causing timeout
+// after 25 retries and entering infinite spin loop.
+// 
+// Solution: Bypass entirely - host GPU handles synchronization through
+// the modern graphics layer (Metal/Vulkan/OpenGL).
+// =============================================================================
+extern "C" void __imp__sub_8285AF80(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285AF80) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 10 || s_count % 1000 == 0) {
+        LOGF_WARNING("[GPU] sub_8285AF80 GPU sync #{} - BYPASSING to prevent infinite loop", s_count);
+    }
+    
+    // Return immediately - GPU sync handled by host graphics layer
+    // This prevents the 25-retry timeout and infinite loop at loc_8285B214
     return;
 }
 
@@ -8888,6 +8709,50 @@ PPC_FUNC(sub_829A1290)
     }
 }
 
+// =============================================================================
+// sub_821200D0 - Pre-Main-Loop Phase (TRACE ENTRY)
+// =============================================================================
+// This function should be called after sub_82120FB8 completes.
+// It contains the loading gate that calls sub_82124490.
+// Adding trace to see if we ever reach this function.
+// =============================================================================
+extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821200D0) {
+    static int s_count = 0;
+    ++s_count;
+    
+    LOGF_WARNING("[TRACE] *** sub_821200D0 ENTERED #{} - Pre-Main-Loop Phase ***", s_count);
+    
+    __imp__sub_821200D0(ctx, base);
+    
+    LOGF_WARNING("[TRACE] *** sub_821200D0 EXITED #{} r3=0x{:08X} ***", s_count, ctx.r3.u32);
+}
+
+// =============================================================================
+// sub_82124490 - Loading Gate Check (BYPASSED)
+// =============================================================================
+// This function checks loading flags at 0x82D37BB7 and 0x82D37BC9.
+// Returns 0 when loading complete, non-zero while loading.
+// 
+// Problem: Creates deadlock - waits for resources to load, but resources
+// cannot load until we exit the loading gate.
+// 
+// Solution: Force return 0 (loading complete) to bypass the deadlock and
+// allow game to proceed to resource loading code.
+// =============================================================================
+PPC_FUNC(sub_82124490) {
+    static int s_count = 0;
+    ++s_count;
+    
+    // ALWAYS log to see if this is being called
+    LOGF_WARNING("[LOADING_GATE] sub_82124490 #{} - HOOK CALLED, forcing return 0", s_count);
+    
+    // Force return 0 (loading complete) to exit loading gate and proceed to resource loading
+    ctx.r3.u64 = 0;
+    
+    // Do NOT call __imp__sub_82124490 - it would return 1 and block forever
+}
+
 // Forward declare the original implementation from recompiled code
 extern "C" void __imp__sub_829A1F00(PPCContext& ctx, uint8_t* base);
 
@@ -8995,12 +8860,28 @@ PPC_FUNC(sub_829A1F00)
             asyncPtr[0] = 0;                    // Status = STATUS_SUCCESS (0) - write LAST!
             std::atomic_thread_fence(std::memory_order_seq_cst);
             
+            // Signal event at offset 8 if present (Xbox kernel would do this on I/O completion)
+            // asyncInfo structure: +0=Status, +4=Information, +8=hEvent, +12=?, +16=Flags
+            uint32_t eventHandle = ByteSwap(asyncPtr[2]);
+            if (eventHandle != 0 && eventHandle != 0xFFFFFFFF && IsKernelObject(eventHandle))
+            {
+                XDISPATCHER_HEADER* eventObj = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(eventHandle));
+                if (eventObj && (eventObj->Type == 0 || eventObj->Type == 1))
+                {
+                    QueryKernelObject<Event>(*eventObj)->Set();
+                    if (count <= 20)
+                    {
+                        LOGF_IMPL(Utility, "GTA4_FileLoad", 
+                                  "ASYNC: Signaled event 0x{:08X} for async completion", eventHandle);
+                    }
+                }
+            }
+            
             // Log AFTER state
             if (count <= 20)
             {
                 uint32_t afterStatus = asyncPtr[0];
                 uint32_t afterInfo = asyncPtr[1];
-                uint32_t eventHandle = ByteSwap(asyncPtr[2]);
                 LOGF_IMPL(Utility, "GTA4_FileLoad", 
                           "ASYNC: AFTER  @0x{:08X}: Status=0x{:08X}, Info=0x{:08X}, hEvent=0x{:08X}", 
                           asyncInfo, afterStatus, afterInfo, eventHandle);
@@ -9142,7 +9023,7 @@ GUEST_FUNCTION_HOOK(__imp__XamVoiceHeadsetPresent, XamVoiceHeadsetPresent);
 GUEST_FUNCTION_HOOK(__imp__XamVoiceSubmitPacket, XamVoiceSubmitPacket);
 GUEST_FUNCTION_HOOK(__imp__XeKeysConsolePrivateKeySign, XeKeysConsolePrivateKeySign);
 GUEST_FUNCTION_HOOK(__imp__IoDismountVolumeByFileHandle, IoDismountVolumeByFileHandle);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetEthernetLinkStatus, NetDll_XNetGetEthernetLinkStatus);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetEthernetLinkStatus, Net::XNetGetEthernetLinkStatus);
 GUEST_FUNCTION_HOOK(__imp__KeTryToAcquireSpinLockAtRaisedIrql, KeTryToAcquireSpinLockAtRaisedIrql);
 GUEST_FUNCTION_HOOK(__imp__XamShowGamerCardUIForXUID, XamShowGamerCardUIForXUID);
 GUEST_FUNCTION_HOOK(__imp__XamShowPlayerReviewUI, XamShowPlayerReviewUI);
@@ -9251,19 +9132,19 @@ GUEST_FUNCTION_HOOK(__imp__KeTlsAlloc, KeTlsAlloc);
 GUEST_FUNCTION_HOOK(__imp__KeTlsFree, KeTlsFree);
 GUEST_FUNCTION_HOOK(__imp__XMsgInProcessCall, XMsgInProcessCall);
 GUEST_FUNCTION_HOOK(__imp__XamUserReadProfileSettings, XamUserReadProfileSettings);
-GUEST_FUNCTION_HOOK(__imp__NetDll_WSAStartup, NetDll_WSAStartup);
-GUEST_FUNCTION_HOOK(__imp__NetDll_WSACleanup, NetDll_WSACleanup);
-GUEST_FUNCTION_HOOK(__imp__NetDll_socket, NetDll_socket);
-GUEST_FUNCTION_HOOK(__imp__NetDll_closesocket, NetDll_closesocket);
-GUEST_FUNCTION_HOOK(__imp__NetDll_setsockopt, NetDll_setsockopt);
-GUEST_FUNCTION_HOOK(__imp__NetDll_bind, NetDll_bind);
-GUEST_FUNCTION_HOOK(__imp__NetDll_connect, NetDll_connect);
-GUEST_FUNCTION_HOOK(__imp__NetDll_listen, NetDll_listen);
-GUEST_FUNCTION_HOOK(__imp__NetDll_accept, NetDll_accept);
-GUEST_FUNCTION_HOOK(__imp__NetDll_select, NetDll_select);
-GUEST_FUNCTION_HOOK(__imp__NetDll_recv, NetDll_recv);
-GUEST_FUNCTION_HOOK(__imp__NetDll_send, NetDll_send);
-GUEST_FUNCTION_HOOK(__imp__NetDll_inet_addr, NetDll_inet_addr);
+GUEST_FUNCTION_HOOK(__imp__NetDll_WSAStartup, Net::WSAStartup);
+GUEST_FUNCTION_HOOK(__imp__NetDll_WSACleanup, Net::WSACleanup);
+GUEST_FUNCTION_HOOK(__imp__NetDll_socket, Net::Socket);
+GUEST_FUNCTION_HOOK(__imp__NetDll_closesocket, Net::CloseSocket);
+GUEST_FUNCTION_HOOK(__imp__NetDll_setsockopt, Net::SetSockOpt);
+GUEST_FUNCTION_HOOK(__imp__NetDll_bind, Net::Bind);
+GUEST_FUNCTION_HOOK(__imp__NetDll_connect, Net::Connect);
+GUEST_FUNCTION_HOOK(__imp__NetDll_listen, Net::Listen);
+GUEST_FUNCTION_HOOK(__imp__NetDll_accept, Net::Accept);
+GUEST_FUNCTION_HOOK(__imp__NetDll_select, Net::Select);
+GUEST_FUNCTION_HOOK(__imp__NetDll_recv, Net::Recv);
+GUEST_FUNCTION_HOOK(__imp__NetDll_send, Net::Send);
+GUEST_FUNCTION_HOOK(__imp__NetDll_inet_addr, Net::InetAddr);
 GUEST_FUNCTION_HOOK(__imp__NetDll___WSAFDIsSet, NetDll___WSAFDIsSet);
 GUEST_FUNCTION_HOOK(__imp__XMsgStartIORequestEx, XMsgStartIORequestEx);
 GUEST_FUNCTION_HOOK(__imp__XamInputGetCapabilities, XamInputGetCapabilities);
@@ -9312,8 +9193,8 @@ GUEST_FUNCTION_HOOK(__imp__ObIsTitleObject, ObIsTitleObject);
 GUEST_FUNCTION_HOOK(__imp__IoCheckShareAccess, IoCheckShareAccess);
 GUEST_FUNCTION_HOOK(__imp__IoSetShareAccess, IoSetShareAccess);
 GUEST_FUNCTION_HOOK(__imp__IoRemoveShareAccess, IoRemoveShareAccess);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetStartup, NetDll_XNetStartup);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetTitleXnAddr, NetDll_XNetGetTitleXnAddr);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetStartup, Net::XNetStartup);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetTitleXnAddr, Net::XNetGetTitleXnAddr);
 GUEST_FUNCTION_HOOK(__imp__KeWaitForMultipleObjects, KeWaitForMultipleObjects);
 GUEST_FUNCTION_HOOK(__imp__KeRaiseIrqlToDpcLevel, KeRaiseIrqlToDpcLevel);
 GUEST_FUNCTION_HOOK(__imp__KfLowerIrql, KfLowerIrql);
@@ -9337,26 +9218,38 @@ GUEST_FUNCTION_HOOK(__imp__NtCreateMutant, NtCreateMutant);
 GUEST_FUNCTION_HOOK(__imp__NtReleaseMutant, NtReleaseMutant);
 GUEST_FUNCTION_HOOK(__imp__IoDismountVolume, IoDismountVolume);
 GUEST_FUNCTION_HOOK(__imp__XNotifyPositionUI, XNotifyPositionUI);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetCleanup, NetDll_XNetCleanup);
-GUEST_FUNCTION_HOOK(__imp__NetDll_getsockname, NetDll_getsockname);
-GUEST_FUNCTION_HOOK(__imp__NetDll_ioctlsocket, NetDll_ioctlsocket);
-GUEST_FUNCTION_HOOK(__imp__NetDll_sendto, NetDll_sendto);
-GUEST_FUNCTION_HOOK(__imp__NetDll_recvfrom, NetDll_recvfrom);
-GUEST_FUNCTION_HOOK(__imp__NetDll_shutdown, NetDll_shutdown);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetCleanup, Net::XNetCleanup);
+GUEST_FUNCTION_HOOK(__imp__NetDll_getsockname, Net::GetSockName);
+GUEST_FUNCTION_HOOK(__imp__NetDll_ioctlsocket, Net::IOCtlSocket);
+GUEST_FUNCTION_HOOK(__imp__NetDll_sendto, Net::SendTo);
+GUEST_FUNCTION_HOOK(__imp__NetDll_recvfrom, Net::RecvFrom);
+GUEST_FUNCTION_HOOK(__imp__NetDll_shutdown, Net::Shutdown);
 GUEST_FUNCTION_HOOK(__imp__XMsgCancelIORequest, XMsgCancelIORequest);
 GUEST_FUNCTION_HOOK(__imp__XAudioGetSpeakerConfig, XAudioGetSpeakerConfig);
 GUEST_FUNCTION_HOOK(__imp__XamContentSetThumbnail, XamContentSetThumbnail);
 GUEST_FUNCTION_HOOK(__imp__XamInputGetKeystrokeEx, XamInputGetKeystrokeEx);
-GUEST_FUNCTION_HOOK(__imp__XamSessionCreateHandle, XamSessionCreateHandle);
-GUEST_FUNCTION_HOOK(__imp__XamSessionRefObjByHandle, XamSessionRefObjByHandle);
+GUEST_FUNCTION_HOOK(__imp__XamSessionCreateHandle, Net::XamSessionCreateHandle);
+GUEST_FUNCTION_HOOK(__imp__XamSessionRefObjByHandle, Net::XamSessionRefObjByHandle);
 GUEST_FUNCTION_HOOK(__imp__KeSetDisableBoostThread, KeSetDisableBoostThread);
 GUEST_FUNCTION_HOOK(__imp__XamCreateEnumeratorHandle, XamCreateEnumeratorHandle);
 GUEST_FUNCTION_HOOK(__imp__NtDeviceIoControlFile, NtDeviceIoControlFile);
-GUEST_FUNCTION_HOOK(__imp__NetDll_WSAGetLastError, NetDll_WSAGetLastError);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosListen, NetDll_XNetQosListen);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosLookup, NetDll_XNetQosLookup);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosRelease, NetDll_XNetQosRelease);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetServerToInAddr, NetDll_XNetServerToInAddr);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetXnAddrToInAddr, NetDll_XNetXnAddrToInAddr);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetConnectStatus, NetDll_XNetGetConnectStatus);
-GUEST_FUNCTION_HOOK(__imp__NetDll_XNetUnregisterInAddr, NetDll_XNetUnregisterInAddr);
+GUEST_FUNCTION_HOOK(__imp__NetDll_WSAGetLastError, Net::WSAGetLastError);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosListen, Net::XNetQosListen);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosLookup, Net::XNetQosLookup);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetQosRelease, Net::XNetQosRelease);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetServerToInAddr, Net::XNetServerToInAddr);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetXnAddrToInAddr, Net::XNetXnAddrToInAddr);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetGetConnectStatus, Net::XNetGetConnectStatus);
+GUEST_FUNCTION_HOOK(__imp__NetDll_XNetUnregisterInAddr, Net::XNetUnregisterInAddr);
+
+// =============================================================================
+// GTA IV File System API Hooks (UnleashedRecomp Pattern)
+// =============================================================================
+// Following UnleashedRecomp's elegant approach, we hook at the file API
+// boundary rather than the low-level storage device vtable layer.
+// This avoids validation token complexity and lets game logic run naturally.
+// =============================================================================
+
+extern "C" void __imp__sub_8249BE88(PPCContext& ctx, uint8_t* base);
+GUEST_FUNCTION_HOOK(sub_8249BE88, GTA::FileResolve);
+
