@@ -5931,12 +5931,21 @@ extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);  // Game ma
 extern "C" void __imp__sub_828E0AB8(PPCContext& ctx, uint8_t* base);  // Frame tick
 
 // =============================================================================
-// Boot Sequence Global Addresses
+// Storage Device Constants (still needed for PC storage hooks)
 // =============================================================================
-// These addresses were computed from PPC code analysis of each function.
-// All memory writes performed by the original boot sequence are replicated here.
-// =============================================================================
+namespace StorageConstants {
+    constexpr uint32_t PC_STORAGE_DEVICE_ADDR  = 0x83132000;
+    constexpr uint32_t PC_STORAGE_VTABLE_ADDR  = 0x83132100;
+    constexpr uint32_t PC_STORAGE_DATA_ADDR    = 0x83132200;
+}
 
+// =============================================================================
+// Boot Sequence Global Addresses - DISABLED
+// =============================================================================
+// These were used by the _xstart replacement which is now disabled.
+// Per UnleashedRecomp architecture, we let the original game CRT run.
+// =============================================================================
+#if 0  // DISABLED - boot hacks removed
 namespace BootGlobals {
     // -------------------------------------------------------------------------
     // sub_829A7FF8 / sub_829A7F20 - Early System Init
@@ -6050,19 +6059,16 @@ namespace BootGlobals {
     constexpr uint32_t CMDLINE_ARGV_ADDR   = 0x83100800;
     constexpr uint32_t CMDLINE_MAX_ARGS    = 16;
     constexpr uint32_t CMDLINE_BUFFER_SIZE = 2048;
-}
+}  // namespace BootGlobals
+#endif  // DISABLED BootGlobals
 
 // =============================================================================
-// Modern CRT/TLS Initialization
+// Modern CRT/TLS Initialization - DISABLED
 // =============================================================================
-// This function replaces sub_82994700 and all its nested calls:
-//   - sub_82992680 (CRT subsystem init)
-//   - sub_82998A48 (Thread pool init - SKIPPED)
-//   - sub_829937E0 (Memory allocation)
-//   - sub_829A2810 (Thread ID)
-//   - sub_829A79C0 (Callback registration - SKIPPED)
+// This was part of the _xstart replacement which is now disabled.
+// Per UnleashedRecomp architecture, we let the original game CRT run.
 // =============================================================================
-
+#if 0  // DISABLED - InitializeModernCRT not used
 static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
 {
     LOG_WARNING("[CRT] * Modern CRT/TLS initialization starting");
@@ -6162,41 +6168,15 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     LOG_WARNING("[CRT] * Modern CRT/TLS initialization complete");
 }
 
-// =============================================================================
 // Hook for sub_82994700 - redirects to modern implementation
-// =============================================================================
-PPC_FUNC(sub_82994700)
+PPC_FUNC(sub_82994700_DISABLED)
 {
     InitializeModernCRT(ctx, base);
     ctx.r3.s64 = 1;  // Return success
 }
 
-// =============================================================================
-// Modern sub_829A7960 - Runtime Callback Invocation
-// =============================================================================
-// Original function iterates a doubly-linked list at 0x82A97FD0 and calls each
-// registered callback with the notification type in r3.
-//
-// Structure: sub_829A7960(r3 = notification_type)
-//   1. RtlEnterCriticalSection(0x82A97FB4)
-//   2. For each node in list at 0x82A97FD0:
-//      - callback = [node+8]
-//      - call callback(notification_type)
-//   3. RtlLeaveCriticalSection(0x82A97FB4)
-//
-// Notification types:
-//   r3=1: System startup
-//   r3=2: System shutdown (speculation)
-//
-// Modern implementation:
-// Since we initialize the callback list as empty (self-referential), this
-// function would iterate nothing. We provide a hook that:
-//   1. Logs the notification for debugging
-//   2. Iterates the list (which is empty) for compatibility
-//   3. Returns cleanly
-// =============================================================================
-
-PPC_FUNC(sub_829A7960)
+// Modern sub_829A7960 - Runtime Callback Invocation (DISABLED)
+PPC_FUNC(sub_829A7960_DISABLED)
 {
     uint32_t notificationType = ctx.r3.u32;
     
@@ -6208,29 +6188,22 @@ PPC_FUNC(sub_829A7960)
                      notificationType, s_callCount);
     }
     
-    // The callback list at 0x82A97FD0 is initialized as empty (self-referential)
-    // by InitializeModernCRT(). If any game code registered callbacks, we would
-    // iterate them here. For now, we just verify the list is empty.
-    
     uint32_t listHead = BootGlobals::CALLBACK_LIST_ADDR;
     uint32_t firstNode = PPC_LOAD_U32(listHead);
     
     if (firstNode != listHead) {
-        // List is not empty - iterate callbacks for full compatibility
         LOG_WARNING("[CALLBACK] Callback list not empty, iterating...");
         
         uint32_t currentNode = firstNode;
         int callbackCount = 0;
         
-        while (currentNode != listHead && callbackCount < 100) {  // Safety limit
+        while (currentNode != listHead && callbackCount < 100) {
             uint32_t callback = PPC_LOAD_U32(currentNode + 8);
             uint32_t nextNode = PPC_LOAD_U32(currentNode);
             
             if (callback != 0) {
                 LOGF_WARNING("[CALLBACK] Invoking callback #{} at 0x{:08X}", 
                              callbackCount, callback);
-                
-                // Call the callback with notification type
                 ctx.r3.u64 = notificationType;
                 ctx.ctr.u64 = callback;
                 PPC_CALL_INDIRECT_FUNC(callback);
@@ -6242,9 +6215,8 @@ PPC_FUNC(sub_829A7960)
         
         LOGF_WARNING("[CALLBACK] Invoked {} callbacks", callbackCount);
     }
-    
-    // Return cleanly - no return value needed
 }
+#endif  // DISABLED InitializeModernCRT, sub_82994700, sub_829A7960
 
 // =============================================================================
 // Modern sub_829A7DC8 - C++ Static Constructor Execution (SKIPPED)
@@ -6268,7 +6240,9 @@ PPC_FUNC(sub_829A7960)
 // constructors (if any) are actually required.
 // =============================================================================
 
-PPC_FUNC(sub_829A7DC8)
+// DISABLED - Let original constructor execution run per UnleashedRecomp architecture
+#if 0
+PPC_FUNC(sub_829A7DC8_DISABLED)
 {
     static bool s_logged = false;
     if (!s_logged) {
@@ -6326,10 +6300,12 @@ PPC_FUNC(sub_829A7DC8)
     // Return success without executing constructors
     ctx.r3.s64 = 0;
 }
+#endif  // DISABLED sub_829A7DC8
 
 // =============================================================================
-// Command-Line Support Helper
+// Command-Line Support Helper (only used by disabled _xstart)
 // =============================================================================
+#if 0  // DISABLED - part of boot sequence hacks
 static int BuildGuestCommandLine(uint8_t* base, const std::vector<std::string>& args)
 {
     if (args.empty()) return 0;
@@ -6355,6 +6331,7 @@ static int BuildGuestCommandLine(uint8_t* base, const std::vector<std::string>& 
     PPC_STORE_U32(BootGlobals::CMDLINE_ARGV_ADDR + (argCount * 4), 0);
     return argCount;
 }
+#endif  // DISABLED BuildGuestCommandLine
 
 // =============================================================================
 // UNIFIED _xstart - Complete Xbox 360 Boot Sequence Replacement
@@ -6376,7 +6353,18 @@ static int BuildGuestCommandLine(uint8_t* base, const std::vector<std::string>& 
 //   sub_8218BEA8 → sub_827D89B8  - Game main entry
 // =============================================================================
 
-PPC_FUNC(_xstart)
+// =============================================================================
+// REFACTORING NOTE: _xstart replacement DISABLED
+// =============================================================================
+// Per UnleashedRecomp architecture, we should NOT replace _xstart.
+// Let the game's original CRT run, and only hook Xbox kernel/XAM APIs.
+// The GUEST_FUNCTION_HOOK macros at the end of this file handle Xbox APIs.
+//
+// If boot fails, identify which specific API needs a hook and add it properly.
+// Do NOT re-enable this inline boot sequence - fix the proper way.
+// =============================================================================
+#if 0  // DISABLED - Let original _xstart run
+PPC_FUNC(_xstart_DISABLED)
 {
     LOG_WARNING("[BOOT] ============================================================");
     LOG_WARNING("[BOOT] * UNIFIED BOOT SEQUENCE - Modern _xstart replacement");
@@ -6577,6 +6565,7 @@ PPC_FUNC(_xstart)
     LOGF_WARNING("[BOOT] * Game main returned, r3={}", ctx.r3.u32);
     LOG_WARNING("[BOOT] ============================================================");
 }
+#endif  // DISABLED _xstart replacement
 
 // =============================================================================
 // INITIALIZATION FLOW TRACING
@@ -7126,21 +7115,14 @@ PPC_FUNC(sub_827DF248) {
     LOGF_WARNING("[sub_8218C600] sub_827DF248 EXIT #{}", s_count);
 }
 
-extern "C" void __imp__sub_82192578(PPCContext& ctx, uint8_t* base);
+// sub_82192578 is called by recompiled code but wasn't itself recompiled
+// Create a stub that returns success
 PPC_FUNC(sub_82192578) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[sub_8218C600] sub_82192578 ENTER #{}", s_count);
-    __imp__sub_82192578(ctx, base);
-    LOGF_WARNING("[sub_8218C600] sub_82192578 EXIT #{}", s_count);
-}
-
-// Tracing hooks for sub_82192578 call chain
-extern "C" void __imp__sub_82192088(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82192088) {
-    static int s_count = 0; ++s_count;
-    LOGF_WARNING("[TRACE] sub_82192088 ENTER #{}", s_count);
-    __imp__sub_82192088(ctx, base);
-    LOGF_WARNING("[TRACE] sub_82192088 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    if (s_count <= 5) {
+        LOG_WARNING("[STUB] sub_82192578 called - returning success");
+    }
+    ctx.r3.u32 = 1;  // Return success
 }
 
 // =============================================================================
@@ -7423,16 +7405,16 @@ static void InitializePCStorageDevice(uint8_t* base) {
     }
     
     // Set up device object: vtable pointer at offset 0
-    PPC_STORE_U32(BootGlobals::PC_STORAGE_DEVICE_ADDR + 0, BootGlobals::PC_STORAGE_VTABLE_ADDR);
+    PPC_STORE_U32(StorageConstants::PC_STORAGE_DEVICE_ADDR + 0, StorageConstants::PC_STORAGE_VTABLE_ADDR);
     
     // Fill vtable with placeholder values for unused slots
     // Use high addresses in code range so they're at least in valid range
     for (int i = 0; i < 120; i += 4) {
-        PPC_STORE_U32(BootGlobals::PC_STORAGE_VTABLE_ADDR + i, 0x82120000 + i);
+        PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + i, 0x82120000 + i);
     }
     
     // vtable[27] at offset 108 - point to our ReadFile implementation
-    PPC_STORE_U32(BootGlobals::PC_STORAGE_VTABLE_ADDR + 108, STORAGE_DEVICE_READ_ADDR);
+    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 108, STORAGE_DEVICE_READ_ADDR);
     
     s_pcStorageInitialized = true;
     LOGF_WARNING("[STORAGE] PC storage device initialized, vtable[27]=0x{:08X}", STORAGE_DEVICE_READ_ADDR);
@@ -7458,12 +7440,12 @@ PPC_FUNC(sub_827E1EC0) {
     
     if (s_count <= 20) {
         LOGF_WARNING("[STORAGE] sub_827E1EC0 #{} path='{}' -> returning PC device 0x{:08X}", 
-                     s_count, pathBuf, BootGlobals::PC_STORAGE_DEVICE_ADDR);
+                     s_count, pathBuf, StorageConstants::PC_STORAGE_DEVICE_ADDR);
     }
     
     // Return our PC storage device for ALL paths
     // The VFS system handles path resolution internally
-    ctx.r3.u32 = BootGlobals::PC_STORAGE_DEVICE_ADDR;
+    ctx.r3.u32 = StorageConstants::PC_STORAGE_DEVICE_ADDR;
 }
 
 // =============================================================================
@@ -7508,7 +7490,7 @@ PPC_FUNC(sub_827EF2F8) {
     //   [ctx+36]  = path length
     
     // Store our PC storage device
-    PPC_STORE_U32(contextAddr + 32, BootGlobals::PC_STORAGE_DEVICE_ADDR);
+    PPC_STORE_U32(contextAddr + 32, StorageConstants::PC_STORAGE_DEVICE_ADDR);
     
     // Set file handle to a valid non-negative value (0 = success)
     PPC_STORE_U32(contextAddr + 12, 0);
