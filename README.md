@@ -45,6 +45,7 @@ This project is in **early development**. Current progress:
 - [ ] Save data handling (basic stubs exist, full implementation pending)
 - [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
 - [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
+- [x] Online multiplayer via Nebula VPN integration
 
 ## Installation
 
@@ -93,6 +94,7 @@ cmake --build ./out/build/macos-release --target LibertyRecomp
 | [Dumping Guide](/docs/DUMPING-en.md) | How to extract game files from Xbox 360 |
 | [Shader Pipeline](/docs/SHADER_PIPELINE.md) | RAGE FXC → platform shader conversion |
 | [Installation Architecture](/docs/INSTALLATION_ARCHITECTURE.md) | Platform paths and install flow |
+| [Online Multiplayer Guide](/docs/ONLINE_MULTIPLAYER.md) | Setup guide for online play via Nebula VPN |
 
 ## Performance Comparison
 

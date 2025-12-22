@@ -62,3 +62,6 @@
 [submodule "tools/xenia"]
 	path = tools/xenia
 	url = https://github.com/xenia-project/xenia.git
+[submodule "tools/nebula/src"]
+	path = tools/nebula/src
+	url = https://github.com/slackhq/nebula.git

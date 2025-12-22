@@ -1,0 +1,74 @@
+# Nebula Client Configuration Template
+# 
+# This configuration is for regular nodes (players) connecting to a network.
+#
+# Variables to replace:
+#   {{CA_CERT_PATH}}       - Path to ca.crt
+#   {{HOST_CERT_PATH}}     - Path to client.crt  
+#   {{HOST_KEY_PATH}}      - Path to client.key
+#   {{LIGHTHOUSE_IP}}      - Virtual IP of lighthouse (e.g., 192.168.100.1)
+#   {{LIGHTHOUSE_PUBLIC}}  - Public IP:port of lighthouse (e.g., 203.0.113.45:4242)
+
+pki:
+  ca: "{{CA_CERT_PATH}}"
+  cert: "{{HOST_CERT_PATH}}"
+  key: "{{HOST_KEY_PATH}}"
+
+static_host_map:
+  "{{LIGHTHOUSE_IP}}": ["{{LIGHTHOUSE_PUBLIC}}"]
+
+lighthouse:
+  am_lighthouse: false
+  # How often to report to lighthouse
+  interval: 60
+  # List of lighthouse virtual IPs
+  hosts:
+    - "{{LIGHTHOUSE_IP}}"
+
+listen:
+  # Listen on any available port
+  host: 0.0.0.0
+  port: 0
+
+# Punch through NATs
+punchy:
+  punch: true
+  respond: true
+  delay: 1s
+
+# Configure the TUN device
+tun:
+  dev: nebula-liberty
+  drop_local_broadcast: false
+  drop_multicast: false
+  tx_queue: 500
+  mtu: 1300
+
+# Logging
+logging:
+  level: info
+  format: text
+
+# Firewall rules - allow all traffic for gaming
+firewall:
+  conntrack:
+    tcp_timeout: 12m
+    udp_timeout: 3m
+    default_timeout: 10m
+
+  outbound:
+    - port: any
+      proto: any
+      host: any
+
+  inbound:
+    - port: any
+      proto: any
+      host: any
+
+# Optional: Use relays if direct connection fails
+# relay:
+#   relays:
+#     - "{{LIGHTHOUSE_IP}}"
+#   am_relay: false
+#   use_relays: true
