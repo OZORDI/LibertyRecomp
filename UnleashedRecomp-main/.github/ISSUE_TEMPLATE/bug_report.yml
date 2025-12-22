@@ -1,0 +1,124 @@
+name: Bug Report
+description: Report a bug, crash, or other type of error in Unleashed Recompiled
+type: Bug
+body:
+  - id: validation
+    type: checkboxes
+    attributes:
+      label: Validation
+      options:
+      - label: I have checked the [Issues](https://github.com/hedge-dev/UnleashedRecomp/issues) page to see if my problem has already been reported
+        required: true
+      - label: I have confirmed that this bug does not occur in the original game running on original Xbox 360 hardware
+        required: false
+  - id: dlc-installed
+    type: checkboxes
+    attributes:
+      label: If you have DLC installed, please specify which ones you have.
+      options:
+      - label: Apotos & Shamar Adventure Pack
+        required: false
+      - label: Chun-nan Adventure Pack
+        required: false
+      - label: Empire City & Adabat Adventure Pack
+        required: false
+      - label: Holoska Adventure Pack
+        required: false
+      - label: Mazuri Adventure Pack
+        required: false
+      - label: Spagonia Adventure Pack
+        required: false
+  - id: mods-used
+    type: textarea
+    validations:
+      required: false
+    attributes:
+      label: If you have mods enabled, please specify which ones you have.
+      description: Provide a list of your enabled mods in Hedge Mod Manager here. You will not receive support for issues *caused* by mods.
+  - id: codes-used
+    type: textarea
+    validations:
+      required: false
+    attributes:
+      label: If you have codes enabled, please specify which ones you have.
+      description: Provide a list of your enabled codes in Hedge Mod Manager here.
+  - id: describe-bug
+    type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+  - id: repro-steps
+    type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions on how to reproduce the bug.
+      placeholder: |
+        1. Go to '...'
+        2. etc.
+  - id: expected-behavior
+    type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+  - id: footage
+    type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Footage
+      description: Attach a screenshot or video of the bug. If possible, please also provide footage of the expected behaviour on original Xbox 360 hardware.
+  - id: specs-version
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: Version
+      description: The version of Unleashed Recompiled you are running (e.g. **v1.0.0**). This can be found at the bottom right corner of the installer wizard, options menu, or in the application metadata.
+  - id: specs-cpu
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: CPU
+      description: The name of your CPU (e.g. **Intel Core [...]**, **AMD Ryzen [...]**, etc.).
+  - id: specs-gpu
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: GPU
+      description: The name of your GPU (e.g. **NVIDIA GeForce [...]**, **AMD Radeon [...]**, **Intel [...]**, etc.).
+  - id: specs-gpu-driver
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: GPU Driver
+      description: The version of your GPU driver (e.g. **NVIDIA Driver 572.XX**, **AMD Driver 25.X.X**, **Intel Driver 32.X.XXX.XXXX** etc.).
+  - id: specs-ram
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: Memory
+      description: The amount of system memory you have (e.g. **8 GB**, **16 GB**, etc.).
+  - id: specs-os
+    type: input
+    validations:
+      required: true
+    attributes:
+      label: Operating System
+      description: The name of the operating system you are running (e.g. **Windows 10**, **Windows 11**, **Linux distro**).
+  - id: additional-context
+    type: textarea
+    validations:
+      required: false
+    attributes:
+      label: Additional Context
+      description: Provide any other context about the problem here.

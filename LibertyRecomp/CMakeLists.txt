@@ -80,6 +80,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/vfs.cpp"
     "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
+    "kernel/game_init.cpp"
 )
 
 set(LIBERTY_RECOMP_LOCALE_CXX_SOURCES
@@ -189,13 +190,9 @@ set(LIBERTY_RECOMP_INSTALL_CXX_SOURCES
     "install/xbox360/xex_patcher.cpp"
     "install/xbox360/title_update_manager.cpp"
     "install/hashes/game.cpp"
-    "install/hashes/episode_sonic.cpp"
-    "install/hashes/episode_shadow.cpp"
-    "install/hashes/episode_silver.cpp"
-    "install/hashes/episode_amigo.cpp"
-    "install/hashes/mission_sonic.cpp"
-    "install/hashes/mission_shadow.cpp"
-    "install/hashes/mission_silver.cpp"
+    "install/hashes/dlc_tlad.cpp"
+    "install/hashes/dlc_tbogt.cpp"
+    "install/hashes/title_update.cpp"
 )
 
 set(LIBERTY_RECOMP_USER_CXX_SOURCES

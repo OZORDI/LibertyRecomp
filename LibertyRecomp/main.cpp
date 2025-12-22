@@ -367,7 +367,7 @@ int main(int argc, char *argv[])
     
     // TEMPORARY: Force installer UI to always show for preview
     // TODO: Remove this line after UI preview is done
-    runInstallerWizard = true;
+    // runInstallerWizard = true;  // DISABLED - respect actual install check
     
      if (runInstallerWizard)
      {
