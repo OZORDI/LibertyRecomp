@@ -1,0 +1,1143 @@
+[main]
+file_path = "../private/default.xex"
+patch_file_path = "../private/default.xexp"
+patched_file_path = "../private/default_patched.xex"
+out_directory_path = "../ppc"
+switch_table_file_path = "SWA_switch_tables.toml"
+
+skip_lr = true
+skip_msr = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
+cr_as_local = true
+non_argument_as_local = true
+non_volatile_as_local = true
+
+restgprlr_14_address = 0x831B0B40
+savegprlr_14_address = 0x831B0AF0
+restfpr_14_address = 0x831B144C
+savefpr_14_address = 0x831B1400
+restvmx_14_address = 0x831B36E8
+savevmx_14_address = 0x831B3450
+restvmx_64_address = 0x831B377C
+savevmx_64_address = 0x831B34E4
+
+longjmp_address = 0x831B6790
+setjmp_address = 0x831B6AB0
+
+# These functions do not exist in .pdata and do
+# not analyze properly due to having jump tables
+functions = [
+    { address = 0x824E7EF0, size = 0x98 },
+    { address = 0x824E7F28, size = 0x60 },
+    { address = 0x82C980E8, size = 0x110 },
+    { address = 0x82CF7080, size = 0x80 },
+    { address = 0x82D9AC08, size = 0x78 },
+    { address = 0x82E86770, size = 0x98 },
+    { address = 0x82E97E50, size = 0x84 },
+    { address = 0x82EE2D08, size = 0x154 },
+    { address = 0x82EF5C38, size = 0x64 },
+    { address = 0x82EF5D78, size = 0x3F8 },
+    { address = 0x82F08730, size = 0x2B0 },
+    { address = 0x82F098C0, size = 0x19C },
+    { address = 0x82F13980, size = 0xF4 },
+    { address = 0x82F1D668, size = 0x1E8 },
+    { address = 0x82F22908, size = 0x20C },
+    { address = 0x82F25FD8, size = 0x240 },
+    { address = 0x82F852A0, size = 0xCC },
+    { address = 0x830DADA0, size = 0x150 },
+    { address = 0x831487D0, size = 0xD4 },
+    { address = 0x831530C8, size = 0x258 },
+    { address = 0x831539E0, size = 0xD0 },
+    { address = 0x83168940, size = 0x100 },
+    { address = 0x83168A48, size = 0x11C },
+    { address = 0x83168B70, size = 0x128 },
+    { address = 0x83168F18, size = 0x254 },
+    { address = 0x8316C678, size = 0x78 },
+    { address = 0x8317CD30, size = 0x50 },
+    { address = 0x83180700, size = 0x74 },
+    { address = 0x8319ED58, size = 0x98 },
+    { address = 0x82455E70, size = 0x84 },
+    { address = 0x82456DC8, size = 0xD4 },
+    { address = 0x826ABB70, size = 0x70 },
+    { address = 0x82893088, size = 0x45C },
+    { address = 0x82C49540, size = 0x114 },
+    { address = 0x82DE35D8, size = 0x68 },
+    { address = 0x82DE3640, size = 0x64 },
+    { address = 0x82DE36A8, size = 0x5C },
+    { address = 0x82DE3708, size = 0x198 },
+    { address = 0x82DE38A0, size = 0x16C },
+    { address = 0x830B7DD0, size = 0x74 },
+    { address = 0x831B0BA0, size = 0xA0 },
+    { address = 0x8305D168, size = 0x278 }
+]
+
+invalid_instructions = [
+    { data = 0x00000000, size = 4 }, # Padding
+    { data = 0x831B1C90, size = 8 }, # C++ Frame Handler
+    { data = 0x8324B3BC, size = 8 }, # C Specific Frame Handler
+    { data = 0x831C8B50, size = 8 },
+    { data = 0x00485645, size = 44 } # End of .text
+]
+
+[[midasm_hook]]
+name = "IndexBufferLengthMidAsmHook"
+address = 0x82E26244
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "SetShadowResolutionMidAsmHook"
+address = 0x82BAD87C
+registers = ["r11"]
+
+[[midasm_hook]]
+name = "CameraAspectRatioMidAsmHook"
+address = 0x82468E78
+registers = ["r30", "r31"]
+
+[[midasm_hook]]
+name = "CameraFieldOfViewMidAsmHook"
+address = 0x82468EDC
+registers = ["r31", "f31"]
+jump_address = 0x82468EE0
+
+[[midasm_hook]]
+name = "ResetScoreOnRestartMidAsmHook"
+address = 0x82304374
+
+# Disable hint rings
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x827A2E34
+jump_address_on_true = 0x827A2E4C
+
+# Disable Tornado Defense hints
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82AF52BC
+jump_address_on_true = 0x82AF52E4
+
+# Disable Egg Dragoon hint "V_WHG_083" ("That lit-up part on the bottom looks fishy. I'll try aiming for that.")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82AA3224
+jump_address_on_true = 0x82AA3228
+
+# Disable Egg Dragoon hint "V_CHP_057" ("That green round thing looks suspicious! Give it a bonk, Sonic!")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82AB1A00
+jump_address_on_true = 0x82AB1A04
+
+# Disable Dark Moray hints
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x829F7538
+jump_address_on_true = 0x829F753C
+
+# Disable Dark Moray hint "snow_boss_01" ("Ack, Sonic! You're frozen! Move the left stick left and right quickly to break free!")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x829F7C90
+jump_address_on_true = 0x829F7C94
+
+# Disable Dark Guardian hint "V_CHP_051" ("Ooh, ooh! Sonic! What if you took the boxes over to the blue place!")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82A33008
+jump_address_on_true = 0x82A33054
+
+# Disable Dark Guardian hint "V_CHP_055" ("Looks like those annoying nightmares stay gone for a while if you clear 'em out!")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82A1DE14
+jump_address_on_true = 0x82A1DE34
+
+# Disable Dark Guardian hint "V_WHG_076" ("I keep beating him down and he gets right back up! There's gotta be a better way.")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82A260D8
+jump_address_on_true = 0x82A26198
+
+# Disable Dark Guardian hint "V_WHG_078" ("Looks like I can push this box thing.")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82A2F934
+jump_address_on_true = 0x82A2F94C
+
+# Disable Dark Gaia Phoenix hint "V_WHG_070" ("Ngh! Looks like I can't get at it while it's covered in fire...")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x829D2388
+jump_address_on_true = 0x829D238C
+
+# Disable Dark Gaia Phoenix hint "V_WHG_071" ("Looks like he runs out of breath eventually. That's my chance.")
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x829E409C
+jump_address_on_true = 0x829E40A0
+
+# Disable Chip hints for shoe upgrades
+[[midasm_hook]]
+name = "DisableHintsMidAsmHook"
+address = 0x82691DD0
+jump_address_on_true = 0x82691DD4
+
+# Disable navigation volumes
+[[midasm_hook]]
+name = "DisableControlTutorialMidAsmHook"
+address = 0x827AA5EC
+jump_address_on_true = 0x827AA604
+
+# Disable Werehog button prompts
+[[midasm_hook]]
+name = "DisableEvilControlTutorialMidAsmHook"
+address = 0x823A4FF0
+registers = ["r4", "r5"]
+return_on_false = true
+
+# Set default value for XButtonHoming.
+[[midasm_hook]]
+name = "SetXButtonHomingMidAsmHook"
+address = 0x8237AC90
+registers = ["r1"]
+
+# Disable XML reading for XButtonHoming.
+[[midasm_hook]]
+name = "IsHomingAttackOnJump"
+address = 0x8237ACE4
+jump_address_on_true = 0x8237ACE8
+
+# Down force HFR fix
+[[midasm_hook]]
+name = "DownForceDeltaTimeFixMidAsmHook"
+address = 0x82319D60
+registers = ["f0"]
+jump_address = 0x82319D64
+
+[[midasm_hook]]
+name = "DownForceDeltaTimeFixMidAsmHook"
+address = 0x82319DCC
+registers = ["v127", "f24"]
+
+# 2D spline HFR fix
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x82345468
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x8234547C
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x823454B0
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x82345534
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x823455EC
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x8234564C
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x823457A8
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x823458A0
+registers = ["f1"]
+
+# Lever/door/panchinko pad acceleration fix
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x82418350
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x824178A0
+registers = ["f1"]
+
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixMidAsmHook"
+address = 0x82419408
+registers = ["f1"]
+
+# 3D camera HFR fixes
+[[midasm_hook]]
+name = "CameraDeltaTimeFixMidAsmHook"
+address = 0x8247DD38 # Slope
+registers = ["f0", "f31"]
+jump_address = 0x8247DD3C
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247DD48 # Slope
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247DDFC # Dash path binormal
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E280 # Target front offset
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E300 # Target
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E3C8 # Target
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E4A0 # Target up positive
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E4E8 # Target up negative
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247E9FC # Position
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247EA84 # Position up negative
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247EA50 # Position up positive
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraDeltaTimeFixMidAsmHook"
+address = 0x8247ED30 # Distance offset 1
+registers = ["f0", "f12"]
+jump_address = 0x8247ED34
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247ED40 # Distance offset 1
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "CameraDeltaTimeFixMidAsmHook"
+address = 0x8247ED54 # Distance offset 2
+registers = ["f13"]
+jump_address = 0x8247ED58
+
+[[midasm_hook]]
+name = "CameraLerpFixMidAsmHook"
+address = 0x8247ED64 # Distance offset 2
+registers = ["f13"]
+
+[[midasm_hook]]
+name = "CameraTargetSideOffsetLerpFixMidAsmHook"
+address = 0x8247F12C # Target side offset
+registers = ["v13", "v62"]
+
+# 2D camera HFR fixes
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x824761AC # Player velocity
+registers = ["f0", "f28"]
+jump_address = 0x824761B0
+
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x824762AC # Player position
+registers = ["f0", "f28"]
+jump_address = 0x824762B0
+
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x8247645C # Spherical position
+registers = ["f0", "f28"]
+jump_address = 0x82476460
+
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x82476514 # Target up offset
+registers = ["f0", "f28"]
+jump_address = 0x82476518
+
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x824768A0 # Spherical position
+registers = ["f0", "f28"]
+jump_address = 0x824768A4
+
+[[midasm_hook]]
+name = "Camera2DLerpFixMidAsmHook"
+address = 0x824768C8 # Spherical position
+registers = ["f0", "f28"]
+jump_address = 0x824768CC
+
+[[midasm_hook]]
+name = "CameraDeltaTimeFixMidAsmHook"
+address = 0x82476768 # Slope
+registers = ["f1", "f30"]
+jump_address = 0x8247676C
+
+[[midasm_hook]]
+name = "Camera2DSlopeLerpFixMidAsmHook"
+address = 0x82476778 # Slope
+registers = ["f1", "f28"]
+
+[[midasm_hook]]
+name = "PostUnleashMidAsmHook"
+address = 0x823C6788
+registers = ["r30"]
+
+[[midasm_hook]]
+name = "MovieRendererMidAsmHook"
+address = 0x82AE3200
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "WerehogBattleMusicMidAsmHook"
+address = 0x82B47278
+registers = ["r11"]
+
+[[midasm_hook]]
+name = "WerehogBattleMusicMidAsmHook"
+address = 0x82B47728
+registers = ["r11"]
+
+[[midasm_hook]]
+name = "WerehogBattleMusicMidAsmHook"
+address = 0x82B47C58
+registers = ["r11"]
+
+[[midasm_hook]]
+name = "MotionBlurMidAsmHook"
+address = 0x82BA99D0
+jump_address_on_false = 0x82BAA544
+
+# Bloom glare resolution fix
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA3E9C
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA3EF4
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA3F4C
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA3F9C
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA4000
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BA4064
+registers = ["r4", "f1", "f2"]
+
+# Light shaft resolution fix
+[[midasm_hook]]
+name = "PostProcessResolutionFix"
+address = 0x82BB0EE0
+registers = ["r4", "f1", "f2"]
+
+[[midasm_hook]]
+name = "LightShaftAspectRatioFix"
+address = 0x82BB1314
+registers = ["f28", "f0"]
+
+[[midasm_hook]]
+name = "ParticleTestIndexBufferMidAsmHook"
+address = 0x827D20A0
+registers = ["r30"]
+jump_address_on_true = 0x827D20EC
+
+[[midasm_hook]]
+name = "ParticleTestDrawIndexedPrimitiveMidAsmHook"
+address = 0x827D25AC
+registers = ["r7"]
+
+[[midasm_hook]]
+name = "MotionBlurPrevInvViewProjectionMidAsmHook"
+address = 0x82BA9E7C
+registers = ["r10"]
+
+[[midasm_hook]]
+name = "GetDatabaseDataMidAsmHook"
+address = 0x82E38688 # Model
+registers = ["r1", "r31"]
+
+[[midasm_hook]]
+name = "GetDatabaseDataMidAsmHook"
+address = 0x82E39650 # Terrain Model
+registers = ["r1", "r31"]
+
+[[midasm_hook]]
+name = "GetDatabaseDataMidAsmHook"
+address = 0x827D614C # Particle Material Binary
+registers = ["r1", "r29"]
+
+[[midasm_hook]]
+name = "GetDatabaseDataMidAsmHook"
+address = 0x827D6018 # Particle Material XML
+registers = ["r1", "r30"]
+
+# Removes the storage device prompt on new game
+[[midasm_hook]]
+name = "StorageDevicePromptMidAsmHook"
+address = 0x822C53CC
+jump_address = 0x822C53F8
+
+# World Map Pause Menu
+[[midasm_hook]]
+name = "CHudPauseAddOptionsItemMidAsmHook"
+address = 0x824AF140
+registers = ["r31"]
+
+# Village Pause Menu
+[[midasm_hook]]
+name = "CHudPauseAddOptionsItemMidAsmHook"
+address = 0x824AF5BC
+registers = ["r31"]
+
+# Stage Pause Menu
+[[midasm_hook]]
+name = "CHudPauseAddOptionsItemMidAsmHook"
+address = 0x824AF988
+registers = ["r31"]
+
+# Hub Pause Menu
+[[midasm_hook]]
+name = "CHudPauseAddOptionsItemMidAsmHook"
+address = 0x824AFB20
+registers = ["r31"]
+
+# Misc Pause Menu
+[[midasm_hook]]
+name = "CHudPauseAddOptionsItemMidAsmHook"
+address = 0x824AFCC8
+registers = ["r31"]
+
+# World Map Pause Menu
+[[midasm_hook]]
+name = "CHudPauseItemCountMidAsmHook"
+address = 0x824B02F8
+registers = ["r3", "r11"]
+return_on_true = true
+
+# Village Pause Menu
+[[midasm_hook]]
+name = "CHudPauseVillageItemCountMidAsmHook"
+address = 0x824B04AC
+registers = ["r31", "r10"]
+
+# Stage Pause Menu
+[[midasm_hook]]
+name = "CHudPauseItemCountMidAsmHook"
+address = 0x824B061C
+registers = ["r3", "r11"]
+return_on_true = true
+
+# Hub Pause Menu
+[[midasm_hook]]
+name = "CHudPauseItemCountMidAsmHook"
+address = 0x824B07C4
+registers = ["r3", "r10"]
+return_on_true = true
+
+# Misc Pause Menu Index Wrap-around
+[[midasm_hook]]
+name = "CHudPauseItemCountMidAsmHook"
+address = 0x824B08A8
+registers = ["r3", "r11"]
+return_on_true = true
+
+# Misc Pause Menu Index Comparison
+[[midasm_hook]]
+name = "CHudPauseMiscItemCountMidAsmHook"
+address = 0x824B08B0
+registers = ["r11"]
+jump_address_on_true = 0x824B08C0
+
+# Misc Pause Menu Inject Options Behaviour
+[[midasm_hook]]
+name = "CHudPauseMiscInjectOptionsMidAsmHook"
+address = 0x824B08C0
+registers = ["r3"]
+return_on_true = true
+
+[[midasm_hook]]
+name = "AchievementManagerUnlockMidAsmHook"
+address = 0x82BCFF28
+registers = ["r31"]
+
+[[midasm_hook]]
+name = "TitleMenuRemoveStorageDeviceOptionMidAsmHook"
+address = 0x825854F8
+registers = ["r11"]
+jump_address = 0x825854FC
+
+[[midasm_hook]]
+name = "TitleMenuAddInstallOptionMidAsmHook"
+address = 0x8258547C
+registers = ["r3"]
+jump_address = 0x82585480
+
+[[midasm_hook]]
+name = "LoadingScreenControllerMidAsmHook"
+address = 0x824DC9D4
+
+# SWA::Player::CPlayerSpeedPostureInputOnPath / SWA::Player::CPlayerSpeedPostureInputForcePath / SWA::Player::CPlayerSpeedPostureInput2DStandard
+[[midasm_hook]]
+name = "PostureDPadSupportInvertYMidAsmHook"
+address = 0x8234F194
+registers = ["r31", "f13", "f0"]
+
+# SWA::Player::CPlayerSpeedPostureInputPathLocal
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x8234F610
+registers = ["r30", "f0", "f13"]
+
+# SWA::Player::CPlayerSpeedPostureInput3DStandard
+[[midasm_hook]]
+name = "PostureDPadSupportInvertYMidAsmHook"
+address = 0x8234EEE8
+registers = ["r31", "f12", "f13"]
+
+# SWA::Player::CEvilPostureInputStandard
+[[midasm_hook]]
+name = "PostureDPadSupportInvertYMidAsmHook"
+address = 0x823CDA60
+registers = ["r3", "f11", "f12"]
+
+# SWA::Player::CEvilPostureInputStandard
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x823CDA74
+registers = ["r3", "f0"]
+
+# SWA::Player::CEvilPostureInputStandard
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823CDA88
+registers = ["r3", "f12"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x823E057C
+registers = ["r11", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x823E0634
+registers = ["r11", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x823E065C
+registers = ["r11", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x823E088C
+registers = ["r11", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823DFB10
+registers = ["r23", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823E0AB4
+registers = ["r11", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823E0BB8
+registers = ["r11", "f13"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823E0CBC
+registers = ["r29", "f0"]
+
+# SWA::Player::CEvilSonicContext::CStateColumn
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x823E01EC
+registers = ["r23", "f0"]
+
+# SWA::CObjBobsleigh::CStateMode3D
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x8266B5F0
+registers = ["r29", "f13"]
+
+# SWA::CObjBobsleigh::CStateMode3D
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x8266B8B4
+registers = ["r29", "f0"]
+
+# SWA::CObjBobsleigh::CStateMode3D
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x8266B618
+registers = ["r29", "f0"]
+
+# SWA::CObjBobsleigh::CStateMode3D
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x8266B6AC
+registers = ["r29", "f0"]
+
+# SWA::Player::CPlayerSpeedStateNormalDamageStandUp / SWA::Player::CSonicStateStartEvent / SWA::Player::CSonicStateStompingLand
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x8231F824
+registers = ["r29", "f12", "f13"]
+
+# SWA::Boss::Temple::CTemple (shared)
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x82A77E68
+registers = ["r31", "f31", "f30"]
+
+# SWA::Boss::Temple::CTempleStateMove
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x82A7B3CC
+registers = ["r30", "f29", "f28"]
+
+# SWA::Boss::Temple::CTempleStateMove
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x82A7B288
+registers = ["r30", "f13", "f10"]
+
+# SWA::Boss::Temple::CTempleStateBoost / SWA::Boss::Temple::CTempleStateDamage / SWA::Boss::Temple::CTempleStateGuard
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x82A72358
+registers = ["r30", "f13"]
+
+# SWA::Player::CSuperSonicPostureInputSpaceHurrier
+[[midasm_hook]]
+name = "PostureSpaceHurrierDPadSupportXMidAsmHook"
+address = 0x82455DD8
+registers = ["r30", "v61"]
+
+# SWA::Player::CSuperSonicPostureInputSpaceHurrier
+[[midasm_hook]]
+name = "PostureSpaceHurrierDPadSupportYMidAsmHook"
+address = 0x82455DC8
+registers = ["r30", "v63"]
+
+# SWA::Player::CSuperSonicPostureNights
+[[midasm_hook]]
+name = "PostureDPadSupportMidAsmHook"
+address = 0x82454104
+registers = ["r29", "f28", "f27"]
+after_instruction = true
+
+# SWA::CBossEggBeetle
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x829A4FCC
+registers = ["r29", "f13"]
+
+# SWA::CBossEggRayBird (horizontal)
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x829BA7E0
+registers = ["r21", "f13"]
+
+# SWA::CBossEggRayBird (vertical)
+[[midasm_hook]]
+name = "PostureDPadSupportYMidAsmHook"
+address = 0x829C53E8
+registers = ["r21", "f13"]
+
+# SWA::CBossEggLancer
+[[midasm_hook]]
+name = "PostureDPadSupportXMidAsmHook"
+address = 0x82A55A48
+registers = ["r21", "f13"]
+
+# SWA::CWorldMapCamera - disable rotation deadzone for touch
+[[midasm_hook]]
+name = "WorldMapDeadzoneMidAsmHook"
+address = 0x824862EC
+registers = ["r30"]
+jump_address_on_true = 0x824862F0
+
+# SWA::CWorldMapCamera - disable flag magnetism for touch
+[[midasm_hook]]
+name = "WorldMapMagnetismMidAsmHook"
+address = 0x824866D4
+registers = ["f0"]
+jump_address_on_true = 0x824866D8
+jump_address_on_false = 0x82486838
+
+# SWA::CWorldMapCamera - touch and D-Pad support for camera adjustment threshold on the X axis
+[[midasm_hook]]
+name = "WorldMapHidSupportXMidAsmHook"
+address = 0x824862D8
+registers = ["r30", "f12"]
+
+# SWA::CWorldMapCamera - touch and D-Pad support for adjusing camera yaw
+[[midasm_hook]]
+name = "WorldMapHidSupportXMidAsmHook"
+address = 0x82486318
+registers = ["r30", "f12"]
+
+# SWA::CWorldMapCamera - touch and D-Pad support for camera adjustment threshold on the Y axis
+[[midasm_hook]]
+name = "WorldMapHidSupportYMidAsmHook"
+address = 0x824862CC
+registers = ["r30", "f0"]
+
+# SWA::CWorldMapCamera - touch and D-Pad support for adjusing camera pitch
+[[midasm_hook]]
+name = "WorldMapHidSupportYMidAsmHook"
+address = 0x824862F4
+registers = ["r30", "f0"]
+
+# SWA::CWorldMapCamera - touch and D-Pad support for flag magnetism on the X axis
+[[midasm_hook]]
+name = "WorldMapHidSupportXMidAsmHook"
+address = 0x8248665C
+registers = ["r27", "f29"]
+after_instruction = true
+
+# SWA::CWorldMapCamera - touch and D-Pad support for flag magnetism on the Y axis
+[[midasm_hook]]
+name = "WorldMapHidSupportYMidAsmHook"
+address = 0x82486658
+registers = ["r27", "f28"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "LoadingUpdateMidAsmHook"
+address = 0x825360C8
+registers = ["r31"]
+jump_address_on_true = 0x825360C8
+jump_address_on_false = 0x82536140
+
+[[midasm_hook]]
+name = "RemoveMoviePlayerLetterboxMidAsmHook"
+address = 0x82B723A8
+jump_address = 0x82B723BC
+
+[[midasm_hook]]
+name = "DisableDLCIconMidAsmHook"
+address = 0x825756B0
+jump_address_on_true = 0x825756E0
+
+[[midasm_hook]]
+name = "MakeCsdProjectMidAsmHook"
+address = 0x825E4120
+registers = ["r3", "r29"]
+
+[[midasm_hook]]
+name = "RenderCsdCastNodeMidAsmHook"
+address = 0x830C6A58
+registers = ["r10", "r27"]
+
+[[midasm_hook]]
+name = "RenderCsdCastMidAsmHook"
+address = 0x830C6A98
+registers = ["r4"]
+
+[[midasm_hook]]
+name = "ComputeScreenPositionMidAsmHook"
+address = 0x82923204
+registers = ["f1", "f2"]
+
+[[midasm_hook]]
+name = "ComputeScreenPositionMidAsmHook"
+address = 0x82AD7914
+registers = ["f1", "f2"]
+
+[[midasm_hook]]
+name = "WorldMapInfoMidAsmHook"
+address = 0x8257AF34
+registers = ["r4"]
+
+# Loading
+[[midasm_hook]]
+name = "AddPrimitive2DMidAsmHook"
+address = 0x824DB3E4
+registers = ["r3"]
+
+# NPC
+[[midasm_hook]]
+name = "AddPrimitive2DMidAsmHook"
+address = 0x82B34914
+registers = ["r3"]
+
+# Title
+[[midasm_hook]]
+name = "AddPrimitive2DMidAsmHook"
+address = 0x82581C2C
+registers = ["r3"]
+
+# Shop
+[[midasm_hook]]
+name = "AddPrimitive2DMidAsmHook"
+address = 0x82B2BCD8
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "ObjGetItemFieldOfViewMidAsmHook"
+address = 0x82692934
+registers = ["r1", "f1"]
+
+[[midasm_hook]]
+name = "WorldMapProjectionMidAsmHook"
+address = 0x82574E00
+registers = ["v63", "v62"]
+
+[[midasm_hook]]
+name = "ViewRingFieldOfViewMidAsmHook"
+address = 0x825EBDF0
+registers = ["r1", "f1"]
+
+[[midasm_hook]]
+name = "ViewRingYMidAsmHook"
+address = 0x825EBF1C
+registers = ["f0"]
+
+[[midasm_hook]]
+name = "ViewRingXMidAsmHook"
+address = 0x825EBF68
+registers = ["f0", "v62"]
+
+[[midasm_hook]]
+name = "InspireLetterboxTopMidAsmHook"
+address = 0x82B8AB78
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "InspireLetterboxBottomMidAsmHook"
+address = 0x82B8ABAC
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "InspireSubtitleMidAsmHook"
+address = 0x82B949B0
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "TitleMenuRemoveContinueOnCorruptSaveMidAsmHook"
+address = 0x82585470
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "ObjBigBarrelAllocMidAsmHook"
+address = 0x8271B778
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "ObjBigBarrelSetPositionMidAsmHook"
+address = 0x8271B5C8
+registers = ["r3", "r4"]
+
+[[midasm_hook]]
+name = "LoadingRenderMidAsmHook"
+address = 0x824DB734
+jump_address_on_true = 0x824DB738
+
+[[midasm_hook]]
+name = "FxFadePreRenderQuadMidAsmHook"
+address = 0x82BA7D3C
+registers = ["r31"]
+
+[[midasm_hook]]
+name = "FxFadePostRenderQuadMidAsmHook"
+address = 0x82BA7D40
+
+[[midasm_hook]]
+name = "YggdrasillRenderQuadMidAsmHook"
+address = 0x82E9FBA0
+registers = ["r3", "r6"]
+
+# CSB loader
+[[midasm_hook]]
+name = "MakeCueSheetDataMidAsmHook"
+address = 0x82E5EA10
+registers = ["r31"]
+jump_address_on_true = 0x82E5EA40
+
+# Name assignment
+[[midasm_hook]]
+name = "MakeCueSheetDataMidAsmHook"
+address = 0x82E5EA40
+registers = ["r31"]
+jump_address_on_true = 0x82E5EA4C
+
+[[midasm_hook]]
+name = "WaitVsyncMidAsmHook"
+address = 0x82AE2770
+jump_address = 0x82AE2774
+
+[[midasm_hook]]
+name = "ApplicationFrameLimiterMidAsmHook"
+address = 0x822C1064
+jump_address = 0x822C111C
+
+[[midasm_hook]]
+name = "PressStartSaveLoadThreadMidAsmHook"
+address = 0x822C4358
+
+[[midasm_hook]]
+name = "FxShadowMapInitMidAsmHook"
+address = 0x82BAD8F4
+registers = ["r11"]
+
+[[midasm_hook]]
+name = "FxShadowMapNoTerrainMidAsmHook"
+address = 0x82BAD9EC
+registers = ["r4", "r30"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "FxShadowMapMidAsmHook"
+address = 0x82BADADC
+registers = ["r4", "r5", "r6", "r30"]
+jump_address_on_true = 0x82BAD9F0
+jump_address_on_false = 0x82BADAFC
+
+[[midasm_hook]]
+name = "CExStageBossCStateBattleAllocMidAsmHook"
+address = 0x82B026DC
+registers = ["r3"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "CExStageBossCStateBattleCtorMidAsmHook"
+address = 0x82B026E4
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EvilHudGuideAllocMidAsmHook"
+address = 0x823B6908
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EvilHudGuideUpdateMidAsmHook"
+address = 0x82449800
+registers = ["r30", "f30"]
+
+[[midasm_hook]]
+name = "SparkleLocusMidAsmHook"
+address = 0x82E96804
+jump_address_on_true = 0x82E96808
+
+# Rooftop Run barrel fix (works at up to ~400 FPS)
+[[midasm_hook]]
+name = "HighFrameRateDeltaTimeFixVectorMidAsmHook"
+address = 0x827673CC
+registers = ["v62"]
+
+[[midasm_hook]]
+name = "BossEggDragoonDrillMissileCMissileSetRotationMidAsmHook"
+address = 0x82A9BADC
+registers = ["r4"]
+
+[[midasm_hook]]
+name = "AnimationDataMakeMidAsmHook"
+address = 0x82BB38E4
+registers = ["r31", "r29", "r28"]
+
+[[midasm_hook]]
+name = "ObjGrindDashPanelAllocMidAsmHook"
+address = 0x82614948
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "UseAlternateTitleMidAsmHook"
+address = 0x82580F44
+jump_address_on_true = 0x82580F48
+jump_address_on_false = 0x82580FA0
+
+[[midasm_hook]]
+name = "EndingTextAllocMidAsmHook"
+address = 0x8257E284
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextAllocMidAsmHook"
+address = 0x8257E45C
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextAllocMidAsmHook"
+address = 0x8257EDD8
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextCtorRightMidAsmHook"
+address = 0x8257E304
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextCtorLeftMidAsmHook"
+address = 0x8257E4DC
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextCtorCenterMidAsmHook"
+address = 0x8257EE40
+registers = ["r3"]
+
+[[midasm_hook]]
+name = "EndingTextPositionMidAsmHook"
+address = 0x82580168
+registers = ["r31", "f13"]

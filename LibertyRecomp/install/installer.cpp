@@ -11,8 +11,11 @@
 #include "iso_file_system.h"
 #include "xcontent_file_system.h"
 
-// GTA IV uses simplified hash validation - DLC hashes TBD
+// GTA IV hash validation files
 #include "hashes/game.h"
+#include "hashes/dlc_tlad.h"
+#include "hashes/dlc_tbogt.h"
+#include "hashes/title_update.h"
 
 static const std::string GameDirectory = "game";
 static const std::string DLCDirectory = "dlc";
@@ -321,15 +324,13 @@ static bool fillDLCSource(DLC dlc, Installer::DLCSource &dlcSource)
     switch (dlc)
     {
     case DLC::TheLostAndDamned:
-        // TLAD uses same file structure - will need TLAD-specific hashes later
-        dlcSource.filePairs = { }; // Empty for now - DLC support TBD
-        dlcSource.fileHashes = nullptr;
+        dlcSource.filePairs = { TLADFiles, TLADFilesSize };
+        dlcSource.fileHashes = TLADHashes;
         dlcSource.targetSubDirectory = TLADDirectory;
         return true;
     case DLC::TheBalladOfGayTony:
-        // TBOGT uses same file structure - will need TBOGT-specific hashes later
-        dlcSource.filePairs = { }; // Empty for now - DLC support TBD
-        dlcSource.fileHashes = nullptr;
+        dlcSource.filePairs = { TBOGTFiles, TBOGTFilesSize };
+        dlcSource.fileHashes = TBOGTHashes;
         dlcSource.targetSubDirectory = TBOGTDirectory;
         return true;
     default:
