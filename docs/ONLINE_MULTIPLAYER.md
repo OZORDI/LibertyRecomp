@@ -213,6 +213,61 @@ A: Your real IP is only visible to the lighthouse host. Other players only see y
 **Q: Can I use this with other VPNs?**  
 A: Generally yes, but may cause routing conflicts. Disable other VPNs while using Nebula.
 
+## In-Game Troubleshooting
+
+The game includes a built-in diagnostics tool accessible from **Multiplayer → Online Setup → Diagnostics**.
+
+### Diagnostics Page Features
+
+| Check | What It Tests | Common Fixes |
+|-------|---------------|---------------|
+| Nebula Status | Binary availability | Run `tools/nebula/build.sh` |
+| Config Valid | Configuration exists | Create/join network first |
+| Connection | Lighthouse reachable | Check port forwarding, firewall |
+| Peers | Other players visible | Wait 10-30s, check certificates |
+
+### Status Indicator Colors
+
+| Color | Meaning | Action |
+|-------|---------|--------|
+| 🟢 Green | Connected | Ready to play |
+| 🟡 Yellow | Connecting | Wait for connection |
+| 🔴 Red | Error/Disconnected | Check diagnostics |
+| ⚪ Gray | Not configured | Set up network first |
+
+### Common Error Messages
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Binaries not found" | Nebula not built | Run `tools/nebula/build.sh --download` |
+| "Failed to generate CA" | Permission denied | Run as admin/root |
+| "Connection timeout" | Port blocked | Forward UDP 4242 |
+| "Certificate mismatch" | Wrong CA cert | Get correct cert from host |
+| "TUN device error" | Missing permissions | Run with elevated privileges |
+
+### Log Files
+
+Nebula logs are stored in:
+
+| Platform | Location |
+|----------|----------|
+| Windows | `%LOCALAPPDATA%\LibertyRecomp\nebula\logs\` |
+| macOS | `~/Library/Application Support/LibertyRecomp/nebula/logs/` |
+| Linux | `~/.local/share/LibertyRecomp/nebula/logs/` |
+
+### Network Test Commands
+
+```bash
+# Test if lighthouse is reachable (replace with actual IP)
+nc -vzu 203.0.113.45 4242
+
+# Check Nebula process status
+ps aux | grep nebula
+
+# View Nebula logs in real-time
+tail -f ~/.local/share/LibertyRecomp/nebula/logs/nebula.log
+```
+
 ## Resources
 
 - [Nebula GitHub](https://github.com/slackhq/nebula)

@@ -176,6 +176,8 @@ set(LIBERTY_RECOMP_UI_CXX_SOURCES
     "ui/imgui_utils.cpp"
     "ui/installer_wizard.cpp"
     "ui/message_window_stub.cpp"   # Stub - GTA IV version needed
+    "ui/network_status_overlay.cpp"
+    "ui/online_multiplayer_menu.cpp"
     "ui/options_menu_stub.cpp"     # Stub - GTA IV version needed
 )
 

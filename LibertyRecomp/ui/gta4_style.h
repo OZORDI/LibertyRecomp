@@ -23,6 +23,14 @@ namespace GTA4Style
         constexpr ImU32 TextOrange = IM_COL32(255, 150, 0, 255);
         constexpr ImU32 TextGreen = IM_COL32(100, 200, 100, 255);
         constexpr ImU32 TextGray = IM_COL32(150, 150, 150, 255);
+        constexpr ImU32 TextRed = IM_COL32(200, 50, 50, 255);
+        constexpr ImU32 TextYellow = IM_COL32(255, 200, 50, 255);
+        
+        // Network status colors
+        constexpr ImU32 StatusConnected = IM_COL32(50, 200, 50, 255);
+        constexpr ImU32 StatusConnecting = IM_COL32(255, 200, 50, 255);
+        constexpr ImU32 StatusDisconnected = IM_COL32(150, 150, 150, 255);
+        constexpr ImU32 StatusError = IM_COL32(200, 50, 50, 255);
     }
 
     inline ImU32 WithAlpha(ImU32 color, float alpha)

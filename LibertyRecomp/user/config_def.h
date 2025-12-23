@@ -104,3 +104,11 @@ CONFIG_DEFINE_HIDDEN("Codes", bool, UseOfficialTitleOnTitleBar, false, true);
 CONFIG_DEFINE("Update", time_t, LastChecked, 0, false);
 
 CONFIG_DEFINE_HIDDEN("Install", uint32_t, InstalledTitleUpdateVersion, 0, false);
+
+// Online Multiplayer (Nebula VPN)
+CONFIG_DEFINE_HIDDEN("Network", std::string, NetworkName, "", false);
+CONFIG_DEFINE_HIDDEN("Network", std::string, LighthouseAddress, "", false);
+CONFIG_DEFINE_HIDDEN("Network", std::string, VirtualIP, "192.168.100.2/24", false);
+CONFIG_DEFINE_HIDDEN("Network", int32_t, ListenPort, 4242, false);
+CONFIG_DEFINE_HIDDEN("Network", bool, AutoConnect, false, false);
+CONFIG_DEFINE_HIDDEN("Network", bool, ShowStatusOverlay, true, false);
