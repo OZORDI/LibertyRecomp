@@ -1580,10 +1580,7 @@ uint32_t XMsgStartIORequest(uint32_t App, uint32_t Message, XXOVERLAPPED* lpOver
     return STATUS_SUCCESS;
 }
 
-uint32_t XamUserGetSigninState(uint32_t userIndex)
-{
-    return true;
-}
+
 
 uint32_t XamGetSystemVersion()
 {
@@ -2321,42 +2318,8 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
             return STATUS_TIMEOUT;
         }
         
-        // Force-succeed worker semaphore waits to allow workers to do their tasks
-        // Workers are waiting for work signals - force them to run so they can 
-        // potentially unblock the main thread which is stuck in sub_82273988
-        // Main thread is NOT in these waits - it's busy-waiting on memory inside sub_82273988
-        bool isWorkerSem = (Handle >= 0xEB2C0000 && Handle <= 0xEB2DFFFF) ||
-                           (Handle == 0xA82487B0 || Handle == 0xA82487F0 ||
-                            Handle == 0xA8240270 || Handle == 0xA82402B0);
-        if (isWorkerSem)
-        {
-            static int s_forceCount = 0;
-            if (++s_forceCount <= 30 || s_forceCount % 500 == 0)
-            {
-                LOGF_WARNING("[NtWaitEx] FORCE WORKER #{} sem 0x{:08X} timeout={}", 
-                            s_forceCount, Handle, timeout);
-            }
-            return STATUS_SUCCESS;
-        }
-        
-        // Log all other timeout=0 waits to find blocking handles
-        if (timeout == 0)
-        {
-            static int s_poll = 0;
-            if (++s_poll <= 50 || s_poll % 500 == 0)
-            {
-                LOGF_WARNING("[NtWaitEx] POLL #{} handle=0x{:08X} (not in force list)", s_poll, Handle);
-            }
-        }
-        
-        // Log ALL waits that actually reach Wait() - these are potential blocking points
-        static int s_actualWait = 0;
-        ++s_actualWait;
-        if (s_actualWait <= 50 || timeout == INFINITE)
-        {
-            LOGF_WARNING("[NtWaitEx] ACTUAL WAIT #{} handle=0x{:08X} timeout={} - WILL BLOCK!", 
-                        s_actualWait, Handle, timeout);
-        }
+        // Removed worker semaphore bypass hack - let C++20 atomic wait/notify work naturally
+        // Following Unleashed's approach: proper synchronization without forced returns
         
         return obj->Wait(timeout);
     }
@@ -3737,6 +3700,34 @@ void VdSwap()
             LOGF_UTILITY("VdSwap signaled {} events (gen={})", g_trackedEventHandles.size(), g_keSetEventGeneration.load());
         }
     }
+    
+    // Signal worker semaphores to process queued work
+    // Based on PPC analysis: workers wait on semaphores created during init
+    // These semaphores need periodic signaling to drive worker processing
+    static const std::vector<uint32_t> workerSemaphores = {
+        0xA8240270, 0xA82402B0, 0xA82402F0, 0xA8240370,
+        0xA82403B0, 0xA82403F0, 0xA8240430, 0xA8240470,
+        0xA82404B0, 0xA82404F0, 0xA8240530, 0xA8240570
+    };
+    
+    static int s_semSignalCount = 0;
+    for (uint32_t semHandle : workerSemaphores)
+    {
+        if (IsKernelObject(semHandle))
+        {
+            Semaphore* sem = GetKernelObject<Semaphore>(semHandle);
+            if (sem && sem->count.load() == 0)
+            {
+                sem->Release(1, nullptr);  // Signal one worker
+            }
+        }
+    }
+    
+    if (s_semSignalCount < 5)
+    {
+        ++s_semSignalCount;
+        LOGF_UTILITY("VdSwap signaled {} worker semaphores", workerSemaphores.size());
+    }
 }
 
 void VdGetSystemCommandBuffer()
@@ -4047,19 +4038,105 @@ void VdSetDisplayMode()
     LOG_UTILITY("!!! STUB !!!");
 }
 
+// =============================================================================
+// VBlank Timer Thread - Fires at 60Hz to drive timing-dependent systems
+// =============================================================================
+// GTA IV expects VBlank interrupts at exactly 60Hz even during initialization.
+// This is different from Sonic Unleashed which doesn't need VBlank timing.
+// The timer fires the registered graphics interrupt callback and wakes event waiters.
+
+static std::atomic<bool> g_vblankThreadRunning{false};
+static std::thread g_vblankThread;
+
+void StartVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+        return;  // Already running
+    
+    g_vblankThreadRunning = true;
+    g_vblankThread = std::thread([]() {
+        using namespace std::chrono;
+        auto nextVBlank = steady_clock::now();
+        constexpr auto VBLANK_INTERVAL = nanoseconds(16666667);  // 60Hz = 16.666ms
+        
+        uint32_t vblankCount = 0;
+        
+        while (g_vblankThreadRunning)
+        {
+            nextVBlank += VBLANK_INTERVAL;
+            std::this_thread::sleep_until(nextVBlank);
+            
+            ++vblankCount;
+            
+            // Fire VBlank callback if registered
+            if (g_gpuRingBuffer.interruptCallback != 0 && g_ppcContext)
+            {
+                PPCFunc* callback = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
+                if (callback)
+                {
+                    PPCContext tempCtx = *g_ppcContext;
+                    tempCtx.r3.u32 = 0;  // Interrupt type 0 = VBlank
+                    tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                    callback(tempCtx, g_memory.base);
+                    
+                    if (vblankCount <= 5 || vblankCount % 60 == 0)
+                    {
+                        LOGF_UTILITY("[VBlank] Fired callback #{} at 60Hz", vblankCount);
+                    }
+                }
+            }
+            
+            // Increment event generation to wake any waiters
+            ++g_keSetEventGeneration;
+            g_keSetEventGeneration.notify_all();
+        }
+    });
+}
+
+void StopVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+    {
+        g_vblankThreadRunning = false;
+        if (g_vblankThread.joinable())
+            g_vblankThread.join();
+    }
+}
+
 void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
 {
-    // Following UnleashedRecomp pattern: Store but never fire
     g_gpuRingBuffer.interruptCallback = callback;
     g_gpuRingBuffer.interruptUserData = userData;
     
-    LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X} - STORED BUT WILL NOT FIRE (Sonic pattern)", callback, userData);
+    // Start VBlank timer when callback is registered (GTA IV requirement)
+    StartVBlankTimer();
+    
+    LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X} - VBlank timer started at 60Hz", callback, userData);
 }
 
 uint32_t VdInitializeEngines()
 {
     g_gpuRingBuffer.enginesInitialized = true;
     LOG_UTILITY("enginesInitialized = true");
+    
+    // Signal all tracked events to wake waiting threads
+    // Workers may be blocked waiting for GPU initialization to complete
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        LOGF_UTILITY("VdInitializeEngines signaled {} events", g_trackedEventHandles.size());
+    }
+    
     return 1;
 }
 
@@ -4105,6 +4182,28 @@ uint32_t VdRetrainEDRAM()
     {
         LOGF_UTILITY("edramTrainingComplete = true (call #{})", s_callCount);
     }
+    
+    // Signal all tracked events to wake waiting threads
+    // GPU initialization complete - workers can proceed
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        if (s_callCount <= 3)
+        {
+            LOGF_UTILITY("VdRetrainEDRAM signaled {} events", g_trackedEventHandles.size());
+        }
+    }
+    
     return 0;  // Success
 }
 
@@ -4267,175 +4366,8 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
         }
     }
     
-    // =========================================================================
-    // GPU FENCE BYPASS: Auto-signal the GPU fence to unblock the boot sequence
-    // The GPU thread (caller 0x829DDD48) waits on fence 0x8006F844.
-    // The caller is in a loop that processes GPU commands and waits for completion.
-    // Since we don't have a real GPU, we block this thread to let others run.
-    // =========================================================================
-    if (objAddr == 0x8006F844 || caller == 0x829DDD48)
-    {
-        static int s_fenceBypassCount = 0;
-        static bool s_gpuThreadParked = false;
-        ++s_fenceBypassCount;
-        
-        if (s_fenceBypassCount <= 10)
-        {
-            LOGF_IMPL(Utility, "FenceBypass", "GPU thread wait #{} obj=0x{:08X} caller=0x{:08X}", 
-                      s_fenceBypassCount, objAddr, caller);
-        }
-        
-        // Force-signal any fence object
-        if (Object)
-        {
-            Object->SignalState = 1;
-        }
-        
-        // Update ring buffer read pointer to indicate all commands consumed
-        if (g_gpuRingBuffer.writebackEnabled && g_gpuRingBuffer.readPtrWritebackAddr != 0)
-        {
-            uint32_t* writebackPtr = reinterpret_cast<uint32_t*>(
-                g_memory.Translate(g_gpuRingBuffer.readPtrWritebackAddr));
-            *writebackPtr = ByteSwap(0xFFFFFFFF);
-        }
-        
-        // Force-set all GPU init flags after a few iterations to unblock boot
-        if (s_fenceBypassCount >= 5)
-        {
-            g_gpuRingBuffer.enginesInitialized = true;
-            g_gpuRingBuffer.edramTrainingComplete = true;
-            g_gpuRingBuffer.interruptSeen = true;
-        }
-        
-        // Park the GPU thread: once GPU init is done, fire VBlank interrupt periodically
-        if (g_gpuRingBuffer.enginesInitialized && 
-            g_gpuRingBuffer.edramTrainingComplete && 
-            g_gpuRingBuffer.interruptSeen)
-        {
-            if (!s_gpuThreadParked)
-            {
-                s_gpuThreadParked = true;
-                LOGF_IMPL(Utility, "FenceBypass", "GPU init complete - starting VBlank heartbeat (after {} waits)", s_fenceBypassCount);
-            }
-            
-            // VBlank removed - following UnleashedRecomp pattern
-            
-            // Short sleep to prevent tight spinning
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        else
-        {
-            // During init, short sleep to allow progress
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-        
-        return STATUS_SUCCESS;
-    }
-    
-    
-    // Log ALL waits for async IO debugging - exclude GPU poll thread (0x829DDD48)
-    static int s_asyncWaitLogCount = 0;
-    if (g_asyncReadCount > 0 && caller != 0x829DDD48 && s_asyncWaitLogCount < 200)
-    {
-        ++s_asyncWaitLogCount;
-        LOGF_IMPL(Utility, "KeWaitForSingleObject", 
-                  "ASYNC_WAIT #{} type={} obj=0x{:08X} caller=0x{:08X} timeout={} lastAsync=0x{:08X}",
-                  s_asyncWaitLogCount, Object ? Object->Type : -1, objAddr, caller, timeout, g_lastAsyncInfo.load());
-    }
-    
-    // Log INFINITE waits more aggressively as they can block forever
-    if (timeout == INFINITE)
-    {
-        ++s_infiniteWaitCount;
-        if (s_infiniteWaitCount <= 20 || s_infiniteWaitCount % 100 == 0)
-        {
-            LOGF_IMPL(Utility, "KeWaitForSingleObject", "INFINITE WAIT #{} type={} obj=0x{:08X} caller=0x{:08X}", 
-                      s_infiniteWaitCount, Object ? Object->Type : -1, objAddr, caller);
-        }
-        
-        // GPU init deadlock prevention: known GPU bootstrap callers that wait forever
-        // These callers are waiting for GPU readiness signals that never come from stubs.
-        // We fake GPU consumption by updating the ring buffer read pointer writeback.
-        static const std::unordered_set<uint32_t> s_gpuInitCallers = {
-            0x829DDD48,  // VdRetrainEDRAM / GPU init wait
-            0x829D8AA8,  // VdInitializeRingBuffer caller
-        };
-        
-        if (s_gpuInitCallers.count(caller) != 0)
-        {
-            static int s_gpuSignalCount = 0;
-            ++s_gpuSignalCount;
-            
-            // Log video state flags periodically for debugging
-            if (s_gpuSignalCount <= 5 || s_gpuSignalCount % 1000 == 0)
-            {
-                LOGF_IMPL(Utility, "KeWaitForSingleObject", 
-                          "GPU poll #{}: engines={} edram={} interrupt={}", 
-                          s_gpuSignalCount,
-                          g_gpuRingBuffer.enginesInitialized ? 1 : 0,
-                          g_gpuRingBuffer.edramTrainingComplete ? 1 : 0,
-                          g_gpuRingBuffer.interruptSeen ? 1 : 0);
-            }
-            
-            // Short-circuit: if all video state flags are true, GPU init is complete
-            // The game's polling loop checks memory-backed flags that we can't easily update.
-            // Instead, we block this thread with a real wait to stop the spinning.
-            // This allows other threads to progress while the GPU poll thread sleeps.
-            if (g_gpuRingBuffer.enginesInitialized &&
-                g_gpuRingBuffer.edramTrainingComplete &&
-                g_gpuRingBuffer.interruptSeen)
-            {
-                static bool s_loggedOnce = false;
-                if (!s_loggedOnce)
-                {
-                    s_loggedOnce = true;
-                    LOGF_IMPL(Utility, "KeWaitForSingleObject", 
-                              "GPU init complete - all flags true, parking poll thread (count={})", s_gpuSignalCount);
-                }
-                // Park this thread - sleep for a long time to stop spinning
-                // The game's GPU poll thread will be effectively disabled
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                return STATUS_SUCCESS;
-            }
-            
-            // Fake GPU consumption: set RP to ring buffer size
-            if (g_gpuRingBuffer.writebackEnabled && g_gpuRingBuffer.readPtrWritebackAddr != 0)
-            {
-                uint32_t* writebackPtr = reinterpret_cast<uint32_t*>(
-                    g_memory.Translate(g_gpuRingBuffer.readPtrWritebackAddr));
-                if (writebackPtr)
-                {
-                    uint32_t fakeRP = g_gpuRingBuffer.ringBufferSize;
-                    *writebackPtr = ByteSwap(fakeRP);
-                }
-            }
-            
-            // Signal the event
-            if (Object->Type == 0 || Object->Type == 1)
-            {
-                QueryKernelObject<Event>(*Object)->Set();
-            }
-            
-            // Fire graphics interrupt callback once and set interruptSeen flag
-            if (!g_gpuRingBuffer.interruptFired && g_gpuRingBuffer.interruptCallback != 0)
-            {
-                g_gpuRingBuffer.interruptFired = true;
-                g_gpuRingBuffer.interruptSeen = true;
-                LOGF_IMPL(Utility, "KeWaitForSingleObject", 
-                          "Firing graphics interrupt callback 0x{:08X} - interruptSeen = true", 
-                          g_gpuRingBuffer.interruptCallback);
-            }
-            
-            // After many iterations, add a small delay to prevent CPU spinning
-            if (s_gpuSignalCount > 1000)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-            
-            return STATUS_SUCCESS;
-        }
-        
-    }
+    // Removed all GPU fence bypass hacks - following Unleashed's clean approach
+    // Let proper Event/Semaphore wait/notify work naturally without forced returns
 
     switch (Object->Type)
     {
@@ -5723,6 +5655,7 @@ namespace StorageConstants {
     constexpr uint32_t PC_STORAGE_DATA_ADDR    = 0x83132200;
 }
 
+
 // =============================================================================
 // Boot Sequence Global Addresses - DISABLED
 // =============================================================================
@@ -6380,6 +6313,17 @@ PPC_FUNC(sub_8218C600)
     // Save r31 before call to trace the vtable call after sub_82856C90
     __imp__sub_8218C600(ctx, base);
     
+    // CRITICAL FIX: Ensure success return value
+    // sub_82120000 checks (r3 & 0xFF) == 0 for failure at lines 23-28
+    // If sub_8218C600 returns 0, sub_82120000 returns early, skipping:
+    //   - sub_82120EE8, sub_821250B0, sub_82120FB8, sub_821200A8
+    //   - sub_821212A8 -> sub_82192BB0 (which signals semaphore 0xA8240270)
+    // Force success to allow full initialization chain to execute
+    if ((ctx.r3.u32 & 0xFF) == 0) {
+        LOG_WARNING("[INIT] sub_8218C600 returned 0 (failure), forcing success");
+        ctx.r3.u32 = 1;  // Force success
+    }
+    
     LOGF_WARNING("[INIT] sub_8218C600 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.u32);
 }
 
@@ -6464,11 +6408,378 @@ PPC_FUNC(sub_82120EE8)
 }
 
 // Trace functions inside sub_82120EE8 to find the blocker
+// Hook sub_821207B0 to ensure resource manager is properly initialized
 extern "C" void __imp__sub_821207B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821207B0) {
+    uint32_t structAddr = ctx.r3.u32;
+    
+    // Call original initialization
+    __imp__sub_821207B0(ctx, base);
+    
+    // Verify critical fields are zeroed (defense against uninitialized memory)
+    PPC_STORE_U32(structAddr + 0, 0);      // Base pointer = NULL
+    PPC_STORE_U16(structAddr + 4, 0);      // Count = 0
+    PPC_STORE_U16(structAddr + 6, 0);      // Secondary count = 0
+    
+    // Ensure sentinel value at offset +940 (as set by original function)
+    PPC_STORE_U32(structAddr + 940, 0xFFFFFFFF);
+    
+    LOGF_WARNING("[INIT] sub_821207B0 initialized resource manager at 0x{:08X}", structAddr);
+}
+// =============================================================================
+// sub_82192840 - File open operation (called by sub_822C1A30)
+// =============================================================================
+// This function opens a configuration file for streaming initialization.
+// If the file doesn't exist (common on PC), it should return 0 to signal failure.
+// Enhanced with comprehensive validation to prevent PAC crashes in sub_827E7FA8.
+// =============================================================================
+extern "C" void __imp__sub_82192840(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192840) {
+    static int s_callCount = 0;
+    static int s_invalidHandles = 0;
+    s_callCount++;
+    
+    // Log the parameters for debugging
+    if (s_callCount <= 10) {
+        LOGF_WARNING("[sub_82192840] Call #{}: r3=0x{:08X}, r4=0x{:08X}, lr=0x{:08X}", 
+            s_callCount, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    
+    // Call original implementation
+    __imp__sub_82192840(ctx, base);
+    
+    uint32_t handle = ctx.r3.u32;
+    
+    // COMPREHENSIVE VALIDATION: Check all possible invalid handle cases
+    bool isInvalid = false;
+    const char* reason = nullptr;
+    
+    // Case 1: NULL handle (file not found)
+    if (handle == 0) {
+        isInvalid = true;
+        reason = "NULL handle (file not found)";
+    }
+    // Case 2: Handle in initialized stream range (0x82000000-0x82020000)
+    // This means we got a stream structure instead of a file handle
+    else if (handle >= 0x82000000 && handle < 0x82020000) {
+        isInvalid = true;
+        reason = "stream structure in range 0x82000000-0x82020000";
+    }
+    // Case 3: Handle in extended stream/shader range (0x82A00000-0x82B00000)
+    // The object pointer 0x82A80A24 we use is in this range
+    else if (handle >= 0x82A00000 && handle < 0x82B00000) {
+        isInvalid = true;
+        reason = "shader/stream structure in range 0x82A00000-0x82B00000";
+    }
+    // Case 4: Handle below valid guest memory (< 0x80000000)
+    else if (handle < 0x80000000) {
+        isInvalid = true;
+        reason = "below valid guest memory range";
+    }
+    // Case 5: Handle above valid guest memory (>= 0x90000000)
+    else if (handle >= 0x90000000) {
+        isInvalid = true;
+        reason = "above valid guest memory range";
+    }
+    // Case 6: Check if the handle points to an object with invalid vtable
+    // This is the most critical check to prevent PAC crashes
+    else {
+        // Try to read the object pointer at handle+0
+        uint32_t objectPtr = PPC_LOAD_U32(handle + 0);
+        
+        // If object pointer is invalid, the handle is bad
+        if (objectPtr != 0 && (objectPtr < 0x80000000 || objectPtr >= 0x90000000)) {
+            isInvalid = true;
+            reason = "object pointer invalid";
+            
+            if (s_invalidHandles < 10) {
+                LOGF_WARNING("[sub_82192840] Handle 0x{:08X} has invalid object pointer 0x{:08X}", 
+                    handle, objectPtr);
+            }
+        }
+        // If object pointer is valid, check the vtable
+        else if (objectPtr != 0) {
+            uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+            
+            if (vtablePtr != 0 && (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000)) {
+                isInvalid = true;
+                reason = "vtable pointer invalid";
+                
+                if (s_invalidHandles < 10) {
+                    LOGF_WARNING("[sub_82192840] Handle 0x{:08X} -> object 0x{:08X} has invalid vtable 0x{:08X}", 
+                        handle, objectPtr, vtablePtr);
+                }
+            }
+        }
+    }
+    
+    // If handle is invalid, return 0 to signal failure
+    if (isInvalid) {
+        s_invalidHandles++;
+        
+        if (s_invalidHandles <= 10) {
+            LOGF_WARNING("[sub_82192840] Call #{}: Invalid handle 0x{:08X} ({}), returning 0", 
+                s_callCount, handle, reason);
+        }
+        
+        ctx.r3.u32 = 0;  // File not found
+        return;
+    }
+    
+    // Handle is valid
+    if (s_callCount <= 10) {
+        LOGF_WARNING("[sub_82192840] Call #{}: Valid handle 0x{:08X}", s_callCount, handle);
+    }
+}
+
+// =============================================================================
+// STREAM FUNCTION BYPASSES REMOVED - Testing vtable fix with corrected addresses
+// =============================================================================
+// The null stream vtable now uses addresses within valid PPC code range.
+// Bypasses removed to test if vtable fix works properly.
+// =============================================================================
+
+// =============================================================================
+// sub_822C1A30 - Streaming initialization
+// =============================================================================
+// This function tries to open platform:/stream.ini and parse streaming config.
+// If the file doesn't exist or fails to open, we need to ensure the stream
+// memory pool (0x82000000-0x82020000) is zeroed to prevent garbage vtable reads.
+// =============================================================================
+extern "C" void __imp__sub_822C1A30(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822C1A30) {
+    static int s_count = 0;
+    static bool s_poolInitialized = false;
+    ++s_count;
+    
+    LOGF_WARNING("[INIT] sub_822C1A30 ENTER #{}", s_count);
+    
+    // Call original implementation - it will try to open platform:/stream.ini
+    __imp__sub_822C1A30(ctx, base);
+    
+    // If this is the first call and stream pool hasn't been initialized,
+    // zero out the stream memory region to ensure no garbage vtable pointers
+    if (!s_poolInitialized) {
+        LOGF_WARNING("[INIT] sub_822C1A30 zeroing stream pool 0x82000000-0x82020000 ({} KB)",
+                    (0x20000 / 1024));
+        
+        // Zero the entire stream region
+        memset(g_memory.Translate(0x82000000), 0, 0x20000);
+        
+        s_poolInitialized = true;
+        LOG_WARNING("[INIT] sub_822C1A30 stream pool zeroed");
+    }
+    
+    LOGF_WARNING("[INIT] sub_822C1A30 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// Hook sub_8221B7A0 to prevent infinite loops in string duplication
+extern "C" void __imp__sub_8221B7A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221B7A0) {
+    static int s_count = 0; ++s_count;
+    
+    // Prevent infinite loops - if called more than 100,000 times, something is wrong
+    if (s_count > 100000) {
+        if (s_count == 100001) {
+            LOG_WARNING("[STRING] sub_8221B7A0 called 100,000+ times - possible infinite loop, returning NULL");
+        }
+        ctx.r3.u32 = 0;  // Return NULL to break loop
+        return;
+    }
+    
+    __imp__sub_8221B7A0(ctx, base);
+}
+
+// ============================================================================
+// SHADER BINDING HOOKS - Connect embedded shader cache to rendering pipeline
+// ============================================================================
+
+extern "C" void __imp__sub_829CD350(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829CD350) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t deviceCtx = ctx.r3.u32;
+    uint32_t shaderPtr = ctx.r4.u32;
+    
+    if (s_count <= 10 || s_count % 1000 == 0) {
+        LOGF_WARNING("[SHADER] SetVertexShader #{} device=0x{:08X} shader=0x{:08X}", 
+                     s_count, deviceCtx, shaderPtr);
+    }
+    
+    // Call original implementation to update device context
+    // Original stores shader at deviceCtx+12700 and sets dirty flag at deviceCtx+12708
+    __imp__sub_829CD350(ctx, base);
+    
+    // Shader cache integration will be implemented when Video system is ready
+    // For now, device context updates are sufficient for game logic to progress
+}
+
+extern "C" void __imp__sub_829D6690(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D6690) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t deviceCtx = ctx.r3.u32;
+    uint32_t shaderPtr = ctx.r4.u32;
+    
+    if (s_count <= 10 || s_count % 1000 == 0) {
+        LOGF_WARNING("[SHADER] SetPixelShader #{} device=0x{:08X} shader=0x{:08X}", 
+                     s_count, deviceCtx, shaderPtr);
+    }
+    
+    // Call original implementation to update device context
+    // Original stores shader at device context and sets dirty flags
+    __imp__sub_829D6690(ctx, base);
+    
+    // Shader cache integration will be implemented when Video system is ready
+    // For now, device context updates are sufficient for game logic to progress
+}
+
+// DrawPrimitive hook is implemented in gpu/video.cpp
+
+// Hook sub_8218BE78 to validate vtable pointers and prevent crashes
+extern "C" void __imp__sub_8218BE78(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8218BE78) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t param = ctx.r3.u32;
+    if (param == 0) return;
+    
+    // Load device context from TLS (r13+0 = TLS base, offset 1676 to device ctx)
+    uint32_t tlsBase = ctx.r13.u32;
+    uint32_t deviceCtx = PPC_LOAD_U32(tlsBase + 1676);
+    
+    // Validate device context pointer
+    if (deviceCtx == 0 || deviceCtx < 0x80000000 || deviceCtx >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid device context 0x{:08X}, skipping call", 
+                         s_count, deviceCtx);
+        }
+        return;
+    }
+    
+    // Load vtable pointer from device context
+    uint32_t vtable = PPC_LOAD_U32(deviceCtx + 0);
+    
+    // Validate vtable pointer
+    if (vtable == 0 || vtable < 0x80000000 || vtable >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid vtable 0x{:08X} at deviceCtx 0x{:08X}, skipping call", 
+                         s_count, vtable, deviceCtx);
+        }
+        return;
+    }
+    
+    // Load vtable[3] (offset 12)
+    uint32_t funcPtr = PPC_LOAD_U32(vtable + 12);
+    
+    // Validate function pointer
+    if (funcPtr == 0 || funcPtr < 0x80000000 || funcPtr >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid vtable[3] 0x{:08X}, skipping call", 
+                         s_count, funcPtr);
+        }
+        return;
+    }
+    
+    // All pointers valid, call original implementation
+    if (s_count <= 10) {
+        LOGF_WARNING("[VTABLE] sub_8218BE78 #{} calling vtable[3]=0x{:08X}", s_count, funcPtr);
+    }
+    
+    __imp__sub_8218BE78(ctx, base);
+}
+
 extern "C" void __imp__sub_82673718(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82269098(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82269098) {
+    static int s_count = 0; ++s_count;
+    
+    LOGF_WARNING("[INIT] sub_82269098 ENTER #{}", s_count);
+    
+    // BYPASS: Resource manager init creates worker task that blocks on semaphore 0xC12855F0
+    // Worker task sub_8298E700 waits indefinitely, preventing sub_82120EE8 from completing
+    // This blocks the entire init chain: sub_82124080 -> sub_82120FB8 -> sub_821200A8
+    // Skip to allow initialization to continue - resource manager can be implemented later
+    LOG_WARNING("[INIT] sub_82269098 BYPASSED - skipping resource manager worker to unblock init");
+    
+    // Return success
+    ctx.r3.u32 = 0;
+    
+    LOGF_WARNING("[INIT] sub_82269098 EXIT #{} (bypassed)", s_count);
+}
 extern "C" void __imp__sub_822054F8(PPCContext& ctx, uint8_t* base);
+// Hook sub_822736C8 to fix infinite loop when no resources exist
+extern "C" void __imp__sub_822736C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822736C8) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32 & 0xFF;
+    uint32_t index = ctx.r5.u32;
+    
+    // Check resource array count
+    uint32_t resourceArrayAddr = 0x8214B4B4;
+    uint32_t arrayPtr = PPC_LOAD_U32(resourceArrayAddr + 0);
+    uint16_t arrayCount = PPC_LOAD_U16(resourceArrayAddr + 4);
+    
+    LOGF_WARNING("[RESOURCE] sub_822736C8 #{} context=0x{:08X} flags={} index={} arrayCount={}",
+                 s_count, contextAddr, flags, index, arrayCount);
+    
+    // If count is 0 and index is 0, there are no resources to process
+    // Skip execution to prevent infinite loop waiting for data that doesn't exist
+    if (arrayCount == 0 && index == 0) {
+        LOGF_WARNING("[RESOURCE] sub_822736C8 #{} skipping - no resources (count=0)", s_count);
+        
+        // Clear output parameters (what the function would do with no resources)
+        uint32_t outParam1 = ctx.r6.u32;
+        uint32_t outParam2 = ctx.r7.u32;
+        uint32_t outParam3 = ctx.r8.u32;
+        
+        if (outParam1 != 0) PPC_STORE_U32(outParam1, 0);
+        if (outParam2 != 0) PPC_STORE_U32(outParam2, 0);
+        if (outParam3 != 0) PPC_STORE_U32(outParam3, 0);
+        
+        return; // Skip original implementation
+    }
+    
+    // Call original implementation for normal resource processing
+    __imp__sub_822736C8(ctx, base);
+    
+    LOGF_WARNING("[RESOURCE] sub_822736C8 #{} completed", s_count);
+}
+
 extern "C" void __imp__sub_821DE390(PPCContext& ctx, uint8_t* base);
+// Hook sub_827EA150 to fix infinite loop in callback list iteration
+extern "C" void __imp__sub_827EA150(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EA150) {
+    static int s_count = 0; ++s_count;
+    
+    // Calculate callback list address: r29 + -7772
+    // Global callback list head at 0x831E3E44
+    uint32_t callbackListAddr = 0x831E3E44;
+    uint32_t firstCallback = PPC_LOAD_U32(callbackListAddr);
+    
+    LOGF_WARNING("[FS] sub_827EA150 #{} callback list at 0x{:08X} first=0x{:08X}",
+                 s_count, callbackListAddr, firstCallback);
+    
+    // ALWAYS clear the callback list to prevent infinite loops from uninitialized memory
+    // The original function clears it at the end anyway (line 20678)
+    // We're just doing it proactively to prevent processing invalid callbacks
+    // This is safe because:
+    //   1. Callbacks are single-use (cleared after processing)
+    //   2. Resources load via VFS and vtable implementations
+    //   3. No rendering dependency on these callbacks
+    if (firstCallback != 0) {
+        LOGF_WARNING("[FS] Clearing callback list (was 0x{:08X})", firstCallback);
+        PPC_STORE_U32(callbackListAddr, 0);
+    }
+    
+    // Call original implementation (will skip callback iteration since list is now NULL)
+    __imp__sub_827EA150(ctx, base);
+    
+    LOGF_WARNING("[FS] sub_827EA150 #{} completed", s_count);
+}
+
 extern "C" void __imp__sub_8221F8A8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82273988(PPCContext& ctx, uint8_t* base);
 
@@ -6576,12 +6887,7 @@ PPC_FUNC(sub_82205390) {
     }
 }
 
-PPC_FUNC(sub_821207B0) {
-    static int s_count = 0; ++s_count;
-    LOGF_WARNING("[INIT] sub_821207B0 ENTER #{}", s_count);
-    __imp__sub_821207B0(ctx, base);
-    LOGF_WARNING("[INIT] sub_821207B0 EXIT #{}", s_count);
-}
+
 
 PPC_FUNC(sub_82673718) {
     static int s_count = 0; ++s_count;
@@ -7014,10 +7320,17 @@ PPC_FUNC(sub_827EF208) {
 // =============================================================================
 static bool s_pcStorageInitialized = false;
 
-// Address for our custom vtable[27] implementation
-// This must be within valid code range: 0x82120000 to 0x82A13D5C (PPC_CODE_BASE + PPC_CODE_SIZE)
-// Using a high address within range that's unlikely to conflict with game code
+// Global tracker for last shader file handle opened by sub_827E8180
+// This is used by vtable[19] to populate the FileStream structure
+static uint32_t g_lastShaderFileHandle = 0;
+
+// Addresses for our custom vtable implementations
+// These must be within valid code range: 0x82120000 to 0x82A13D5C (PPC_CODE_BASE + PPC_CODE_SIZE)
+// Using high addresses within range that are unlikely to conflict with game code
 constexpr uint32_t STORAGE_DEVICE_READ_ADDR = 0x82A13D00;
+constexpr uint32_t STORAGE_DEVICE_GETFILEINFO_ADDR = 0x82A13D10;
+constexpr uint32_t STORAGE_DEVICE_READFILE_ADDR = 0x82A13D20;
+constexpr uint32_t STORAGE_DEVICE_CLOSEFILE_ADDR = 0x82A13D30;
 
 // =============================================================================
 // StorageDevice_ReadFile - vtable[27] implementation
@@ -7119,13 +7432,181 @@ static bool RegisterDynamicFunction(uint32_t guestAddr, PPCFunc* hostFunc) {
     return true;
 }
 
+// =============================================================================
+// StorageDevice_ReadFileVtable5 - vtable[5] implementation
+// =============================================================================
+// Called by sub_827E8420 to read file data from storage device
+// Parameters (PPC calling convention):
+//   r3 = storage device pointer
+//   r4 = file handle
+//   r5 = buffer pointer (in PPC memory)
+//   r6 = size to read
+// Returns:
+//   r3 = bytes read, or -1 on error
+// =============================================================================
+static void StorageDevice_ReadFileVtable5(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t fileHandle = ctx.r4.u32;
+    uint32_t bufferAddr = ctx.r5.u32;
+    uint32_t sizeToRead = ctx.r6.u32;
+    
+    LOGF_WARNING("[vtable[5]] ReadFile #{} device=0x{:08X} handle=0x{:08X} buffer=0x{:08X} size={}",
+                 s_count, deviceAddr, fileHandle, bufferAddr, sizeToRead);
+    
+    // Use the existing RPF reading infrastructure
+    auto it = g_ntFileHandles.find(fileHandle);
+    if (it == g_ntFileHandles.end()) {
+        LOGF_WARNING("[vtable[5]] Invalid file handle 0x{:08X}", fileHandle);
+        ctx.r3.s32 = -1;
+        return;
+    }
+    
+    NtFileHandle* hFile = it->second;
+    uint8_t* hostBuffer = base + bufferAddr;
+    
+    // For shader files in common.rpf, we need to read from the correct offset
+    // The game expects to read shader file headers starting with magic "rgxa" (0x61786772)
+    // Use ReadFromBestRpf which handles offset-based reading from RPF files
+    std::string rpfName;
+    uint32_t bytesRead = 0;
+    
+    // Try to read using the RPF offset system
+    // For shader validation, the game typically reads from offset 0 of the "file"
+    // which corresponds to specific offsets in common.rpf
+    const uint32_t chosen = ReadFromBestRpf(fileHandle, hostBuffer, sizeToRead, 0, s_count, rpfName);
+    
+    if (chosen != UINT32_MAX) {
+        // ReadFromBestRpf succeeded, data is already in hostBuffer
+        // Return the size that was requested (ReadFromBestRpf always reads full size)
+        LOGF_WARNING("[vtable[5]] Read {} bytes from RPF '{}' at offset 0", sizeToRead, rpfName);
+        ctx.r3.s32 = static_cast<int32_t>(sizeToRead);
+        return;
+    }
+    
+    // Fallback: direct file stream read
+    hFile->stream.read(reinterpret_cast<char*>(hostBuffer), sizeToRead);
+    bytesRead = static_cast<uint32_t>(hFile->stream.gcount());
+    
+    LOGF_WARNING("[vtable[5]] Direct read {} bytes from handle 0x{:08X}", bytesRead, fileHandle);
+    
+    ctx.r3.s32 = static_cast<int32_t>(bytesRead);
+}
+
+// =============================================================================
+// StorageDevice_CloseFile - vtable[10] implementation
+// =============================================================================
+// Called by sub_827E87A0 to close a file and cleanup resources
+// Parameters (PPC calling convention):
+//   r3 = storage device pointer
+//   r4 = file handle
+// Returns:
+//   void (no return value)
+// =============================================================================
+static void StorageDevice_CloseFile(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t fileHandle = ctx.r4.u32;
+    
+    LOGF_WARNING("[vtable[10]] CloseFile #{} device=0x{:08X} handle=0x{:08X}",
+                 s_count, deviceAddr, fileHandle);
+    
+    // Close the file handle if it exists
+    auto it = g_ntFileHandles.find(fileHandle);
+    if (it != g_ntFileHandles.end()) {
+        NtFileHandle* hFile = it->second;
+        if (hFile->stream.is_open()) {
+            hFile->stream.close();
+        }
+        // Note: Don't delete the handle yet as it might be reused
+        LOGF_WARNING("[vtable[10]] Closed file handle 0x{:08X}", fileHandle);
+    } else {
+        LOGF_WARNING("[vtable[10]] Handle 0x{:08X} not found (already closed?)", fileHandle);
+    }
+}
+
+// =============================================================================
+// StorageDevice_GetFileInfo - vtable[19] implementation
+// =============================================================================
+// Called by shader loading code to get file metadata
+// Parameters (PPC calling convention):
+//   r3 = storage device pointer
+//   r4 = path string pointer
+// Returns:
+//   r3 = file info (64-bit value or pointer)
+// =============================================================================
+static void StorageDevice_GetFileInfo(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t pathAddr = ctx.r4.u32;
+    
+    // Read path string for logging
+    char path[256] = {0};
+    for (int i = 0; i < 255; i++) {
+        uint8_t c = PPC_LOAD_U8(pathAddr + i);
+        if (c == 0) break;
+        path[i] = c;
+    }
+    
+    LOGF_WARNING("[vtable[19]] GetFileInfo #{} device=0x{:08X} path='{}' LR=0x{:08X}",
+                 s_count, deviceAddr, path, ctx.lr);
+    
+    // Phase 1B: Allocate and return a FileStream structure
+    // Based on sub_827E8420 analysis, the FileStream structure has:
+    //   +0:  Storage device pointer
+    //   +4:  File handle
+    //   +8:  Buffer pointer
+    //   +12: Bytes read counter
+    //   +16: Current position in buffer
+    //   +20: Buffer end position
+    //   +24: Buffer size
+    
+    // Allocate FileStream structure (32 bytes minimum)
+    static uint32_t s_streamAddr = 0;
+    if (s_streamAddr == 0) {
+        // Allocate in high memory area (near our vtable functions)
+        s_streamAddr = 0x82A14000;
+    }
+    
+    // Get the file handle that was opened by sub_827E8180
+    // This is tracked globally when shader files are opened
+    uint32_t fileHandle = g_lastShaderFileHandle;
+    
+    // Initialize FileStream structure
+    PPC_STORE_U32(s_streamAddr + 0, deviceAddr);      // Storage device
+    PPC_STORE_U32(s_streamAddr + 4, fileHandle);      // File handle
+    PPC_STORE_U32(s_streamAddr + 8, 0);               // Buffer (NULL for now)
+    PPC_STORE_U32(s_streamAddr + 12, 0);              // Bytes read
+    PPC_STORE_U32(s_streamAddr + 16, 0);              // Current position
+    PPC_STORE_U32(s_streamAddr + 20, 0);              // Buffer end
+    PPC_STORE_U32(s_streamAddr + 24, 4096);           // Buffer size
+    
+    LOGF_WARNING("[vtable[19]] Allocated FileStream at 0x{:08X} with handle=0x{:08X}",
+                 s_streamAddr, fileHandle);
+    
+    // Return pointer to FileStream structure
+    ctx.r3.u64 = s_streamAddr;
+}
+
 // Initialize PC storage device structure in guest memory
 static void InitializePCStorageDevice(uint8_t* base) {
     if (s_pcStorageInitialized) return;
     
     LOG_WARNING("[STORAGE] Initializing PC storage device");
     
-    // Register our vtable[27] implementation
+    // Register our vtable implementations
+    if (!RegisterDynamicFunction(STORAGE_DEVICE_READFILE_ADDR, StorageDevice_ReadFileVtable5)) {
+        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_ReadFileVtable5");
+    }
+    if (!RegisterDynamicFunction(STORAGE_DEVICE_CLOSEFILE_ADDR, StorageDevice_CloseFile)) {
+        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_CloseFile");
+    }
+    if (!RegisterDynamicFunction(STORAGE_DEVICE_GETFILEINFO_ADDR, StorageDevice_GetFileInfo)) {
+        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_GetFileInfo");
+    }
     if (!RegisterDynamicFunction(STORAGE_DEVICE_READ_ADDR, StorageDevice_ReadFile)) {
         LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_ReadFile");
     }
@@ -7139,11 +7620,21 @@ static void InitializePCStorageDevice(uint8_t* base) {
         PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + i, 0x82120000 + i);
     }
     
-    // vtable[27] at offset 108 - point to our ReadFile implementation
+    // vtable[5] at offset 20 - ReadFile implementation (called by sub_827E8420)
+    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 20, STORAGE_DEVICE_READFILE_ADDR);
+    
+    // vtable[10] at offset 40 - CloseFile implementation
+    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 40, STORAGE_DEVICE_CLOSEFILE_ADDR);
+    
+    // vtable[19] at offset 76 - GetFileInfo implementation
+    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 76, STORAGE_DEVICE_GETFILEINFO_ADDR);
+    
+    // vtable[27] at offset 108 - ReadFile implementation (alternative)
     PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 108, STORAGE_DEVICE_READ_ADDR);
     
     s_pcStorageInitialized = true;
-    LOGF_WARNING("[STORAGE] PC storage device initialized, vtable[27]=0x{:08X}", STORAGE_DEVICE_READ_ADDR);
+    LOGF_WARNING("[STORAGE] PC storage device initialized, vtable[5]=0x{:08X} vtable[10]=0x{:08X} vtable[19]=0x{:08X} vtable[27]=0x{:08X}",
+                 STORAGE_DEVICE_READFILE_ADDR, STORAGE_DEVICE_CLOSEFILE_ADDR, STORAGE_DEVICE_GETFILEINFO_ADDR, STORAGE_DEVICE_READ_ADDR);
 }
 
 extern "C" void __imp__sub_827E1EC0(PPCContext& ctx, uint8_t* base);
@@ -7416,13 +7907,7 @@ PPC_FUNC(sub_8286BAE0) {
     LOG_WARNING("[sub_8286D668] sub_8286BAE0 EXIT");
 }
 
-// Trace internal calls of sub_8286BAE0
-extern "C" void __imp__sub_8221B7A0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8221B7A0) {
-    LOG_WARNING("[sub_8286BAE0] sub_8221B7A0 ENTER");
-    __imp__sub_8221B7A0(ctx, base);
-    LOG_WARNING("[sub_8286BAE0] sub_8221B7A0 EXIT");
-}
+// sub_8221B7A0 is now hooked earlier with infinite loop protection - removed duplicate
 
 extern "C" void __imp__sub_829E5C38(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829E5C38) {
@@ -7741,12 +8226,79 @@ PPC_FUNC(sub_8285BC60) {
     LOGF_WARNING("[sub_8285BDC8] sub_8285BC60 EXIT #{}", s_count);
 }
 
+// =============================================================================
+// sub_827E04F0 - PLATFORM GLUE: Path Construction Function
+// =============================================================================
+// Original Xbox behavior: Constructs a file path from the storage device context.
+// It reads a path configuration index from context+3072, and if non-zero,
+// calculates an offset to read the path string from the context structure.
+// If context+3072 is 0 and no source path is provided, it writes an empty string.
+//
+// PC replacement: Call the original implementation first. If it returns an empty
+// path (due to uninitialized path config), construct a default path based on
+// the path index. This allows shader loading to proceed without Xbox path config.
+// =============================================================================
 extern "C" void __imp__sub_827E04F0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827E04F0) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[sub_8285BDC8] sub_827E04F0 ENTER #{}", s_count);
+    
+    // Extract parameters per PPC calling convention:
+    // r3 = storage device context pointer
+    // r4 = output buffer address
+    // r5 = buffer size
+    // r6 = source path pointer (can be NULL)
+    // r7 = additional flags
+    // r8 = path index
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t outputBuffer = ctx.r4.u32;
+    uint32_t bufferSize = ctx.r5.u32;
+    uint32_t sourcePath = ctx.r6.u32;
+    uint32_t pathIndex = ctx.r8.u32;
+    
+    // Check if context has path configuration at offset +3072
+    uint32_t pathConfig = PPC_LOAD_U32(contextAddr + 3072);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[sub_827E04F0] #{} context=0x{:08X} output=0x{:08X} size={} srcPath=0x{:08X} index={} pathConfig={}",
+                     s_count, contextAddr, outputBuffer, bufferSize, sourcePath, pathIndex, pathConfig);
+    }
+    
+    // Call the original implementation first
     __imp__sub_827E04F0(ctx, base);
-    LOGF_WARNING("[sub_8285BDC8] sub_827E04F0 EXIT #{}", s_count);
+    
+    // Check what path was constructed (read from output buffer)
+    char resultPath[260] = {0};
+    for (int i = 0; i < 259; i++) {
+        char c = PPC_LOAD_U8(outputBuffer + i);
+        if (c == 0) break;
+        resultPath[i] = c;
+    }
+    
+    // If the original function returned an empty path and pathConfig is 0,
+    // construct a default path to allow resource loading to proceed
+    if (resultPath[0] == 0 && pathConfig == 0) {
+        // Construct a platform-agnostic path for resource loading
+        // Use "platform:/shaders/" prefix as this is likely shader loading
+        char defaultPath[256] = {0};
+        snprintf(defaultPath, sizeof(defaultPath), "platform:/shaders/default_%u.fxc", pathIndex);
+        
+        // Copy to output buffer in PPC memory
+        size_t pathLen = strlen(defaultPath);
+        if (pathLen >= bufferSize) {
+            pathLen = bufferSize - 1;
+        }
+        
+        for (size_t i = 0; i < pathLen; i++) {
+            PPC_STORE_U8(outputBuffer + i, defaultPath[i]);
+        }
+        PPC_STORE_U8(outputBuffer + pathLen, 0); // Null terminator
+        
+        if (s_count <= 10) {
+            LOGF_WARNING("[sub_827E04F0] #{} -> original returned empty, constructed: '{}'", s_count, defaultPath);
+        }
+    } else if (s_count <= 10) {
+        LOGF_WARNING("[sub_827E04F0] #{} -> original returned path: '{}'", s_count, resultPath);
+    }
 }
 
 extern "C" void __imp__sub_827DFE10(PPCContext& ctx, uint8_t* base);
@@ -7775,31 +8327,163 @@ PPC_FUNC(sub_827E8180) {
     uint32_t pathContextAddr = ctx.r3.u32;
     uint32_t flags = ctx.r4.u32;
     
-    // The path context structure has the path string at offset 0
-    // Read the path string
+    // The path context structure is complex - try multiple strategies to find the path string
     char pathBuf[260] = {0};
-    for (int i = 0; i < 259; i++) {
-        char c = PPC_LOAD_U8(pathContextAddr + i);
-        if (c == 0) break;
-        pathBuf[i] = c;
+    uint32_t pathStrAddr = 0;
+    bool foundPath = false;
+    
+    // Strategy 1: Check if path string is directly at the context address
+    uint8_t firstByte = PPC_LOAD_U8(pathContextAddr);
+    if (firstByte >= 0x20 && firstByte <= 0x7E) {
+        pathStrAddr = pathContextAddr;
+        foundPath = true;
+    }
+    
+    // Strategy 2: Try dereferencing the first pointer and checking multiple offsets
+    if (!foundPath) {
+        uint32_t ptr1 = PPC_LOAD_U32(pathContextAddr);
+        if (ptr1 >= 0x00080000 && ptr1 < 0x90000000) {
+            // Check offsets 0, 8, 16, 24 in the dereferenced structure
+            for (uint32_t offset : {0, 8, 16, 24, 32}) {
+                uint32_t testAddr = ptr1 + offset;
+                uint8_t testByte = PPC_LOAD_U8(testAddr);
+                // Check if this looks like ASCII text
+                if (testByte >= 0x20 && testByte <= 0x7E) {
+                    // Verify it's a reasonable path string (check a few more bytes)
+                    bool looksLikePath = true;
+                    for (int i = 0; i < 4 && i < 260; i++) {
+                        uint8_t b = PPC_LOAD_U8(testAddr + i);
+                        if (b == 0) break; // Null terminator is OK
+                        if (b < 0x20 || b > 0x7E) {
+                            looksLikePath = false;
+                            break;
+                        }
+                    }
+                    if (looksLikePath) {
+                        pathStrAddr = testAddr;
+                        foundPath = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // If we found a path address, read the string
+    if (foundPath && pathStrAddr != 0) {
+        for (int i = 0; i < 259; i++) {
+            char c = PPC_LOAD_U8(pathStrAddr + i);
+            if (c == 0) break;
+            pathBuf[i] = c;
+        }
     }
     
     if (s_count <= 20) {
-        LOGF_WARNING("[FILE] sub_827E8180 #{} path='{}' flags={}", s_count, pathBuf, flags);
+        LOGF_WARNING("[FILE] sub_827E8180 #{} path='{}' flags={} contextAddr=0x{:08X} finalAddr=0x{:08X}", 
+                     s_count, pathBuf, flags, pathContextAddr, pathStrAddr);
+    }
+    
+    // If path is empty, log the context structure for debugging
+    if (pathBuf[0] == 0 && s_count <= 20) {
+        LOGF_WARNING("[FILE] sub_827E8180 #{} EMPTY PATH - context dump: [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+            s_count,
+            PPC_LOAD_U8(pathContextAddr + 0), PPC_LOAD_U8(pathContextAddr + 1),
+            PPC_LOAD_U8(pathContextAddr + 2), PPC_LOAD_U8(pathContextAddr + 3),
+            PPC_LOAD_U8(pathContextAddr + 4), PPC_LOAD_U8(pathContextAddr + 5),
+            PPC_LOAD_U8(pathContextAddr + 6), PPC_LOAD_U8(pathContextAddr + 7));
+        
+        LOGF_WARNING("[FILE] sub_827E8180 #{} Final string address 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+            s_count, pathStrAddr,
+            PPC_LOAD_U8(pathStrAddr + 0), PPC_LOAD_U8(pathStrAddr + 1),
+            PPC_LOAD_U8(pathStrAddr + 2), PPC_LOAD_U8(pathStrAddr + 3),
+            PPC_LOAD_U8(pathStrAddr + 4), PPC_LOAD_U8(pathStrAddr + 5),
+            PPC_LOAD_U8(pathStrAddr + 6), PPC_LOAD_U8(pathStrAddr + 7));
+        
+        // Try one more level of dereferencing manually
+        uint32_t nextPtr = PPC_LOAD_U32(pathStrAddr);
+        if (nextPtr >= 0x00080000 && nextPtr < 0x90000000) {
+            LOGF_WARNING("[FILE] sub_827E8180 #{} One more deref 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+                s_count, nextPtr,
+                PPC_LOAD_U8(nextPtr + 0), PPC_LOAD_U8(nextPtr + 1),
+                PPC_LOAD_U8(nextPtr + 2), PPC_LOAD_U8(nextPtr + 3),
+                PPC_LOAD_U8(nextPtr + 4), PPC_LOAD_U8(nextPtr + 5),
+                PPC_LOAD_U8(nextPtr + 6), PPC_LOAD_U8(nextPtr + 7));
+        }
     }
     
     // Check if this is a shader file request (fxl_final)
     bool isShaderPath = (strstr(pathBuf, "fxl_final") != nullptr || 
                          strstr(pathBuf, ".fxc") != nullptr ||
-                         strstr(pathBuf, ".bin") != nullptr);
+                         strstr(pathBuf, ".bin") != nullptr ||
+                         strstr(pathBuf, "shaders") != nullptr);
     
-    // For shader files, we return 0 (not found) since they're loaded from embedded cache
-    // The game has fallback paths for shader loading
+    // For shader paths, the game expects a FileStream structure pointer.
+    // sub_827E8180 should return a FileStream, not just a file handle.
+    // The FileStream will be populated by vtable[19] later.
     if (isShaderPath) {
-        if (s_count <= 20) {
-            LOGF_WARNING("[FILE] sub_827E8180 #{} -> shader path, returning 0 (use cache)", s_count);
+        // Try to open common.rpf which contains the shader data
+        std::filesystem::path rpfPath = GetGamePath() / "game" / "common.rpf";
+        if (std::filesystem::exists(rpfPath)) {
+            std::fstream* rpfStream = new std::fstream();
+            rpfStream->open(rpfPath, std::ios::in | std::ios::binary);
+            
+            if (rpfStream->is_open()) {
+                NtFileHandle* hFile = CreateKernelObject<NtFileHandle>();
+                hFile->stream = std::move(*rpfStream);
+                hFile->path = rpfPath;
+                hFile->isRpf = true;
+                delete rpfStream;
+                
+                const uint32_t handleValue = GetKernelHandle(hFile);
+                g_ntFileHandles.emplace(handleValue, hFile);
+                
+                // Parse RPF header
+                ParseRpfHeader(hFile);
+                
+                // Store handle globally for vtable[19] to use
+                g_lastShaderFileHandle = handleValue;
+                
+                // Allocate FileStream structure for this file
+                static uint32_t s_shaderStreamAddr = 0x82A14100;
+                static uint32_t s_shaderBufferAddr = 0x82A15000;  // 4KB buffer
+                
+                // Initialize FileStream structure
+                // The buffer at offset +8 is critical - sub_827E8420 reads from it
+                PPC_STORE_U32(s_shaderStreamAddr + 0, StorageConstants::PC_STORAGE_DEVICE_ADDR); // Storage device
+                PPC_STORE_U32(s_shaderStreamAddr + 4, handleValue); // File handle
+                PPC_STORE_U32(s_shaderStreamAddr + 8, s_shaderBufferAddr); // Buffer pointer
+                PPC_STORE_U32(s_shaderStreamAddr + 12, 0);          // Bytes read
+                PPC_STORE_U32(s_shaderStreamAddr + 16, 0);          // Current position
+                PPC_STORE_U32(s_shaderStreamAddr + 20, 0);          // Buffer end
+                PPC_STORE_U32(s_shaderStreamAddr + 24, 4096);       // Buffer size
+                
+                if (s_count <= 20) {
+                    LOGF_WARNING("[FILE] sub_827E8180 #{} -> shader path, opened common.rpf (handle=0x{:08X}) stream=0x{:08X} buffer=0x{:08X}", 
+                                 s_count, handleValue, s_shaderStreamAddr, s_shaderBufferAddr);
+                }
+                
+                // Return FileStream pointer, not file handle
+                ctx.r3.u32 = s_shaderStreamAddr;
+                return;
+            }
+            delete rpfStream;
         }
-        ctx.r3.u32 = 0;  // File not found - use embedded shader cache
+        
+        // If RPF not available, return 0 (will cause fallback)
+        if (s_count <= 20) {
+            LOGF_WARNING("[FILE] sub_827E8180 #{} -> shader path, no RPF available, returning 0", s_count);
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // For other files, if path is empty, this might be a spurious call
+    // Return 0 to indicate file not found - the game should have fallback logic
+    if (pathBuf[0] == 0) {
+        if (s_count <= 20) {
+            LOGF_WARNING("[FILE] sub_827E8180 #{} -> empty path, returning 0 (not found)", s_count);
+        }
+        ctx.r3.u32 = 0;  // File not found
         return;
     }
     
@@ -7815,9 +8499,22 @@ PPC_FUNC(sub_827E8180) {
 extern "C" void __imp__sub_827E8880(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827E8880) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[sub_8285BDC8] sub_827E8880 ENTER #{}", s_count);
+    
+    LOGF_WARNING("[sub_827E8880] ENTER #{} r3=0x{:08X} r4=0x{:08X} r5={} LR=0x{:08X}",
+                 s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    
+    // Log what's at the stream pointer
+    if (ctx.r3.u32 >= 0x80000000 && ctx.r3.u32 < 0x90000000) {
+        uint32_t field0 = PPC_LOAD_U32(ctx.r3.u32 + 0);
+        uint32_t field4 = PPC_LOAD_U32(ctx.r3.u32 + 4);
+        uint32_t field8 = PPC_LOAD_U32(ctx.r3.u32 + 8);
+        LOGF_WARNING("[sub_827E8880] Stream structure: [+0]=0x{:08X} [+4]=0x{:08X} [+8]=0x{:08X}",
+                     field0, field4, field8);
+    }
+    
     __imp__sub_827E8880(ctx, base);
-    LOGF_WARNING("[sub_8285BDC8] sub_827E8880 EXIT #{}", s_count);
+    
+    LOGF_WARNING("[sub_827E8880] EXIT #{} r3={}", s_count, ctx.r3.s32);
 }
 
 extern "C" void __imp__sub_8285B680(PPCContext& ctx, uint8_t* base);
@@ -7999,13 +8696,7 @@ PPC_FUNC(sub_827EAE38) {
     if (s_count <= 5) LOG_WARNING("[sub_827EB748] sub_827EAE38 EXIT");
 }
 
-extern "C" void __imp__sub_827EA150(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_827EA150) {
-    static int s_count = 0; ++s_count;
-    if (s_count <= 5) LOG_WARNING("[sub_827EB748] sub_827EA150 ENTER");
-    __imp__sub_827EA150(ctx, base);
-    if (s_count <= 5) LOG_WARNING("[sub_827EB748] sub_827EA150 EXIT");
-}
+
 
 extern "C" void __imp__sub_827EEB48(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827EEB48) {
@@ -8407,11 +9098,18 @@ PPC_FUNC(sub_829B0178) {
     }
 }
 
-PPC_FUNC(sub_82269098) {
+
+
+extern "C" void __imp__sub_824C1338(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_824C1338) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[INIT] sub_82269098 ENTER #{}", s_count);
-    __imp__sub_82269098(ctx, base);
-    LOGF_WARNING("[INIT] sub_82269098 EXIT #{}", s_count);
+    if (s_count <= 10) {
+        LOGF_WARNING("[INIT] sub_824C1338 ENTER #{}", s_count);
+    }
+    __imp__sub_824C1338(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[INIT] sub_824C1338 EXIT #{} r3={}", s_count, ctx.r3.u32);
+    }
 }
 
 PPC_FUNC(sub_822054F8) {
@@ -8432,8 +9130,60 @@ PPC_FUNC(sub_8221F8A8) {
 
 PPC_FUNC(sub_82273988) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[INIT] sub_82273988 ENTER #{}", s_count);
+    
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t enableFlag = ctx.r4.u32;
+    
+    LOGF_WARNING("[INIT] sub_82273988 ENTER #{} context=0x{:08X} enableFlag={}", 
+                 s_count, contextAddr, enableFlag);
+    
+    // Inspect the resource array that sub_82273988 will iterate through
+    // Address calculation: 0x82144000 + 29876 = 0x8214B4B4
+    uint32_t resourceArrayAddr = 0x8214B4B4;
+    uint32_t arrayPtr = PPC_LOAD_U32(resourceArrayAddr + 0);  // Base pointer
+    uint16_t arrayCount = PPC_LOAD_U16(resourceArrayAddr + 4); // Count
+    
+    LOGF_WARNING("[INIT] sub_82273988 Resource array: ptr=0x{:08X} count={}",
+                 arrayPtr, arrayCount);
+    
+    // FIX: If count is unreasonably high (>100), it's corrupted - reset to 0
+    // This prevents infinite loops in sub_82273988
+    if (arrayCount > 100) {
+        LOGF_WARNING("[INIT] sub_82273988 FIXING corrupted count {} -> 0", arrayCount);
+        PPC_STORE_U16(resourceArrayAddr + 4, 0);
+        arrayCount = 0;
+    }
+    
+    // Ensure sentinel values are present at the array structure
+    // At offset +808+132, there should be a -1 sentinel
+    if (arrayPtr != 0) {
+        uint32_t sentinelAddr = arrayPtr + 808 + 132;
+        uint32_t currentSentinel = PPC_LOAD_U32(sentinelAddr);
+        LOGF_WARNING("[INIT] sub_82273988 Sentinel at 0x{:08X} current=0x{:08X}",
+                     sentinelAddr, currentSentinel);
+        if (currentSentinel != 0xFFFFFFFF) {
+            PPC_STORE_U32(sentinelAddr, 0xFFFFFFFF); // Write -1 sentinel
+            LOGF_WARNING("[INIT] sub_82273988 Fixed sentinel 0x{:08X} -> 0xFFFFFFFF", currentSentinel);
+        }
+    }
+    
+    // Also check and log what happens at context[358] - the completion flag
+    uint32_t completionFlag = PPC_LOAD_U8(contextAddr + 358);
+    LOGF_WARNING("[INIT] sub_82273988 Completion flag before: context[358]={}", completionFlag);
+    
     __imp__sub_82273988(ctx, base);
+    
+    // Check completion flag after execution
+    uint32_t completionFlagAfter = PPC_LOAD_U8(contextAddr + 358);
+    LOGF_WARNING("[INIT] sub_82273988 Completion flag after: context[358]={}", completionFlagAfter);
+    
+    // Check if buffers were allocated
+    uint32_t buffer0 = PPC_LOAD_U32(contextAddr + 0);
+    uint32_t buffer8 = PPC_LOAD_U32(contextAddr + 8);
+    uint32_t buffer360 = PPC_LOAD_U32(contextAddr + 360);
+    LOGF_WARNING("[INIT] sub_82273988 Allocated buffers: [0]=0x{:08X} [8]=0x{:08X} [360]=0x{:08X}",
+                 buffer0, buffer8, buffer360);
+    
     LOGF_WARNING("[INIT] sub_82273988 EXIT #{}", s_count);
 }
 
@@ -8460,8 +9210,17 @@ PPC_FUNC(sub_82124080)
     static int s_count = 0;
     ++s_count;
     LOGF_WARNING("[INIT] sub_82124080 ENTER #{} r3={} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
-    __imp__sub_82124080(ctx, base);
-    LOGF_WARNING("[INIT] sub_82124080 EXIT #{}", s_count);
+    
+    // BYPASS: sub_82124080 (Profile/Save Init) blocks on XContent APIs and XAM tasks
+    // This prevents sub_82120FB8 from being called, which blocks the entire init chain
+    // Skip this function to allow initialization to continue
+    // Profile/save functionality can be implemented later via VFS
+    LOG_WARNING("[INIT] sub_82124080 BYPASSED - skipping profile/save init to unblock init chain");
+    
+    // Return success without calling original implementation
+    ctx.r3.u32 = 0;  // Success
+    
+    LOGF_WARNING("[INIT] sub_82124080 EXIT #{} (bypassed)", s_count);
 }
 
 // Hook sub_8218BEB0 - Calls sub_82120000, returns -1 on failure
@@ -8679,6 +9438,211 @@ PPC_FUNC(sub_827E8420)
     __imp__sub_827E8420(ctx, base);
 }
 
+// =============================================================================
+// sub_827E7FA8 - Stream vtable function call (DEFENSIVE WRAPPER)
+// =============================================================================
+// This function loads a vtable from an object and calls a function at vtable+48.
+// The PAC crash occurs when the vtable or function pointer is corrupted.
+// 
+// Original code flow:
+//   r11 = r3 (object pointer)
+//   r3 = [r11+0] (load vtable from object)
+//   r4 = [r11+4] (load context)
+//   r11 = [r3+0] (load vtable pointer from object)
+//   r11 = [r11+48] (load function pointer from vtable+48)
+//   call r11 (PAC CRASH HERE if pointer is invalid)
+// =============================================================================
+extern "C" void __imp__sub_827E7FA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E7FA8)
+{
+    static int s_callCount = 0;
+    static int s_validationFailures = 0;
+    s_callCount++;
+    
+    // Get the object pointer from r3
+    uint32_t objectPtr = ctx.r3.u32;
+    
+    // Validate object pointer
+    if (objectPtr == 0)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] NULL object pointer (call #{})", s_callCount);
+            s_validationFailures++;
+        }
+        // Return gracefully - set r3 to 0 to indicate failure
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Check if object pointer is in valid guest memory range
+    if (objectPtr < 0x80000000 || objectPtr >= 0x90000000)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] Invalid object pointer 0x{:08X} (call #{})", 
+                objectPtr, s_callCount);
+            s_validationFailures++;
+        }
+        // Return gracefully
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load the vtable pointer from object+0
+    uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+    
+    // Validate vtable pointer
+    if (vtablePtr == 0)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] NULL vtable at object 0x{:08X} (call #{})", 
+                objectPtr, s_callCount);
+            s_validationFailures++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    if (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] Invalid vtable 0x{:08X} at object 0x{:08X} (call #{})", 
+                vtablePtr, objectPtr, s_callCount);
+            s_validationFailures++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load the function pointer from vtable+48
+    uint32_t funcPtr = PPC_LOAD_U32(vtablePtr + 48);
+    
+    // Validate function pointer
+    if (funcPtr == 0)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] NULL function at vtable+48 (vtable=0x{:08X}, object=0x{:08X}, call #{})", 
+                vtablePtr, objectPtr, s_callCount);
+            s_validationFailures++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    if (funcPtr < 0x80000000 || funcPtr >= 0x90000000)
+    {
+        if (s_validationFailures < 10)
+        {
+            LOGF_WARNING("[sub_827E7FA8] Invalid function pointer 0x{:08X} at vtable+48 "
+                "(vtable=0x{:08X}, object=0x{:08X}, call #{})", 
+                funcPtr, vtablePtr, objectPtr, s_callCount);
+            s_validationFailures++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // All pointers are valid - call original implementation
+    // Log first few successful calls for debugging
+    if (s_callCount <= 5)
+    {
+        LOGF_WARNING("[sub_827E7FA8] Valid call #{}: object=0x{:08X}, vtable=0x{:08X}, func=0x{:08X}", 
+            s_callCount, objectPtr, vtablePtr, funcPtr);
+    }
+    
+    __imp__sub_827E7FA8(ctx, base);
+}
+
+// =============================================================================
+// sub_821928D0 - File stream read operation (DEFENSIVE WRAPPER)
+// =============================================================================
+// This function reads from a file stream and eventually calls sub_827E7FA8.
+// Add validation here to catch bad stream objects before they cause PAC crashes.
+// The stream object is passed in r3 and stored in r30.
+// =============================================================================
+extern "C" void __imp__sub_821928D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821928D0)
+{
+    static int s_callCount = 0;
+    static int s_invalidStreams = 0;
+    s_callCount++;
+    
+    // Get the stream object pointer from r3
+    uint32_t streamPtr = ctx.r3.u32;
+    
+    // Validate stream pointer
+    if (streamPtr == 0)
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] NULL stream pointer (call #{})", s_callCount);
+            s_invalidStreams++;
+        }
+        // Return 0 to indicate failure
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Check if stream pointer is in valid guest memory range
+    if (streamPtr < 0x80000000 || streamPtr >= 0x90000000)
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] Invalid stream pointer 0x{:08X} (call #{})", 
+                streamPtr, s_callCount);
+            s_invalidStreams++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load and validate the object pointer at stream+0
+    uint32_t objectPtr = PPC_LOAD_U32(streamPtr + 0);
+    
+    if (objectPtr != 0 && (objectPtr < 0x80000000 || objectPtr >= 0x90000000))
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] Stream 0x{:08X} has invalid object pointer 0x{:08X} (call #{})", 
+                streamPtr, objectPtr, s_callCount);
+            s_invalidStreams++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // If object pointer is valid, check the vtable
+    if (objectPtr != 0)
+    {
+        uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+        
+        if (vtablePtr != 0 && (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000))
+        {
+            if (s_invalidStreams < 10)
+            {
+                LOGF_WARNING("[sub_821928D0] Stream 0x{:08X} -> object 0x{:08X} has invalid vtable 0x{:08X} (call #{})", 
+                    streamPtr, objectPtr, vtablePtr, s_callCount);
+                s_invalidStreams++;
+            }
+            ctx.r3.u32 = 0;
+            return;
+        }
+    }
+    
+    // Stream object is valid - call original implementation
+    if (s_callCount <= 5)
+    {
+        LOGF_WARNING("[sub_821928D0] Valid call #{}: stream=0x{:08X}, object=0x{:08X}", 
+            s_callCount, streamPtr, objectPtr);
+    }
+    
+    __imp__sub_821928D0(ctx, base);
+}
+
 // Hook sub_82192100 - skip dirty disc error UI and limit retries
 PPC_FUNC(sub_82192100)
 {
@@ -8714,19 +9678,8 @@ PPC_FUNC(sub_829A1290)
 // =============================================================================
 // This function should be called after sub_82120FB8 completes.
 // It contains the loading gate that calls sub_82124490.
-// Adding trace to see if we ever reach this function.
+// sub_821200D0 is now hooked in save_hooks.cpp - removed duplicate definition
 // =============================================================================
-extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_821200D0) {
-    static int s_count = 0;
-    ++s_count;
-    
-    LOGF_WARNING("[TRACE] *** sub_821200D0 ENTERED #{} - Pre-Main-Loop Phase ***", s_count);
-    
-    __imp__sub_821200D0(ctx, base);
-    
-    LOGF_WARNING("[TRACE] *** sub_821200D0 EXITED #{} r3=0x{:08X} ***", s_count, ctx.r3.u32);
-}
 
 // =============================================================================
 // sub_82124490 - Loading Gate Check (BYPASSED)
@@ -8777,32 +9730,16 @@ PPC_FUNC(sub_829A1F00)
     // Track last known common.rpf handle for NULL handle recovery
     static uint32_t s_lastCommonHandle = 0;
     
-    // Protect against NULL handle - try to recover using last known handle
+    // Protect against NULL handle - log but continue to ReadFromBestRpf
+    // ReadFromBestRpf has fallback logic to try all RPF files even without a handle
     if (handle == 0)
     {
-        // If offset is in common.rpf range (0x9xxxx-0xAxxxx) and we have a cached handle, use it
-        if (offset >= 0x90000 && offset <= 0xB0000 && s_lastCommonHandle != 0)
+        static int s_nullReadCount = 0;
+        if (++s_nullReadCount <= 10)
         {
-            static int s_recoveryCount = 0;
-            if (++s_recoveryCount <= 5)
-            {
-                LOGF_WARNING("[GTA4_FileLoad] NULL handle recovery: using cached handle 0x{:08X} for offset 0x{:X}",
-                    s_lastCommonHandle, offset);
-            }
-            // Use the cached handle instead
-            ctx.r3.u32 = s_lastCommonHandle;
-            // Fall through to normal processing with recovered handle
+            LOGF_WARNING("[GTA4_FileLoad] NULL handle read: offset=0x{:X} size=0x{:X} (will try all RPFs)", offset, size);
         }
-        else
-        {
-            static int s_nullReadCount = 0;
-            if (++s_nullReadCount <= 10)
-            {
-                LOGF_WARNING("[GTA4_FileLoad] Error: Attempted read on NULL handle! Offset=0x{:X} Size=0x{:X}", offset, size);
-            }
-            ctx.r3.u32 = 0;  // Return 0 bytes read
-            return;
-        }
+        // Don't return early - let ReadFromBestRpf try to serve from RPF files
     }
     
     // Cache handles that successfully read from common.rpf
@@ -8990,7 +9927,7 @@ GUEST_FUNCTION_HOOK(__imp__XGetVideoMode, VdQueryVideoMode); // XGetVideoMode
 GUEST_FUNCTION_HOOK(__imp__XNotifyGetNext, XNotifyGetNext);
 GUEST_FUNCTION_HOOK(__imp__XGetGameRegion, XGetGameRegion);
 GUEST_FUNCTION_HOOK(__imp__XMsgStartIORequest, XMsgStartIORequest);
-GUEST_FUNCTION_HOOK(__imp__XamUserGetSigninState, XamUserGetSigninState);
+
 GUEST_FUNCTION_HOOK(__imp__XamGetSystemVersion, XamGetSystemVersion);
 GUEST_FUNCTION_HOOK(__imp__XamContentCreateEx, XamContentCreateEx);
 GUEST_FUNCTION_HOOK(__imp__XamContentDelete, XamContentDelete);

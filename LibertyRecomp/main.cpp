@@ -9,6 +9,7 @@
 #include <kernel/memory.h>
 #include <kernel/heap.h>
 #include <kernel/xam.h>
+#include <kernel/save_system.h>
 #include <kernel/io/file_system.h>
 #include <kernel/vfs.h>
 #include <file.h>
@@ -62,8 +63,11 @@ void HostStartup()
     hid::Init();
 }
 
-// Forward declaration from imports.cpp
+// Forward declarations from imports.cpp
 void InitKernelMainThread();
+
+// Xenon memory initialization
+#include <kernel/xenon_memory.h>
 
 // Name inspired from nt's entry point
 void KiSystemStartup()
@@ -78,6 +82,14 @@ void KiSystemStartup()
     }
 
     g_userHeap.Init();
+    
+    // CRITICAL: Initialize Xbox 360 Xenon memory regions per memory contract
+    // This zeros all regions the game assumes are pre-allocated and zeroed on boot.
+    // Must happen BEFORE any game code executes to prevent corruption.
+    InitializeXenonMemoryRegions(g_memory.base);
+
+    // Initialize save system early - creates directories and registers save content
+    SaveSystem::Initialize();
 
     const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
     const std::string gamePath = (const char*)(GetGamePath() / "game").u8string().c_str();
@@ -92,6 +104,29 @@ void KiSystemStartup()
 
     XamRegisterContent(gameContent, gamePath);
 
+    // Register and mount update content (CRITICAL for file override)
+    const auto updateContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Update");
+    const std::filesystem::path updateRoot = GetGamePath() / "update";
+    const std::string updatePath = (const char*)updateRoot.u8string().c_str();
+
+    if (std::filesystem::exists(updateRoot))
+    {
+        XamRegisterContent(updateContent, updatePath);
+        XamContentCreateEx(0, "update", &updateContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
+        
+        // Create root mappings for update paths (case variations)
+        XamRootCreate("update", updatePath);
+        XamRootCreate("Update", updatePath);
+        
+        LOGF_IMPL(Utility, "Main", "Registered update: -> {}", updatePath);
+    }
+    else
+    {
+        LOGF_IMPL(Utility, "Main", "No update directory found (this is normal if no Title Update installed)");
+    }
+
+    // Note: Save system initialization already handled by SaveSystem::Initialize() above
+    // This section is kept for backwards compatibility with old save file format
     const auto saveFilePath = GetSaveFilePath(true);
     bool saveFileExists = std::filesystem::exists(saveFilePath);
 
@@ -153,7 +188,20 @@ void KiSystemStartup()
         {
             std::u8string fileNameU8 = file.path().filename().u8string();
             std::u8string filePathU8 = file.path().u8string();
-            XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, (const char*)(fileNameU8.c_str())), (const char*)(filePathU8.c_str()));
+            const char* fileName = (const char*)(fileNameU8.c_str());
+            const char* filePath = (const char*)(filePathU8.c_str());
+            
+            // Register DLC content
+            XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, fileName), filePath);
+            
+            // Mount DLC to virtual path
+            auto dlcContent = XamMakeContent(XCONTENTTYPE_DLC, fileName);
+            XamContentCreateEx(0, fileName, &dlcContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
+            
+            // Create root mapping for DLC-specific paths
+            XamRootCreate(fileName, filePath);
+            
+            LOGF_IMPL(Utility, "Main", "Registered DLC: {} -> {}", fileName, filePath);
         }
     }
 
@@ -200,6 +248,19 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
         streamPtr[4] = 0;           // Buffer cursor
         streamPtr[5] = 0;           // Buffer end (0 = empty)
         streamPtr[6] = 0;           // Capacity (0 = no buffer)
+    }
+    
+    // Worker Thread Global Memory Initialization
+    // Address range 0x830F5000-0x830F8000 contains worker-related global structures.
+    // Workers read semaphore handles from this region (e.g., 0x830F7684 = base+9860).
+    // Without zeroing, workers read stale data from previous runs causing infinite polling.
+    // Fix: Zero worker globals so uninitialized handles read as NULL.
+    {
+        uint8_t* workerGlobals = static_cast<uint8_t*>(g_memory.Translate(0x830F5000));
+        if (workerGlobals) {
+            memset(workerGlobals, 0, 0x3000);  // Zero 12KB of worker globals
+            printf("[LdrLoadModule] Zeroed worker globals 0x830F5000-0x830F8000\n");
+        }
     }
 
     return image.entry_point;

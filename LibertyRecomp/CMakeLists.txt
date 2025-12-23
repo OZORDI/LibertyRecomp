@@ -76,7 +76,10 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/xdm.cpp"
     "kernel/heap.cpp"
     "kernel/memory.cpp"
+    "kernel/xenon_memory.cpp"
     "kernel/xam.cpp"
+    "kernel/save_system.cpp"
+    "kernel/save_hooks.cpp"
     "kernel/vfs.cpp"
     "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
@@ -137,6 +140,7 @@ set(LIBERTY_RECOMP_APU_CXX_SOURCES
 
 set(LIBERTY_RECOMP_HID_CXX_SOURCES
     "hid/hid.cpp"
+    "hid/mouse_camera.cpp"
     "hid/driver/sdl_hid.cpp"
 )
 
