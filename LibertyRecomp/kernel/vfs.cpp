@@ -287,6 +287,11 @@ namespace VFS
         
         // Platform-specific paths (platform: → xbox360/)
         // GTA IV uses "platform:/textures/fonts" etc. for Xbox 360 platform assets
+        // Root platform: prefix mappings (must come before subdirectory mappings)
+        g_pathMappings.push_back({"platform:", "xbox360"});
+        g_pathMappings.push_back({"platform:/", "xbox360/"});
+        
+        // Subdirectory mappings (more specific paths)
         g_pathMappings.push_back({"textures", "xbox360/textures"});
         g_pathMappings.push_back({"models", "xbox360/models"});
         g_pathMappings.push_back({"anim", "xbox360/anim"});
