@@ -37,15 +37,15 @@ This project is in **early development**. Current progress:
 ### In Progress
 - [ ] RAGE engine structure reverse engineering
 - [ ] GPU/rendering pipeline implementation
-- [ ] File system and RPF archive handling
 - [ ] Game-specific patches and fixes
 
-### TODO
+### Completed (Previously TODO)
 - [x] Audio system implementation (XMA decoder, SDL2 driver)
-- [ ] Save data handling (basic stubs exist, full implementation pending)
+- [x] Save data handling (full save system with GTA IV format support)
 - [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
 - [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
 - [x] Online multiplayer via Nebula VPN integration
+- [x] File system and RPF archive handling (VFS, GTA file system)
 
 ## Installation
 
