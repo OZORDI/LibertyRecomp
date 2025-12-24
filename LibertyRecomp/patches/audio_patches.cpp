@@ -200,3 +200,37 @@ void AudioConfigChanged()
     GTA4Audio::SetMusicVolume(Config::MusicVolume);
     GTA4Audio::SetEffectsVolume(Config::EffectsVolume);
 }
+
+// =============================================================================
+// GTA IV Audio System PPC Hooks
+// =============================================================================
+// These hooks intercept the actual PPC audio initialization functions
+// to track when the audio system is ready for volume control.
+
+// External declarations for original PPC functions
+extern "C" void __imp__sub_822EEDB8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821AB5F8(PPCContext& ctx, uint8_t* base);
+
+// Hook for audio system initialization (sub_822EEDB8)
+// Called during game startup to initialize RAGE audEngine
+void GTA4_AudioSystemInit(PPCContext& ctx, uint8_t* base) {
+    // Call original function first
+    __imp__sub_822EEDB8(ctx, base);
+    
+    // Mark audio as initialized
+    GTA4Audio::SetInitialized(true);
+    LOGF_INFO("[Audio] GTA IV audio system initialized");
+}
+
+// Hook for radio system initialization (sub_821AB5F8)
+// Called during game startup to set up radio stations
+void GTA4_RadioSystemInit(PPCContext& ctx, uint8_t* base) {
+    // Call original function first
+    __imp__sub_821AB5F8(ctx, base);
+    
+    LOGF_INFO("[Audio] GTA IV radio system initialized");
+}
+
+// Register the PPC hooks
+GUEST_FUNCTION_HOOK(sub_822EEDB8, GTA4_AudioSystemInit);
+GUEST_FUNCTION_HOOK(sub_821AB5F8, GTA4_RadioSystemInit);

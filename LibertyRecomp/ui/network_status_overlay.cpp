@@ -1,5 +1,4 @@
 #include "network_status_overlay.h"
-#include "online_multiplayer_menu.h"
 #include <ui/imgui_utils.h>
 #include <ui/gta4_style.h>
 #include <hid/hid.h>
@@ -15,7 +14,7 @@ static constexpr float DETAILED_HEIGHT = 80.0f;
 // Animation
 static double g_pulseTime{};
 static double g_lastRefreshTime{};
-static constexpr double REFRESH_INTERVAL = 5.0; // seconds
+static constexpr double REFRESH_INTERVAL = 2.0; // seconds
 
 void NetworkStatusOverlay::Init()
 {
@@ -27,10 +26,6 @@ void NetworkStatusOverlay::Draw()
     if (!s_isVisible)
         return;
     
-    // Don't show overlay if online multiplayer menu is open
-    if (OnlineMultiplayerMenu::IsVisible())
-        return;
-    
     auto time = ImGui::GetTime();
     
     // Periodic status refresh
@@ -40,9 +35,8 @@ void NetworkStatusOverlay::Draw()
         g_lastRefreshTime = time;
     }
     
-    // Only show if Nebula is configured or running
-    if (s_lastStatus == liberty::install::NebulaStatus::NotInstalled ||
-        s_lastStatus == liberty::install::NebulaStatus::NotConfigured)
+    // Only show if in a P2P session
+    if (s_lastStatus == NetworkOverlayStatus::Offline)
     {
         return;
     }
@@ -75,21 +69,19 @@ void NetworkStatusOverlay::DrawMinimal()
     
     switch (s_lastStatus)
     {
-        case liberty::install::NebulaStatus::Running:
+        case NetworkOverlayStatus::Connected:
             color = IM_COL32(50, 200, 50, 255);
             break;
-        case liberty::install::NebulaStatus::Starting:
+        case NetworkOverlayStatus::Connecting:
             color = IM_COL32(255, 200, 50, 255);
             pulse = true;
             break;
-        case liberty::install::NebulaStatus::Stopped:
+        case NetworkOverlayStatus::Offline:
             color = IM_COL32(150, 150, 150, 255);
             break;
-        case liberty::install::NebulaStatus::Error:
+        case NetworkOverlayStatus::Error:
             color = IM_COL32(200, 50, 50, 255);
             pulse = true;
-            break;
-        default:
             break;
     }
     
@@ -106,7 +98,7 @@ void NetworkStatusOverlay::DrawMinimal()
     drawList->AddCircleFilled(center, radius, color);
     drawList->AddCircle(center, radius, IM_COL32(255, 255, 255, 80), 0, Scale(1.0f));
     
-    // Check for click to show details
+    // Check for hover to show tooltip
     ImVec2 clickMin(x - radius * 2, y - radius);
     ImVec2 clickMax(x + radius * 2, y + radius * 3);
     
@@ -118,30 +110,32 @@ void NetworkStatusOverlay::DrawMinimal()
         const char* statusText = "Unknown";
         switch (s_lastStatus)
         {
-            case liberty::install::NebulaStatus::Running:
+            case NetworkOverlayStatus::Connected:
                 statusText = "Online - Connected";
                 break;
-            case liberty::install::NebulaStatus::Starting:
+            case NetworkOverlayStatus::Connecting:
                 statusText = "Connecting...";
                 break;
-            case liberty::install::NebulaStatus::Stopped:
+            case NetworkOverlayStatus::Offline:
                 statusText = "Offline";
                 break;
-            case liberty::install::NebulaStatus::Error:
+            case NetworkOverlayStatus::Error:
                 statusText = "Connection Error";
-                break;
-            default:
                 break;
         }
         
         ImGui::Text("%s", statusText);
-        ImGui::Text("Click to open Online Multiplayer menu");
+        if (s_peerCount > 0)
+        {
+            ImGui::Text("Peers: %d", s_peerCount);
+        }
+        ImGui::Text("Click to toggle details");
         ImGui::EndTooltip();
         
-        // Open menu on click
+        // Toggle details on click
         if (ImGui::IsMouseClicked(0))
         {
-            OnlineMultiplayerMenu::Open();
+            s_showDetails = !s_showDetails;
         }
     }
 }
@@ -172,23 +166,21 @@ void NetworkStatusOverlay::DrawDetailed()
     
     switch (s_lastStatus)
     {
-        case liberty::install::NebulaStatus::Running:
+        case NetworkOverlayStatus::Connected:
             indicatorColor = IM_COL32(50, 200, 50, 255);
             statusText = "Connected";
             break;
-        case liberty::install::NebulaStatus::Starting:
+        case NetworkOverlayStatus::Connecting:
             indicatorColor = IM_COL32(255, 200, 50, 255);
             statusText = "Connecting...";
             break;
-        case liberty::install::NebulaStatus::Stopped:
+        case NetworkOverlayStatus::Offline:
             indicatorColor = IM_COL32(150, 150, 150, 255);
             statusText = "Disconnected";
             break;
-        case liberty::install::NebulaStatus::Error:
+        case NetworkOverlayStatus::Error:
             indicatorColor = IM_COL32(200, 50, 50, 255);
             statusText = "Error";
-            break;
-        default:
             break;
     }
     
@@ -204,14 +196,11 @@ void NetworkStatusOverlay::DrawDetailed()
         indicatorColor, statusText);
     
     // Peer count if connected
-    if (s_lastStatus == liberty::install::NebulaStatus::Running)
+    if (s_lastStatus == NetworkOverlayStatus::Connected && s_peerCount > 0)
     {
-        auto& nebula = liberty::install::NebulaManager::Instance();
-        auto peers = nebula.GetConnectedPeers();
-        
         textPos.y += Scale(16.0f);
         char peerText[64];
-        snprintf(peerText, sizeof(peerText), "Peers: %zu", peers.size());
+        snprintf(peerText, sizeof(peerText), "Peers: %d", s_peerCount);
         DrawTextWithShadow(g_pFntNewRodin, Scale(10.0f), textPos,
             GTA4Style::Colors::TextGray, peerText);
     }
@@ -219,7 +208,7 @@ void NetworkStatusOverlay::DrawDetailed()
     // Close button hint
     textPos = ImVec2(min.x + Scale(5.0f), max.y - Scale(15.0f));
     DrawTextWithShadow(g_pFntNewRodin, Scale(9.0f), textPos,
-        GTA4Style::Colors::TextGray, "Click indicator to toggle");
+        GTA4Style::Colors::TextGray, "Click indicator to close");
     
     // Check for click on indicator to toggle
     ImVec2 clickMin(min.x, min.y);
@@ -233,6 +222,36 @@ void NetworkStatusOverlay::DrawDetailed()
 
 void NetworkStatusOverlay::RefreshStatus()
 {
-    auto& nebula = liberty::install::NebulaManager::Instance();
-    s_lastStatus = nebula.GetStatus();
+    auto& p2p = Net::P2PManager::Instance();
+    
+    if (!p2p.IsInitialized())
+    {
+        s_lastStatus = NetworkOverlayStatus::Offline;
+        s_peerCount = 0;
+        return;
+    }
+    
+    auto lobbyState = p2p.GetLobbyState();
+    
+    switch (lobbyState)
+    {
+        case Net::P2PLobbyState::Active:
+        case Net::P2PLobbyState::Joined:
+            s_lastStatus = NetworkOverlayStatus::Connected;
+            s_peerCount = static_cast<int>(p2p.GetConnectedPeers().size());
+            break;
+        case Net::P2PLobbyState::Creating:
+        case Net::P2PLobbyState::Joining:
+            s_lastStatus = NetworkOverlayStatus::Connecting;
+            s_peerCount = 0;
+            break;
+        case Net::P2PLobbyState::Failed:
+            s_lastStatus = NetworkOverlayStatus::Error;
+            s_peerCount = 0;
+            break;
+        default:
+            s_lastStatus = NetworkOverlayStatus::Offline;
+            s_peerCount = 0;
+            break;
+    }
 }

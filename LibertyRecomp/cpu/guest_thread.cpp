@@ -10,31 +10,64 @@
 // Forward declaration from imports.cpp
 extern void PumpSdlEventsIfNeeded();
 
-constexpr size_t PCR_SIZE = 0xAB0;
-constexpr size_t TLS_SIZE = 0x100;
-constexpr size_t TEB_SIZE = 0x2E0;
-constexpr size_t STACK_SIZE = 0x80000;
-constexpr size_t TOTAL_SIZE = PCR_SIZE + TLS_SIZE + TEB_SIZE + STACK_SIZE;
-
-constexpr size_t TEB_OFFSET = PCR_SIZE + TLS_SIZE;
+// Legacy constants for backward compatibility (now defined in guest_thread.h as X360_*)
+constexpr size_t PCR_SIZE = X360_PCR_SIZE;
+constexpr size_t TLS_SIZE = X360_TLS_SIZE;
+constexpr size_t TEB_SIZE = X360_TEB_SIZE;
+constexpr size_t STACK_SIZE = X360_STACK_SIZE;
+constexpr size_t TOTAL_SIZE = X360_THREAD_CONTEXT_TOTAL;
+constexpr size_t TEB_OFFSET = X360_TEB_OFFSET;
 
 GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
 {
     assert(thread == nullptr);
 
+    // Allocate contiguous block: [PCR][TLS][TEB][Stack]
     thread = (uint8_t*)g_userHeap.Alloc(TOTAL_SIZE);
-    // printf("TOTAL_SIZE: %x %x %d\n", thread, TOTAL_SIZE, TOTAL_SIZE);
     memset(thread, 0, TOTAL_SIZE);
 
-    *(uint32_t*)thread = ByteSwap(g_memory.MapVirtual(thread + PCR_SIZE)); // tls pointer
-    *(uint32_t*)(thread + 0x100) = ByteSwap(g_memory.MapVirtual(thread + PCR_SIZE + TLS_SIZE)); // teb pointer
-    *(thread + 0x10C) = cpuNumber;
+    // Get typed pointers to each region
+    X360_PCR* pcr = reinterpret_cast<X360_PCR*>(thread);
+    X360_TLS* tls = reinterpret_cast<X360_TLS*>(thread + X360_TLS_OFFSET);
+    X360_TEB* teb = reinterpret_cast<X360_TEB*>(thread + X360_TEB_OFFSET);
 
-    *(uint32_t*)(thread + PCR_SIZE + 0x10) = 0xFFFFFFFF; // that one TLS entry that felt quirky
-    *(uint32_t*)(thread + PCR_SIZE + TLS_SIZE + 0x14C) = ByteSwap(GuestThread::GetCurrentThreadId()); // thread id
+    // Calculate virtual addresses for each region
+    uint32_t pcrAddr   = g_memory.MapVirtual(thread);
+    uint32_t tlsAddr   = g_memory.MapVirtual(thread + X360_TLS_OFFSET);
+    uint32_t tebAddr   = g_memory.MapVirtual(thread + X360_TEB_OFFSET);
+    uint32_t stackBase = g_memory.MapVirtual(thread + TOTAL_SIZE);  // High address (stack grows down)
+    uint32_t stackLimit = g_memory.MapVirtual(thread + X360_STACK_OFFSET);  // Low address
 
-    ppcContext.r1.u64 = g_memory.MapVirtual(thread + PCR_SIZE + TLS_SIZE + TEB_SIZE + STACK_SIZE); // stack pointer
-    ppcContext.r13.u64 = g_memory.MapVirtual(thread);
+    // -------------------------------------------------------------------------
+    // Initialize PCR (Processor Control Region)
+    // -------------------------------------------------------------------------
+    pcr->tls_ptr = tlsAddr;                          // 0x00 - TLS pointer
+    pcr->pcr_ptr = pcrAddr;                          // 0x30 - Self-pointer for validation
+    pcr->stack_base = stackBase;                     // 0x70 - Stack base (high address)
+    pcr->stack_limit = stackLimit;                   // 0x74 - Stack limit (low address)
+    pcr->current_thread = tebAddr;                   // 0x100 - TEB pointer
+    pcr->current_cpu = cpuNumber;                    // 0x10C - CPU/worker index
+    // Note: dpc_active (0x150) left as 0 - setting it suppresses error reporting
+
+    // -------------------------------------------------------------------------
+    // Initialize TLS (Thread Local Storage)
+    // -------------------------------------------------------------------------
+    tls->quirky_slot = 0xFFFFFFFF;                   // 0x10 - Special TLS slot
+
+    // -------------------------------------------------------------------------
+    // Initialize TEB (Thread Environment Block)
+    // -------------------------------------------------------------------------
+    teb->thread_id = GuestThread::GetCurrentThreadId();  // 0x14C - Thread identifier
+    teb->start_address = 0;                          // 0x150 - Will be set by caller if needed
+    teb->last_error = 0;                             // 0x160 - Win32 last error
+    teb->fiber_ptr = 0;                              // 0x164 - No fiber support
+    teb->creation_flags = 0;                         // 0x16C - Creation flags
+
+    // -------------------------------------------------------------------------
+    // Initialize PPC Context
+    // -------------------------------------------------------------------------
+    ppcContext.r1.u64 = stackBase;                   // Stack pointer (top of stack)
+    ppcContext.r13.u64 = pcrAddr;                    // TLS base register
     ppcContext.fpscr.loadFromHost();
 
     assert(GetPPCContext() == nullptr);
@@ -241,15 +274,20 @@ uint32_t GuestThread::GetCurrentThreadId()
 
 void GuestThread::SetLastError(uint32_t error)
 {
-    auto* thread = (char*)g_memory.Translate(GetPPCContext()->r13.u32);
-    if (*(uint32_t*)(thread + 0x150))
+    auto* thread = (uint8_t*)g_memory.Translate(GetPPCContext()->r13.u32);
+    X360_PCR* pcr = reinterpret_cast<X360_PCR*>(thread);
+    X360_TEB* teb = reinterpret_cast<X360_TEB*>(thread + X360_TEB_OFFSET);
+    
+    // Check PCR dpc_active field (0x150 from PCR base)
+    // If non-zero (DPC mode active), don't report errors
+    if (pcr->dpc_active != 0)
     {
-        // Program doesn't want errors
+        // Program doesn't want errors during DPC
         return;
     }
 
-    // TEB + 0x160 : Win32LastError
-    *(uint32_t*)(thread + TEB_OFFSET + 0x160) = ByteSwap(error);
+    // Set Win32 last error in TEB
+    teb->last_error = error;
 }
 
 #ifdef _WIN32

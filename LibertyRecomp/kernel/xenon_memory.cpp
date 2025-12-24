@@ -24,10 +24,12 @@ void InitializeXenonMemoryRegions(uint8_t* base) {
     LOG_WARNING("[Xenon] Zeroing kernel runtime: 0x82A90000-0x82AA0000 (64 KB)");
     memset(base + 0x82A90000, 0, 0x10000);
     
-    // Region 4: Static data/BSS (0x83000000-0x83200000)
+    // Region 4: Static data/BSS (0x83000000-0x831F0000)
     // Global variables and static data. Per C/C++ BSS contract, must be zeroed.
-    LOG_WARNING("[Xenon] Zeroing static data (BSS): 0x83000000-0x83200000 (2 MB)");
-    memset(base + 0x83000000, 0, 0x200000);
+    // Stop at 0x831F0000 (PPC_IMAGE_BASE + PPC_IMAGE_SIZE) to avoid the protected
+    // function table region that starts there.
+    LOG_WARNING("[Xenon] Zeroing static data (BSS): 0x83000000-0x831F0000 (1.99 MB)");
+    memset(base + 0x83000000, 0, 0x1F0000);  // Stop before function table
     
     LOG_WARNING("[Xenon] Memory region initialization complete");
     LOG_WARNING("[Xenon] IMPORTANT: Import region 0x82A00000-0x82B00000 left untouched (system-managed)");

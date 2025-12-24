@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include "session_tracker.h"
 
 namespace Net {
 
@@ -67,7 +68,7 @@ using OnDataReceivedCallback = std::function<void(uint32_t peerId, const void* d
  * P2PManager - Seamless peer-to-peer networking for online multiplayer
  * 
  * Uses GameNetworkingSockets for reliable/unreliable messaging with
- * Firebase Realtime Database for signaling and lobby management.
+ * configurable session tracking backends (Community Server, Firebase, or LAN).
  * 
  * The game's existing XNet/socket layer routes traffic through this
  * when online multiplayer is active.
@@ -109,11 +110,29 @@ public:
     /**
      * Create a new lobby and become the host
      * @param playerName Display name for this player
+     * @param gameMode Game mode (for session filtering)
+     * @param mapArea Map area (for session filtering)
      * @param maxPlayers Maximum players (2-16)
+     * @param isPrivate If true, generates lobby code for invite-only
      * @param callback Called when lobby is created with join code
      */
-    void CreateLobby(const std::string& playerName, uint32_t maxPlayers,
-                     OnLobbyCreatedCallback callback);
+    void CreateLobby(const std::string& playerName, GameMode gameMode, MapArea mapArea,
+                     uint32_t maxPlayers, bool isPrivate, OnLobbyCreatedCallback callback);
+    
+    /**
+     * Quick Match - find any available session
+     * @param gameMode Preferred game mode
+     * @param callback Called when joined or failed
+     */
+    void QuickMatch(GameMode gameMode, OnLobbyJoinedCallback callback);
+    
+    /**
+     * Search for available sessions
+     * @param filter Search criteria
+     * @param callback Called with list of sessions
+     */
+    void SearchSessions(const SessionSearchFilter& filter,
+                        std::function<void(bool, const std::vector<SessionInfo>&)> callback);
     
     /**
      * Join an existing lobby using a 6-character code
@@ -213,14 +232,19 @@ public:
     // =========================================================================
     
     /**
-     * Set Firebase project configuration
+     * Get the session tracker instance
      */
-    void SetFirebaseConfig(const std::string& projectId, const std::string& apiKey);
+    ISessionTracker* GetSessionTracker() { return sessionTracker_.get(); }
     
     /**
      * Get STUN/TURN server list
      */
     static std::vector<std::string> GetIceServers();
+    
+    /**
+     * Get backend name for display
+     */
+    const char* GetBackendName() const;
 
 private:
     P2PManager();
@@ -254,13 +278,12 @@ private:
     OnPeerDisconnectedCallback onPeerDisconnected_;
     OnDataReceivedCallback onDataReceived_;
     
-    // Firebase config
-    std::string firebaseProjectId_;
-    std::string firebaseApiKey_;
+    // Session tracker (configurable backend)
+    std::unique_ptr<ISessionTracker> sessionTracker_;
     
-    // GNS handles (void* to avoid header dependency)
-    void* listenSocket_{nullptr};
-    void* pollGroup_{nullptr};
+    // GNS handles (uint32_t to match HSteamListenSocket/HSteamNetPollGroup types)
+    uint32_t listenSocket_{0};
+    uint32_t pollGroup_{0};
     
     // Virtual IP allocation
     std::atomic<uint8_t> nextVirtualIpSuffix_{2};  // Start at 192.168.100.2

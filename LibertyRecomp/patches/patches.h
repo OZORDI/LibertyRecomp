@@ -2,6 +2,7 @@
 
 // GTA IV-specific patches
 #include "gta4_patches.h"
+#include "player_limit_patches.h"
 
 // Note: The following Sonic '06 specific patches are disabled for GTA IV:
 // - aspect_ratio_patches.h (has Sonicteam namespace references)
@@ -12,4 +13,7 @@ inline void InitPatches()
 {
     // Initialize GTA IV-specific patches
     GTA4Patches::Init();
+    
+    // Initialize player limit patches (extended multiplayer support)
+    PlayerLimitPatches::Init();
 }

@@ -1,4 +1,5 @@
 #include "gta4_patches.h"
+#include "player_limit_patches.h"
 #include <api/Liberty.h>
 #include <gpu/video.h>
 #include <hid/hid.h>
@@ -6,6 +7,7 @@
 #include <app.h>
 #include <kernel/function.h>
 #include <kernel/memory.h>
+#include <os/logger.h>
 
 // =============================================================================
 // GTA IV Game-Specific Patches Implementation
@@ -24,6 +26,11 @@ namespace GTA4Patches
         GTA4GraphicsPatches::Init();
         GTA4AudioPatches::Init();
         GTA4SavePatches::Init();
+        
+        // Initialize extended multiplayer (64-player support)
+        PlayerLimitPatches::Init();
+        
+        LOG_INFO("GTA4Patches: Initialized (64-player multiplayer enabled)");
     }
     
     void Update(double deltaTime)
