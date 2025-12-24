@@ -1,6 +1,7 @@
 #include "p2p_manager.h"
-#include "signaling_client.h"
+#include "session_tracker.h"
 #include <os/logger.h>
+#include <user/config.h>
 #include <random>
 #include <algorithm>
 #include <cstring>
@@ -27,9 +28,7 @@ P2PManager& P2PManager::Instance() {
 }
 
 P2PManager::P2PManager() {
-    // Default Firebase config - users should set their own
-    firebaseProjectId_ = "";
-    firebaseApiKey_ = "";
+    // Session tracker will be created on Initialize()
 }
 
 P2PManager::~P2PManager() {
@@ -75,10 +74,22 @@ bool P2PManager::Initialize() {
         "openrelayproject"
     );
     
-    // Initialize Firebase signaling client
-    if (!firebaseProjectId_.empty()) {
-        SignalingClient::Instance().Initialize(firebaseProjectId_, firebaseApiKey_);
+    // Create session tracker based on config
+    sessionTracker_ = CreateSessionTracker();
+    if (!sessionTracker_) {
+        LOG_ERROR("[P2P] Failed to create session tracker");
+        GameNetworkingSockets_Kill();
+        return false;
     }
+    
+    if (!sessionTracker_->Initialize()) {
+        LOG_ERROR("[P2P] Failed to initialize session tracker");
+        sessionTracker_.reset();
+        GameNetworkingSockets_Kill();
+        return false;
+    }
+    
+    LOGF_INFO("[P2P] Using session tracker backend: {}", sessionTracker_->GetBackendName());
     
     initialized_ = true;
     LOG_INFO("[P2P] Initialization complete");
@@ -98,8 +109,11 @@ void P2PManager::Shutdown() {
         LeaveLobby();
     }
     
-    // Shutdown signaling
-    SignalingClient::Instance().Shutdown();
+    // Shutdown session tracker
+    if (sessionTracker_) {
+        sessionTracker_->Shutdown();
+        sessionTracker_.reset();
+    }
     
     // Shutdown GNS
     GameNetworkingSockets_Kill();
@@ -112,9 +126,9 @@ void P2PManager::Shutdown() {
 // Lobby Management
 // ============================================================================
 
-void P2PManager::CreateLobby(const std::string& playerName, uint32_t maxPlayers,
-                              OnLobbyCreatedCallback callback) {
-    if (!initialized_.load()) {
+void P2PManager::CreateLobby(const std::string& playerName, GameMode gameMode, MapArea mapArea,
+                              uint32_t maxPlayers, bool isPrivate, OnLobbyCreatedCallback callback) {
+    if (!initialized_.load() || !sessionTracker_) {
         LOG_ERROR("[P2P] CreateLobby failed: not initialized");
         if (callback) callback(false, "");
         return;
@@ -129,22 +143,20 @@ void P2PManager::CreateLobby(const std::string& playerName, uint32_t maxPlayers,
     lobbyState_ = P2PLobbyState::Creating;
     localPlayerName_ = playerName;
     
-    // Generate unique lobby code
-    std::string lobbyCode = GenerateLobbyCode();
-    
     // Assign ourselves the host virtual IP
     localVirtualIp_ = VIRTUAL_IP_HOST;
     
-    LOGF_INFO("[P2P] Creating lobby with code: {}", lobbyCode);
+    LOGF_INFO("[P2P] Creating lobby (mode: {}, area: {})", 
+              GameModeToString(gameMode), MapAreaToString(mapArea));
     
-    // Create lobby in Firebase
-    SignalingClient::Instance().CreateLobby(lobbyCode, playerName, maxPlayers,
-        [this, callback, lobbyCode](bool success, const std::string& lobbyId) {
+    // Create session via session tracker
+    sessionTracker_->CreateSession(playerName, gameMode, mapArea, maxPlayers, isPrivate,
+        [this, callback, maxPlayers](bool success, const std::string& sessionId, const std::string& lobbyCode) {
             if (success) {
                 currentLobby_.lobbyCode = lobbyCode;
-                currentLobby_.lobbyId = lobbyId;
+                currentLobby_.lobbyId = sessionId;
                 currentLobby_.hostName = localPlayerName_;
-                currentLobby_.maxPlayers = 16;
+                currentLobby_.maxPlayers = maxPlayers;
                 currentLobby_.currentPlayers = 1;
                 currentLobby_.isHost = true;
                 
@@ -163,19 +175,75 @@ void P2PManager::CreateLobby(const std::string& playerName, uint32_t maxPlayers,
                 listenSocket_ = pInterface->CreateListenSocketP2P(0, 0, nullptr);
                 pollGroup_ = pInterface->CreatePollGroup();
                 
-                LOGF_INFO("[P2P] Lobby created successfully: {} ({})", lobbyCode, lobbyId);
+                LOGF_INFO("[P2P] Lobby created successfully: {} (code: {})", sessionId, lobbyCode);
                 if (callback) callback(true, lobbyCode);
             } else {
                 lobbyState_ = P2PLobbyState::Failed;
-                LOG_ERROR("[P2P] Failed to create lobby in Firebase");
+                LOG_ERROR("[P2P] Failed to create lobby");
                 if (callback) callback(false, "");
             }
         });
 }
 
+void P2PManager::QuickMatch(GameMode gameMode, OnLobbyJoinedCallback callback) {
+    if (!initialized_.load() || !sessionTracker_) {
+        if (callback) callback(false, "Not initialized");
+        return;
+    }
+    
+    if (lobbyState_ != P2PLobbyState::None) {
+        if (callback) callback(false, "Already in a lobby");
+        return;
+    }
+    
+    lobbyState_ = P2PLobbyState::Joining;
+    localPlayerName_ = Config::PlayerName.Value;
+    
+    LOGF_INFO("[P2P] Quick match for mode: {}", GameModeToString(gameMode));
+    
+    sessionTracker_->QuickMatch(gameMode,
+        [this, callback](bool success, const std::string& hostPeerId, const std::string& error) {
+            if (success) {
+                localVirtualIp_ = AssignVirtualIp();
+                currentLobby_.isHost = false;
+                lobbyState_ = P2PLobbyState::Joined;
+                
+                // Create poll group and connect to host
+                auto* pInterface = SteamNetworkingSockets();
+                pollGroup_ = pInterface->CreatePollGroup();
+                
+                SteamNetworkingIdentity hostIdentity;
+                hostIdentity.SetGenericString(hostPeerId.c_str());
+                
+                HSteamNetConnection conn = pInterface->ConnectP2P(hostIdentity, 0, 0, nullptr);
+                if (conn != k_HSteamNetConnection_Invalid) {
+                    pInterface->SetConnectionPollGroup(conn,
+                        static_cast<HSteamNetPollGroup>(pollGroup_));
+                }
+                
+                LOG_INFO("[P2P] Quick match successful, connecting to host...");
+                if (callback) callback(true, "");
+            } else {
+                lobbyState_ = P2PLobbyState::Failed;
+                LOGF_ERROR("[P2P] Quick match failed: {}", error);
+                if (callback) callback(false, error);
+            }
+        });
+}
+
+void P2PManager::SearchSessions(const SessionSearchFilter& filter,
+                                 std::function<void(bool, const std::vector<SessionInfo>&)> callback) {
+    if (!initialized_.load() || !sessionTracker_) {
+        if (callback) callback(false, {});
+        return;
+    }
+    
+    sessionTracker_->SearchSessions(filter, callback);
+}
+
 void P2PManager::JoinLobby(const std::string& lobbyCode, const std::string& playerName,
                             OnLobbyJoinedCallback callback) {
-    if (!initialized_.load()) {
+    if (!initialized_.load() || !sessionTracker_) {
         LOG_ERROR("[P2P] JoinLobby failed: not initialized");
         if (callback) callback(false, "Not initialized");
         return;
@@ -192,9 +260,9 @@ void P2PManager::JoinLobby(const std::string& lobbyCode, const std::string& play
     
     LOGF_INFO("[P2P] Joining lobby: {}", lobbyCode);
     
-    // Join lobby via Firebase
-    SignalingClient::Instance().JoinLobby(lobbyCode, playerName,
-        [this, callback, lobbyCode](bool success, const std::string& errorOrHostId) {
+    // Join lobby via session tracker
+    sessionTracker_->JoinByCode(lobbyCode, playerName,
+        [this, callback, lobbyCode](bool success, const std::string& hostPeerId, const std::string& error) {
             if (success) {
                 // Assign ourselves a virtual IP
                 localVirtualIp_ = AssignVirtualIp();
@@ -210,22 +278,22 @@ void P2PManager::JoinLobby(const std::string& lobbyCode, const std::string& play
                 
                 // Connect to the host via signaling
                 SteamNetworkingIdentity hostIdentity;
-                hostIdentity.SetGenericString(errorOrHostId.c_str());
+                hostIdentity.SetGenericString(hostPeerId.c_str());
                 
                 HSteamNetConnection conn = pInterface->ConnectP2P(
                     hostIdentity, 0, 0, nullptr);
                     
                 if (conn != k_HSteamNetConnection_Invalid) {
                     pInterface->SetConnectionPollGroup(conn, 
-                        static_cast<HSteamNetPollGroup>(reinterpret_cast<intptr_t>(pollGroup_)));
+                        static_cast<HSteamNetPollGroup>(pollGroup_));
                 }
                 
-                LOGF_INFO("[P2P] Joined lobby successfully, connecting to host...");
+                LOG_INFO("[P2P] Joined lobby successfully, connecting to host...");
                 if (callback) callback(true, "");
             } else {
                 lobbyState_ = P2PLobbyState::Failed;
-                LOGF_ERROR("[P2P] Failed to join lobby: {}", errorOrHostId);
-                if (callback) callback(false, errorOrHostId);
+                LOGF_ERROR("[P2P] Failed to join lobby: {}", error);
+                if (callback) callback(false, error);
             }
         });
 }
@@ -252,19 +320,21 @@ void P2PManager::LeaveLobby() {
     // Close listen socket if host
     if (listenSocket_) {
         pInterface->CloseListenSocket(
-            static_cast<HSteamListenSocket>(reinterpret_cast<intptr_t>(listenSocket_)));
-        listenSocket_ = nullptr;
+            static_cast<HSteamListenSocket>(listenSocket_));
+        listenSocket_ = 0;
     }
     
     // Destroy poll group
     if (pollGroup_) {
         pInterface->DestroyPollGroup(
-            static_cast<HSteamNetPollGroup>(reinterpret_cast<intptr_t>(pollGroup_)));
-        pollGroup_ = nullptr;
+            static_cast<HSteamNetPollGroup>(pollGroup_));
+        pollGroup_ = 0;
     }
     
-    // Leave Firebase lobby
-    SignalingClient::Instance().LeaveLobby(currentLobby_.lobbyId);
+    // Leave session via tracker
+    if (sessionTracker_) {
+        sessionTracker_->LeaveSession();
+    }
     
     // Reset state
     currentLobby_ = P2PLobbyInfo{};
@@ -367,7 +437,7 @@ int P2PManager::ReceiveFromPeer(uint32_t* outPeerId, void* buffer, size_t buffer
     
     ISteamNetworkingMessage* pMsg = nullptr;
     int numMsgs = pInterface->ReceiveMessagesOnPollGroup(
-        static_cast<HSteamNetPollGroup>(reinterpret_cast<intptr_t>(pollGroup_)),
+        static_cast<HSteamNetPollGroup>(pollGroup_),
         &pMsg, 1);
     
     if (numMsgs <= 0 || !pMsg) {
@@ -401,8 +471,10 @@ void P2PManager::Poll() {
         return;
     }
     
-    // Process signaling messages
-    SignalingClient::Instance().Poll();
+    // Process session tracker events
+    if (sessionTracker_) {
+        sessionTracker_->Poll();
+    }
     
     // Process GNS callbacks
     auto* pInterface = SteamNetworkingSockets();
@@ -418,7 +490,7 @@ void P2PManager::Poll() {
         while (true) {
             SteamNetworkingIPAddr clientAddr;
             HSteamNetConnection conn = pInterface->AcceptConnection(
-                static_cast<HSteamListenSocket>(reinterpret_cast<intptr_t>(listenSocket_)));
+                static_cast<HSteamListenSocket>(listenSocket_));
             
             if (conn == k_HSteamNetConnection_Invalid) {
                 break;
@@ -426,7 +498,7 @@ void P2PManager::Poll() {
             
             // Add to poll group
             pInterface->SetConnectionPollGroup(conn,
-                static_cast<HSteamNetPollGroup>(reinterpret_cast<intptr_t>(pollGroup_)));
+                static_cast<HSteamNetPollGroup>(pollGroup_));
             
             // Assign virtual IP to new peer
             uint32_t peerVirtualIp = AssignVirtualIp();
@@ -459,13 +531,11 @@ void P2PManager::Poll() {
 // Configuration
 // ============================================================================
 
-void P2PManager::SetFirebaseConfig(const std::string& projectId, const std::string& apiKey) {
-    firebaseProjectId_ = projectId;
-    firebaseApiKey_ = apiKey;
-    
-    if (initialized_.load()) {
-        SignalingClient::Instance().Initialize(projectId, apiKey);
+const char* P2PManager::GetBackendName() const {
+    if (sessionTracker_) {
+        return sessionTracker_->GetBackendName();
     }
+    return "Not initialized";
 }
 
 std::vector<std::string> P2PManager::GetIceServers() {

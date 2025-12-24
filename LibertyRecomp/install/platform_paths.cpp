@@ -81,11 +81,6 @@ namespace PlatformPaths
         return GetInstallDirectory() / "shader_cache";
     }
     
-    std::filesystem::path GetSavesDirectory()
-    {
-        return GetInstallDirectory() / "saves";
-    }
-    
     std::filesystem::path GetTempDirectory()
     {
         return GetInstallDirectory() / "temp";
@@ -107,7 +102,6 @@ namespace PlatformPaths
         std::filesystem::create_directories(GetInstallDirectory(), ec);
         std::filesystem::create_directories(GetGameDirectory(), ec);
         std::filesystem::create_directories(GetShaderCacheDirectory(), ec);
-        std::filesystem::create_directories(GetSavesDirectory(), ec);
         std::filesystem::create_directories(GetTempDirectory(), ec);
         std::filesystem::create_directories(GetExtractedRpfDirectory(), ec);
     }

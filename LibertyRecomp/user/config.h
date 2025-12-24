@@ -165,6 +165,13 @@ enum class EPlayerCharacter : uint32_t
     Knuckles
 };
 
+enum class EMultiplayerBackend : uint32_t
+{
+    Community,  // Default - uses community-hosted session tracker
+    Firebase,   // Self-hosted Firebase for private communities
+    LAN         // LAN only - no internet matchmaking
+};
+
 template<typename T, bool isHidden = false>
 class ConfigDef final : public IConfigDef
 {

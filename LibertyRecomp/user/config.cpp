@@ -385,6 +385,13 @@ CONFIG_DEFINE_ENUM_TEMPLATE(EUIAlignmentMode)
     { "Center",  EUIAlignmentMode::Centre }
 };
 
+CONFIG_DEFINE_ENUM_TEMPLATE(EMultiplayerBackend)
+{
+    { "Community", EMultiplayerBackend::Community },
+    { "Firebase",  EMultiplayerBackend::Firebase },
+    { "LAN",       EMultiplayerBackend::LAN }
+};
+
 #undef  CONFIG_DEFINE
 #define CONFIG_DEFINE(section, type, name, defaultValue, requiresRestart) \
     ConfigDef<type> Config::name{section, #name, defaultValue, requiresRestart};

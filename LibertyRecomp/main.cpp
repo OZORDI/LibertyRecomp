@@ -241,7 +241,7 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
         //   [5] = Buffer end/limit
         //   [6] = Buffer capacity
         be<uint32_t>* streamPtr = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(0x82003890));
-        streamPtr[0] = 0x82A80A24;  // Valid object pointer (heap-backed)
+        streamPtr[0] = 0;  // Null object - stream ops will return early gracefully
         streamPtr[1] = 0;           // Context (null is safe)
         streamPtr[2] = 0;           // Buffer (null = no buffer)
         streamPtr[3] = 0;           // File position

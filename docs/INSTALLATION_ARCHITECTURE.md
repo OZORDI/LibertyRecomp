@@ -117,9 +117,19 @@ This document describes the comprehensive installation flow that handles:
 │     ├── Linux: HLSL → SPIR-V (DXC)                                     │
 │     └── macOS: HLSL → AIR (Metal compiler)                             │
 │                                                                         │
-│  10. FINALIZE                                                           │
+│  10. MULTIPLAYER SETUP (Optional)                                       │
+│      User selects multiplayer backend:                                 │
+│      ├── Community Server (Recommended)                                │
+│      │   └── Works out of box, no config needed                        │
+│      ├── Firebase (Self-Hosted)                                        │
+│      │   └── User provides project ID and API key                      │
+│      └── LAN Only                                                      │
+│          └── No internet matchmaking, local network only               │
+│                                                                         │
+│  11. FINALIZE                                                           │
 │      ├── Write shader_cache.marker                                     │
 │      ├── Save installed TU version to config                           │
+│      ├── Save multiplayer backend choice to config                     │
 │      ├── Clean up temp files                                           │
 │      └── Signal completion                                             │
 │                                                                         │
@@ -381,6 +391,91 @@ See [SHADER_PIPELINE.md](SHADER_PIPELINE.md) for detailed shader conversion docu
 - Shader conversion is non-fatal
 - Game can fall back to runtime compilation
 - Check logs for specific shader errors
+
+---
+
+## Multiplayer Backend System
+
+Liberty Recomp supports three multiplayer backends, selectable during installation:
+
+### Community Server (Default)
+
+The recommended option for most users. Uses a community-hosted REST API for Xbox Live-style matchmaking.
+
+**Features:**
+- Works out of the box, no configuration needed
+- Full Quick Match / Custom Match support
+- Session browsing with filters (game mode, map area)
+- Lobby codes for private sessions
+
+**Config:**
+```toml
+[Multiplayer]
+MultiplayerBackend = "Community"
+# CommunityServerURL = "https://liberty-sessions.libertyrecomp.com"  # Hidden, uses default
+```
+
+### Firebase (Self-Hosted)
+
+For private communities who want to run their own matchmaking server.
+
+**Setup:**
+1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
+2. Enable Realtime Database
+3. Copy Project ID and Web API Key
+4. Enter credentials during installation or in config
+
+**Config:**
+```toml
+[Multiplayer]
+MultiplayerBackend = "Firebase"
+FirebaseProjectId = "your-project-id"
+FirebaseApiKey = "AIzaSy..."
+```
+
+### LAN Only
+
+For offline/local network play without internet matchmaking.
+
+**Features:**
+- UDP broadcast discovery on local network
+- No internet connection required
+- Automatic session discovery
+- Works behind any firewall
+
+**Config:**
+```toml
+[Multiplayer]
+MultiplayerBackend = "LAN"
+# LANBroadcastPort = 3074  # Hidden, uses default
+```
+
+### Session Tracker Components
+
+```
+LibertyRecomp/kernel/io/
+├── session_tracker.h              # ISessionTracker interface
+├── session_tracker.cpp            # Factory and utilities
+├── session_tracker_community.cpp  # Community server backend
+├── session_tracker_firebase.cpp   # Firebase backend
+└── session_tracker_lan.cpp        # LAN broadcast backend
+```
+
+### GTA IV Game Modes Supported
+
+| Mode | Description |
+|------|-------------|
+| Free Mode | Open world sandbox |
+| Deathmatch | Free-for-all combat |
+| Team Deathmatch | Team-based combat |
+| Mafiya Work | Complete jobs for Petrovic |
+| Car Jack City | Steal and deliver vehicles |
+| Race / GTA Race | Vehicle racing |
+| Cops 'n' Crooks | Asymmetric cops vs criminals |
+| Turf War | Territory control |
+| Hangman's NOOSE | Cooperative extraction |
+| Deal Breaker | Cooperative mission |
+| Bomb Da Base II | Cooperative mission |
 
 ---
 

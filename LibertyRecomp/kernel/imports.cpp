@@ -47,6 +47,46 @@
 #endif
 
 // =============================================================================
+// COMPREHENSIVE SEMAPHORE FIX - Following UnleashedRecomp Pattern
+// =============================================================================
+// Problem: Worker threads wait on semaphores that are never signaled, causing deadlocks.
+// 
+// Root cause: The game's init sequence creates worker threads that wait on semaphores,
+// but the code that should signal those semaphores either:
+// 1. Never runs (bypassed functions)
+// 2. Runs in wrong order (race conditions)
+// 3. Depends on hardware that doesn't exist on PC
+//
+// Solution: Track all blocking semaphores (count=0 at init) and provide:
+// 1. Timeout-based fallback to prevent infinite waits
+// 2. Signaling mechanism after init completes
+// 3. Proper synchronization that matches reference projects
+// =============================================================================
+
+// Forward declarations - actual tracking functions defined after Semaphore struct
+static std::mutex g_semaphoreTrackMutex;
+static std::unordered_set<uint32_t> g_blockingSemaphoreAddrs;  // Guest addresses of blocking semaphores
+static std::atomic<bool> g_initComplete{false};
+static std::atomic<int> g_semaphoreWaitCount{0};
+
+// Track a semaphore address that was initialized with count=0
+void TrackBlockingSemaphoreAddr(uint32_t addr) {
+    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
+    g_blockingSemaphoreAddrs.insert(addr);
+}
+
+bool IsBlockingSemaphore(uint32_t addr) {
+    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
+    return g_blockingSemaphoreAddrs.count(addr) > 0;
+}
+
+bool IsInitComplete() {
+    return g_initComplete.load();
+}
+
+// SetInitComplete and SignalAllBlockingSemaphores defined after Semaphore struct
+
+// =============================================================================
 // SDL Event Pumping Helper
 // =============================================================================
 // This is called from kernel functions that are invoked frequently during
@@ -1506,6 +1546,62 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
         count.notify_all();
     }
 };
+
+// =============================================================================
+// SEMAPHORE SIGNALING FUNCTIONS (defined after Semaphore struct)
+// =============================================================================
+
+// Signal all tracked blocking semaphores - called after init completes
+void SignalAllBlockingSemaphores() {
+    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
+    for (uint32_t addr : g_blockingSemaphoreAddrs) {
+        XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(addr));
+        if (semaphore && semaphore->Header.Type == 5) {
+            auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+            if (object && object->count.load() == 0) {
+                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked semaphore 0x{:08X}", addr);
+                object->Release(1, nullptr);  // Release with count 1 to unblock one waiter
+            }
+        }
+    }
+}
+
+// Mark init as complete and signal blocked semaphores
+void SetInitComplete() {
+    if (!g_initComplete.exchange(true)) {
+        LOGF_WARNING("[SEMAPHORE_FIX] Init complete - signaling {} blocked semaphores", 
+                     g_blockingSemaphoreAddrs.size());
+        SignalAllBlockingSemaphores();
+    }
+}
+
+// Timeout-based wait for semaphores during init - prevents infinite blocking
+// Returns true if semaphore was acquired, false if timeout
+bool TryWaitSemaphoreWithTimeout(uint32_t semAddr, uint32_t timeoutMs) {
+    XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(semAddr));
+    if (!semaphore || semaphore->Header.Type != 5) return false;
+    
+    auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+    if (!object) return false;
+    
+    auto startTime = std::chrono::steady_clock::now();
+    while (true) {
+        uint32_t currentCount = object->count.load();
+        if (currentCount != 0) {
+            if (object->count.compare_exchange_weak(currentCount, currentCount - 1)) {
+                return true;  // Successfully acquired
+            }
+        }
+        
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= timeoutMs) {
+            return false;  // Timeout
+        }
+        
+        // Brief sleep before retry
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
 
 inline void CloseKernelObject(XDISPATCHER_HEADER& header)
 {
@@ -5169,9 +5265,13 @@ void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limi
 
     auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
     
-    // Log semaphore initialization to trace blocking semaphores
+    // Track semaphores initialized with count=0 (will block immediately)
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
-    if (s_count <= 30 || (semAddr >= 0xEB2D0000 && semAddr <= 0xEB2E0000)) {
+    if (count == 0) {
+        TrackBlockingSemaphoreAddr(semAddr);
+        LOGF_WARNING("[KeInitializeSemaphore] #{} BLOCKING sem=0x{:08X} count=0 limit={} - TRACKED", 
+                     s_count, semAddr, limit);
+    } else if (s_count <= 30) {
         LOGF_WARNING("[KeInitializeSemaphore] #{} sem=0x{:08X} count={} limit={} object={}", 
                      s_count, semAddr, count, limit, object ? "OK" : "NULL");
     }
@@ -6388,6 +6488,12 @@ PPC_FUNC(sub_82120000)
     // Cache the result
     g_initResult.store(ctx.r3.s32);
     
+    // Mark init complete when sub_82120000 returns success (1)
+    // This signals all blocked worker semaphores
+    if (ctx.r3.s32 == 1) {
+        SetInitComplete();
+    }
+    
     LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
 }
 
@@ -6783,6 +6889,26 @@ PPC_FUNC(sub_827EA150) {
 extern "C" void __imp__sub_8221F8A8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82273988(PPCContext& ctx, uint8_t* base);
 
+// =============================================================================
+// sub_821DB1E0 - Config File Parser (causes PAC crash)
+// =============================================================================
+// This function parses Xbox 360 config files and accesses vtables that are
+// uninitialized on PC. Attempting to call through garbage vtable pointers
+// causes PAC authentication failures (crash at 0xd73f0b51f2e09f11).
+// SOLUTION: Bypass and return 0 (success/null result)
+// =============================================================================
+extern "C" void __imp__sub_821DB1E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821DB1E0) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 5) {
+        LOG_WARNING("[INIT] sub_821DB1E0 BYPASSED - config parser that causes vtable PAC crash");
+    }
+    
+    // Return 0 to indicate no result/success
+    ctx.r3.u32 = 0;
+}
+
 PPC_FUNC(sub_821DE390) {
     static int s_count = 0; ++s_count;
     LOGF_WARNING("[INIT] sub_821DE390 ENTER #{}", s_count);
@@ -7096,16 +7222,54 @@ PPC_FUNC(sub_827DACD8) {
     static int s_count = 0; ++s_count;
     uint32_t semHandle = ctx.r3.u32;
     
-    // Log ALL semaphore waits for first 50 calls to trace init flow
-    if (s_count <= 50) {
-        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ENTERING wait on semaphore 0x{:08X} (LR=0x{:08X})", 
-                     s_count, semHandle, (uint32_t)ctx.lr);
+    // Skip null handles
+    if (semHandle == 0) {
+        ctx.r3.u32 = 1;  // Return success for null
+        return;
     }
     
-    __imp__sub_827DACD8(ctx, base);
+    // Check if this is a tracked blocking semaphore
+    bool isBlocking = IsBlockingSemaphore(semHandle);
     
-    if (s_count <= 50) {
-        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} PASSED wait on semaphore 0x{:08X}", s_count, semHandle);
+    if (s_count <= 50 || isBlocking) {
+        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ENTERING wait on semaphore 0x{:08X} (LR=0x{:08X}) blocking={}", 
+                     s_count, semHandle, (uint32_t)ctx.lr, isBlocking);
+    }
+    
+    // For blocking semaphores during init, use timeout-based approach
+    if (isBlocking && !IsInitComplete()) {
+        // Try to acquire with timeout to prevent infinite blocking
+        constexpr uint32_t INIT_TIMEOUT_MS = 100;  // 100ms timeout during init
+        
+        if (TryWaitSemaphoreWithTimeout(semHandle, INIT_TIMEOUT_MS)) {
+            LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ACQUIRED semaphore 0x{:08X} within timeout", 
+                         s_count, semHandle);
+            ctx.r3.u32 = 1;  // Return success
+        } else {
+            // Timeout - signal the semaphore ourselves and acquire
+            LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} TIMEOUT on semaphore 0x{:08X} - auto-signaling", 
+                         s_count, semHandle);
+            
+            // Signal the semaphore to unblock
+            XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(semHandle));
+            if (semaphore && semaphore->Header.Type == 5) {
+                auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
+                if (object) {
+                    object->Release(1, nullptr);  // Release to unblock
+                }
+            }
+            
+            // Now call original which should succeed
+            __imp__sub_827DACD8(ctx, base);
+        }
+    } else {
+        // Normal path - call original implementation
+        __imp__sub_827DACD8(ctx, base);
+    }
+    
+    if (s_count <= 50 || isBlocking) {
+        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} PASSED wait on semaphore 0x{:08X} r3={}", 
+                     s_count, semHandle, ctx.r3.u32);
     }
 }
 
@@ -7119,11 +7283,7 @@ PPC_FUNC(sub_827DE858) {
     LOGF_WARNING("[RENDER WORKER] sub_827DE858 EXIT #{}", s_count);
 }
 
-// Helper to mark init complete - called when sub_82673718 exits
-void MarkInitComplete() {
-    // This will be called from sub_82673718 hook when it exits
-    extern void SetInitComplete();
-}
+// MarkInitComplete is now deprecated - use SetInitComplete() directly
 
 PPC_FUNC(sub_827DADB0) {
     static int s_count = 0; ++s_count;
@@ -9211,16 +9371,48 @@ PPC_FUNC(sub_82124080)
     ++s_count;
     LOGF_WARNING("[INIT] sub_82124080 ENTER #{} r3={} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
     
-    // BYPASS: sub_82124080 (Profile/Save Init) blocks on XContent APIs and XAM tasks
-    // This prevents sub_82120FB8 from being called, which blocks the entire init chain
-    // Skip this function to allow initialization to continue
-    // Profile/save functionality can be implemented later via VFS
-    LOG_WARNING("[INIT] sub_82124080 BYPASSED - skipping profile/save init to unblock init chain");
+    // BYPASS: sub_82124080 (Profile/Save Init) blocks on semaphore waits in sub_82192E00
+    // The function calls sub_827DACD8 (KeWaitForSingleObject) with timeout=-1 which never returns
+    // because worker threads that would signal are also blocked waiting for main thread.
+    // 
+    // Skip the original function and write minimal global state the game expects:
+    // - 0x83137BB7: Profile init flag (1 = initialized)
+    // - 0x83137BC0: Profile data (0 = cleared)
+    // - 0x83137BC4: State flags (0 = cleared)
+    // - 0x83137BC8: Profile state byte (0 = cleared)
+    // - 0x830639AC: Save system flag (1 = enabled)
+    // - 0x83137BCB: Ready flag (1 = ready)
+    //
+    // Profile/save functionality can be reimplemented later via XContent hooks in save_hooks.cpp
     
-    // Return success without calling original implementation
-    ctx.r3.u32 = 0;  // Success
+    LOG_WARNING("[INIT] sub_82124080 BYPASSED - skipping profile/save init to unblock semaphore deadlock");
     
-    LOGF_WARNING("[INIT] sub_82124080 EXIT #{} (bypassed)", s_count);
+    // Write minimal expected global state (from REWRITE_PLAYBOOK.md section 23.5)
+    PPC_STORE_U8(0x83137BB7, 1);    // Mark profile init complete
+    PPC_STORE_U32(0x83137BC0, 0);   // Clear profile data
+    PPC_STORE_U32(0x83137BC4, 0);   // Clear state flags
+    PPC_STORE_U8(0x83137BC8, 0);    // Clear profile state
+    PPC_STORE_U8(0x830639AC, 1);    // Enable save system
+    PPC_STORE_U8(0x83137BCB, 1);    // Set ready flag
+    
+    ctx.r3.u32 = 0;  // Return success
+    
+    LOGF_WARNING("[INIT] sub_82124080 EXIT #{} r3={} (bypassed)", s_count, ctx.r3.u32);
+}
+
+// Hook sub_82120FB8 - Main Game Setup (63-subsystem init)
+// This is the massive initialization function that sets up all game systems
+PPC_FUNC(sub_82120FB8)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_82120FB8 ENTER #{} thread=0x{:04X} - 63-subsystem init starting", s_count, threadId);
+    
+    __imp__sub_82120FB8(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{} thread=0x{:04X} r3={} - 63-subsystem init complete", s_count, threadId, ctx.r3.u32);
 }
 
 // Hook sub_8218BEB0 - Calls sub_82120000, returns -1 on failure
@@ -9352,7 +9544,7 @@ static void RepairCorruptedStream(uint32_t streamPtr)
 {
     static int s_repairCount = 0;
     be<uint32_t>* stream = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(streamPtr));
-    stream[0] = 0x82A80A24;  // Valid object pointer
+    stream[0] = 0;  // Null object - indicates stream not initialized
     stream[1] = 0;
     stream[2] = 0;
     stream[3] = 0;
@@ -9400,7 +9592,7 @@ PPC_FUNC(sub_827E8420)
             (objectPtr < 0x80000000 && objectPtr != 0))
         {
             RepairCorruptedStream(streamPtr);
-            objectPtr = 0x82A80A24;  // Use the repaired value
+            objectPtr = 0;  // Use null (validation already handles this)
         }
     }
     

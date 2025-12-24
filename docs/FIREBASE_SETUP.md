@@ -1,111 +1,282 @@
-# Firebase Setup Guide for Liberty Recomp Multiplayer
+# Liberty Recomp - Multiplayer Backend Setup (Developer Guide)
 
-This guide walks you through setting up Firebase Realtime Database for online multiplayer signaling in Liberty Recompiled.
+This guide is for **developers** setting up the multiplayer backend infrastructure for Liberty Recomp.
 
 ## Overview
 
-Liberty Recomp uses **Firebase Realtime Database** as a signaling server for peer-to-peer multiplayer. Firebase handles:
-- **Lobby creation and discovery** - Players create/join lobbies with 6-character codes
-- **ICE candidate exchange** - WebRTC connection negotiation
-- **Player presence** - Tracking who's in each lobby
+Liberty Recomp supports three multiplayer backends:
 
-**Cost**: Firebase's free tier (Spark plan) is sufficient for small-to-medium player bases:
-- 1 GB storage
-- 10 GB/month download
-- 100 simultaneous connections
+| Backend | Use Case | Setup Required |
+|---------|----------|----------------|
+| **Community Server** | Default for all players | Deploy REST API |
+| **Firebase** | Private communities | Firebase project |
+| **LAN** | Local network play | None (built-in) |
 
 ---
 
-## Step 1: Create a Firebase Project
+## Community Server Setup (Default Backend)
+
+The community server is a simple REST API that handles session tracking for all players using the default configuration.
+
+### API Specification
+
+The community server must implement these endpoints:
+
+#### `POST /api/sessions` - Create Session
+```json
+// Request
+{
+  "hostPeerId": "peer_abc123...",
+  "hostName": "PlayerOne",
+  "gameMode": 0,
+  "mapArea": 0,
+  "maxPlayers": 16,
+  "currentPlayers": 1,
+  "isPrivate": false,
+  "lobbyCode": ""
+}
+
+// Response
+{
+  "sessionId": "session_xyz789...",
+  "lobbyCode": "ABC123"
+}
+```
+
+#### `GET /api/sessions` - List/Search Sessions
+```
+GET /api/sessions?gameMode=0&mapArea=0&notFull=true&public=true&limit=20
+```
+```json
+// Response
+[
+  {
+    "sessionId": "session_xyz789...",
+    "hostPeerId": "peer_abc123...",
+    "hostName": "PlayerOne",
+    "gameMode": 0,
+    "mapArea": 0,
+    "maxPlayers": 16,
+    "currentPlayers": 3,
+    "isPrivate": false,
+    "lobbyCode": ""
+  }
+]
+```
+
+#### `GET /api/sessions?lobbyCode=ABC123` - Find by Code
+```json
+// Response
+{
+  "sessionId": "session_xyz789...",
+  "hostPeerId": "peer_abc123...",
+  ...
+}
+```
+
+#### `POST /api/sessions/{sessionId}/join` - Join Session
+```json
+// Request
+{
+  "peerId": "peer_def456...",
+  "playerName": "PlayerTwo"
+}
+
+// Response
+{
+  "hostPeerId": "peer_abc123..."
+}
+```
+
+#### `POST /api/sessions/{sessionId}/leave` - Leave Session
+```json
+// Request
+{
+  "peerId": "peer_def456..."
+}
+```
+
+#### `PUT /api/sessions/{sessionId}` - Update Session
+```json
+// Request
+{
+  "currentPlayers": 4
+}
+```
+
+#### `POST /api/sessions/{sessionId}/heartbeat` - Keep Alive
+```json
+// Request
+{}
+```
+
+#### `DELETE /api/sessions/{sessionId}` - Close Session
+
+### Game Mode Values
+
+| Value | Mode |
+|-------|------|
+| 0 | Free Mode |
+| 1 | Deathmatch |
+| 2 | Team Deathmatch |
+| 3 | Mafiya Work |
+| 4 | Team Mafiya Work |
+| 5 | Car Jack City |
+| 6 | Team Car Jack City |
+| 7 | Race |
+| 8 | GTA Race |
+| 9 | Cops 'n' Crooks |
+| 10 | Turf War |
+| 11 | Deal Breaker |
+| 12 | Hangman's NOOSE |
+| 13 | Bomb Da Base II |
+| 14 | Party Mode |
+
+### Map Area Values
+
+| Value | Area |
+|-------|------|
+| 0 | All of Liberty City |
+| 1 | Broker |
+| 2 | Dukes |
+| 3 | Bohan |
+| 4 | Algonquin |
+| 5 | Alderney |
+
+### Deployment Options
+
+#### Option 1: Cloudflare Workers (Free Tier)
+```javascript
+// worker.js - Example implementation
+const sessions = new Map();
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    
+    if (request.method === 'POST' && path === '/api/sessions') {
+      const body = await request.json();
+      const sessionId = crypto.randomUUID();
+      const lobbyCode = generateLobbyCode();
+      
+      sessions.set(sessionId, {
+        ...body,
+        sessionId,
+        lobbyCode: body.isPrivate ? lobbyCode : '',
+        createdAt: Date.now(),
+        lastHeartbeat: Date.now()
+      });
+      
+      return Response.json({ sessionId, lobbyCode });
+    }
+    
+    // ... implement other endpoints
+  }
+};
+
+function generateLobbyCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+```
+
+#### Option 2: Supabase (Free Tier)
+- Create a Supabase project
+- Create `sessions` table with columns matching the API spec
+- Use Supabase REST API or Edge Functions
+
+#### Option 3: Self-Hosted (Node.js/Express)
+```javascript
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+const sessions = new Map();
+
+app.post('/api/sessions', (req, res) => {
+  // Implementation
+});
+
+// ... other endpoints
+
+app.listen(3000);
+```
+
+### Session Cleanup
+
+Sessions should be cleaned up after inactivity. Recommended:
+- Delete sessions with no heartbeat for 60 seconds
+- Run cleanup every 30 seconds
+
+```javascript
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of sessions) {
+    if (now - session.lastHeartbeat > 60000) {
+      sessions.delete(id);
+    }
+  }
+}, 30000);
+```
+
+### Default Server URL
+
+The client defaults to:
+```
+https://liberty-sessions.libertyrecomp.com
+```
+
+Update `CommunityServerURL` in config to use a different server.
+
+---
+
+## Firebase Setup (Alternative Backend)
+
+For private communities who want their own matchmaking server.
+
+### Step 1: Create Firebase Project
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Click **"Create a project"**
+3. Enter a project name (e.g., `my-gta4-server`)
+4. **Disable Google Analytics** (not needed)
+5. Click **"Create project"**
 
-2. Click **"Create a project"** (or "Add project")
+### Step 2: Create Realtime Database
 
-3. Enter a project name (e.g., `libertyrecomp-multiplayer`)
-
-4. **Disable Google Analytics** (not needed for multiplayer)
-
-5. Click **"Create project"** and wait for it to finish
-
----
-
-## Step 2: Create Realtime Database
-
-1. In your Firebase project, go to **Build → Realtime Database**
-
+1. Go to **Build → Realtime Database**
 2. Click **"Create Database"**
-
-3. Choose a location closest to your players:
-   - `us-central1` - United States
-   - `europe-west1` - Belgium
-   - `asia-southeast1` - Singapore
-
-4. Start in **"Test mode"** (we'll secure it later)
-
+3. Choose a location closest to your players
+4. Start in **"Test mode"**
 5. Click **"Enable"**
 
-Your database URL will look like:
-```
-https://your-project-id-default-rtdb.firebaseio.com/
-```
+### Step 3: Get Credentials
 
----
+1. Go to **Project Settings** (gear icon)
+2. Under **"Your apps"**, click **Web** (</> icon)
+3. Register an app
+4. Copy `apiKey` and `projectId`
 
-## Step 3: Get Your Project Credentials
+### Step 4: Configure Security Rules
 
-1. Go to **Project Settings** (gear icon → Project settings)
-
-2. Under **"Your apps"**, click **"Add app"** → **Web** (</> icon)
-
-3. Enter an app nickname (e.g., `LibertyRecomp`)
-
-4. **Don't** check "Firebase Hosting"
-
-5. Click **"Register app"**
-
-6. Copy these values from the config shown:
-   ```javascript
-   const firebaseConfig = {
-     apiKey: "AIzaSy...",           // ← Copy this
-     projectId: "your-project-id",   // ← Copy this
-     databaseURL: "https://your-project-id-default-rtdb.firebaseio.com",
-   };
-   ```
-
----
-
-## Step 4: Configure Security Rules
-
-1. Go to **Realtime Database → Rules**
-
-2. Replace the default rules with:
+Go to **Realtime Database → Rules** and set:
 
 ```json
 {
   "rules": {
-    "lobbies": {
-      "$lobbyCode": {
-        // Anyone can read lobby info
+    "sessions": {
+      "$sessionId": {
         ".read": true,
-        
-        // Only allow creating new lobbies (not overwriting)
-        ".write": "!data.exists() || auth != null",
-        
+        ".write": true,
         "players": {
           "$peerId": {
-            // Players can add/remove themselves
             ".write": true
           }
-        },
-        
-        "signaling": {
-          // Anyone in the lobby can send/receive signaling
-          ".read": true,
-          ".write": true,
-          
-          // Auto-delete old messages after 1 hour
-          ".indexOn": ["timestamp"]
         }
       }
     }
@@ -113,179 +284,99 @@ https://your-project-id-default-rtdb.firebaseio.com/
 }
 ```
 
-3. Click **"Publish"**
+### Step 5: Configure Client
 
----
-
-## Step 5: Configure Liberty Recomp
-
-### Option A: Config File (Recommended)
-
-Create or edit `config.toml` in your Liberty Recomp data directory:
-
-**Windows:** `%LOCALAPPDATA%\LibertyRecomp\config.toml`
-**macOS:** `~/Library/Application Support/LibertyRecomp/config.toml`
-**Linux:** `~/.local/share/LibertyRecomp/config.toml`
-
-Add these lines:
+Players using your Firebase server need this config:
 
 ```toml
-[multiplayer]
-firebase_project_id = "your-project-id"
-firebase_api_key = "AIzaSy..."
+[Multiplayer]
+MultiplayerBackend = "Firebase"
+FirebaseProjectId = "your-project-id"
+FirebaseApiKey = "AIzaSy..."
 ```
 
-### Option B: Environment Variables
+### Firebase Free Tier Limits
 
-Set these environment variables before launching:
+- 1 GB storage
+- 10 GB/month download
+- 100 simultaneous connections
 
-```bash
-export LIBERTY_FIREBASE_PROJECT_ID="your-project-id"
-export LIBERTY_FIREBASE_API_KEY="AIzaSy..."
-```
+Sufficient for small-to-medium communities.
 
 ---
 
-## Step 6: Test Your Setup
+## LAN Backend
 
-1. Launch Liberty Recomp
+No setup required. Built into the client.
 
-2. Start a multiplayer game - it will automatically create a lobby
+Uses UDP broadcast on port 3074 (configurable) for local network discovery.
 
-3. Check Firebase Console → Realtime Database → Data
-   - You should see a new entry under `/lobbies/`
-
-4. Have a friend join using your lobby code
-
----
-
-## Troubleshooting
-
-### "Failed to create lobby"
-
-- **Check project ID**: Must match exactly (case-sensitive)
-- **Check API key**: Copy the full key including `AIzaSy...`
-- **Check database URL**: Should end in `.firebaseio.com`
-- **Check rules**: Make sure you published the security rules
-
-### "Lobby not found"
-
-- **Check the code**: Lobby codes are 6 characters, all uppercase
-- **Lobby expired**: Lobbies auto-delete after 1 hour of inactivity
-
-### Connection Issues
-
-The P2P connection uses:
-- **STUN**: Google's free STUN servers for NAT traversal
-- **TURN**: OpenRelay's free TURN servers as fallback
-
-If you're behind a very restrictive NAT (like carrier-grade NAT), connections may fail. Solutions:
-1. Try a different network (e.g., mobile hotspot)
-2. Use a VPN
-3. Host your own TURN server (advanced)
-
----
-
-## Database Structure
-
-For reference, here's the Firebase data structure:
-
-```
-/lobbies/
-  /{lobbyCode}/
-    hostId: "peer_abc123..."
-    hostName: "PlayerOne"
-    maxPlayers: 16
-    createdAt: 1703376000000
-    /players/
-      /peer_abc123.../
-        name: "PlayerOne"
-        joinedAt: 1703376000000
-      /peer_def456.../
-        name: "PlayerTwo"
-        joinedAt: 1703376030000
-    /signaling/
-      /{messageId}/
-        type: 0
-        from: "peer_abc123..."
-        to: "peer_def456..."
-        payload: "{...}"
-        timestamp: 1703376031000
+```toml
+[Multiplayer]
+MultiplayerBackend = "LAN"
+LANBroadcastPort = 3074
 ```
 
 ---
 
-## Cost Optimization
+## Testing
 
-To stay within Firebase's free tier:
+### Test Community Server Locally
 
-1. **Auto-delete old lobbies**: Add a Cloud Function or scheduled job to delete lobbies older than 1 hour
+1. Run your server on `localhost:3000`
+2. Set config:
+   ```toml
+   [Multiplayer]
+   MultiplayerBackend = "Community"
+   CommunityServerURL = "http://localhost:3000"
+   ```
+3. Launch two instances of Liberty Recomp
+4. Create session on one, join on other
 
-2. **Limit signaling messages**: The code already limits polling to 500ms intervals
+### Test Firebase
 
-3. **Monitor usage**: Check Firebase Console → Usage for your current consumption
+1. Set up Firebase project
+2. Configure credentials in config
+3. Check Firebase Console → Realtime Database → Data for session entries
 
-### Optional: Auto-Cleanup Cloud Function
+### Test LAN
 
-Deploy this Cloud Function to auto-delete old lobbies:
-
-```javascript
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-admin.initializeApp();
-
-exports.cleanupLobbies = functions.pubsub
-  .schedule('every 1 hours')
-  .onRun(async (context) => {
-    const db = admin.database();
-    const now = Date.now();
-    const oneHourAgo = now - (60 * 60 * 1000);
-    
-    const snapshot = await db.ref('lobbies').once('value');
-    const updates = {};
-    
-    snapshot.forEach((lobby) => {
-      const createdAt = lobby.child('createdAt').val();
-      if (createdAt && createdAt < oneHourAgo) {
-        updates[lobby.key] = null;
-      }
-    });
-    
-    if (Object.keys(updates).length > 0) {
-      await db.ref('lobbies').update(updates);
-      console.log(`Deleted ${Object.keys(updates).length} old lobbies`);
-    }
-    
-    return null;
-  });
-```
+1. Set both clients to LAN mode
+2. Ensure both are on same network
+3. Create session on one, search on other
 
 ---
 
-## Security Best Practices
+## Monitoring
 
-1. **Never share your API key publicly** - It's okay in your app, but don't post it on GitHub
+### Community Server Metrics
 
-2. **Enable App Check** (optional) - Prevents abuse from non-app clients
+Track these for production:
+- Active sessions count
+- Sessions created/hour
+- Average session duration
+- API response times
 
-3. **Monitor for abuse** - Check Firebase Console → Usage regularly
+### Firebase Monitoring
 
-4. **Rate limit** (advanced) - Add security rules to limit writes per user
+Use Firebase Console → Usage to monitor:
+- Database reads/writes
+- Bandwidth usage
+- Concurrent connections
+
+---
+
+## Security Considerations
+
+1. **Rate limiting** - Prevent session spam
+2. **Input validation** - Sanitize all inputs
+3. **HTTPS only** - Never run production over HTTP
+4. **CORS** - Configure appropriately for your domain
 
 ---
 
 ## Resources
 
-- [Firebase Realtime Database Docs](https://firebase.google.com/docs/database)
-- [Firebase Security Rules](https://firebase.google.com/docs/database/security)
-- [Firebase Pricing](https://firebase.google.com/pricing)
-- [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets)
-
----
-
-## Need Help?
-
-If you're having trouble:
-1. Check the [Liberty Recomp Discord](#) for community support
-2. Open an issue on [GitHub](https://github.com/user/LibertyRecomp/issues)
-3. Make sure you followed each step exactly - Firebase is case-sensitive!
+- [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
+- [Supabase Docs](https://supabase.com/docs)
+- [Firebase Realtime Database](https://firebase.google.com/docs/database)

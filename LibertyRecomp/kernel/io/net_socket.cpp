@@ -1,4 +1,5 @@
 #include "net_socket.h"
+#include "p2p_manager.h"
 #include <kernel/memory.h>
 #include <os/logger.h>
 #include <cstring>
@@ -344,6 +345,15 @@ int SocketManager::Recv(uint32_t handle, void* buf, int len, int flags) {
 
 int SocketManager::SendTo(uint32_t handle, const void* buf, int len, int flags,
                            const XSOCKADDR_IN* to, int tolen) {
+    // Check if destination is a P2P virtual IP
+    if (P2PManager::Instance().IsInSession() && IsVirtualIp(to->sin_addr)) {
+        int result = P2PManager::Instance().SendToPeer(to->sin_addr, buf, len, false);
+        if (result >= 0) {
+            return result;
+        }
+        // Fall through to regular socket if P2P fails
+    }
+    
     native_socket_t sock = GetNativeHandle(handle);
     if (sock == INVALID_NATIVE_SOCKET) {
         lastError_ = 0x2736;  // WSAENOTSOCK
@@ -367,6 +377,22 @@ int SocketManager::SendTo(uint32_t handle, const void* buf, int len, int flags,
 
 int SocketManager::RecvFrom(uint32_t handle, void* buf, int len, int flags,
                              XSOCKADDR_IN* from, int* fromlen) {
+    // Check for P2P data first if in session
+    if (P2PManager::Instance().IsInSession()) {
+        uint32_t peerId = 0;
+        int p2pResult = P2PManager::Instance().ReceiveFromPeer(&peerId, buf, len);
+        if (p2pResult > 0) {
+            if (from && fromlen) {
+                std::memset(from, 0, sizeof(XSOCKADDR_IN));
+                from->sin_family = ByteSwap(static_cast<uint16_t>(AF_INET));
+                from->sin_addr = peerId;  // Virtual IP
+                from->sin_port = ByteSwap(static_cast<uint16_t>(3074));  // Game port
+                *fromlen = sizeof(XSOCKADDR_IN);
+            }
+            return p2pResult;
+        }
+    }
+    
     native_socket_t sock = GetNativeHandle(handle);
     if (sock == INVALID_NATIVE_SOCKET) {
         lastError_ = 0x2736;  // WSAENOTSOCK
@@ -677,10 +703,16 @@ uint32_t XNetGetTitleXnAddr(uint32_t caller, XNADDR* addr) {
     if (addr) {
         std::memset(addr, 0, sizeof(*addr));
         
-        // Return a fake local IP: 192.168.1.100
-        // Network byte order (big-endian)
-        addr->ina = 0x6401A8C0;  // 192.168.1.100
-        addr->inaOnline = 0x6401A8C0;
+        // Use P2P virtual IP if in a session, otherwise use fake LAN IP
+        uint32_t localIp;
+        if (P2PManager::Instance().IsInSession()) {
+            localIp = P2PManager::Instance().GetLocalVirtualIp();
+        } else {
+            localIp = 0x6401A8C0;  // 192.168.1.100 (fallback for LAN)
+        }
+        
+        addr->ina = localIp;
+        addr->inaOnline = localIp;
         addr->wPortOnline = ByteSwap(static_cast<uint16_t>(3074));
         
         // Fake MAC address
@@ -693,7 +725,11 @@ uint32_t XNetGetTitleXnAddr(uint32_t caller, XNADDR* addr) {
     }
     
     if (s_count <= 5) {
-        LOGF_WARNING("[Net] XNetGetTitleXnAddr #{} -> STATIC (fake 192.168.1.100)", s_count);
+        if (P2PManager::Instance().IsInSession()) {
+            LOGF_WARNING("[Net] XNetGetTitleXnAddr #{} -> P2P (192.168.100.x)", s_count);
+        } else {
+            LOGF_WARNING("[Net] XNetGetTitleXnAddr #{} -> STATIC (fake 192.168.1.100)", s_count);
+        }
     }
     
     // Return XNET_GET_XNADDR_STATIC - we have a static IP

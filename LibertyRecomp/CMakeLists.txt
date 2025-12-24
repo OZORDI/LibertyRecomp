@@ -86,6 +86,8 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/gta_file_system.cpp"
     "kernel/io/net_socket.cpp"
     "kernel/io/net_session.cpp"
+    "kernel/io/p2p_manager.cpp"
+    "kernel/io/signaling_client.cpp"
     "kernel/game_init.cpp"
 )
 
@@ -151,6 +153,7 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/gta4_input_patches.cpp"  # GTA IV input remapping
     "patches/audio_patches.cpp"       # GTA IV audio system (updated for RAGE)
     "patches/memcpy_patches.cpp"  # Native memcpy implementation to fix broken recompiled control flow
+    "patches/player_limit_patches.cpp"  # Extended multiplayer - raise player limit from 16 to 32+
     
     # Generic/stub patches needed for compilation
     # "patches/aspect_ratio_patches.cpp"  # Has Sonicteam references - replaced by gta4_aspect_ratio_patches.cpp
@@ -181,7 +184,6 @@ set(LIBERTY_RECOMP_UI_CXX_SOURCES
     "ui/installer_wizard.cpp"
     "ui/message_window_stub.cpp"   # Stub - GTA IV version needed
     "ui/network_status_overlay.cpp"
-    "ui/online_multiplayer_menu.cpp"
     "ui/options_menu_stub.cpp"     # Stub - GTA IV version needed
 )
 
@@ -189,7 +191,6 @@ set(LIBERTY_RECOMP_INSTALL_CXX_SOURCES
     "install/installer.cpp"
     "install/iso_file_system.cpp"
     "install/iso_extractor.cpp"
-    "install/nebula_manager.cpp"
     "install/platform_paths.cpp"
     "install/rpf_extractor.cpp"
     "install/shader_converter.cpp"
@@ -245,6 +246,7 @@ set(LIBERTY_RECOMP_THIRDPARTY_INCLUDES
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/magic_enum/include"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/stb"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/unordered_dense/include"
+    "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/GameNetworkingSockets/include"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/bc_diff"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp/thirdparty/smol-v/source"
 )
@@ -441,9 +443,36 @@ target_link_libraries(LibertyRecomp PRIVATE
     xxHash::xxhash
     CURL::libcurl
     plume
+    GameNetworkingSockets::static
 )
 
 target_link_libraries(LibertyRecomp PRIVATE ffmpeg)
+
+# Link abseil libraries for GameNetworkingSockets (protobuf dependency)
+if (APPLE)
+    find_library(ABSL_LOG_INTERNAL_CHECK_OP absl_log_internal_check_op HINTS /opt/homebrew/lib)
+    find_library(ABSL_LOG_INTERNAL_MESSAGE absl_log_internal_message HINTS /opt/homebrew/lib)
+    find_library(ABSL_LOG_INTERNAL_NULLGUARD absl_log_internal_nullguard HINTS /opt/homebrew/lib)
+    find_library(ABSL_EXAMINE_STACK absl_examine_stack HINTS /opt/homebrew/lib)
+    find_library(ABSL_STRERROR absl_strerror HINTS /opt/homebrew/lib)
+    find_library(ABSL_LOG_INTERNAL_GLOBALS absl_log_internal_globals HINTS /opt/homebrew/lib)
+    find_library(ABSL_RAW_HASH_SET absl_raw_hash_set HINTS /opt/homebrew/lib)
+    find_library(ABSL_HASHTABLEZ_SAMPLER absl_hashtablez_sampler HINTS /opt/homebrew/lib)
+    find_library(ABSL_LOG_SINK absl_log_sink HINTS /opt/homebrew/lib)
+    if (ABSL_LOG_INTERNAL_CHECK_OP)
+        target_link_libraries(LibertyRecomp PRIVATE 
+            ${ABSL_LOG_INTERNAL_CHECK_OP}
+            ${ABSL_LOG_INTERNAL_MESSAGE}
+            ${ABSL_LOG_INTERNAL_NULLGUARD}
+            ${ABSL_EXAMINE_STACK}
+            ${ABSL_STRERROR}
+            ${ABSL_LOG_INTERNAL_GLOBALS}
+            ${ABSL_RAW_HASH_SET}
+            ${ABSL_HASHTABLEZ_SAMPLER}
+            ${ABSL_LOG_SINK}
+        )
+    endif()
+endif()
 
 target_include_directories(LibertyRecomp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
