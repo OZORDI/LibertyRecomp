@@ -106,8 +106,6 @@ Performance comparison of GTA IV running on macOS using different methods:
 | **Xenia (Xbox 360 Emulator)** | ![Xenia Performance](docs/images/perf_xenia.png) |
 | **RPCS3 (PS3 Emulator)** | ![RPCS3 Performance](docs/images/perf_rpcs3.png) |
 
-> **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
-
 ## Credits
 
 ### Liberty Recompiled
