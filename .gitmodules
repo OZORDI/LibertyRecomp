@@ -65,3 +65,6 @@
 [submodule "tools/nebula/src"]
 	path = tools/nebula/src
 	url = https://github.com/slackhq/nebula.git
+[submodule "thirdparty/GameNetworkingSockets"]
+	path = thirdparty/GameNetworkingSockets
+	url = https://github.com/ValveSoftware/GameNetworkingSockets.git

@@ -19,6 +19,9 @@ GAME DLC/*.zip
 # GTA IV Title Updates - DO NOT COMMIT (Copyrighted)
 GAME UPDATES/
 
+# Game Saves - DO NOT COMMIT
+GAME SAVES/
+
 # RPF Archives and Extracted Content - DO NOT COMMIT (Copyrighted)
 RPF DUMP/
 extracted/
@@ -26,11 +29,13 @@ extracted/
 
 # Development Notes - Private
 NOTES.md
-docs/REWRITE_PLAYBOOK.md
-docs/DOCS_INDEX.md
-docs/ARCHITECTURE_REFERENCE.md
-docs/RUNTIME_BEHAVIOR.md
-docs/TITLE_UPDATE_SYSTEM.md
+
+# Documentation - Ignore all except build/dump/install/multiplayer guides
+docs/*.md
+!docs/BUILDING.md
+!docs/DUMPING-en.md
+!docs/INSTALLATION_ARCHITECTURE.md
+!docs/ONLINE_MULTIPLAYER.md
 
 # Sample/Reference Projects - Not part of this repo
 Sample Recomp Projects/
