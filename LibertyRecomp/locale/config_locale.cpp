@@ -254,6 +254,46 @@ CONFIG_DEFINE_LOCALE(AllowBackgroundInput)
     { ELanguage::Italian,  { "Input con la finestra inattiva", "Attiva/disattiva i tasti del controller mentre la finestra è inattiva." } }
 };
 
+CONFIG_DEFINE_LOCALE(MouseSensitivityX)
+{
+    { ELanguage::English,  { "Mouse Sensitivity X", "Adjust horizontal mouse sensitivity." } },
+    { ELanguage::Japanese, { "マウス感度 X", "水平マウス感度を調整します" } },
+    { ELanguage::German,   { "Mausempfindlichkeit X", "Passe die horizontale Mausempfindlichkeit an." } },
+    { ELanguage::French,   { "Sensibilité souris X", "Ajuste la sensibilité horizontale de la souris." } },
+    { ELanguage::Spanish,  { "Sensibilidad del ratón X", "Ajusta la sensibilidad horizontal del ratón." } },
+    { ELanguage::Italian,  { "Sensibilità mouse X", "Regola la sensibilità orizzontale del mouse." } }
+};
+
+CONFIG_DEFINE_LOCALE(MouseSensitivityY)
+{
+    { ELanguage::English,  { "Mouse Sensitivity Y", "Adjust vertical mouse sensitivity." } },
+    { ELanguage::Japanese, { "マウス感度 Y", "垂直マウス感度を調整します" } },
+    { ELanguage::German,   { "Mausempfindlichkeit Y", "Passe die vertikale Mausempfindlichkeit an." } },
+    { ELanguage::French,   { "Sensibilité souris Y", "Ajuste la sensibilité verticale de la souris." } },
+    { ELanguage::Spanish,  { "Sensibilidad del ratón Y", "Ajusta la sensibilidad vertical del ratón." } },
+    { ELanguage::Italian,  { "Sensibilità mouse Y", "Regola la sensibilità verticale del mouse." } }
+};
+
+CONFIG_DEFINE_LOCALE(MouseInvertY)
+{
+    { ELanguage::English,  { "Invert Mouse Y", "Invert vertical mouse movement." } },
+    { ELanguage::Japanese, { "マウス Y 反転", "垂直マウス移動を反転します" } },
+    { ELanguage::German,   { "Maus Y invertieren", "Invertiere die vertikale Mausbewegung." } },
+    { ELanguage::French,   { "Inverser souris Y", "Inverse le mouvement vertical de la souris." } },
+    { ELanguage::Spanish,  { "Invertir ratón Y", "Invierte el movimiento vertical del ratón." } },
+    { ELanguage::Italian,  { "Inverti mouse Y", "Inverti il movimento verticale del mouse." } }
+};
+
+CONFIG_DEFINE_LOCALE(MouseSmoothing)
+{
+    { ELanguage::English,  { "Mouse Smoothing", "Adjust mouse smoothing amount." } },
+    { ELanguage::Japanese, { "マウススムージング", "マウススムージング量を調整します" } },
+    { ELanguage::German,   { "Mausglättung", "Passe die Mausglättung an." } },
+    { ELanguage::French,   { "Lissage souris", "Ajuste le lissage de la souris." } },
+    { ELanguage::Spanish,  { "Suavizado del ratón", "Ajusta el suavizado del ratón." } },
+    { ELanguage::Italian,  { "Smoothing mouse", "Regola lo smoothing del mouse." } }
+};
+
 CONFIG_DEFINE_LOCALE(ControllerIcons)
 {
     { ELanguage::English,  { "Controller Icons", "Change the icons to match your controller." } },

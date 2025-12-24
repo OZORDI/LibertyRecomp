@@ -148,24 +148,29 @@ flatpak-builder --user --force-clean --install-deps-from=flathub builddir ./flat
 ### macOS (ARM64 and x64)
 The build process works for both Apple Silicon (ARM64) and Intel (x64) Macs.
 
-1. Configure the project using CMake by navigating to the repository and running the following command.
+1. Set the VCPKG_ROOT environment variable (required for dependency management):
+```bash
+export VCPKG_ROOT=$(pwd)/thirdparty/vcpkg
+```
+
+2. Configure the project using CMake by navigating to the repository and running the following command.
 ```bash
 # For Apple Silicon (ARM64) - default on M1/M2/M3 Macs
-cmake . --preset macos-release -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake . --preset macos-release
 
-# For Intel (x64) Macs
+# For Intel (x64) Macs  
 cmake . --preset macos-release -DCMAKE_OSX_ARCHITECTURES=x86_64
 ```
 
 > [!NOTE]
 > The available presets are `macos-debug`, `macos-relwithdebinfo` and `macos-release`.
 
-2. Build the project using the selected configuration.
+3. Build the project using the selected configuration.
 ```bash
 cmake --build ./out/build/macos-release --target LibertyRecomp
 ```
 
-3. Navigate to the directory that was specified as the output in the previous step and run the game.
+4. Navigate to the directory that was specified as the output in the previous step and run the game.
 ```bash
 open "./out/build/macos-release/LibertyRecomp/Liberty Recompiled.app"
 ```

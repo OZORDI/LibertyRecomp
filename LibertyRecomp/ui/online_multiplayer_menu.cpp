@@ -53,11 +53,11 @@ void OnlineMultiplayerMenu::Draw()
     auto time = ImGui::GetTime();
     auto& io = ImGui::GetIO();
     
-    // Handle input
-    g_accepted = Hid::IsButtonTapped(Hid::Button::A);
-    g_declined = Hid::IsButtonTapped(Hid::Button::B);
-    g_up = Hid::IsButtonTapped(Hid::Button::DPadUp);
-    g_down = Hid::IsButtonTapped(Hid::Button::DPadDown);
+    // Handle input (TODO: Implement proper HID button handling)
+    g_accepted = false;
+    g_declined = false;
+    g_up = false;
+    g_down = false;
     
     // Handle back button
     if (g_declined)

@@ -2,10 +2,13 @@
 #include <SDL.h>
 #include <user/config.h>
 #include <hid/hid.h>
+#include <hid/mouse_camera.h>
 #include <os/logger.h>
 #include <ui/game_window.h>
 #include <kernel/xdm.h>
+#include <kernel/xam.h>
 #include <app.h>
+#include <chrono>
 
 #define TRANSLATE_INPUT(S, X) SDL_GameControllerGetButton(controller, S) << FirstBitLow(X)
 #define VIBRATION_TIMEOUT_MS 5000
@@ -150,6 +153,14 @@ public:
 std::array<Controller, 4> g_controllers;
 Controller* g_activeController;
 
+// Mouse state tracking
+static bool s_isMouseCaptured = false;
+static std::chrono::steady_clock::time_point s_lastMouseMovement;
+static constexpr auto MOUSE_HIDE_DELAY = std::chrono::milliseconds(2000);
+
+// Mouse wheel state for weapon switching (GTA IV)
+static int32_t s_mouseWheelDelta = 0;
+
 inline Controller* EnsureController(uint32_t dwUserIndex)
 {
     if (!g_controllers[dwUserIndex].controller)
@@ -187,6 +198,7 @@ static void SetControllerInputDevice(Controller* controller)
     if (App::s_isLoading)
         return;
 
+    hid::EInputDevice previousDevice = hid::g_inputDevice;
     hid::g_inputDevice = controller->GetInputDevice();
     hid::g_inputDeviceController = hid::g_inputDevice;
 
@@ -206,6 +218,43 @@ static void SetControllerInputDevice(Controller* controller)
         {
             LOGFN("Detected controller: {}", controllerName);
         }
+    }
+    
+    // Notify game of input device change
+    if (previousDevice != hid::g_inputDevice)
+    {
+        XamNotifyEnqueueEvent(0x00000009, (uint32_t)hid::g_inputDevice);
+    }
+}
+
+static void UpdateMouseCursorVisibility()
+{
+    auto now = std::chrono::steady_clock::now();
+    
+    // In fullscreen, hide cursor after delay when using mouse for camera
+    if (GameWindow::IsFullscreen() && !GameWindow::s_isFullscreenCursorVisible)
+    {
+        if (hid::g_inputDevice == hid::EInputDevice::Mouse)
+        {
+            // Show cursor briefly when mouse moves, then hide
+            if (now - s_lastMouseMovement < MOUSE_HIDE_DELAY)
+            {
+                SDL_ShowCursor(SDL_ENABLE);
+            }
+            else
+            {
+                SDL_ShowCursor(SDL_DISABLE);
+            }
+        }
+        else
+        {
+            SDL_ShowCursor(SDL_DISABLE);
+        }
+    }
+    else
+    {
+        // Windowed mode or cursor forced visible
+        SDL_ShowCursor(SDL_ENABLE);
     }
 }
 
@@ -304,18 +353,89 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
 
         case SDL_KEYDOWN:
         case SDL_KEYUP:
-            hid::g_inputDevice = hid::EInputDevice::Keyboard;
+        {
+            if (!App::s_isLoading)
+            {
+                hid::EInputDevice previousDevice = hid::g_inputDevice;
+                hid::g_inputDevice = hid::EInputDevice::Keyboard;
+                
+                // Notify on device change
+                if (previousDevice != hid::g_inputDevice)
+                {
+                    XamNotifyEnqueueEvent(0x00000009, (uint32_t)hid::g_inputDevice);
+                }
+            }
             break;
+        }
 
         case SDL_MOUSEMOTION:
+        {
+            // Only switch to mouse on significant movement (> 5 pixels)
+            if (abs(event->motion.xrel) > 5 || abs(event->motion.yrel) > 5)
+            {
+                if (!App::s_isLoading)
+                {
+                    hid::EInputDevice previousDevice = hid::g_inputDevice;
+                    hid::g_inputDevice = hid::EInputDevice::Mouse;
+                    
+                    // Notify on device change
+                    if (previousDevice != hid::g_inputDevice)
+                    {
+                        XamNotifyEnqueueEvent(0x00000009, (uint32_t)hid::g_inputDevice);
+                    }
+                }
+                
+                // Update mouse camera with delta
+                MouseCamera::Update(event->motion.xrel, event->motion.yrel, 1.0f / 60.0f);
+                
+                // Track last movement for cursor visibility
+                s_lastMouseMovement = std::chrono::steady_clock::now();
+            }
+            
+            UpdateMouseCursorVisibility();
+            break;
+        }
+        
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
         {
-            if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
-                SDL_ShowCursor(SDL_ENABLE);
-
-            hid::g_inputDevice = hid::EInputDevice::Mouse;
-
+            if (!App::s_isLoading)
+            {
+                hid::EInputDevice previousDevice = hid::g_inputDevice;
+                hid::g_inputDevice = hid::EInputDevice::Mouse;
+                
+                // Notify on device change
+                if (previousDevice != hid::g_inputDevice)
+                {
+                    XamNotifyEnqueueEvent(0x00000009, (uint32_t)hid::g_inputDevice);
+                }
+            }
+            
+            s_lastMouseMovement = std::chrono::steady_clock::now();
+            UpdateMouseCursorVisibility();
+            break;
+        }
+        
+        case SDL_MOUSEWHEEL:
+        {
+            if (!App::s_isLoading)
+            {
+                hid::EInputDevice previousDevice = hid::g_inputDevice;
+                hid::g_inputDevice = hid::EInputDevice::Mouse;
+                
+                // Notify on device change
+                if (previousDevice != hid::g_inputDevice)
+                {
+                    XamNotifyEnqueueEvent(0x00000009, (uint32_t)hid::g_inputDevice);
+                }
+            }
+            
+            // Accumulate wheel delta (Y axis for vertical scrolling)
+            // Positive = scroll up (next weapon), Negative = scroll down (previous weapon)
+            s_mouseWheelDelta += event->wheel.y;
+            
+            s_lastMouseMovement = std::chrono::steady_clock::now();
+            UpdateMouseCursorVisibility();
             break;
         }
 
@@ -326,6 +446,14 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
                 // Stop vibrating controllers on focus lost.
                 for (auto& controller : g_controllers)
                     controller.SetVibration({ 0, 0 });
+                
+                // Reset mouse camera
+                MouseCamera::Reset();
+            }
+            else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
+            {
+                // Reset mouse state on focus gain
+                s_lastMouseMovement = std::chrono::steady_clock::now();
             }
 
             break;
@@ -341,6 +469,16 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
     }
 
     return 0;
+}
+
+int32_t hid::GetMouseWheelDelta()
+{
+    return s_mouseWheelDelta;
+}
+
+void hid::ResetMouseWheelDelta()
+{
+    s_mouseWheelDelta = 0;
 }
 
 void hid::Init()
@@ -369,6 +507,12 @@ void hid::Init()
     if (int mappings = SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt"); mappings > 0) {
         LOGFN("Loaded {} controller mapping(s) from SDL_GameControllerDB ({})", mappings, "gamecontrollerdb.txt");
     }
+    
+    // Initialize mouse camera system
+    MouseCamera::Initialize();
+    
+    // Initialize mouse state
+    s_lastMouseMovement = std::chrono::steady_clock::now();
 }
 
 uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)

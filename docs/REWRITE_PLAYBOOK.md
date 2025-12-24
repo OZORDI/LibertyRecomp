@@ -6054,3 +6054,201 @@ uint32_t GameInit::Initialize(PPCContext& ctx, uint8_t* base)
 - 2025-12-21: **Added Game Init Deep Traces (§23)** - Complete execution traces for `sub_8218C600` (14-phase core engine init: D3D, GPU, TLS, render buffers), `sub_82120EE8` (game manager 944B, world context 352B), `sub_821250B0` (memory pool allocator with bitmap), `sub_82318F60` (RAGE string tables), `sub_82124080` (7-phase profile/save init with XContent), `sub_82120FB8` (**63 subsystem init** with complete order list).
 - 2025-12-21: **Added UI Menu System Deep Traces (§24)** - Complete menu framework for custom toggles/sliders: `sub_8274F568` (38KB context), `sub_8274E0B0` (112B panel), `sub_8274E518` (21KB slots), `sub_8274E428` (tab array init), `sub_8274E190` (★add tab), `sub_8274E1F8` (★enable/disable), `sub_8274E340` (★set value for sliders/toggles), `sub_8274E328` (★set option for multi-choice), `sub_8274E4C8` (D-pad nav). Includes complete `sub_82258100` trace (12 phases, 6 tabs × 4 items), hook examples, and global addresses (0x81323088 manager, 0x8132308C panel).
 - 2025-12-21: **Added Game Init Complete Trace (§26)** - Deep execution trace of `sub_82120000` (game init entry) with all nested calls: `sub_8218C600` (5-phase core engine: thread/GPU/systems/filesystem/workers), `sub_82120EE8` (4-phase game manager: allocation, audio/streaming **BLOCKING**, world context, game systems), `sub_82673718` (audio init with XamTaskSchedule blocking point), `sub_82124080` (profile/save with XContent), `sub_82120FB8` (55 subsystem inits with frame ticks). Includes 18-address global memory map, 5 blocking points with solutions, implementation files (`kernel/game_init.h`, `kernel/game_init.cpp`), replacement strategy, and testing checklist.
+
+---
+
+## 13. Storage System Deep-Dive - vtable[27] Validation Pattern
+
+**Research Date:** December 22, 2025  
+**Status:** Root cause identified, execution blocked at resource loading
+
+### 13.1 The Stuck Point
+
+**Execution Path:**
+```
+sub_82120000 (Game Init)
+  └── sub_82120EE8 (Core engine init)
+      └── sub_821DE390 ← STUCK HERE (never exits)
+          └── sub_82205438 (resource lookup) ← STUCK HERE (never exits)
+              └── sub_827DB2A8 ✓ (completes)
+              └── sub_8249BE88 ✗ (never reached)
+```
+
+**Evidence:**
+- `sub_821DE390 ENTER #1` logged, never exits
+- `sub_82205438 ENTER` logged, never exits  
+- `sub_827DB2A8 ENTER/EXIT` both logged
+- Execution stops after `sub_827DB2A8` returns
+- No crash, no error - just blocked
+
+### 13.2 The Validation Token Pattern
+
+**Discovered through PPC code analysis:**
+
+`sub_82205438` uses a validation token pattern:
+
+```cpp
+// Line 89305: Hardcode validation token
+li r6,7                    // r6 = 7 (validation code)
+
+// Line 89317-89319: Call file resolution
+bl 0x8249be88
+sub_8249BE88(ctx, base);
+
+// Line 89320-89325: Check if return == 0 for success
+clrlwi r11,r3,24          // r11 = r3 & 0xFF
+cmplwi cr6,r11,0          // Compare with 0
+beq cr6,0x822054dc        // If == 0, success
+```
+
+**Inside sub_8249BE88:**
+
+```cpp
+// Line 37378-37379: Save validation token
+mr r31,r6                  // r31 = 7 (save for later)
+
+// Line 37394-37396: Format path
+bl 0x827eded0
+sub_827EDED0(buffer, 256, path, pathData, 7, 0);
+
+// Line 37401-37403: Get storage device
+bl 0x827e1ec0
+device = sub_827E1EC0(buffer, 1);
+
+// Line 37404-37407: Check device exists
+cmplwi cr6,r3,0
+beq cr6,0x8249bf04         // If NULL, goto failure
+
+// Line 37408-37420: Call vtable[27]
+lwz r11,0(r3)              // Load vtable from device
+lwz r11,108(r11)           // Load vtable[27] (offset 108 = 27*4)
+mtctr r11
+bctrl                       // Call vtable[27](device, path, &output)
+
+// Line 37421-37424: CRITICAL - Compare return with validation token
+cmpw cr6,r3,r31            // Compare vtable[27] return with r31 (7)
+bne cr6,0x8249bf04         // If NOT equal, goto failure
+
+// Line 37425-37431: Success path
+mr r3,r30                  // r3 = original context
+lwz r4,80(r1)              // r4 = output value
+bl 0x8249bdc8              // Call sub_8249BDC8(context, output)
+// Returns 0 (success)
+
+// Line 37434-37436: Failure path
+li r3,1                    // Return 1 (failure)
+```
+
+### 13.3 Key Findings
+
+**1. Validation Token Must Be Echoed Back**
+
+vtable[27] receives:
+- `r3 = device pointer`
+- `r4 = formatted path buffer`
+- `r5 = output pointer`
+
+vtable[27] must:
+- Write file size/handle to `[r5]`
+- **Return the validation code (7) in r3**
+
+**Current broken implementation:**
+```cpp
+ctx.r3.s64 = static_cast<int64_t>(fileSize);  // Returns 35631 ❌
+```
+
+**Expected:**
+```cpp
+ctx.r3.s64 = 7;  // Echo back validation token ✓
+```
+
+**2. Validation Codes Vary by Resource Type**
+
+From PPC code analysis, different values found:
+- `7` - Textures, fonts, common resources
+- `12, 13, 14` - Different resource categories
+- `0` - No validation
+- `1` - Simple validation
+- `72, 74, 77` - Specialized operations
+- `752, 784` - Large buffer operations
+
+**3. The Challenge**
+
+vtable[27] doesn't receive the validation token as a parameter - it's stored in `r31` by the caller before the vtable call. Solutions:
+
+1. **Always return 7** - Works for fonts but breaks other resources
+2. **Parse path to determine code** - Complex, error-prone
+3. **Lookup table** - Map paths to validation codes
+4. **Hook higher level** - Intercept sub_8249BE88 where we have access to r6
+
+### 13.4 Why Game is Stuck
+
+**The actual problem is different than initially thought:**
+
+The game is stuck because execution **stops after sub_827DB2A8 returns**. Looking at the PPC code, after line 89302 (`sub_827DB2A8` call), it should continue to line 89303-89319 to call `sub_8249BE88`.
+
+**Hypothesis:** The game might be:
+1. **Context switching** to another thread
+2. **Waiting for an event** that never fires
+3. **Blocked on a semaphore** inside sub_827DB2A8's callees
+4. **Stuck in sub_827F1478** (called at end of sub_827DB2A8)
+
+**Evidence:**
+- No crash or error logged
+- Other threads continue running (sub_8296BE18, sub_82974FF8 loop)
+- Main thread appears blocked
+- vtable[27] never called (no VTABLE27 log)
+
+### 13.5 UnleashedRecomp Approach
+
+UnleashedRecomp doesn't deal with vtable validation tokens because they hook at a **higher level**:
+
+```cpp
+// file_system.cpp - Hook complete file operations
+GUEST_FUNCTION_HOOK(sub_82BD4668, XCreateFileA);
+GUEST_FUNCTION_HOOK(sub_82BD4478, XReadFile);
+GUEST_FUNCTION_HOOK(sub_82BD4600, XGetFileSizeA);
+```
+
+They intercept the **file system API layer**, not storage device vtables. This avoids:
+- Validation token complexity
+- vtable registration issues
+- Platform-specific storage device logic
+
+### 13.6 Recommended Fix Strategy
+
+**Per UnleashedRecomp patterns:**
+
+1. **Find GTA IV's file system API functions** (equivalent to Sonic's `sub_82BD4668`, etc.)
+2. **Hook those with GUEST_FUNCTION_HOOK** to native file operations
+3. **Remove storage device vtable hacks** entirely
+4. **Let game's storage layer run naturally** with proper file APIs underneath
+
+**DO NOT:**
+- Try to fix vtable[27] return values by guessing
+- Reimplement sub_8249BE88 or sub_82205438
+- Add validation token lookup tables
+
+**DO:**
+- Trace to find GTA IV's XCreateFileA/XReadFile equivalents
+- Hook at the file API boundary
+- Provide proper file handles and sizes
+- Let validation happen naturally in game code
+
+### 13.7 Current Blocker
+
+Game is stuck in `sub_82205438` after `sub_827DB2A8` returns. The execution doesn't continue to call `sub_8249BE88`. This suggests:
+
+1. **Thread is blocked** waiting for something
+2. **sub_827F1478** (called by sub_827DB2A8) might be blocking
+3. **Some initialization is incomplete** preventing forward progress
+
+**Next research needed:**
+- Trace sub_827F1478 to see if it blocks
+- Check if there's a semaphore/event wait
+- Identify what initialization sub_827DB2A8 expects to be complete
+
+---
+
+*Section added: December 22, 2025*
+*Status: Research complete, blocker identified, no patches applied*

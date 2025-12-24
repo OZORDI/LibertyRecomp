@@ -502,7 +502,54 @@ std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool
     if (index != std::string::npos)
     {
         // rooted folder, handle direction
-        const std::string_view root = path.substr(0, index);
+        std::string_view root = path.substr(0, index);
+        std::string_view pathSuffix = path.substr(index + 2);
+        
+        // PHASE 3: CRITICAL - Check update directory first for certain paths
+        // Based on Sonic Unleashed pattern: game:\work\ → update:\
+        // This ensures Title Update files override base game files
+        std::string rootStr(root);
+        std::transform(rootStr.begin(), rootStr.end(), rootStr.begin(), ::tolower);
+        
+        if (rootStr == "game")
+        {
+            // Paths that should check update first
+            std::string suffixStr(pathSuffix);
+            std::string suffixLower = suffixStr;
+            std::transform(suffixLower.begin(), suffixLower.end(), suffixLower.begin(), ::tolower);
+            
+            // Remove leading slashes for comparison
+            while (!suffixLower.empty() && (suffixLower[0] == '\\' || suffixLower[0] == '/'))
+                suffixLower.erase(0, 1);
+            
+            bool checkUpdate = false;
+            if (suffixLower.starts_with("work\\") || suffixLower.starts_with("work/") || suffixLower == "work")
+                checkUpdate = true;
+            else if (suffixLower.starts_with("common\\data\\") || suffixLower.starts_with("common/data/"))
+                checkUpdate = true;
+            else if (suffixLower.starts_with("xbox360\\data\\") || suffixLower.starts_with("xbox360/data/"))
+                checkUpdate = true;
+            
+            if (checkUpdate)
+            {
+                std::string_view updateRoot = XamGetRootPath("update");
+                if (!updateRoot.empty())
+                {
+                    std::string updatePathStr(updateRoot);
+                    updatePathStr += '/';
+                    updatePathStr += suffixStr;
+                    std::replace(updatePathStr.begin(), updatePathStr.end(), '\\', '/');
+                    
+                    std::filesystem::path updatePath = std::u8string_view((const char8_t*)updatePathStr.c_str());
+                    if (std::filesystem::exists(updatePath))
+                    {
+                        LOGF_IMPL(Utility, "Game", "Using update file (priority): {}", updatePath.string());
+                        return updatePath;  // Use update version (highest priority)
+                    }
+                }
+            }
+        }
+        
         const auto newRoot = XamGetRootPath(root);
 
         // Force shader loads from extracted folder even when 'game' root is registered.

@@ -4,6 +4,7 @@
 #include "xam.h"
 #include "xdm.h"
 #include <hid/hid.h>
+#include <hid/mouse_camera.h>
 #include <ui/game_window.h>
 #include <cpu/guest_thread.h>
 #include <ranges>
@@ -11,6 +12,9 @@
 #include "xxHashMap.h"
 #include <user/paths.h>
 #include <SDL.h>
+
+// Debug logging control
+#define SAVE_SYSTEM_DEBUG_LOGGING 1
 
 struct XamListener : KernelObject
 {
@@ -343,12 +347,22 @@ uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const 
     uint32_t dwContentFlags, be<uint32_t>* pdwDisposition, be<uint32_t>* pdwLicenseMask,
     uint32_t dwFileCacheSize, uint64_t uliContentSize, PXXOVERLAPPED pOverlapped)
 {
+#if SAVE_SYSTEM_DEBUG_LOGGING
+    printf("[XamContentCreateEx] ========================================\n");
+    printf("[XamContentCreateEx] Root: '%s', Content: '%s'\n", szRootName, pContentData->szFileName);
+    printf("[XamContentCreateEx] Type: %u, Flags: 0x%X, User: %u\n", 
+           pContentData->dwContentType, dwContentFlags, dwUserIndex);
+#endif
+    
     const auto& registry = gContentRegistry[pContentData->dwContentType - 1];
     const auto exists = registry.contains(StringHash(pContentData->szFileName));
     const auto mode = dwContentFlags & 0xF;
 
     if (mode == CREATE_ALWAYS)
     {
+#if SAVE_SYSTEM_DEBUG_LOGGING
+        printf("[XamContentCreateEx] Mode: CREATE_ALWAYS\n");
+#endif
         if (pdwDisposition)
             *pdwDisposition = XCONTENT_NEW;
 
@@ -359,6 +373,9 @@ uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const 
             if (pContentData->dwContentType == XCONTENTTYPE_SAVEDATA)
             {
                 rootPath = GetSavePath(true);
+#if SAVE_SYSTEM_DEBUG_LOGGING
+                printf("[XamContentCreateEx] Save data path: %s\n", rootPath.string().c_str());
+#endif
             }
             else if (pContentData->dwContentType == XCONTENTTYPE_DLC)
             {
@@ -374,19 +391,37 @@ uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const 
 
             std::error_code ec;
             std::filesystem::create_directory(rootPath, ec);
+            
+            if (ec)
+            {
+                printf("[XamContentCreateEx] ERROR: Failed to create directory: %s\n", ec.message().c_str());
+            }
 
             XamRootCreate(szRootName, root);
+#if SAVE_SYSTEM_DEBUG_LOGGING
+            printf("[XamContentCreateEx] Created new content, root mapped: %s -> %s\n", szRootName, root.c_str());
+#endif
         }
         else
         {
             XamRootCreate(szRootName, registry.find(StringHash(pContentData->szFileName))->second.szRoot);
+#if SAVE_SYSTEM_DEBUG_LOGGING
+            printf("[XamContentCreateEx] Content exists, using registered root\n");
+#endif
         }
 
+#if SAVE_SYSTEM_DEBUG_LOGGING
+        printf("[XamContentCreateEx] Result: SUCCESS\n");
+        printf("[XamContentCreateEx] ========================================\n");
+#endif
         return ERROR_SUCCESS;
     }
 
     if (mode == OPEN_EXISTING)
     {
+#if SAVE_SYSTEM_DEBUG_LOGGING
+        printf("[XamContentCreateEx] Mode: OPEN_EXISTING\n");
+#endif
         if (exists)
         {
             if (pdwDisposition)
@@ -394,6 +429,11 @@ uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const 
 
             XamRootCreate(szRootName, registry.find(StringHash(pContentData->szFileName))->second.szRoot);
 
+#if SAVE_SYSTEM_DEBUG_LOGGING
+            printf("[XamContentCreateEx] Content found and opened\n");
+            printf("[XamContentCreateEx] Result: SUCCESS\n");
+            printf("[XamContentCreateEx] ========================================\n");
+#endif
             return ERROR_SUCCESS;
         }
         else
@@ -401,16 +441,38 @@ uint32_t XamContentCreateEx(uint32_t dwUserIndex, const char* szRootName, const 
             if (pdwDisposition)
                 *pdwDisposition = XCONTENT_NEW;
 
+#if SAVE_SYSTEM_DEBUG_LOGGING
+            printf("[XamContentCreateEx] Content not found\n");
+            printf("[XamContentCreateEx] Result: ERROR_PATH_NOT_FOUND\n");
+            printf("[XamContentCreateEx] ========================================\n");
+#endif
             return ERROR_PATH_NOT_FOUND;
         }
     }
 
+#if SAVE_SYSTEM_DEBUG_LOGGING
+    printf("[XamContentCreateEx] Unknown mode: 0x%X\n", mode);
+    printf("[XamContentCreateEx] Result: ERROR_PATH_NOT_FOUND\n");
+    printf("[XamContentCreateEx] ========================================\n");
+#endif
     return ERROR_PATH_NOT_FOUND;
 }
 
 uint32_t XamContentClose(const char* szRootName, XXOVERLAPPED* pOverlapped)
 {
+#if SAVE_SYSTEM_DEBUG_LOGGING
+    printf("[XamContentClose] Closing root: '%s'\n", szRootName);
+#endif
+    
     gRootMap.erase(StringHash(szRootName));
+    
+    if (pOverlapped)
+    {
+        pOverlapped->dwCompletionContext = GuestThread::GetCurrentThreadId();
+        pOverlapped->Error = 0;
+        pOverlapped->Length = 0;
+    }
+    
     return 0;
 }
 
@@ -418,16 +480,24 @@ uint32_t XamContentGetDeviceData(uint32_t DeviceID, XDEVICE_DATA* pDeviceData)
 {
     pDeviceData->DeviceID = DeviceID;
     pDeviceData->DeviceType = XCONTENTDEVICETYPE_HDD;
-    pDeviceData->ulDeviceBytes = 0x10000000;
-    pDeviceData->ulDeviceFreeBytes = 0x10000000;
-    pDeviceData->wszName[0] = 'S';
-    pDeviceData->wszName[1] = 'o';
-    pDeviceData->wszName[2] = 'n';
-    pDeviceData->wszName[3] = 'i';
-    pDeviceData->wszName[4] = 'c';
-    pDeviceData->wszName[5] = '\0';
+    pDeviceData->ulDeviceBytes = 0x40000000;      // 1GB total (increased from 256MB)
+    pDeviceData->ulDeviceFreeBytes = 0x40000000;  // 1GB free
+    pDeviceData->wszName[0] = 'G';
+    pDeviceData->wszName[1] = 'T';
+    pDeviceData->wszName[2] = 'A';
+    pDeviceData->wszName[3] = '4';
+    pDeviceData->wszName[4] = '\0';
 
     return 0;
+}
+
+// Device state check - always return ready
+uint32_t XamContentGetDeviceState(uint32_t DeviceID, be<uint32_t>* pState)
+{
+    if (pState)
+        *pState = 1; // Device ready
+    
+    return ERROR_SUCCESS;
 }
 
 uint32_t XamInputGetCapabilities(uint32_t unk, uint32_t userIndex, uint32_t flags, XAMINPUT_CAPABILITIES* caps)
@@ -463,9 +533,11 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
         hid::GetState(userIndex, state);
 
     auto keyboardState = SDL_GetKeyboardState(NULL);
+    auto mouseState = SDL_GetMouseState(nullptr, nullptr);
 
     if (GameWindow::s_isFocused && !keyboardState[SDL_SCANCODE_LALT])
     {
+        // GTA IV Keyboard Input - Movement (WASD → Left Stick)
         if (keyboardState[Config::Key_LeftStickUp])
             state->Gamepad.sThumbLY = 32767;
         if (keyboardState[Config::Key_LeftStickDown])
@@ -475,6 +547,7 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
         if (keyboardState[Config::Key_LeftStickRight])
             state->Gamepad.sThumbLX = 32767;
 
+        // GTA IV - Right stick handled by mouse camera (see below)
         if (keyboardState[Config::Key_RightStickUp])
             state->Gamepad.sThumbRY = 32767;
         if (keyboardState[Config::Key_RightStickDown])
@@ -484,11 +557,13 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
         if (keyboardState[Config::Key_RightStickRight])
             state->Gamepad.sThumbRX = 32767;
 
+        // GTA IV - Triggers handled by mouse buttons (see below)
         if (keyboardState[Config::Key_LeftTrigger])
             state->Gamepad.bLeftTrigger = 0xFF;
         if (keyboardState[Config::Key_RightTrigger])
             state->Gamepad.bRightTrigger = 0xFF;
 
+        // GTA IV - D-Pad
         if (keyboardState[Config::Key_DPadUp])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_UP;
         if (keyboardState[Config::Key_DPadDown])
@@ -498,16 +573,19 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
         if (keyboardState[Config::Key_DPadRight])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_RIGHT;
 
+        // GTA IV - Start/Back
         if (keyboardState[Config::Key_Start])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_START;
         if (keyboardState[Config::Key_Back])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_BACK;
 
+        // GTA IV - Shoulders (LB=Action/E, RB=Cover/Q)
         if (keyboardState[Config::Key_LeftBumper])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_LEFT_SHOULDER;
         if (keyboardState[Config::Key_RightBumper])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_RIGHT_SHOULDER;
 
+        // GTA IV - Face Buttons (A=Sprint/Shift, B=Crouch/Ctrl, X=Jump/Space, Y=Enter Vehicle/F)
         if (keyboardState[Config::Key_A])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_A;
         if (keyboardState[Config::Key_B])
@@ -516,6 +594,80 @@ uint32_t XamInputGetState(uint32_t userIndex, uint32_t flags, XAMINPUT_STATE* st
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_X;
         if (keyboardState[Config::Key_Y])
             state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_Y;
+        
+        // GTA IV Additional Keys - Map to appropriate buttons
+        // Reload (R) - can be mapped to B when holding weapon
+        if (keyboardState[Config::Key_Reload])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_B;
+        
+        // Look Behind (C) - press right stick
+        if (keyboardState[Config::Key_LookBehind])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_RIGHT_THUMB;
+        
+        // Horn (H) - press left stick when in vehicle
+        if (keyboardState[Config::Key_Horn])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_LEFT_THUMB;
+        
+        // Headlight (G) - hold X when in vehicle
+        if (keyboardState[Config::Key_Headlight])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_X;
+        
+        // Radio controls - D-Pad Left/Right when in vehicle
+        if (keyboardState[Config::Key_RadioNext])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_RIGHT;
+        if (keyboardState[Config::Key_RadioPrev])
+            state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_LEFT;
+        
+        // GTA IV Mouse Input (camera and actions)
+        if (hid::g_inputDevice == hid::EInputDevice::Mouse || MouseCamera::IsActive())
+        {
+            // GTA IV Mouse Buttons → Triggers/Buttons
+            // Left mouse button → Right Trigger (Shoot/Accelerate)
+            if (mouseState & SDL_BUTTON_LMASK)
+                state->Gamepad.bRightTrigger = 0xFF;
+            
+            // Right mouse button → Left Trigger (Aim/Brake)
+            if (mouseState & SDL_BUTTON_RMASK)
+                state->Gamepad.bLeftTrigger = 0xFF;
+            
+            // Middle mouse button → Y button (Enter vehicle)
+            if (mouseState & SDL_BUTTON_MMASK)
+                state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_Y;
+            
+            // Mouse button 4 (back) → Left Bumper (Action)
+            if (mouseState & SDL_BUTTON_X1MASK)
+                state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_LEFT_SHOULDER;
+            
+            // Mouse button 5 (forward) → Right Bumper (Cover)
+            if (mouseState & SDL_BUTTON_X2MASK)
+                state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_RIGHT_SHOULDER;
+            
+            // GTA IV Mouse Wheel → Weapon Switching (D-Pad Left/Right)
+            int32_t wheelDelta = hid::GetMouseWheelDelta();
+            if (wheelDelta > 0)
+            {
+                // Scroll up = Next weapon (D-Pad Right)
+                state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_RIGHT;
+                hid::ResetMouseWheelDelta();
+            }
+            else if (wheelDelta < 0)
+            {
+                // Scroll down = Previous weapon (D-Pad Left)
+                state->Gamepad.wButtons |= XAMINPUT_GAMEPAD_DPAD_LEFT;
+                hid::ResetMouseWheelDelta();
+            }
+            
+            // Mouse camera → right stick (camera control)
+            int16_t mouseX, mouseY;
+            MouseCamera::GetAnalogValues(mouseX, mouseY);
+            
+            // Only override right stick if mouse camera is active
+            if (MouseCamera::IsActive())
+            {
+                state->Gamepad.sThumbRX = mouseX;
+                state->Gamepad.sThumbRY = mouseY;
+            }
+        }
     }
 
     state->Gamepad.wButtons &= ~hid::g_prohibitedButtons;
@@ -553,4 +705,70 @@ uint32_t XamInputSetState(uint32_t userIndex, uint32_t flags, XAMINPUT_VIBRATION
     ByteSwapInplace(vibration->wRightMotorSpeed);
 
     return hid::SetState(userIndex, vibration);
+}
+
+// Profile Settings Stubs
+// GTA IV uses these for player preferences, stats, and settings
+uint32_t XamUserReadProfileSettings(uint32_t dwTitleId, uint32_t dwUserIndex, uint32_t dwNumSettingIds,
+    const uint32_t* pdwSettingIds, be<uint32_t>* pcbResults, void* pResults, XXOVERLAPPED* pOverlapped)
+{
+#if SAVE_SYSTEM_DEBUG_LOGGING
+    printf("[XamUserReadProfileSettings] TitleId: 0x%X, User: %u, NumSettings: %u\n",
+           dwTitleId, dwUserIndex, dwNumSettingIds);
+#endif
+    
+    // Stub: Return success but no settings
+    // TODO: Implement profile settings storage
+    if (pcbResults)
+        *pcbResults = 0;
+    
+    if (pOverlapped)
+    {
+        pOverlapped->dwCompletionContext = GuestThread::GetCurrentThreadId();
+        pOverlapped->Error = 0;
+        pOverlapped->Length = 0;
+    }
+    
+    return ERROR_SUCCESS;
+}
+
+uint32_t XamUserWriteProfileSettings(uint32_t dwUserIndex, uint32_t dwNumSettings,
+    const void* pSettings, XXOVERLAPPED* pOverlapped)
+{
+#if SAVE_SYSTEM_DEBUG_LOGGING
+    printf("[XamUserWriteProfileSettings] User: %u, NumSettings: %u\n",
+           dwUserIndex, dwNumSettings);
+#endif
+    
+    // Stub: Accept all writes
+    // TODO: Implement profile settings storage
+    if (pOverlapped)
+    {
+        pOverlapped->dwCompletionContext = GuestThread::GetCurrentThreadId();
+        pOverlapped->Error = 0;
+        pOverlapped->Length = 0;
+    }
+    
+    return ERROR_SUCCESS;
+}
+
+// User signin state - always return signed in
+PPC_FUNC(__imp__XamUserGetSigninState)
+{
+    uint32_t dwUserIndex = ctx.r3.u32;
+    
+    if (dwUserIndex != 0)
+        ctx.r3.u32 = 0; // Not signed in
+    else
+        ctx.r3.u32 = 1; // eXUserSigninState_SignedInToLive
+}
+
+uint32_t XamUserGetSigninInfo(uint32_t dwUserIndex, uint32_t dwFlags, void* pInfo)
+{
+    if (dwUserIndex != 0)
+        return ERROR_NO_SUCH_USER;
+    
+    // Stub: Return success
+    // TODO: Fill in user info structure if needed
+    return ERROR_SUCCESS;
 }
