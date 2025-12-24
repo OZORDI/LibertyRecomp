@@ -121,7 +121,7 @@ NebulaResult NebulaManager::GenerateCA(const std::string& networkName,
     result = ExecuteNebulaCert(args, outputDir);
     
     if (result.success) {
-        LOG_INFO("[Nebula] Generated CA certificate for network: {}", networkName);
+        LOGF_INFO("[Nebula] Generated CA certificate for network: {}", networkName);
     }
     
     return result;
@@ -172,7 +172,7 @@ NebulaResult NebulaManager::GenerateNodeCert(const std::string& nodeName,
     result = ExecuteNebulaCert(args, outputDir);
     
     if (result.success) {
-        LOG_INFO("[Nebula] Generated certificate for node: {} ({})", nodeName, ipAddress);
+        LOGF_INFO("[Nebula] Generated certificate for node: {} ({})", nodeName, ipAddress);
     }
     
     return result;
@@ -202,7 +202,7 @@ NebulaResult NebulaManager::ImportCACert(const std::string& caCertData,
     outFile.close();
     
     result.success = true;
-    LOG_INFO("[Nebula] Imported CA certificate to: {}", caCertPath.string());
+    LOGF_INFO("[Nebula] Imported CA certificate to: {}", caCertPath.string());
     
     return result;
 }
@@ -257,7 +257,7 @@ NebulaResult NebulaManager::CreateConfig(const NebulaConfig& config,
     outFile.close();
     
     result.success = true;
-    LOG_INFO("[Nebula] Created configuration file: {}", outputPath.string());
+    LOGF_INFO("[Nebula] Created configuration file: {}", outputPath.string());
     
     return result;
 }
@@ -343,7 +343,7 @@ NebulaResult NebulaManager::Start(const std::filesystem::path& configPath) {
         CloseHandle(pi.hThread);
         isRunning_ = true;
         result.success = true;
-        LOG_INFO("[Nebula] Started with PID: {}", nebulaProcessId_);
+        LOGF_INFO("[Nebula] Started with PID: {}", nebulaProcessId_);
     } else {
         result.errorMessage = "Failed to start Nebula: " + std::to_string(GetLastError());
     }
@@ -372,7 +372,7 @@ NebulaResult NebulaManager::Start(const std::filesystem::path& configPath) {
         nebulaProcessId_ = pid;
         isRunning_ = true;
         result.success = true;
-        LOG_INFO("[Nebula] Started with PID: {}", nebulaProcessId_);
+        LOGF_INFO("[Nebula] Started with PID: {}", nebulaProcessId_);
     } else {
         result.errorMessage = "Failed to start Nebula: " + std::string(strerror(status));
     }
@@ -409,7 +409,7 @@ NebulaResult NebulaManager::Stop() {
     nebulaProcessId_ = -1;
     result.success = true;
     
-    LOG_INFO("[Nebula] Stopped");
+    LOG("[Nebula] Stopped");
     
     return result;
 }
@@ -533,7 +533,7 @@ NebulaResult NebulaManager::ExecuteNebulaCert(const std::vector<std::string>& ar
         }
     }
     
-    LOG_DEBUG("[Nebula] Executing: {}", cmdLine);
+    LOGF_DEBUG("[Nebula] Executing: {}", cmdLine);
     
 #ifdef _WIN32
     STARTUPINFOA si = {sizeof(si)};
@@ -618,7 +618,7 @@ std::string NebulaManager::LoadTemplate(const std::string& templateName) {
     }
     
     if (!std::filesystem::exists(templatePath)) {
-        LOG_ERROR("[Nebula] Template not found: {}", templateName);
+        LOGF_ERROR("[Nebula] Template not found: {}", templateName);
         return "";
     }
     

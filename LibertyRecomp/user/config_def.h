@@ -17,28 +17,54 @@ CONFIG_DEFINE_ENUM_LOCALISED("Input", EControllerIcons, ControllerIcons, EContro
 CONFIG_DEFINE_ENUM_LOCALISED("Input", ELightDash, LightDash, ELightDash::X, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Input", ESlidingAttack, SlidingAttack, ESlidingAttack::X, false);
 
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_A, SDL_SCANCODE_S, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_B, SDL_SCANCODE_D, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_X, SDL_SCANCODE_A, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Y, SDL_SCANCODE_W, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadUp, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadDown, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadLeft, SDL_SCANCODE_Q, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadRight, SDL_SCANCODE_E, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Start, SDL_SCANCODE_RETURN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Back, SDL_SCANCODE_BACKSPACE, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftTrigger, SDL_SCANCODE_1, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightTrigger, SDL_SCANCODE_3, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftBumper, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightBumper, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickUp, SDL_SCANCODE_UP, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickDown, SDL_SCANCODE_DOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickLeft, SDL_SCANCODE_LEFT, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickRight, SDL_SCANCODE_RIGHT, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickUp, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickDown, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickLeft, SDL_SCANCODE_UNKNOWN, false);
-CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickRight, SDL_SCANCODE_UNKNOWN, false);
+// GTA IV Control Scheme - Face Buttons
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_A, SDL_SCANCODE_LSHIFT, false);      // Sprint (on foot) / Handbrake (in car)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_B, SDL_SCANCODE_LCTRL, false);       // Crouch/Duck
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_X, SDL_SCANCODE_SPACE, false);       // Jump
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Y, SDL_SCANCODE_F, false);           // Enter/Exit Vehicle
+
+// GTA IV Control Scheme - D-Pad (weapon switching via mouse wheel)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadUp, SDL_SCANCODE_UP, false);     // Phone
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadDown, SDL_SCANCODE_T, false);    // Radar Zoom
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadLeft, SDL_SCANCODE_UNKNOWN, false);  // Previous Weapon (Mouse Wheel Down)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_DPadRight, SDL_SCANCODE_UNKNOWN, false); // Next Weapon (Mouse Wheel Up)
+
+// GTA IV Control Scheme - Start/Back
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Start, SDL_SCANCODE_ESCAPE, false);  // Pause Menu
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Back, SDL_SCANCODE_V, false);        // Change Camera
+
+// GTA IV Control Scheme - Triggers (handled by mouse buttons)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftTrigger, SDL_SCANCODE_UNKNOWN, false);  // Aim (RMB)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightTrigger, SDL_SCANCODE_UNKNOWN, false); // Shoot (LMB)
+
+// GTA IV Control Scheme - Shoulders
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftBumper, SDL_SCANCODE_E, false);  // Action (hail taxi, etc.)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightBumper, SDL_SCANCODE_Q, false); // Take Cover
+
+// GTA IV Control Scheme - Movement (WASD)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickUp, SDL_SCANCODE_W, false);    // Move Forward
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickDown, SDL_SCANCODE_S, false);  // Move Backward
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickLeft, SDL_SCANCODE_A, false);  // Move Left
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LeftStickRight, SDL_SCANCODE_D, false); // Move Right
+
+// GTA IV Control Scheme - Camera (handled by mouse)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickUp, SDL_SCANCODE_UNKNOWN, false);    // Mouse Y
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickDown, SDL_SCANCODE_UNKNOWN, false);  // Mouse Y
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickLeft, SDL_SCANCODE_UNKNOWN, false);  // Mouse X
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RightStickRight, SDL_SCANCODE_UNKNOWN, false); // Mouse X
+
+// GTA IV Additional Keys
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Reload, SDL_SCANCODE_R, false);       // Reload
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_LookBehind, SDL_SCANCODE_C, false);   // Look Behind
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Horn, SDL_SCANCODE_H, false);         // Horn (in vehicle)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Headlight, SDL_SCANCODE_G, false);    // Headlights (in vehicle)
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RadioNext, SDL_SCANCODE_X, false);    // Next Radio Station
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RadioPrev, SDL_SCANCODE_Z, false);    // Previous Radio Station
+
+CONFIG_DEFINE_LOCALISED("Input", float, MouseSensitivityX, 1.0f, false);
+CONFIG_DEFINE_LOCALISED("Input", float, MouseSensitivityY, 1.0f, false);
+CONFIG_DEFINE_LOCALISED("Input", bool, MouseInvertY, false, false);
+CONFIG_DEFINE_LOCALISED("Input", float, MouseSmoothing, 0.5f, false);
 
 CONFIG_DEFINE_LOCALISED("Audio", float, MasterVolume, 1.0f, false);
 CONFIG_DEFINE_LOCALISED("Audio", float, MusicVolume, 0.6f, false);

@@ -34,6 +34,9 @@
 #include <res/credits.h>
 #include <ui/gta4_style.h>
 
+// Forward declarations
+static bool AutoSelectTU8();
+
 // One Shot Animations Constants
 static constexpr double SCANLINES_ANIMATION_TIME = 0.0;
 static constexpr double SCANLINES_ANIMATION_DURATION = 15.0;
@@ -258,6 +261,17 @@ public:
                         else
                         {
                             g_currentCursorAccepted = (g_currentCursorIndex >= 0);
+                        }
+                        break;
+                    case SDL_SCANCODE_Y:
+                        // Auto-select TU8 when error modal is shown
+                        if (!g_currentMessagePrompt.empty() && g_currentPage == WizardPage::SelectDLC)
+                        {
+                            if (AutoSelectTU8())
+                            {
+                                g_currentMessagePrompt.clear();
+                                Game_PlaySound("deside");
+                            }
                         }
                         break;
                     case SDL_SCANCODE_ESCAPE:
@@ -1369,6 +1383,40 @@ static void ScanForTitleUpdates()
     g_titleUpdatesScanned = true;
 }
 
+static bool ValidateDLCUpdateRequirement()
+{
+    // Check if DLC is selected (0=TBOGT, 1=None/Base Game, 2=TLAD)
+    bool isDLCSelected = (g_dlcSelectionIndex != 1);
+    
+    if (!isDLCSelected)
+        return true;  // No DLC selected, no requirement
+    
+    // Check if TU8 or higher is selected
+    const auto& updates = g_titleUpdateManager.GetDetectedUpdates();
+    if (g_selectedTitleUpdateIndex >= 0 && g_selectedTitleUpdateIndex < static_cast<int>(updates.size()))
+    {
+        uint32_t selectedVersion = updates[g_selectedTitleUpdateIndex].info.version;
+        return selectedVersion >= 8;  // TU8 (v1.06) or higher required
+    }
+    
+    return false;  // DLC selected but no update or update too old
+}
+
+static bool AutoSelectTU8()
+{
+    const auto& updates = g_titleUpdateManager.GetDetectedUpdates();
+    for (int i = 0; i < static_cast<int>(updates.size()); i++)
+    {
+        if (updates[i].info.version == 8)
+        {
+            g_selectedTitleUpdateIndex = i;
+            g_titleUpdateManager.SelectUpdate(i);
+            return true;
+        }
+    }
+    return false;  // TU8 not found
+}
+
 static void DrawTitleUpdateSelection()
 {
     auto &res = ImGui::GetIO().DisplaySize;
@@ -1534,6 +1582,16 @@ static bool InstallerParseSources(std::string &errorMessage)
     Installer::Input installerInput;
     installerInput.gameSource = g_gameSourcePath;
 
+    // PHASE 4: Add selected title update to installer input
+    if (g_titleUpdateManager.HasSelectedUpdate())
+    {
+        auto selectedUpdate = g_titleUpdateManager.GetSelectedUpdate();
+        if (selectedUpdate)
+        {
+            installerInput.updateSource = selectedUpdate->path;
+        }
+    }
+
     for (std::filesystem::path &path : g_dlcSourcePaths)
     {
         if (!path.empty())
@@ -1591,6 +1649,44 @@ static void DrawNavigationButton()
     {
         if (g_currentPage == WizardPage::SelectDLC)
         {
+            // PHASE 1: Validate DLC-Update requirement
+            if (!ValidateDLCUpdateRequirement())
+            {
+                // DLC selected but TU8 not selected - show error
+                std::stringstream errorMsg;
+                errorMsg << "DLC Content Requires Title Update 1.06 (TU8)\n\n";
+                errorMsg << "The Lost and Damned and The Ballad of Gay Tony\n";
+                errorMsg << "require the latest title update to function correctly.\n\n";
+                
+                // Check if TU8 is available
+                const auto& updates = g_titleUpdateManager.GetDetectedUpdates();
+                bool tu8Available = false;
+                for (const auto& update : updates)
+                {
+                    if (update.info.version == 8)
+                    {
+                        tu8Available = true;
+                        break;
+                    }
+                }
+                
+                if (tu8Available)
+                {
+                    errorMsg << "Press Y to auto-select TU8, or\n";
+                    errorMsg << "Press BACK to manually select Title Update";
+                }
+                else
+                {
+                    errorMsg << "TU8 not found in GAME UPDATES folder.\n";
+                    errorMsg << "Please add TU8 or deselect DLC.";
+                }
+                
+                g_currentMessagePrompt = errorMsg.str();
+                g_currentMessagePromptConfirmation = false;
+                Game_PlaySound("error");
+                return;  // Block navigation
+            }
+            
             bool dlcInstallerMode = g_gameSourcePath.empty();
             std::string sourcesErrorMessage;
             if (!InstallerParseSources(sourcesErrorMessage))
