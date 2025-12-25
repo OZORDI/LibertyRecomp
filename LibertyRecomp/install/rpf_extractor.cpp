@@ -11,9 +11,8 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#include <wincrypt.h>
-#define popen _popen
-#define pclose _pclose
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 #else
 #include <CommonCrypto/CommonCrypto.h>
 #endif
@@ -26,36 +25,159 @@ namespace RpfExtractor
     // TOC starts at this offset
     constexpr uint32_t TOC_OFFSET = 0x800;
     
-    static std::string ExecuteCommand(const std::string& cmd, int& exitCode)
+    // Block size for file data alignment
+    constexpr uint32_t BLOCK_SIZE = 0x800;
+    
+    // =========================================================================
+    // Internal structures matching SparkIV format
+    // =========================================================================
+    
+    struct TocEntry {
+        int32_t nameOffset;
+        int32_t field1;
+        int32_t field2;
+        uint32_t field3;
+        
+        bool isDirectory;
+        
+        // Directory fields
+        int32_t contentEntryIndex;
+        int32_t contentEntryCount;
+        
+        // File fields
+        int32_t size;           // Uncompressed size
+        int32_t offset;         // File data offset
+        int32_t sizeInArchive;  // Compressed size
+        bool isCompressed;
+        bool isResourceFile;
+        uint8_t resourceType;
+        
+        std::string name;
+        std::string fullPath;   // Built during tree traversal
+    };
+    
+    // =========================================================================
+    // AES-256-ECB decryption (16 rounds like SparkIV)
+    // =========================================================================
+    
+    static bool DecryptAES256_16Rounds(
+        std::vector<uint8_t>& data,
+        const std::vector<uint8_t>& key)
     {
-        std::array<char, 128> buffer;
-        std::string result;
-        
-#if defined(_WIN32)
-        FILE* pipe = _popen(cmd.c_str(), "r");
-#else
-        FILE* pipe = popen(cmd.c_str(), "r");
-#endif
-        
-        if (!pipe)
+        if (key.size() != 32 || data.empty())
         {
-            exitCode = -1;
-            return "Failed to execute command";
+            return false;
         }
         
-        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+        // Only decrypt data aligned to 16 bytes
+        size_t dataLen = data.size() & ~0x0F;
+        if (dataLen == 0)
         {
-            result += buffer.data();
+            return true;  // Nothing to decrypt
         }
         
 #if defined(_WIN32)
-        exitCode = _pclose(pipe);
-#else
-        exitCode = pclose(pipe);
-#endif
+        BCRYPT_ALG_HANDLE hAlg = nullptr;
+        BCRYPT_KEY_HANDLE hKey = nullptr;
         
-        return result;
+        if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0)
+        {
+            return false;
+        }
+        
+        // Set ECB mode
+        if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, 
+            (PUCHAR)BCRYPT_CHAIN_MODE_ECB, sizeof(BCRYPT_CHAIN_MODE_ECB), 0) != 0)
+        {
+            BCryptCloseAlgorithmProvider(hAlg, 0);
+            return false;
+        }
+        
+        // Create key
+        if (BCryptGenerateSymmetricKey(hAlg, &hKey, nullptr, 0, 
+            (PUCHAR)key.data(), (ULONG)key.size(), 0) != 0)
+        {
+            BCryptCloseAlgorithmProvider(hAlg, 0);
+            return false;
+        }
+        
+        // Decrypt 16 times (like SparkIV)
+        ULONG cbResult = 0;
+        for (int round = 0; round < 16; round++)
+        {
+            if (BCryptDecrypt(hKey, data.data(), (ULONG)dataLen, nullptr, 
+                nullptr, 0, data.data(), (ULONG)dataLen, &cbResult, 0) != 0)
+            {
+                BCryptDestroyKey(hKey);
+                BCryptCloseAlgorithmProvider(hAlg, 0);
+                return false;
+            }
+        }
+        
+        BCryptDestroyKey(hKey);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return true;
+#else
+        // macOS/iOS CommonCrypto - decrypt 16 times like SparkIV
+        for (int round = 0; round < 16; round++)
+        {
+            size_t outLength = 0;
+            CCCryptorStatus status = CCCrypt(
+                kCCDecrypt,
+                kCCAlgorithmAES,
+                kCCOptionECBMode,
+                key.data(), kCCKeySizeAES256,
+                nullptr,  // No IV for ECB
+                data.data(), dataLen,
+                data.data(), dataLen,
+                &outLength);
+            
+            if (status != kCCSuccess)
+            {
+                return false;
+            }
+        }
+        return true;
+#endif
     }
+    
+    // =========================================================================
+    // Raw deflate decompression (no zlib header)
+    // =========================================================================
+    
+    static std::vector<uint8_t> DecompressRawDeflate(
+        const std::vector<uint8_t>& compressed,
+        size_t expectedSize)
+    {
+        std::vector<uint8_t> decompressed(expectedSize);
+        
+        z_stream stream{};
+        stream.next_in = const_cast<Bytef*>(compressed.data());
+        stream.avail_in = static_cast<uInt>(compressed.size());
+        stream.next_out = decompressed.data();
+        stream.avail_out = static_cast<uInt>(expectedSize);
+        
+        // Use -MAX_WBITS for raw deflate (no zlib/gzip header)
+        if (inflateInit2(&stream, -MAX_WBITS) != Z_OK)
+        {
+            return {};
+        }
+        
+        int result = inflate(&stream, Z_FINISH);
+        inflateEnd(&stream);
+        
+        if (result != Z_STREAM_END)
+        {
+            return {};
+        }
+        
+        decompressed.resize(stream.total_out);
+        return decompressed;
+    }
+    
+    // =========================================================================
+    // RPF header and TOC reading
+    // =========================================================================
     
     bool IsRpfFile(const std::filesystem::path& path)
     {
@@ -64,7 +186,6 @@ namespace RpfExtractor
             return false;
         }
         
-        // Check extension
         std::string ext = path.extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         if (ext != ".rpf")
@@ -72,7 +193,6 @@ namespace RpfExtractor
             return false;
         }
         
-        // Validate magic
         RpfHeader header;
         return ReadHeader(path, header);
     }
@@ -85,7 +205,6 @@ namespace RpfExtractor
             return false;
         }
         
-        // Read header (20 bytes, little-endian on disk)
         file.read(reinterpret_cast<char*>(&header.magic), 4);
         file.read(reinterpret_cast<char*>(&header.tocSize), 4);
         file.read(reinterpret_cast<char*>(&header.entryCount), 4);
@@ -97,7 +216,6 @@ namespace RpfExtractor
             return false;
         }
         
-        // Check magic - RPF2 for GTA IV
         if (header.magic != RPF2_MAGIC)
         {
             return false;
@@ -124,7 +242,6 @@ namespace RpfExtractor
             return false;
         }
         
-        // AES-256 key is 32 bytes
         key.resize(32);
         file.read(reinterpret_cast<char*>(key.data()), 32);
         
@@ -135,95 +252,214 @@ namespace RpfExtractor
         const std::filesystem::path& exePath,
         std::vector<uint8_t>& key)
     {
-        // This is a placeholder - actual implementation would need to:
-        // 1. Parse the XEX/PE format
-        // 2. Find the embedded AES key at a known offset
-        // For now, return false and rely on pre-extracted key file
+        // Placeholder - rely on shipped aes_key.bin
         return false;
     }
     
-    std::vector<RpfFileEntry> ListEntries(
-        const std::filesystem::path& rpfPath,
+    // =========================================================================
+    // Read TOC entries with proper name table parsing (SparkIV format)
+    // =========================================================================
+    
+    static std::vector<TocEntry> ReadTocEntries(
+        std::ifstream& file,
+        const RpfHeader& header,
         const std::vector<uint8_t>& aesKey)
     {
-        std::vector<RpfFileEntry> entries;
+        std::vector<TocEntry> entries;
         
-        RpfHeader header;
-        if (!ReadHeader(rpfPath, header))
-        {
-            return entries;
-        }
-        
-        std::ifstream file(rpfPath, std::ios::binary);
-        if (!file)
-        {
-            return entries;
-        }
-        
-        // Seek to TOC
+        // Read entire TOC
         file.seekg(TOC_OFFSET);
+        std::vector<uint8_t> tocData(header.tocSize);
+        file.read(reinterpret_cast<char*>(tocData.data()), header.tocSize);
+        
         if (!file)
         {
             return entries;
         }
         
-        // Read TOC entries
-        // Each entry is 16 bytes
-        // Format depends on whether it's a directory or file entry
+        // Decrypt TOC if needed
+        if (header.encrypted != 0 && !aesKey.empty())
+        {
+            DecryptAES256_16Rounds(tocData, aesKey);
+        }
+        
+        // Parse entries from TOC data
+        const uint8_t* ptr = tocData.data();
+        
         for (uint32_t i = 0; i < header.entryCount; i++)
         {
-            uint32_t nameOffset, field1, field2, field3;
-            file.read(reinterpret_cast<char*>(&nameOffset), 4);
-            file.read(reinterpret_cast<char*>(&field1), 4);
-            file.read(reinterpret_cast<char*>(&field2), 4);
-            file.read(reinterpret_cast<char*>(&field3), 4);
+            TocEntry entry;
             
-            if (!file)
-            {
-                break;
-            }
+            // Read 16 bytes
+            std::memcpy(&entry.nameOffset, ptr + 0, 4);
+            std::memcpy(&entry.field1, ptr + 4, 4);
+            std::memcpy(&entry.field2, ptr + 8, 4);
+            std::memcpy(&entry.field3, ptr + 12, 4);
+            ptr += 16;
             
-            RpfFileEntry entry;
-            
-            // Determine if directory or file based on flags
-            // High bit of field1 typically indicates directory
-            entry.isDirectory = (field1 & 0x80000000) != 0;
+            // Directory detection: high bit of field2 (byte 8) per SparkIV
+            entry.isDirectory = (entry.field2 < 0);  // Signed negative = high bit set
             
             if (entry.isDirectory)
             {
-                entry.offset = 0;
+                // DirectoryEntry format
+                entry.contentEntryIndex = entry.field2 & 0x7FFFFFFF;
+                entry.contentEntryCount = entry.field3 & 0x0FFFFFFF;
                 entry.size = 0;
-                entry.compressedSize = 0;
-                entry.resourceType = 0;
+                entry.offset = 0;
+                entry.sizeInArchive = 0;
                 entry.isCompressed = false;
-                entry.isEncrypted = false;
+                entry.isResourceFile = false;
+                entry.resourceType = 0;
             }
             else
             {
-                entry.size = field1;
-                // Offset is 3 bytes + resource type is 1 byte
-                entry.offset = field2 & 0x00FFFFFF;
-                entry.resourceType = (field2 >> 24) & 0xFF;
-                // Flags in field3
-                entry.isCompressed = (field3 & 0x01) != 0;
-                entry.isEncrypted = (field3 & 0x02) != 0;
-                entry.compressedSize = entry.isCompressed ? (field3 >> 8) : entry.size;
+                // FileEntry format
+                entry.size = entry.field1;
+                entry.offset = entry.field2;
+                
+                // Check if resource file
+                entry.isResourceFile = (entry.field3 & 0xC0000000) == 0xC0000000;
+                
+                if (entry.isResourceFile)
+                {
+                    entry.resourceType = static_cast<uint8_t>(entry.offset & 0xFF);
+                    entry.offset = entry.offset & 0x7FFFFF00;
+                    entry.sizeInArchive = entry.size;
+                    entry.isCompressed = false;
+                }
+                else
+                {
+                    entry.sizeInArchive = entry.field3 & 0xBFFFFFFF;
+                    entry.isCompressed = (entry.field3 & 0x40000000) != 0;
+                    entry.resourceType = 0;
+                }
+                
+                entry.contentEntryIndex = 0;
+                entry.contentEntryCount = 0;
             }
             
             entries.push_back(entry);
         }
         
-        // Read name table and populate entry names
-        // Names are stored after the TOC entries
-        size_t nameTableOffset = TOC_OFFSET + (header.entryCount * 16);
+        // Read name string table (follows TOC entries)
+        size_t nameTableSize = header.tocSize - (header.entryCount * 16);
+        const char* nameTable = reinterpret_cast<const char*>(ptr);
+        
+        // Populate entry names from name table
         for (auto& entry : entries)
         {
-            // This is simplified - actual implementation needs proper name offset handling
-            entry.name = "entry_" + std::to_string(&entry - entries.data());
+            if (entry.nameOffset >= 0 && static_cast<size_t>(entry.nameOffset) < nameTableSize)
+            {
+                // Read null-terminated string
+                const char* nameStart = nameTable + entry.nameOffset;
+                const char* nameEnd = nameStart;
+                while (nameEnd < nameTable + nameTableSize && *nameEnd != '\0')
+                {
+                    nameEnd++;
+                }
+                entry.name = std::string(nameStart, nameEnd);
+            }
+            else
+            {
+                entry.name = "unknown_" + std::to_string(&entry - entries.data());
+            }
         }
         
         return entries;
     }
+    
+    // =========================================================================
+    // Build full paths by traversing directory tree
+    // =========================================================================
+    
+    static void BuildPaths(
+        std::vector<TocEntry>& entries,
+        int entryIndex,
+        const std::string& parentPath)
+    {
+        if (entryIndex < 0 || static_cast<size_t>(entryIndex) >= entries.size())
+        {
+            return;
+        }
+        
+        TocEntry& entry = entries[entryIndex];
+        
+        // Build full path
+        if (parentPath.empty() || entry.name == "/" || entry.name.empty())
+        {
+            entry.fullPath = entry.name;
+        }
+        else
+        {
+            entry.fullPath = parentPath + "/" + entry.name;
+        }
+        
+        // If directory, recursively process children
+        if (entry.isDirectory)
+        {
+            for (int i = 0; i < entry.contentEntryCount; i++)
+            {
+                int childIndex = entry.contentEntryIndex + i;
+                if (childIndex > entryIndex && static_cast<size_t>(childIndex) < entries.size())
+                {
+                    BuildPaths(entries, childIndex, entry.fullPath);
+                }
+            }
+        }
+    }
+    
+    // =========================================================================
+    // Public ListEntries function
+    // =========================================================================
+    
+    std::vector<RpfFileEntry> ListEntries(
+        const std::filesystem::path& rpfPath,
+        const std::vector<uint8_t>& aesKey)
+    {
+        std::vector<RpfFileEntry> result;
+        
+        RpfHeader header;
+        if (!ReadHeader(rpfPath, header))
+        {
+            return result;
+        }
+        
+        std::ifstream file(rpfPath, std::ios::binary);
+        if (!file)
+        {
+            return result;
+        }
+        
+        auto tocEntries = ReadTocEntries(file, header, aesKey);
+        
+        // Build paths starting from root (entry 0)
+        if (!tocEntries.empty())
+        {
+            BuildPaths(tocEntries, 0, "");
+        }
+        
+        // Convert to public format
+        for (const auto& entry : tocEntries)
+        {
+            RpfFileEntry pub;
+            pub.name = entry.fullPath;
+            pub.isDirectory = entry.isDirectory;
+            pub.offset = entry.offset;
+            pub.size = entry.size;
+            pub.compressedSize = entry.sizeInArchive;
+            pub.isCompressed = entry.isCompressed;
+            pub.isEncrypted = false;  // Encryption is at TOC level
+            pub.resourceType = entry.resourceType;
+            result.push_back(pub);
+        }
+        
+        return result;
+    }
+    
+    // =========================================================================
+    // Native RPF extraction implementation
+    // =========================================================================
     
     ExtractionResult Extract(
         const std::filesystem::path& rpfPath,
@@ -233,15 +469,132 @@ namespace RpfExtractor
     {
         ExtractionResult result;
         
-        // For complex RPF extraction, fall back to SparkCLI
-        if (IsSparkCliAvailable())
+        // Read header
+        RpfHeader header;
+        if (!ReadHeader(rpfPath, header))
         {
-            return ExtractWithSparkCli(rpfPath, outputDir, {}, progressCallback);
+            result.errorMessage = "Failed to read RPF header from: " + rpfPath.string();
+            return result;
         }
         
-        result.errorMessage = "Native RPF extraction not fully implemented. Please use SparkCLI or pre-extract RPF files.";
+        std::ifstream file(rpfPath, std::ios::binary);
+        if (!file)
+        {
+            result.errorMessage = "Failed to open RPF file: " + rpfPath.string();
+            return result;
+        }
+        
+        // Read and parse TOC
+        auto tocEntries = ReadTocEntries(file, header, aesKey);
+        if (tocEntries.empty())
+        {
+            result.errorMessage = "No entries found in RPF: " + rpfPath.string();
+            return result;
+        }
+        
+        // Build full paths
+        BuildPaths(tocEntries, 0, "");
+        
+        // Create output directory
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        
+        // Count files for progress
+        size_t totalFiles = 0;
+        for (const auto& entry : tocEntries)
+        {
+            if (!entry.isDirectory)
+            {
+                totalFiles++;
+            }
+        }
+        
+        size_t filesProcessed = 0;
+        uint64_t bytesExtracted = 0;
+        
+        // Extract all entries
+        for (const auto& entry : tocEntries)
+        {
+            // Clean path (remove leading "/" or "root" markers)
+            std::string cleanPath = entry.fullPath;
+            while (!cleanPath.empty() && (cleanPath[0] == '/' || cleanPath[0] == '\\'))
+            {
+                cleanPath = cleanPath.substr(1);
+            }
+            if (cleanPath.empty() || cleanPath == "/" || cleanPath == "\\")
+            {
+                continue;  // Skip root entry
+            }
+            
+            std::filesystem::path entryPath = outputDir / cleanPath;
+            
+            if (entry.isDirectory)
+            {
+                // Create directory
+                std::filesystem::create_directories(entryPath, ec);
+            }
+            else
+            {
+                // Extract file
+                std::filesystem::create_directories(entryPath.parent_path(), ec);
+                
+                // Read file data
+                file.seekg(entry.offset);
+                int readSize = entry.isCompressed ? entry.sizeInArchive : entry.size;
+                if (readSize <= 0) readSize = entry.size;
+                
+                std::vector<uint8_t> data(readSize);
+                file.read(reinterpret_cast<char*>(data.data()), readSize);
+                
+                // Decompress if needed
+                std::vector<uint8_t> output;
+                if (entry.isCompressed && entry.sizeInArchive < entry.size && entry.size > 0)
+                {
+                    output = DecompressRawDeflate(data, entry.size);
+                    if (output.empty())
+                    {
+                        // Decompression failed, use raw data
+                        output = std::move(data);
+                    }
+                }
+                else
+                {
+                    output = std::move(data);
+                }
+                
+                // Write to disk
+                std::ofstream outFile(entryPath, std::ios::binary);
+                if (outFile)
+                {
+                    outFile.write(reinterpret_cast<const char*>(output.data()), output.size());
+                    bytesExtracted += output.size();
+                }
+                
+                filesProcessed++;
+                
+                if (progressCallback && totalFiles > 0)
+                {
+                    progressCallback(static_cast<float>(filesProcessed) / static_cast<float>(totalFiles));
+                }
+            }
+        }
+        
+        if (progressCallback)
+        {
+            progressCallback(1.0f);
+        }
+        
+        result.success = true;
+        result.extractedPath = outputDir;
+        result.filesExtracted = filesProcessed;
+        result.bytesExtracted = bytesExtracted;
+        
         return result;
     }
+    
+    // =========================================================================
+    // Other functions
+    // =========================================================================
     
     ExtractionResult ExtractShaders(
         const std::filesystem::path& rpfPath,
@@ -249,7 +602,6 @@ namespace RpfExtractor
         const std::vector<uint8_t>& aesKey,
         const std::function<void(float)>& progressCallback)
     {
-        // Use full extraction and then filter for shaders
         return Extract(rpfPath, outputDir, aesKey, progressCallback);
     }
     
@@ -282,13 +634,12 @@ namespace RpfExtractor
             }
         }
         
-        // If we found shaders directly, we're done
         if (!result.fxcFiles.empty())
         {
             return result;
         }
         
-        // Otherwise, look for RPF files and try to extract
+        // Look for RPF files and extract
         std::vector<std::filesystem::path> rpfFiles;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(gameDir, ec))
         {
@@ -303,7 +654,6 @@ namespace RpfExtractor
             }
         }
         
-        // Extract each RPF
         float progressPerRpf = rpfFiles.empty() ? 1.0f : 1.0f / rpfFiles.size();
         for (size_t i = 0; i < rpfFiles.size(); i++)
         {
@@ -313,11 +663,10 @@ namespace RpfExtractor
             }
             
             auto rpfOutput = outputDir / rpfFiles[i].stem();
-            auto extractResult = ExtractShaders(rpfFiles[i], rpfOutput, aesKey, nullptr);
+            auto extractResult = Extract(rpfFiles[i], rpfOutput, aesKey, nullptr);
             
             if (extractResult.success)
             {
-                // Scan extracted directory for .fxc files
                 for (const auto& entry : std::filesystem::recursive_directory_iterator(rpfOutput, ec))
                 {
                     if (!entry.is_regular_file())
@@ -345,106 +694,6 @@ namespace RpfExtractor
         return result;
     }
     
-    // AES-256 decryption helper
-    static bool DecryptAES256(
-        std::vector<uint8_t>& data,
-        const std::vector<uint8_t>& key)
-    {
-        if (key.size() != 32 || data.empty())
-        {
-            return false;
-        }
-        
-#if defined(_WIN32)
-        HCRYPTPROV hProv = 0;
-        HCRYPTKEY hKey = 0;
-        
-        if (!CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
-        {
-            return false;
-        }
-        
-        // Create key blob
-        struct {
-            BLOBHEADER header;
-            DWORD keySize;
-            BYTE keyData[32];
-        } keyBlob;
-        
-        keyBlob.header.bType = PLAINTEXTKEYBLOB;
-        keyBlob.header.bVersion = CUR_BLOB_VERSION;
-        keyBlob.header.reserved = 0;
-        keyBlob.header.aiKeyAlg = CALG_AES_256;
-        keyBlob.keySize = 32;
-        std::memcpy(keyBlob.keyData, key.data(), 32);
-        
-        if (!CryptImportKey(hProv, (BYTE*)&keyBlob, sizeof(keyBlob), 0, 0, &hKey))
-        {
-            CryptReleaseContext(hProv, 0);
-            return false;
-        }
-        
-        DWORD mode = CRYPT_MODE_ECB;
-        CryptSetKeyParam(hKey, KP_MODE, (BYTE*)&mode, 0);
-        
-        DWORD dataLen = static_cast<DWORD>(data.size());
-        if (!CryptDecrypt(hKey, 0, TRUE, 0, data.data(), &dataLen))
-        {
-            CryptDestroyKey(hKey);
-            CryptReleaseContext(hProv, 0);
-            return false;
-        }
-        
-        CryptDestroyKey(hKey);
-        CryptReleaseContext(hProv, 0);
-        return true;
-#else
-        // macOS/iOS CommonCrypto
-        size_t outLength = 0;
-        CCCryptorStatus status = CCCrypt(
-            kCCDecrypt,
-            kCCAlgorithmAES,
-            kCCOptionECBMode,
-            key.data(), kCCKeySizeAES256,
-            nullptr,  // No IV for ECB
-            data.data(), data.size(),
-            data.data(), data.size(),
-            &outLength);
-        
-        return status == kCCSuccess;
-#endif
-    }
-    
-    // Zlib decompression helper
-    static std::vector<uint8_t> DecompressZlib(
-        const std::vector<uint8_t>& compressed,
-        size_t expectedSize)
-    {
-        std::vector<uint8_t> decompressed(expectedSize);
-        
-        z_stream stream{};
-        stream.next_in = const_cast<Bytef*>(compressed.data());
-        stream.avail_in = static_cast<uInt>(compressed.size());
-        stream.next_out = decompressed.data();
-        stream.avail_out = static_cast<uInt>(expectedSize);
-        
-        if (inflateInit(&stream) != Z_OK)
-        {
-            return {};
-        }
-        
-        int result = inflate(&stream, Z_FINISH);
-        inflateEnd(&stream);
-        
-        if (result != Z_STREAM_END)
-        {
-            return {};
-        }
-        
-        decompressed.resize(stream.total_out);
-        return decompressed;
-    }
-    
     ExtractionResult ExtractParallel(
         const std::filesystem::path& rpfPath,
         const std::filesystem::path& outputDir,
@@ -452,211 +701,13 @@ namespace RpfExtractor
         const ParallelExtractionOptions& options,
         const std::function<void(float)>& progressCallback)
     {
-        ExtractionResult result;
-        
-        // Read header
-        RpfHeader header;
-        if (!ReadHeader(rpfPath, header))
-        {
-            result.errorMessage = "Failed to read RPF header";
-            return result;
-        }
-        
-        // Get entries (this is fast, single-threaded is fine)
-        auto entries = ListEntries(rpfPath, aesKey);
-        if (entries.empty())
-        {
-            result.errorMessage = "No entries found in RPF";
-            return result;
-        }
-        
-        // Create output directory
-        std::error_code ec;
-        std::filesystem::create_directories(outputDir, ec);
-        
-        // Pre-create directory structure
-        for (const auto& entry : entries)
-        {
-            if (entry.isDirectory)
-            {
-                std::filesystem::create_directories(outputDir / entry.name, ec);
-            }
-        }
-        
-        // Filter to file entries only
-        std::vector<RpfFileEntry> fileEntries;
-        for (const auto& entry : entries)
-        {
-            if (!entry.isDirectory)
-            {
-                fileEntries.push_back(entry);
-            }
-        }
-        
-        if (fileEntries.empty())
-        {
-            result.success = true;
-            result.extractedPath = outputDir;
-            return result;
-        }
-        
-        // Open RPF file with shared access
-        std::ifstream rpfFile(rpfPath, std::ios::binary);
-        if (!rpfFile)
-        {
-            result.errorMessage = "Failed to open RPF file";
-            return result;
-        }
-        std::mutex rpfMutex;
-        
-        // Create thread pool and memory budget
-        size_t numThreads = options.numThreads;
-        if (numThreads == 0)
-        {
-            numThreads = std::thread::hardware_concurrency();
-            if (numThreads == 0) numThreads = 4;
-        }
-        
-        Install::ThreadPool pool(numThreads);
-        Install::MemoryBudget memBudget(options.memoryBudgetMB * 1024 * 1024);
-        
-        // Progress tracking
-        std::atomic<uint64_t> filesExtracted{0};
-        std::atomic<uint64_t> bytesExtracted{0};
-        std::atomic<uint64_t> errors{0};
-        const size_t totalFiles = fileEntries.size();
-        
-        // Process files in parallel
-        std::vector<std::future<void>> futures;
-        
-        for (const auto& entry : fileEntries)
-        {
-            futures.push_back(pool.Enqueue([&, entry]()
-            {
-                // Acquire memory budget
-                size_t bufferSize = std::max(entry.size, entry.compressedSize);
-                memBudget.Acquire(bufferSize * 2);  // Input + output buffers
-                
-                try
-                {
-                    // Read compressed/encrypted data (locked)
-                    std::vector<uint8_t> data(entry.compressedSize > 0 ? 
-                        entry.compressedSize : entry.size);
-                    
-                    {
-                        std::lock_guard<std::mutex> lock(rpfMutex);
-                        rpfFile.seekg(entry.offset);
-                        rpfFile.read(reinterpret_cast<char*>(data.data()), data.size());
-                    }
-                    
-                    // Decrypt if needed (unlocked, CPU-bound)
-                    if (entry.isEncrypted && !aesKey.empty())
-                    {
-                        DecryptAES256(data, aesKey);
-                    }
-                    
-                    // Decompress if needed (unlocked, CPU-bound)
-                    std::vector<uint8_t> output;
-                    if (entry.isCompressed && entry.compressedSize < entry.size)
-                    {
-                        output = DecompressZlib(data, entry.size);
-                        if (output.empty())
-                        {
-                            // Decompression failed, use raw data
-                            output = std::move(data);
-                        }
-                    }
-                    else
-                    {
-                        output = std::move(data);
-                    }
-                    
-                    // Write output (no lock needed, different files)
-                    std::filesystem::path outPath = outputDir / entry.name;
-                    std::filesystem::create_directories(outPath.parent_path(), ec);
-                    
-                    std::ofstream out(outPath, std::ios::binary);
-                    out.write(reinterpret_cast<const char*>(output.data()), output.size());
-                    
-                    filesExtracted++;
-                    bytesExtracted += output.size();
-                    
-                    // Update progress
-                    if (progressCallback)
-                    {
-                        float progress = static_cast<float>(filesExtracted.load()) / 
-                                        static_cast<float>(totalFiles);
-                        progressCallback(progress);
-                    }
-                }
-                catch (...)
-                {
-                    errors++;
-                }
-                
-                memBudget.Release(bufferSize * 2);
-            }));
-        }
-        
-        // Wait for all tasks
-        for (auto& f : futures)
-        {
-            f.wait();
-        }
-        
-        pool.Wait();
-        
-        if (progressCallback)
-        {
-            progressCallback(1.0f);
-        }
-        
-        result.success = errors == 0;
-        result.extractedPath = outputDir;
-        result.filesExtracted = filesExtracted.load();
-        result.bytesExtracted = bytesExtracted.load();
-        
-        if (errors > 0)
-        {
-            result.errorMessage = "Failed to extract " + std::to_string(errors.load()) + " files";
-        }
-        
-        return result;
+        // For now, use single-threaded extraction
+        return Extract(rpfPath, outputDir, aesKey, progressCallback);
     }
     
+    // SparkCLI functions - deprecated, we use native extraction now
     bool IsSparkCliAvailable()
     {
-#if defined(_WIN32)
-        // Check for SparkCLI.exe in common locations
-        std::vector<std::filesystem::path> paths = {
-            "SparkCLI.exe",
-            "tools/SparkCLI.exe",
-            "../SparkIV-master/SRC/SparkCLI/bin/Release/SparkCLI.exe",
-        };
-#else
-        // Check for mono and SparkCLI
-        int exitCode = 0;
-        std::string monoPath = ExecuteCommand("which mono 2>/dev/null", exitCode);
-        if (exitCode != 0 || monoPath.empty())
-        {
-            return false;
-        }
-        
-        std::vector<std::filesystem::path> paths = {
-            "SparkCLI.exe",
-            "tools/SparkCLI.exe",
-            "../SparkIV-master/SRC/SparkCLI/bin/Release/SparkCLI.exe",
-        };
-#endif
-        
-        for (const auto& p : paths)
-        {
-            if (std::filesystem::exists(p))
-            {
-                return true;
-            }
-        }
-        
         return false;
     }
     
@@ -667,89 +718,7 @@ namespace RpfExtractor
         const std::function<void(float)>& progressCallback)
     {
         ExtractionResult result;
-        
-        // Find SparkCLI
-        std::filesystem::path sparkCliPath;
-        std::vector<std::filesystem::path> searchPaths = {
-            "SparkCLI.exe",
-            "tools/SparkCLI.exe",
-            "../SparkIV-master/SRC/SparkCLI/bin/Release/SparkCLI.exe",
-        };
-        
-        for (const auto& p : searchPaths)
-        {
-            if (std::filesystem::exists(p))
-            {
-                sparkCliPath = p;
-                break;
-            }
-        }
-        
-        if (sparkCliPath.empty())
-        {
-            result.errorMessage = "SparkCLI not found";
-            return result;
-        }
-        
-        // Build command
-        std::ostringstream cmd;
-        
-#if defined(_WIN32)
-        cmd << "\"" << sparkCliPath.string() << "\" ";
-#else
-        cmd << "mono \"" << sparkCliPath.string() << "\" ";
-#endif
-        
-        cmd << "extract \"" << rpfPath.string() << "\" \"" << outputDir.string() << "\"";
-        
-        if (!keyPath.empty())
-        {
-            cmd << " --key \"" << keyPath.string() << "\"";
-        }
-        
-        cmd << " 2>&1";
-        
-        if (progressCallback)
-        {
-            progressCallback(0.0f);
-        }
-        
-        // Create output directory
-        std::error_code ec;
-        std::filesystem::create_directories(outputDir, ec);
-        
-        // Execute
-        int exitCode = 0;
-        std::string output = ExecuteCommand(cmd.str(), exitCode);
-        
-        if (progressCallback)
-        {
-            progressCallback(1.0f);
-        }
-        
-        if (exitCode != 0)
-        {
-            result.errorMessage = "SparkCLI failed: " + output;
-            return result;
-        }
-        
-        // Count extracted files
-        uint64_t fileCount = 0;
-        uint64_t byteCount = 0;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(outputDir, ec))
-        {
-            if (entry.is_regular_file())
-            {
-                fileCount++;
-                byteCount += entry.file_size();
-            }
-        }
-        
-        result.success = true;
-        result.extractedPath = outputDir;
-        result.filesExtracted = fileCount;
-        result.bytesExtracted = byteCount;
-        
+        result.errorMessage = "SparkCLI is deprecated. Using native extraction.";
         return result;
     }
 }

@@ -747,10 +747,20 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
     std::filesystem::path gameDir = targetDirectory / GameDirectory;
     {
         std::vector<uint8_t> aesKey;
-        std::filesystem::path aesKeyPath = PlatformPaths::GetAesKeyPath();
+        // Try bundled AES key first (shipped with app), then fall back to install directory
+        std::filesystem::path aesKeyPath = PlatformPaths::GetBundledAesKeyPath();
         if (std::filesystem::exists(aesKeyPath))
         {
             RpfExtractor::LoadAesKey(aesKeyPath, aesKey);
+        }
+        else
+        {
+            // Fallback to install directory
+            aesKeyPath = PlatformPaths::GetAesKeyPath();
+            if (std::filesystem::exists(aesKeyPath))
+            {
+                RpfExtractor::LoadAesKey(aesKeyPath, aesKey);
+            }
         }
         
         for (const auto& rpfName : GameRpfArchives)
@@ -793,10 +803,19 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
     // Try to find/extract shaders from RPF archives
     {
         std::vector<uint8_t> aesKey;
-        std::filesystem::path aesKeyPath = PlatformPaths::GetAesKeyPath();
+        // Try bundled AES key first, then fall back to install directory
+        std::filesystem::path aesKeyPath = PlatformPaths::GetBundledAesKeyPath();
         if (std::filesystem::exists(aesKeyPath))
         {
             RpfExtractor::LoadAesKey(aesKeyPath, aesKey);
+        }
+        else
+        {
+            aesKeyPath = PlatformPaths::GetAesKeyPath();
+            if (std::filesystem::exists(aesKeyPath))
+            {
+                RpfExtractor::LoadAesKey(aesKeyPath, aesKey);
+            }
         }
         
         // Scan game directory for shaders (checks extracted files first, then RPFs)

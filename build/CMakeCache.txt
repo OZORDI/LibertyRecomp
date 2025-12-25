@@ -15,7 +15,7 @@
 ########################
 
 //No help, variable specified on the command line.
-CMAKE_BUILD_TYPE:UNINITIALIZED=Release
+CMAKE_BUILD_TYPE:UNINITIALIZED=RelWithDebInfo
 
 //Value Computed by CMake.
 CMAKE_FIND_PACKAGE_REDIRECTS_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/CMakeFiles/pkgRedirects

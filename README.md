@@ -10,11 +10,6 @@
 
 Liberty Recompiled is an unofficial PC port of the Xbox 360 version of Grand Theft Auto IV created through the process of static recompilation. The port aims to offer Windows, Linux, and macOS support.
 
-**Key Improvements over Xbox 360:**
-- 🎮 **64-player multiplayer** (original was limited to 16)
-- 🖥️ Native PC performance (no emulation overhead)
-- 🌐 Online multiplayer without Xbox Live
-
 **This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Liberty Recompiled.**
 
 [XenonRecomp](https://github.com/sonicnext-dev/XenonRecomp) and [XenosRecomp](https://github.com/sonicnext-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively. The development of these recompilers was directly inspired by [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was used to create [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
@@ -49,7 +44,7 @@ This project is in **early development**. Current progress:
 - [x] Save data handling (full save system with GTA IV format support)
 - [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
 - [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
-- [x] Online multiplayer (P2P with configurable session tracking, **64-player support** - 4× original)
+- [x] Online multiplayer via Nebula VPN integration
 - [x] File system and RPF archive handling (VFS, GTA file system)
 
 ## Installation
@@ -99,7 +94,7 @@ cmake --build ./out/build/macos-release --target LibertyRecomp
 | [Dumping Guide](/docs/DUMPING-en.md) | How to extract game files from Xbox 360 |
 | [Shader Pipeline](/docs/SHADER_PIPELINE.md) | RAGE FXC → platform shader conversion |
 | [Installation Architecture](/docs/INSTALLATION_ARCHITECTURE.md) | Platform paths and install flow |
-| [Online Multiplayer Guide](/docs/ONLINE_MULTIPLAYER.md) | Online multiplayer setup and configuration |
+| [Online Multiplayer Guide](/docs/ONLINE_MULTIPLAYER.md) | Setup guide for online play via Nebula VPN |
 
 ## Performance Comparison
 
@@ -110,6 +105,8 @@ Performance comparison of GTA IV running on macOS using different methods:
 | **Crossover (Wine)** | ![Crossover Performance](docs/images/perf_crossover.png) |
 | **Xenia (Xbox 360 Emulator)** | ![Xenia Performance](docs/images/perf_xenia.png) |
 | **RPCS3 (PS3 Emulator)** | ![RPCS3 Performance](docs/images/perf_rpcs3.png) |
+
+> **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
 
 ## Credits
 

@@ -50,4 +50,16 @@ namespace hid
     // Mouse wheel support for weapon switching
     int32_t GetMouseWheelDelta();
     void ResetMouseWheelDelta();
+    
+    // Keystroke queue for XamInputGetKeystrokeEx
+    struct KeystrokeEvent {
+        uint16_t virtualKey;
+        uint16_t unicode;
+        uint16_t flags;
+        uint8_t userIndex;
+    };
+    
+    void EnqueueKeystroke(const KeystrokeEvent& event);
+    bool DequeueKeystroke(uint8_t userIndex, KeystrokeEvent& outEvent);
+    void ClearKeystrokeQueue(uint8_t userIndex);
 }

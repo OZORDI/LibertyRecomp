@@ -50,6 +50,13 @@ namespace PlatformPaths
     std::filesystem::path GetAesKeyPath();
     
     /**
+     * Get the path to the bundled AES key shipped with the application.
+     * This is used at install time to decrypt RPF archives.
+     * Returns: <app_bundle>/LibertyRecompLib/private/aes_key.bin or equivalent
+     */
+    std::filesystem::path GetBundledAesKeyPath();
+    
+    /**
      * Ensure all required directories exist.
      * Creates them if they don't.
      */

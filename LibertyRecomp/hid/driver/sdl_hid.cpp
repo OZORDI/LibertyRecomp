@@ -9,6 +9,8 @@
 #include <kernel/xam.h>
 #include <app.h>
 #include <chrono>
+#include <queue>
+#include <mutex>
 
 #define TRANSLATE_INPUT(S, X) SDL_GameControllerGetButton(controller, S) << FirstBitLow(X)
 #define VIBRATION_TIMEOUT_MS 5000
@@ -160,6 +162,15 @@ static constexpr auto MOUSE_HIDE_DELAY = std::chrono::milliseconds(2000);
 
 // Mouse wheel state for weapon switching (GTA IV)
 static int32_t s_mouseWheelDelta = 0;
+
+// Keystroke queue for XamInputGetKeystrokeEx
+static std::queue<hid::KeystrokeEvent> s_keystrokeQueues[4];
+static std::mutex s_keystrokeMutex;
+
+// Forward declarations for keystroke processing
+static uint16_t SDLScancodeToVirtualKey(SDL_Scancode scancode, uint16_t mod);
+static uint16_t SDLScancodeToUnicode(SDL_Scancode scancode, uint16_t mod);
+static void ProcessKeyboardEvent(const SDL_KeyboardEvent& key);
 
 inline Controller* EnsureController(uint32_t dwUserIndex)
 {
@@ -354,6 +365,9 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
         case SDL_KEYDOWN:
         case SDL_KEYUP:
         {
+            // Enqueue keystroke for XamInputGetKeystrokeEx
+            ProcessKeyboardEvent(event->key);
+            
             if (!App::s_isLoading)
             {
                 hid::EInputDevice previousDevice = hid::g_inputDevice;
@@ -367,6 +381,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             }
             break;
         }
+
 
         case SDL_MOUSEMOTION:
         {
@@ -564,4 +579,120 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
     pCaps->Vibration = g_activeController->vibration;
 
     return ERROR_SUCCESS;
+}
+
+// Convert SDL scancode to Xbox virtual key
+static uint16_t SDLScancodeToVirtualKey(SDL_Scancode scancode, uint16_t mod) {
+    // Letters A-Z
+    if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
+        return 0x41 + (scancode - SDL_SCANCODE_A);
+    }
+    
+    // Numbers 0-9
+    if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9) {
+        return 0x31 + (scancode - SDL_SCANCODE_1);
+    }
+    if (scancode == SDL_SCANCODE_0) {
+        return 0x30;
+    }
+    
+    // Special keys
+    switch (scancode) {
+        case SDL_SCANCODE_RETURN:    return VK_RETURN;
+        case SDL_SCANCODE_ESCAPE:    return VK_ESCAPE;
+        case SDL_SCANCODE_BACKSPACE: return VK_BACK;
+        case SDL_SCANCODE_TAB:       return VK_TAB;
+        case SDL_SCANCODE_SPACE:     return VK_SPACE;
+        case SDL_SCANCODE_DELETE:    return VK_DELETE;
+        case SDL_SCANCODE_LEFT:      return VK_LEFT;
+        case SDL_SCANCODE_RIGHT:     return VK_RIGHT;
+        case SDL_SCANCODE_UP:        return VK_UP;
+        case SDL_SCANCODE_DOWN:      return VK_DOWN;
+        case SDL_SCANCODE_LSHIFT:
+        case SDL_SCANCODE_RSHIFT:    return VK_SHIFT;
+        case SDL_SCANCODE_LCTRL:
+        case SDL_SCANCODE_RCTRL:     return VK_CONTROL;
+        default: return 0;
+    }
+}
+
+// Get unicode character for the key
+static uint16_t SDLScancodeToUnicode(SDL_Scancode scancode, uint16_t mod) {
+    bool shift = (mod & KMOD_SHIFT) != 0;
+    
+    // Letters A-Z
+    if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
+        char base = shift ? 'A' : 'a';
+        return base + (scancode - SDL_SCANCODE_A);
+    }
+    
+    // Numbers 0-9 (with shift for symbols)
+    if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9) {
+        if (shift) {
+            const char* symbols = "!@#$%^&*(";
+            return symbols[scancode - SDL_SCANCODE_1];
+        }
+        return '1' + (scancode - SDL_SCANCODE_1);
+    }
+    if (scancode == SDL_SCANCODE_0) {
+        return shift ? ')' : '0';
+    }
+    
+    // Special keys
+    switch (scancode) {
+        case SDL_SCANCODE_RETURN:    return '\r';
+        case SDL_SCANCODE_BACKSPACE: return '\b';
+        case SDL_SCANCODE_TAB:       return '\t';
+        case SDL_SCANCODE_SPACE:     return ' ';
+        default: return 0;
+    }
+}
+
+// Process SDL keyboard event into keystroke queue
+static void ProcessKeyboardEvent(const SDL_KeyboardEvent& key) {
+    uint16_t virtualKey = SDLScancodeToVirtualKey(key.keysym.scancode, key.keysym.mod);
+    if (virtualKey == 0) return;
+    
+    hid::KeystrokeEvent event;
+    event.virtualKey = virtualKey;
+    event.unicode = SDLScancodeToUnicode(key.keysym.scancode, key.keysym.mod);
+    event.userIndex = 0;
+    
+    if (key.type == SDL_KEYDOWN) {
+        event.flags = key.repeat ? XINPUT_KEYSTROKE_REPEAT : XINPUT_KEYSTROKE_KEYDOWN;
+    } else {
+        event.flags = XINPUT_KEYSTROKE_KEYUP;
+    }
+    
+    hid::EnqueueKeystroke(event);
+}
+
+void hid::EnqueueKeystroke(const KeystrokeEvent& event) {
+    std::lock_guard<std::mutex> lock(s_keystrokeMutex);
+    if (event.userIndex < 4) {
+        // Limit queue size to prevent memory issues
+        if (s_keystrokeQueues[event.userIndex].size() < 64) {
+            s_keystrokeQueues[event.userIndex].push(event);
+        }
+    }
+}
+
+bool hid::DequeueKeystroke(uint8_t userIndex, KeystrokeEvent& outEvent) {
+    std::lock_guard<std::mutex> lock(s_keystrokeMutex);
+    if (userIndex >= 4 || s_keystrokeQueues[userIndex].empty()) {
+        return false;
+    }
+    
+    outEvent = s_keystrokeQueues[userIndex].front();
+    s_keystrokeQueues[userIndex].pop();
+    return true;
+}
+
+void hid::ClearKeystrokeQueue(uint8_t userIndex) {
+    std::lock_guard<std::mutex> lock(s_keystrokeMutex);
+    if (userIndex < 4) {
+        while (!s_keystrokeQueues[userIndex].empty()) {
+            s_keystrokeQueues[userIndex].pop();
+        }
+    }
 }

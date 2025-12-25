@@ -8,6 +8,7 @@
 #elif defined(__APPLE__)
 #include <pwd.h>
 #include <unistd.h>
+#include <mach-o/dyld.h>
 #else // Linux
 #include <pwd.h>
 #include <unistd.h>
@@ -94,6 +95,106 @@ namespace PlatformPaths
     std::filesystem::path GetAesKeyPath()
     {
         return GetInstallDirectory() / "aes_key.bin";
+    }
+    
+    std::filesystem::path GetBundledAesKeyPath()
+    {
+        // The AES key is bundled in LibertyRecompLib/private/aes_key.bin
+        // At runtime, we need to find it relative to the executable
+#if defined(__APPLE__)
+        // On macOS, it's in the app bundle: .app/Contents/Resources/aes_key.bin
+        // or relative to executable for development builds
+        std::error_code ec;
+        
+        // Try app bundle Resources first
+        char path[1024];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) == 0)
+        {
+            std::filesystem::path execPath(path);
+            // .app/Contents/MacOS/LibertyRecomp -> .app/Contents/Resources/
+            auto resourcesPath = execPath.parent_path().parent_path() / "Resources" / "aes_key.bin";
+            if (std::filesystem::exists(resourcesPath, ec))
+            {
+                return resourcesPath;
+            }
+        }
+        
+        // Development build: relative to project root
+        // Try common development paths
+        std::vector<std::filesystem::path> devPaths = {
+            "LibertyRecompLib/private/aes_key.bin",
+            "../LibertyRecompLib/private/aes_key.bin",
+            "../../LibertyRecompLib/private/aes_key.bin",
+            "../../../LibertyRecompLib/private/aes_key.bin",
+        };
+        
+        for (const auto& p : devPaths)
+        {
+            if (std::filesystem::exists(p, ec))
+            {
+                return std::filesystem::absolute(p);
+            }
+        }
+        
+        // Last resort: check install directory
+        return GetAesKeyPath();
+#elif defined(_WIN32)
+        // On Windows, bundled next to executable or in install
+        std::error_code ec;
+        wchar_t path[MAX_PATH];
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        std::filesystem::path execPath(path);
+        
+        auto bundledPath = execPath.parent_path() / "aes_key.bin";
+        if (std::filesystem::exists(bundledPath, ec))
+        {
+            return bundledPath;
+        }
+        
+        // Development paths
+        std::vector<std::filesystem::path> devPaths = {
+            "LibertyRecompLib/private/aes_key.bin",
+            "../LibertyRecompLib/private/aes_key.bin",
+        };
+        
+        for (const auto& p : devPaths)
+        {
+            if (std::filesystem::exists(p, ec))
+            {
+                return std::filesystem::absolute(p);
+            }
+        }
+        
+        return GetAesKeyPath();
+#else
+        // Linux: next to executable or development path
+        std::error_code ec;
+        auto execPath = std::filesystem::read_symlink("/proc/self/exe", ec);
+        if (!ec)
+        {
+            auto bundledPath = execPath.parent_path() / "aes_key.bin";
+            if (std::filesystem::exists(bundledPath, ec))
+            {
+                return bundledPath;
+            }
+        }
+        
+        std::vector<std::filesystem::path> devPaths = {
+            "LibertyRecompLib/private/aes_key.bin",
+            "../LibertyRecompLib/private/aes_key.bin",
+        };
+        
+        for (const auto& p : devPaths)
+        {
+            if (std::filesystem::exists(p, ec))
+            {
+                return std::filesystem::absolute(p);
+            }
+        }
+        
+        return GetAesKeyPath();
+#endif
     }
     
     void EnsureDirectoriesExist()

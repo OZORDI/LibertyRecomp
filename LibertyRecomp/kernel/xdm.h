@@ -51,7 +51,58 @@
 #define ERROR_BAD_ARGUMENTS        0xA0
 #define ERROR_TOO_MANY_POSTS       0x12A
 #define ERROR_DEVICE_NOT_CONNECTED 0x48F
+#define ERROR_EMPTY                0x0
 #define PAGE_READWRITE             0x04
+
+// XINPUT_KEYSTROKE flags
+#define XINPUT_KEYSTROKE_KEYDOWN   0x0001
+#define XINPUT_KEYSTROKE_KEYUP     0x0002
+#define XINPUT_KEYSTROKE_REPEAT    0x0004
+
+// Xbox 360 Virtual Key codes for gamepad
+#define VK_PAD_A                   0x5800
+#define VK_PAD_B                   0x5801
+#define VK_PAD_X                   0x5802
+#define VK_PAD_Y                   0x5803
+#define VK_PAD_RSHOULDER           0x5804
+#define VK_PAD_LSHOULDER           0x5805
+#define VK_PAD_LTRIGGER            0x5806
+#define VK_PAD_RTRIGGER            0x5807
+#define VK_PAD_DPAD_UP             0x5810
+#define VK_PAD_DPAD_DOWN           0x5811
+#define VK_PAD_DPAD_LEFT           0x5812
+#define VK_PAD_DPAD_RIGHT          0x5813
+#define VK_PAD_START               0x5814
+#define VK_PAD_BACK                0x5815
+#define VK_PAD_LTHUMB_PRESS        0x5816
+#define VK_PAD_RTHUMB_PRESS        0x5817
+
+// Standard keyboard virtual keys (Windows VK codes)
+#define VK_BACK                    0x08
+#define VK_TAB                     0x09
+#define VK_RETURN                  0x0D
+#define VK_SHIFT                   0x10
+#define VK_CONTROL                 0x11
+#define VK_ESCAPE                  0x1B
+#define VK_SPACE                   0x20
+#define VK_LEFT                    0x25
+#define VK_UP                      0x26
+#define VK_RIGHT                   0x27
+#define VK_DOWN                    0x28
+#define VK_DELETE                  0x2E
+
+// XINPUT_KEYSTROKE structure (8 bytes, big-endian for Xbox 360)
+typedef struct _XINPUT_KEYSTROKE {
+    be<uint16_t> VirtualKey;
+    be<uint16_t> Unicode;
+    be<uint16_t> Flags;
+    uint8_t UserIndex;
+    uint8_t HidCode;
+} XINPUT_KEYSTROKE;
+
+static_assert(sizeof(XINPUT_KEYSTROKE) == 8);
+
+
 
 typedef union _LARGE_INTEGER {
     struct {
