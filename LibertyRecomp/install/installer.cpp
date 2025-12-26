@@ -1,4 +1,5 @@
 #include "installer.h"
+#include <functional>
 #include "shader_converter.h"
 #include "iso_extractor.h"
 #include "rpf_extractor.h"
@@ -744,6 +745,8 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
     
     // Extract RPF archives (GTA IV specific)
     // This extracts common.rpf, xbox360.rpf, audio.rpf to their respective folders
+    // After successful extraction, the original .rpf files are deleted to save disk space
+    // since the VFS serves files directly from the extracted directories.
     std::filesystem::path gameDir = targetDirectory / GameDirectory;
     {
         std::vector<uint8_t> aesKey;
@@ -763,6 +766,56 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
             }
         }
         
+        // Helper lambda for recursive RPF extraction
+        // Extracts an RPF, then scans output for nested RPFs and extracts those too
+        std::function<bool(const std::filesystem::path&, const std::filesystem::path&)> extractRpfRecursive;
+        extractRpfRecursive = [&](const std::filesystem::path& rpfPath, const std::filesystem::path& outputDir) -> bool {
+            std::error_code ec;
+            std::filesystem::create_directories(outputDir, ec);
+            
+            RpfExtractor::ExtractionResult result = RpfExtractor::Extract(
+                rpfPath,
+                outputDir,
+                aesKey
+            );
+            
+            if (!result.success)
+            {
+                return false;
+            }
+            
+            // Scan extracted directory for nested RPF files
+            std::vector<std::filesystem::path> nestedRpfs;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(outputDir, ec))
+            {
+                if (ec) continue;
+                if (!entry.is_regular_file()) continue;
+                
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == ".rpf")
+                {
+                    nestedRpfs.push_back(entry.path());
+                }
+            }
+            
+            // Extract nested RPFs recursively
+            for (const auto& nestedRpf : nestedRpfs)
+            {
+                std::string nestedBaseName = nestedRpf.stem().string();
+                std::filesystem::path nestedOutputDir = nestedRpf.parent_path() / nestedBaseName;
+                
+                if (extractRpfRecursive(nestedRpf, nestedOutputDir))
+                {
+                    // Delete nested RPF after successful extraction
+                    std::filesystem::remove(nestedRpf, ec);
+                }
+            }
+            
+            return true;
+        };
+        
+        // Extract top-level RPF archives
         for (const auto& rpfName : GameRpfArchives)
         {
             std::filesystem::path rpfPath = gameDir / rpfName;
@@ -775,26 +828,30 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
             std::string baseName = rpfName.substr(0, rpfName.find('.'));
             std::filesystem::path outputDir = gameDir / baseName;
             
-            // Skip if already extracted
-            if (std::filesystem::exists(outputDir) && !std::filesystem::is_empty(outputDir))
+            // Skip if already extracted (non-empty directory exists)
+            std::error_code ec;
+            if (std::filesystem::exists(outputDir, ec) && 
+                std::filesystem::is_directory(outputDir, ec) &&
+                !std::filesystem::is_empty(outputDir, ec))
             {
+                // Already extracted, delete the .rpf if it still exists
+                if (std::filesystem::exists(rpfPath, ec))
+                {
+                    std::filesystem::remove(rpfPath, ec);
+                }
                 continue;
             }
             
-            // Extract RPF contents
-            std::error_code ec;
-            std::filesystem::create_directories(outputDir, ec);
-            
-            RpfExtractor::ExtractionResult result = RpfExtractor::Extract(
-                rpfPath,
-                outputDir,
-                aesKey
-            );
-            
-            // RPF extraction failure is non-fatal for now
-            // Game may have pre-extracted files
+            // Extract RPF contents recursively
+            if (extractRpfRecursive(rpfPath, outputDir))
+            {
+                // Delete original RPF after successful extraction
+                // VFS serves from extracted directories, so keeping both wastes disk space
+                std::filesystem::remove(rpfPath, ec);
+            }
         }
     }
+
     
     // Scan for shaders - first check if already extracted, then try RPF extraction
     std::filesystem::path shaderCacheDir = targetDirectory / "shader_cache";
