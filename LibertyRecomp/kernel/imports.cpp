@@ -6995,35 +6995,41 @@ PPC_FUNC(sub_822736C8) {
 }
 
 extern "C" void __imp__sub_821DE390(PPCContext& ctx, uint8_t* base);
-// Hook sub_827EA150 to fix infinite loop in callback list iteration
+// =============================================================================
+// sub_827EA150 - File System Callback Processor
+// =============================================================================
+// This function processes file system callbacks by iterating through a linked
+// list of callback function pointers. The callback list at 0x831E3E44 contains
+// garbage/uninitialized values (e.g., 0x84FD6076) which cause the indirect
+// call at PPC line 20662 to jump to invalid addresses and block indefinitely.
+//
+// Root Cause: Even though we clear the callback list before calling the
+// original, the PPC code reloads it from memory (line 20650), getting stale
+// or corrupted values.
+//
+// SOLUTION: Full bypass - file streaming handled by VFS layer.
+// =============================================================================
 extern "C" void __imp__sub_827EA150(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827EA150) {
     static int s_count = 0; ++s_count;
     
-    // Calculate callback list address: r29 + -7772
-    // Global callback list head at 0x831E3E44
     uint32_t callbackListAddr = 0x831E3E44;
     uint32_t firstCallback = PPC_LOAD_U32(callbackListAddr);
     
-    LOGF_WARNING("[FS] sub_827EA150 #{} callback list at 0x{:08X} first=0x{:08X}",
-                 s_count, callbackListAddr, firstCallback);
+    if (s_count <= 3) {
+        LOGF_WARNING("[FS] sub_827EA150 #{} BYPASSING - callback=0x{:08X} (file callback processing)", 
+                     s_count, firstCallback);
+    }
     
-    // ALWAYS clear the callback list to prevent infinite loops from uninitialized memory
-    // The original function clears it at the end anyway (line 20678)
-    // We're just doing it proactively to prevent processing invalid callbacks
-    // This is safe because:
-    //   1. Callbacks are single-use (cleared after processing)
-    //   2. Resources load via VFS and vtable implementations
-    //   3. No rendering dependency on these callbacks
+    // Clear callback list to prevent issues if called again
     if (firstCallback != 0) {
-        LOGF_WARNING("[FS] Clearing callback list (was 0x{:08X})", firstCallback);
         PPC_STORE_U32(callbackListAddr, 0);
     }
     
-    // Call original implementation (will skip callback iteration since list is now NULL)
-    __imp__sub_827EA150(ctx, base);
-    
-    LOGF_WARNING("[FS] sub_827EA150 #{} completed", s_count);
+    // BYPASS: Don't call __imp__sub_827EA150
+    // Reason: Callback at 0x84FD6076 is uninitialized, causes infinite block
+    // File streaming handled by VFS layer, callbacks are Xbox-specific
+    return;
 }
 
 extern "C" void __imp__sub_8221F8A8(PPCContext& ctx, uint8_t* base);
@@ -10501,9 +10507,19 @@ PPC_FUNC(sub_822E3EC8) {
 
 PPC_FUNC(sub_822E49A0) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[UI-INT] sub_822E49A0 [9] ENTER #{} r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    __imp__sub_822E49A0(ctx, base);
-    LOGF_WARNING("[UI-INT] sub_822E49A0 [9] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - UI resource init with Xbox device vtables + scheduler loop bypassed", s_count);
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - Parameters: r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    
+    // STUB: This function performs UI resource initialization with:
+    // 1. Xbox device vtable calls (lines 38833, 38862 in ppc_recomp.13.cpp)
+    // 2. Infinite scheduler loop waiting for async events (sub_828E0AB8 called 25000+ times)
+    // 3. Resource loading that depends on Xbox GPU device at 0x83127984
+    // 
+    // Our modern graphics system (plume/Vulkan/D3D12/Metal) handles UI resources independently.
+    // Following Sonic Unleashed's approach: bypass Xbox-specific platform code.
+    
+    // Return success without calling the original implementation
+    // The function doesn't return a value in the original code, so no need to set r3
 }
 
 PPC_FUNC(sub_8222F7E8) {
