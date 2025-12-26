@@ -94,7 +94,7 @@ cmake --build ./out/build/macos-release --target LibertyRecomp
 | [Dumping Guide](/docs/DUMPING-en.md) | How to extract game files from Xbox 360 |
 | [Shader Pipeline](/docs/SHADER_PIPELINE.md) | RAGE FXC → platform shader conversion |
 | [Installation Architecture](/docs/INSTALLATION_ARCHITECTURE.md) | Platform paths and install flow |
-| [Online Multiplayer Guide](/docs/ONLINE_MULTIPLAYER.md) | Setup guide for online play via Nebula VPN |
+| [Online Multiplayer Guide](/docs/ONLINE_MULTIPLAYER.md) | Setup guide for online play |
 
 ## Performance Comparison
 
@@ -105,8 +105,6 @@ Performance comparison of GTA IV running on macOS using different methods:
 | **Crossover (Wine)** | ![Crossover Performance](docs/images/perf_crossover.png) |
 | **Xenia (Xbox 360 Emulator)** | ![Xenia Performance](docs/images/perf_xenia.png) |
 | **RPCS3 (PS3 Emulator)** | ![RPCS3 Performance](docs/images/perf_rpcs3.png) |
-
-> **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
 
 ## Credits
 

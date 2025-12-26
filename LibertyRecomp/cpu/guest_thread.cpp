@@ -23,7 +23,8 @@ GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
     assert(thread == nullptr);
 
     // Allocate contiguous block: [PCR][TLS][TEB][Stack]
-    thread = (uint8_t*)g_userHeap.Alloc(TOTAL_SIZE);
+    // Use physical heap (0x80000000+) so stack addresses match Xbox 360 expectations
+    thread = (uint8_t*)g_userHeap.AllocPhysical(TOTAL_SIZE, 16);
     memset(thread, 0, TOTAL_SIZE);
 
     // Get typed pointers to each region
