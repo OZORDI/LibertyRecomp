@@ -9039,16 +9039,6 @@ PPC_FUNC(sub_827E8180) {
         for (uint32_t ptrOffset : {4u, 8u}) {
             uint32_t level1Ptr = PPC_LOAD_U32(pathContextAddr + ptrOffset);
             if (level1Ptr >= 0x80000000 && level1Ptr < 0xE0000000) {
-                // Log what's at the first level pointer for debugging
-                if (s_count <= 20) {
-                    LOGF_WARNING("[FILE] sub_827E8180 #{} Strategy4 level1Ptr=0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
-                        s_count, level1Ptr,
-                        PPC_LOAD_U8(level1Ptr + 0), PPC_LOAD_U8(level1Ptr + 1),
-                        PPC_LOAD_U8(level1Ptr + 2), PPC_LOAD_U8(level1Ptr + 3),
-                        PPC_LOAD_U8(level1Ptr + 4), PPC_LOAD_U8(level1Ptr + 5),
-                        PPC_LOAD_U8(level1Ptr + 6), PPC_LOAD_U8(level1Ptr + 7));
-                }
-                
                 // Try multiple offsets in the level1 structure
                 for (uint32_t level2Offset : {0u, 4u, 8u, 12u, 16u, 20u, 24u}) {
                     uint32_t level2Ptr = PPC_LOAD_U32(level1Ptr + level2Offset);
@@ -9068,10 +9058,6 @@ PPC_FUNC(sub_827E8180) {
                             if (looksLikePath) {
                                 pathStrAddr = level2Ptr;
                                 foundPath = true;
-                                if (s_count <= 20) {
-                                    LOGF_WARNING("[FILE] sub_827E8180 #{} Strategy4 SUCCESS: level1+{} -> 0x{:08X}", 
-                                        s_count, level2Offset, level2Ptr);
-                                }
                                 break;
                             }
                         }
@@ -9082,47 +9068,29 @@ PPC_FUNC(sub_827E8180) {
         }
     }
 
-    
-    // If we found a path address, read the string
-    if (foundPath && pathStrAddr != 0) {
-        for (int i = 0; i < 259; i++) {
-            char c = PPC_LOAD_U8(pathStrAddr + i);
-            if (c == 0) break;
-            pathBuf[i] = c;
+    // ==========================================================================
+    // EARLY RETURN: If no valid path address found, return 0 (file not found)
+    // This prevents null pointer dereference when pathStrAddr is 0
+    // ==========================================================================
+    if (!foundPath || pathStrAddr == 0) {
+        if (s_count <= 5) {
+            LOGF_WARNING("[FILE] sub_827E8180 #{} NO PATH FOUND - context=0x{:08X}, returning 0", 
+                         s_count, pathContextAddr);
         }
+        ctx.r3.u32 = 0;  // File not found
+        return;
     }
     
-    if (s_count <= 20) {
-        LOGF_WARNING("[FILE] sub_827E8180 #{} path='{}' flags={} contextAddr=0x{:08X} finalAddr=0x{:08X}", 
-                     s_count, pathBuf, flags, pathContextAddr, pathStrAddr);
+    // Read the path string (we know pathStrAddr is valid here)
+    for (int i = 0; i < 259; i++) {
+        char c = PPC_LOAD_U8(pathStrAddr + i);
+        if (c == 0) break;
+        pathBuf[i] = c;
     }
     
-    // If path is empty, log the context structure for debugging
-    if (pathBuf[0] == 0 && s_count <= 20) {
-        LOGF_WARNING("[FILE] sub_827E8180 #{} EMPTY PATH - context dump: [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
-            s_count,
-            PPC_LOAD_U8(pathContextAddr + 0), PPC_LOAD_U8(pathContextAddr + 1),
-            PPC_LOAD_U8(pathContextAddr + 2), PPC_LOAD_U8(pathContextAddr + 3),
-            PPC_LOAD_U8(pathContextAddr + 4), PPC_LOAD_U8(pathContextAddr + 5),
-            PPC_LOAD_U8(pathContextAddr + 6), PPC_LOAD_U8(pathContextAddr + 7));
-        
-        LOGF_WARNING("[FILE] sub_827E8180 #{} Final string address 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
-            s_count, pathStrAddr,
-            PPC_LOAD_U8(pathStrAddr + 0), PPC_LOAD_U8(pathStrAddr + 1),
-            PPC_LOAD_U8(pathStrAddr + 2), PPC_LOAD_U8(pathStrAddr + 3),
-            PPC_LOAD_U8(pathStrAddr + 4), PPC_LOAD_U8(pathStrAddr + 5),
-            PPC_LOAD_U8(pathStrAddr + 6), PPC_LOAD_U8(pathStrAddr + 7));
-        
-        // Try one more level of dereferencing manually
-        uint32_t nextPtr = PPC_LOAD_U32(pathStrAddr);
-        if (nextPtr >= 0x00080000 && nextPtr < 0xE0000000) {
-            LOGF_WARNING("[FILE] sub_827E8180 #{} One more deref 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
-                s_count, nextPtr,
-                PPC_LOAD_U8(nextPtr + 0), PPC_LOAD_U8(nextPtr + 1),
-                PPC_LOAD_U8(nextPtr + 2), PPC_LOAD_U8(nextPtr + 3),
-                PPC_LOAD_U8(nextPtr + 4), PPC_LOAD_U8(nextPtr + 5),
-                PPC_LOAD_U8(nextPtr + 6), PPC_LOAD_U8(nextPtr + 7));
-        }
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE] sub_827E8180 #{} path='{}' flags={} contextAddr=0x{:08X}", 
+                     s_count, pathBuf, flags, pathContextAddr);
     }
     
     // Check if this is a shader file request (fxl_final, .fxc, shaders)
@@ -10055,57 +10023,35 @@ PPC_FUNC(sub_82273988) {
     uint32_t contextAddr = ctx.r3.u32;
     uint32_t enableFlag = ctx.r4.u32;
     
-    LOGF_WARNING("[INIT] sub_82273988 ENTER #{} context=0x{:08X} enableFlag={}", 
-                 s_count, contextAddr, enableFlag);
+    // ==========================================================================
+    // BYPASS: sub_82273988 - Resource array final setup
+    // 
+    // This function iterates through Xbox resource arrays looking for a -1
+    // sentinel. The sentinel location changes dynamically (r27+132 where r27
+    // is updated each iteration), causing an infinite loop when the sentinel
+    // is missing or at unexpected locations.
+    //
+    // Since we use VFS for resource loading (not Xbox resource arrays), we can
+    // safely bypass this function and just set the completion flags.
+    // ==========================================================================
     
-    // Inspect the resource array that sub_82273988 will iterate through
-    // Address calculation: 0x82144000 + 29876 = 0x8214B4B4
-    uint32_t resourceArrayAddr = 0x8214B4B4;
-    uint32_t arrayPtr = PPC_LOAD_U32(resourceArrayAddr + 0);  // Base pointer
-    uint16_t arrayCount = PPC_LOAD_U16(resourceArrayAddr + 4); // Count
-    
-    LOGF_WARNING("[INIT] sub_82273988 Resource array: ptr=0x{:08X} count={}",
-                 arrayPtr, arrayCount);
-    
-    // FIX: If count is unreasonably high (>100), it's corrupted - reset to 0
-    // This prevents infinite loops in sub_82273988
-    if (arrayCount > 100) {
-        LOGF_WARNING("[INIT] sub_82273988 FIXING corrupted count {} -> 0", arrayCount);
-        PPC_STORE_U16(resourceArrayAddr + 4, 0);
-        arrayCount = 0;
+    if (s_count <= 3) {
+        LOGF_WARNING("[INIT] sub_82273988 #{} BYPASSED - resource final setup (VFS handles this)", s_count);
+        LOGF_WARNING("[INIT] sub_82273988 #{} context=0x{:08X} enableFlag={}", s_count, contextAddr, enableFlag);
     }
     
-    // Ensure sentinel values are present at the array structure
-    // At offset +808+132, there should be a -1 sentinel
-    if (arrayPtr != 0) {
-        uint32_t sentinelAddr = arrayPtr + 808 + 132;
-        uint32_t currentSentinel = PPC_LOAD_U32(sentinelAddr);
-        LOGF_WARNING("[INIT] sub_82273988 Sentinel at 0x{:08X} current=0x{:08X}",
-                     sentinelAddr, currentSentinel);
-        if (currentSentinel != 0xFFFFFFFF) {
-            PPC_STORE_U32(sentinelAddr, 0xFFFFFFFF); // Write -1 sentinel
-            LOGF_WARNING("[INIT] sub_82273988 Fixed sentinel 0x{:08X} -> 0xFFFFFFFF", currentSentinel);
-        }
+    // Set completion/initialization flags in the context structure
+    if (contextAddr >= 0x80000000 && contextAddr < 0xE0000000) {
+        PPC_STORE_U8(contextAddr + 357, 1);   // initialized flag
+        PPC_STORE_U8(contextAddr + 358, 1);   // completion flag
+        
+        // Set buffer count fields to 0 to indicate no Xbox resources loaded
+        PPC_STORE_U32(contextAddr + 364, 0);  // resource count 1
+        PPC_STORE_U32(contextAddr + 368, 0);  // resource count 2
     }
     
-    // Also check and log what happens at context[358] - the completion flag
-    uint32_t completionFlag = PPC_LOAD_U8(contextAddr + 358);
-    LOGF_WARNING("[INIT] sub_82273988 Completion flag before: context[358]={}", completionFlag);
-    
-    __imp__sub_82273988(ctx, base);
-    
-    // Check completion flag after execution
-    uint32_t completionFlagAfter = PPC_LOAD_U8(contextAddr + 358);
-    LOGF_WARNING("[INIT] sub_82273988 Completion flag after: context[358]={}", completionFlagAfter);
-    
-    // Check if buffers were allocated
-    uint32_t buffer0 = PPC_LOAD_U32(contextAddr + 0);
-    uint32_t buffer8 = PPC_LOAD_U32(contextAddr + 8);
-    uint32_t buffer360 = PPC_LOAD_U32(contextAddr + 360);
-    LOGF_WARNING("[INIT] sub_82273988 Allocated buffers: [0]=0x{:08X} [8]=0x{:08X} [360]=0x{:08X}",
-                 buffer0, buffer8, buffer360);
-    
-    LOGF_WARNING("[INIT] sub_82273988 EXIT #{}", s_count);
+    // Return success
+    ctx.r3.u32 = 1;
 }
 
 PPC_FUNC(sub_821250B0)
@@ -10362,9 +10308,33 @@ PPC_FUNC(sub_82860928) {
 
 PPC_FUNC(sub_824A0898) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[UI-INT] sub_824A0898 [4] ENTER #{}", s_count);
+    LOGF_WARNING("[UI-INT] sub_824A0898 ENTER #{}", s_count);
+    
+    // Step 1: Call sub_827E0740 (already hooked, should complete)
+    LOGF_WARNING("[UI-INT] sub_824A0898 #{} Step1: calling sub_827E0740", s_count);
+    
+    // Step 2: Check the vtable at global 0x831E7984
+    uint32_t globalAddr = 0x831E7984;
+    uint32_t objPtr = PPC_LOAD_U32(globalAddr);
+    LOGF_WARNING("[UI-INT] sub_824A0898 #{} Step2: global@0x{:08X} -> objPtr=0x{:08X}", s_count, globalAddr, objPtr);
+    
+    if (objPtr >= 0x80000000 && objPtr < 0xE0000000) {
+        uint32_t vtablePtr = PPC_LOAD_U32(objPtr);
+        LOGF_WARNING("[UI-INT] sub_824A0898 #{} Step2: objPtr@0x{:08X} -> vtable=0x{:08X}", s_count, objPtr, vtablePtr);
+        
+        if (vtablePtr >= 0x80000000 && vtablePtr < 0xE0000000) {
+            uint32_t vtable1 = PPC_LOAD_U32(vtablePtr + 4);
+            uint32_t vtable2 = PPC_LOAD_U32(vtablePtr + 8);
+            uint32_t vtable3 = PPC_LOAD_U32(vtablePtr + 12);
+            LOGF_WARNING("[UI-INT] sub_824A0898 #{} Step2: vtable[1]=0x{:08X} vtable[2]=0x{:08X} vtable[3]=0x{:08X}", 
+                         s_count, vtable1, vtable2, vtable3);
+        }
+    }
+    
+    // Call original - this will block
+    LOGF_WARNING("[UI-INT] sub_824A0898 #{} CALLING ORIGINAL (may block)", s_count);
     __imp__sub_824A0898(ctx, base);
-    LOGF_WARNING("[UI-INT] sub_824A0898 [4] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    LOGF_WARNING("[UI-INT] sub_824A0898 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 // Late-stage functions in sub_824A0898 - after sub_82860928 and sub_8285AA90 calls
 extern "C" void __imp__sub_82857C60(PPCContext& ctx, uint8_t* base);
