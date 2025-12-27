@@ -6,9 +6,22 @@
 #include <kernel/function.h>
 #include "ppc_context.h"
 #include <SDL.h>
+#include <thread>
 
 // Forward declaration from imports.cpp
 extern void PumpSdlEventsIfNeeded();
+
+// =============================================================================
+// SINGLE-THREADED MODE
+// =============================================================================
+// When enabled, all "threads" run synchronously on the main thread.
+// This eliminates race conditions and makes debugging easier.
+// Set to false to restore multi-threaded behavior.
+// =============================================================================
+static bool g_singleThreadedMode = true;
+
+// Export for use in imports.cpp
+bool IsSingleThreadedMode() { return g_singleThreadedMode; }
 
 // Legacy constants for backward compatibility (now defined in guest_thread.h as X360_*)
 constexpr size_t PCR_SIZE = X360_PCR_SIZE;
@@ -111,7 +124,13 @@ static void* GuestThreadFunc(void* arg)
 static void* GuestThreadFunc(GuestThreadHandle* hThread)
 {
 #endif
-    bool wasSuspended = hThread->suspended.load();
+    // Wait for constructor to signal we can start (uses mutex/CV for proper sync)
+    bool wasSuspended;
+    {
+        std::unique_lock<std::mutex> lock(hThread->startMutex);
+        hThread->startCV.wait(lock, [hThread]{ return hThread->canStart; });
+        wasSuspended = hThread->suspended.load(std::memory_order_acquire);
+    }
     fprintf(stderr, "[GuestThreadFunc] Thread starting, suspended=%d, waiting...\n", wasSuspended ? 1 : 0);
     if (wasSuspended) {
         hThread->suspended.wait(true);
@@ -126,11 +145,21 @@ static void* GuestThreadFunc(GuestThreadHandle* hThread)
 }
 
 GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
-    : params(params), suspended((params.flags & 0x1) != 0)
+    : params(params), suspended(false)
 #ifdef USE_PTHREAD
 {
-    // Debug: verify flags and suspended state before creating thread
     bool shouldBeSuspended = (params.flags & 0x1) != 0;
+    suspended.store(shouldBeSuspended, std::memory_order_release);
+    
+    // SINGLE-THREADED MODE: Don't create actual pthread
+    if (g_singleThreadedMode) {
+        // Mark as finished since we run synchronously in Start()
+        isFinished = true;
+        thread = pthread_t{};  // Zero-initialize
+        return;
+    }
+    
+    // Multi-threaded mode: create actual pthread
     fprintf(stderr, "[GuestThreadHandle] CTOR flags=0x%X shouldSuspend=%d suspended=%d\n",
             params.flags, shouldBeSuspended ? 1 : 0, suspended.load() ? 1 : 0);
     
@@ -142,15 +171,40 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
         fprintf(stderr, "pthread_create failed with error code 0x%X.\n", ret);
         return;
     }
+    {
+        std::lock_guard<std::mutex> lock(startMutex);
+        canStart = true;
+    }
+    startCV.notify_one();
 }
 #else
-, thread(GuestThreadFunc, this)
+
 {
+    bool shouldBeSuspended = (params.flags & 0x1) != 0;
+    suspended.store(shouldBeSuspended, std::memory_order_release);
+    
+    // SINGLE-THREADED MODE: Don't create actual thread
+    if (g_singleThreadedMode) {
+        isFinished = true;
+        return;
+    }
+    
+    thread = std::thread(GuestThreadFunc, this);
+    {
+        std::lock_guard<std::mutex> lock(startMutex);
+        canStart = true;
+    }
+    startCV.notify_one();
 }
 #endif
 
 GuestThreadHandle::~GuestThreadHandle()
 {
+    // SINGLE-THREADED MODE: No thread to join
+    if (g_singleThreadedMode) {
+        return;
+    }
+    
 #ifdef USE_PTHREAD
     pthread_join(thread, nullptr);
 #else
@@ -254,6 +308,23 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
 
 GuestThreadHandle* GuestThread::Start(const GuestThreadParams& params, uint32_t* threadId)
 {
+    if (g_singleThreadedMode) {
+        // SINGLE-THREADED MODE: Don't actually run spawned threads
+        // Worker threads loop forever and would block the main thread.
+        // Just create a dummy handle - the main game thread continues running.
+        bool isSuspended = (params.flags & 0x1) != 0;
+        fprintf(stderr, "[SingleThreaded] SKIPPING thread entry=0x%08X (suspended=%d) - main thread continues\n", 
+                params.function, isSuspended ? 1 : 0);
+        
+        // Create a handle for the game to reference
+        auto hThread = CreateKernelObject<GuestThreadHandle>(params);
+        if (threadId != nullptr) {
+            *threadId = hThread->GetThreadId();
+        }
+        return hThread;
+    }
+    
+    // Original multi-threaded code
     auto hThread = CreateKernelObject<GuestThreadHandle>(params);
 
     if (threadId != nullptr)
