@@ -157,22 +157,30 @@ PPC_FUNC(sub_82122CA0)
 // Loads profile and enumerates/opens save files
 // =============================================================================
 extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
+// STUBBED: sub_821200D0 - Post-Init (blocks on loading loop)
 PPC_FUNC(sub_821200D0)
 {
     static int s_count = 0;
     ++s_count;
-    
-    printf("[SaveHook] ========================================\n");
-    printf("[SaveHook] sub_821200D0 (Post-Init/Profile Loading) #%d\n", s_count);
-    printf("[SaveHook] This function will:\n");
-    printf("[SaveHook]   - Check profile state\n");
-    printf("[SaveHook]   - Enumerate save files (XContentCreateEnumerator)\n");
-    printf("[SaveHook]   - Open save content (XContentCreate)\n");
-    printf("[SaveHook]   - Validate save signature\n");
-    printf("[SaveHook] ========================================\n");
-    
-    // Call original implementation
-    __imp__sub_821200D0(ctx, base);
-    
-    printf("[SaveHook] sub_821200D0 completed\n");
+    printf("[821200D0] #%d STUBBED - Post-init loading bypassed", s_count);
+    ctx.r3.u32 = 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

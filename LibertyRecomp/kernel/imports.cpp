@@ -10889,9 +10889,16 @@ PPC_FUNC(sub_829D4C48)
 extern "C" void __imp__sub_829D7368(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D7368)
 {
-    // Let the game control its own VBlank flags - don't force them
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[VBLANK] sub_829D7368 #{}", s_count);
     __imp__sub_829D7368(ctx, base);
 }
+
+
+
+
+
 
 // Hook sub_829A3318 - Boot orchestrator (calls XamTaskShouldExit in loop)
 extern "C" void __imp__sub_829A3318(PPCContext& ctx, uint8_t* base);
@@ -12481,6 +12488,108 @@ PPC_FUNC(sub_8232A2C0) {
 PPC_FUNC(sub_82125478) {
     static int s_count = 0; ++s_count;
     LOGF_WARNING("[82125478] #{} STUBBED - Final setup bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
+
+
+
+
+
+
+// =========================================================================
+// Main Loop Tracing Hooks
+// =========================================================================
+extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);  // Main Loop Entry
+extern "C" void __imp__sub_828529B0(PPCContext& ctx, uint8_t* base);  // Main Loop Orchestrator
+extern "C" void __imp__sub_828507F8(PPCContext& ctx, uint8_t* base);  // Frame Presentation
+extern "C" void __imp__sub_829D5388(PPCContext& ctx, uint8_t* base);  // D3D Present (VdSwap)
+
+PPC_FUNC(sub_82856F08) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[MAIN_LOOP] sub_82856F08 (Entry) #{}", s_count);
+    __imp__sub_82856F08(ctx, base);
+}
+
+PPC_FUNC(sub_828529B0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 (Orchestrator) #{}", s_count);
+    __imp__sub_828529B0(ctx, base);
+}
+
+PPC_FUNC(sub_828507F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[RENDER] sub_828507F8 (Frame Present) #{}", s_count);
+    __imp__sub_828507F8(ctx, base);
+}
+
+PPC_FUNC(sub_829D5388) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[RENDER] sub_829D5388 (D3D Present/VdSwap) #{}", s_count);
+    __imp__sub_829D5388(ctx, base);
+}
+
+// =========================================================================
+// sub_821200D0 internal tracing
+// =========================================================================
+extern "C" void __imp__sub_82121E80(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821924D8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218C2C0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218C1F0(PPCContext& ctx, uint8_t* base);
+
+// STUBBED: sub_82121E80 - loading state machine (blocks on async ops)
+PPC_FUNC(sub_82121E80) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82121E80] #{} STUBBED - loading state bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_821924D8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821200D0-INT] sub_821924D8 ENTER #{}", s_count);
+    __imp__sub_821924D8(ctx, base);
+    LOGF_WARNING("[821200D0-INT] sub_821924D8 EXIT #{}", s_count);
+}
+
+// STUBBED: sub_8218C2C0 - loading check (return 1=ready to break wait loop)
+PPC_FUNC(sub_8218C2C0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 3) LOGF_WARNING("[8218C2C0] #{} STUBBED - returning ready", s_count);
+    ctx.r3.u32 = 1;  // Return ready to break loading loop
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_8218C1F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[821200D0-INT] sub_8218C1F0 #{}", s_count);
+    __imp__sub_8218C1F0(ctx, base);
+}
+
+// =========================================================================
+// sub_821200A8 tracing (called after sub_821200D0 in sub_8218BEB0)
+// =========================================================================
+extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
+
+// STUBBED: sub_821200A8 - post-init finalization (blocks on sub_821212A8)
+PPC_FUNC(sub_821200A8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821200A8] #{} STUBBED - post-init finalization bypassed", s_count);
     ctx.r3.u32 = 0;
 }
 
