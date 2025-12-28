@@ -6582,6 +6582,21 @@ extern "C" void __imp__sub_822E49A0(PPCContext& ctx, uint8_t* base);  // Inside 
 extern "C" void __imp__sub_8222F7E8(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [11] final
 
 extern "C" void __imp__sub_8226CB50(PPCContext& ctx, uint8_t* base);  // Camera system [14]
+// Subsystems after Camera system [15-30] - INSTRUMENTATION TO FIND BLOCKER
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);  // HUD init [15]
+extern "C" void __imp__sub_821A8278(PPCContext& ctx, uint8_t* base);  // HUD component [16]
+extern "C" void __imp__sub_821BC9E0(PPCContext& ctx, uint8_t* base);  // Menu system [17]
+extern "C" void __imp__sub_822DB4B0(PPCContext& ctx, uint8_t* base);  // Cutscene system [18]
+extern "C" void __imp__sub_821B7218(PPCContext& ctx, uint8_t* base);  // Mission system [19]
+extern "C" void __imp__sub_822498F8(PPCContext& ctx, uint8_t* base);  // Checkpoint system [20]
+extern "C" void __imp__sub_8225DC40(PPCContext& ctx, uint8_t* base);  // Weather system [21]
+extern "C" void __imp__sub_821E24E0(PPCContext& ctx, uint8_t* base);  // Population system [22]
+extern "C" void __imp__sub_821DFD18(PPCContext& ctx, uint8_t* base);  // Traffic system [23]
+extern "C" void __imp__sub_8220E108(PPCContext& ctx, uint8_t* base);  // Wanted system [24]
+extern "C" void __imp__sub_821D8358(PPCContext& ctx, uint8_t* base);  // Map/GPS init [26]
+extern "C" void __imp__sub_821EA0B8(PPCContext& ctx, uint8_t* base);  // Blip system [27]
+extern "C" void __imp__sub_82200EB8(PPCContext& ctx, uint8_t* base);  // Stats system [30]
+
 // Internal functions in sub_82120C48 - find exact blocker
 extern "C" void __imp__sub_821E9658(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
 extern "C" void __imp__sub_821FD460(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
@@ -10501,9 +10516,19 @@ PPC_FUNC(sub_822E3EC8) {
 
 PPC_FUNC(sub_822E49A0) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[UI-INT] sub_822E49A0 [9] ENTER #{} r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    __imp__sub_822E49A0(ctx, base);
-    LOGF_WARNING("[UI-INT] sub_822E49A0 [9] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - UI resource init with Xbox device vtables + scheduler loop bypassed", s_count);
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - Parameters: r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    
+    // STUB: This function performs UI resource initialization with:
+    // 1. Xbox device vtable calls (lines 38833, 38862 in ppc_recomp.13.cpp)
+    // 2. Infinite scheduler loop waiting for async events (sub_828E0AB8 called 25000+ times)
+    // 3. Resource loading that depends on Xbox GPU device at 0x83127984
+    // 
+    // Our modern graphics system (plume/Vulkan/D3D12/Metal) handles UI resources independently.
+    // Following Sonic Unleashed's approach: bypass Xbox-specific platform code.
+    
+    // Don't call __imp__sub_822E49A0 - it would block forever in scheduler loop
+    return;
 }
 
 PPC_FUNC(sub_8222F7E8) {
@@ -10520,6 +10545,109 @@ PPC_FUNC(sub_8226CB50) {
     LOGF_WARNING("[63-SUBSYS] sub_8226CB50 (Camera system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
 
 }
+
+// Internal functions called by sub_821A8868 - declarations only
+extern "C" void __imp__sub_82300C78(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_824E1DD0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8249BA90(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8060(PPCContext& ctx, uint8_t* base);
+
+// STUBBED: sub_821A8868 (HUD/Mission init) - blocks on synchronization primitives
+// Call chain: sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0
+// The sync primitives (semaphores, waits) block indefinitely in recompilation environment
+PPC_FUNC(sub_821A8868) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821A8868] #{} STUBBED - HUD init bypassed (blocks on sync primitives)", s_count);
+    ctx.r3.u32 = 0;  // Return success
+}
+
+PPC_FUNC(sub_821A8278) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821A8278] #{} STUBBED - HUD component bypassed (depends on stubbed HUD init)", s_count);
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
+
+PPC_FUNC(sub_821BC9E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821BC9E0 (Menu system) ENTER #{}", s_count);
+    __imp__sub_821BC9E0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821BC9E0 (Menu system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822DB4B0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822DB4B0 (Cutscene system) ENTER #{}", s_count);
+    __imp__sub_822DB4B0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822DB4B0 (Cutscene system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821B7218) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821B7218 (Mission system) ENTER #{}", s_count);
+    __imp__sub_821B7218(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821B7218 (Mission system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822498F8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822498F8 (Checkpoint system) ENTER #{}", s_count);
+    __imp__sub_822498F8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822498F8 (Checkpoint system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8225DC40) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8225DC40 (Weather system) ENTER #{}", s_count);
+    __imp__sub_8225DC40(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8225DC40 (Weather system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821E24E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821E24E0 (Population system) ENTER #{}", s_count);
+    __imp__sub_821E24E0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821E24E0 (Population system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821DFD18) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821DFD18 (Traffic system) ENTER #{}", s_count);
+    __imp__sub_821DFD18(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821DFD18 (Traffic system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// STUBBED: sub_8220E108 (Wanted system) - call 30 (sub_82430C60) blocks
+// Calls 1-29 work, call 30 blocks on sync primitives, skip it and remaining
+PPC_FUNC(sub_8220E108) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8220E108] #{} STUBBED - Wanted system bypassed (call 30 blocks)", s_count);
+    ctx.r3.u32 = 0;  // Return success
+}
+
+PPC_FUNC(sub_821D8358) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821D8358 (Map/GPS init) ENTER #{}", s_count);
+    __imp__sub_821D8358(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821D8358 (Map/GPS init) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821EA0B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821EA0B8 (Blip system) ENTER #{}", s_count);
+    __imp__sub_821EA0B8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821EA0B8 (Blip system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+
+// STUBBED: sub_82200EB8 (Stats system) - blocks on sync primitives
+PPC_FUNC(sub_82200EB8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82200EB8] #{} STUBBED - Stats system bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
 // =============================================================================
 // Internal functions in sub_82120C48 - FIND EXACT BLOCKER
 // =============================================================================
@@ -12240,3 +12368,124 @@ PPC_FUNC(sub_822AFAF8) {
         LOGF_WARNING("[sub_822AFAF8] #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
     }
 }
+
+// =========================================================================
+// Remaining 63-subsystem hooks (after Stats system)
+// =========================================================================
+extern "C" void __imp__sub_8212FB78(PPCContext& ctx, uint8_t* base);  // Friend system
+extern "C" void __imp__sub_8219ADF0(PPCContext& ctx, uint8_t* base);  // Online system
+extern "C" void __imp__sub_8212F578(PPCContext& ctx, uint8_t* base);  // Leaderboard
+extern "C" void __imp__sub_8212EDC8(PPCContext& ctx, uint8_t* base);  // Achievement
+extern "C" void __imp__sub_82138710(PPCContext& ctx, uint8_t* base);  // Replay system
+extern "C" void __imp__sub_821B2ED8(PPCContext& ctx, uint8_t* base);  // Camera recording
+extern "C" void __imp__sub_822467B8(PPCContext& ctx, uint8_t* base);  // Cinematic camera
+extern "C" void __imp__sub_82208460(PPCContext& ctx, uint8_t* base);  // Photo mode
+extern "C" void __imp__sub_821B9DA8(PPCContext& ctx, uint8_t* base);  // TV system
+extern "C" void __imp__sub_82258100(PPCContext& ctx, uint8_t* base);  // Internet cafe
+extern "C" void __imp__sub_821A03A0(PPCContext& ctx, uint8_t* base);  // Phone system
+extern "C" void __imp__sub_8232A2C0(PPCContext& ctx, uint8_t* base);  // Dating system
+extern "C" void __imp__sub_82125478(PPCContext& ctx, uint8_t* base);  // Final setup
+
+PPC_FUNC(sub_8212FB78) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212FB78 (Friend system) ENTER #{}", s_count);
+    __imp__sub_8212FB78(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212FB78 (Friend system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// STUBBED: sub_8219ADF0 (Online system)
+PPC_FUNC(sub_8219ADF0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8219ADF0] #{} STUBBED - Online system bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_8212F578) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212F578 (Leaderboard) ENTER #{}", s_count);
+    __imp__sub_8212F578(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212F578 (Leaderboard) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8212EDC8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212EDC8 (Achievement) ENTER #{}", s_count);
+    __imp__sub_8212EDC8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212EDC8 (Achievement) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82138710) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82138710 (Replay system) ENTER #{}", s_count);
+    __imp__sub_82138710(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82138710 (Replay system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821B2ED8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821B2ED8 (Camera recording) ENTER #{}", s_count);
+    __imp__sub_821B2ED8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821B2ED8 (Camera recording) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822467B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822467B8 (Cinematic camera) ENTER #{}", s_count);
+    __imp__sub_822467B8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822467B8 (Cinematic camera) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82208460) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82208460 (Photo mode) ENTER #{}", s_count);
+    __imp__sub_82208460(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82208460 (Photo mode) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821B9DA8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821B9DA8] #{} STUBBED - TV system bypassed", s_count);
+    ctx.r3.u32 = 0;
+    return;
+    // Original below
+
+}
+PPC_FUNC(sub_82258100) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82258100 (Internet cafe) ENTER #{}", s_count);
+    __imp__sub_82258100(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82258100 (Internet cafe) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821A03A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821A03A0 (Phone system) ENTER #{}", s_count);
+    __imp__sub_821A03A0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821A03A0 (Phone system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8232A2C0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8232A2C0 (Dating system) ENTER #{}", s_count);
+    __imp__sub_8232A2C0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8232A2C0 (Dating system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// STUBBED: sub_82125478 (Final setup)
+PPC_FUNC(sub_82125478) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82125478] #{} STUBBED - Final setup bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
+
+
+
+
+
