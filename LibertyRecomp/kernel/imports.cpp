@@ -1559,12 +1559,22 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 void SignalAllBlockingSemaphores() {
     std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
     for (uint32_t addr : g_blockingSemaphoreAddrs) {
+        // Try as kernel handle first (from NtCreateSemaphore)
+        if (IsKernelObject(addr)) {
+            Semaphore* sem = GetKernelObject<Semaphore>(addr);
+            if (sem && sem->count.load() == 0) {
+                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked kernel semaphore handle=0x{:08X}", addr);
+                sem->Release(1, nullptr);
+            }
+            continue;
+        }
+        // Try as guest address (from KeInitializeSemaphore)
         XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(addr));
         if (semaphore && semaphore->Header.Type == 5) {
             auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
             if (object && object->count.load() == 0) {
-                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked semaphore 0x{:08X}", addr);
-                object->Release(1, nullptr);  // Release with count 1 to unblock one waiter
+                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked guest semaphore 0x{:08X}", addr);
+                object->Release(1, nullptr);
             }
         }
     }
@@ -4157,6 +4167,7 @@ void StartVBlankTimer()
         return;  // Already running
     
     g_vblankThreadRunning = true;
+    printf("[StartVBlankTimer] Starting VBlank thread...\n");
     g_vblankThread = std::thread([]() {
         using namespace std::chrono;
         auto nextVBlank = steady_clock::now();
@@ -4172,15 +4183,22 @@ void StartVBlankTimer()
             ++vblankCount;
             
             // Fire VBlank callback if registered
-            if (g_gpuRingBuffer.interruptCallback != 0 && g_ppcContext)
+            // NOTE: g_ppcContext is thread_local and NULL on this thread!
+            // We create our own context for VBlank callbacks.
+            if (vblankCount <= 3) { printf("[VBlank] Thread tick #%u callback=0x%08X\n", vblankCount, g_gpuRingBuffer.interruptCallback); }
+            if (g_gpuRingBuffer.interruptCallback != 0)
             {
                 PPCFunc* callback = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
                 if (callback)
                 {
-                    PPCContext tempCtx = *g_ppcContext;
-                    tempCtx.r3.u32 = 0;  // Interrupt type 0 = VBlank
-                    tempCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
-                    callback(tempCtx, g_memory.base);
+                    // Create a minimal context for VBlank callback
+                    // Cannot use g_ppcContext - it's thread_local and null here
+                    static PPCContext vblankCtx{};
+                    vblankCtx.r3.u32 = 0;  // Interrupt type 0 = VBlank
+                    vblankCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                    vblankCtx.r1.u64 = 0x80080000;  // Minimal stack pointer
+                    vblankCtx.r13.u64 = 0x80000D20; // Minimal TLS base
+                    callback(vblankCtx, g_memory.base);
                     
                     if (vblankCount <= 5 || vblankCount % 60 == 0)
                     {
@@ -4214,12 +4232,21 @@ void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
     // Start VBlank timer when callback is registered (GTA IV requirement)
     StartVBlankTimer();
     
-    LOGF_UTILITY("callback=0x{:08X} userData=0x{:08X} - VBlank timer started at 60Hz", callback, userData);
+    printf("[VdSetGraphicsInterruptCallback] callback=0x%08X userData=0x%08X - VBlank timer started at 60Hz\n", callback, userData);
 }
 
 uint32_t VdInitializeEngines()
 {
     g_gpuRingBuffer.enginesInitialized = true;
+    
+    // FORCE: Register VBlank callback since VdSetGraphicsInterruptCallback is never called
+    // The callback 0x829D7368 is the known VBlank handler from GTA IV
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[VdInitializeEngines] FORCE-registering VBlank callback 0x829D7368\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
     LOG_UTILITY("enginesInitialized = true");
     
     // Signal all tracked events to wake waiting threads
@@ -4780,8 +4807,14 @@ uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttri
     *Handle = GetKernelHandle(sem);
     uint32_t handle = *Handle;
     
-    // Log semaphore creation - EXPERIMENT ROLLED BACK (force signal only helped once)
-    if (s_count <= 50 || (handle >= 0xEB2D0000 && handle <= 0xEB2E0000)) {
+    // Track blocking semaphores (count=0) for signaling after init
+    if (InitialCount == 0) {
+        // Store the kernel handle for later signaling
+        std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
+        g_blockingSemaphoreAddrs.insert(handle);  // Track handle directly
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count=0 max={} - TRACKED for signaling", 
+                     s_count, handle, MaximumCount);
+    } else if (s_count <= 50) {
         LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={}", 
                      s_count, handle, InitialCount, MaximumCount);
     }
@@ -10707,6 +10740,16 @@ PPC_FUNC(sub_82120FB8)
     __imp__sub_82120FB8(ctx, base);
     
     LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{} thread=0x{:04X} r3={} - 63-subsystem init complete", s_count, threadId, ctx.r3.u32);
+    
+    // FORCE: Start VBlank timer with known callback since GPU init path is never reached
+    extern void StartVBlankTimer();
+    
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[FORCE] Starting VBlank timer with callback 0x829D7368 after 63-subsystem init\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
 }
 
 // Hook sub_8218BEB0 - Calls sub_82120000, returns -1 on failure
@@ -12135,7 +12178,7 @@ PPC_FUNC(sub_822F8890) {
         // File failed to open - call error handler and return 0
         ctx.r3.s64 = (int64_t)(-2113863680) + 836;
         ctx.lr = 0x822F88D4;
-        __imp__sub_828E0AB8(ctx, base);
+    __imp__sub_828E0AB8(ctx, base);
         ctx.r3.s64 = 0;
         
         // Restore stack and return
@@ -12586,15 +12629,20 @@ PPC_FUNC(sub_8218C1F0) {
 // =========================================================================
 extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
 
-// STUBBED: sub_821200A8 - post-init finalization (blocks on sub_821212A8)
+// TRACE: sub_821200A8 - let it run (no obvious blocking loops)
 PPC_FUNC(sub_821200A8) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821200A8] #{} STUBBED - post-init finalization bypassed", s_count);
-    ctx.r3.u32 = 0;
+    LOGF_WARNING("[821200A8] #{} ENTER - post-init finalization", s_count);
+    __imp__sub_821200A8(ctx, base);
+    LOGF_WARNING("[821200A8] #{} EXIT", s_count);
 }
 
-
-
-
-
-
+// =========================================================================
+// sub_821219B0 - trace to find blocking point
+// =========================================================================
+extern "C" void __imp__sub_821219B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821219B0) {
+    static int s_count = 0; ++s_count;
+    printf("[821219B0] #%d STUBBED - bypassing blocking sync primitive\n", s_count);
+    ctx.r3.u32 = 0; // Stub - bypass blocking
+}

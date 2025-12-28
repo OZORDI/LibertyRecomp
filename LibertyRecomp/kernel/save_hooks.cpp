@@ -157,30 +157,12 @@ PPC_FUNC(sub_82122CA0)
 // Loads profile and enumerates/opens save files
 // =============================================================================
 extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
-// STUBBED: sub_821200D0 - Post-Init (blocks on loading loop)
+// TRACE: sub_821200D0 - let it run, sub_8218C2C0 returns ready to skip loading wait
 PPC_FUNC(sub_821200D0)
 {
     static int s_count = 0;
     ++s_count;
-    printf("[821200D0] #%d STUBBED - Post-init loading bypassed", s_count);
-    ctx.r3.u32 = 0;
+    printf("[821200D0] #%d ENTER - Post-init loading (non-blocking via sub_8218C2C0 stub)\n", s_count);
+    __imp__sub_821200D0(ctx, base);
+    printf("[821200D0] #%d EXIT\n", s_count);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
