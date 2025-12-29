@@ -164,20 +164,20 @@ extern void SignalAllBlockingSemaphores();  // From imports.cpp
 extern void ShutdownAllWorkers();  // From imports.cpp - sets exit flags and signals workers
 
 // sub_821200D0 - Post-init loading / cleanup phase
-// SIMPLIFIED: Skip internal blocking waits and just signal completion
-// The main loop can handle any remaining cleanup
+// Now that sub_82857240 is fixed, let this run properly
 PPC_FUNC(sub_821200D0)
 {
     static int s_count = 0;
     ++s_count;
     
-    printf("[821200D0] #%d ENTER - signaling init complete\n", s_count); fflush(stdout);
+    printf("[821200D0] #%d ENTER\n", s_count); fflush(stdout);
+    
+    // Signal init complete before running cleanup
     SetInitComplete();
-    ShutdownAllWorkers();
     SignalAllBlockingSemaphores();
     
-    // Skip calling __imp__sub_821200D0 - it contains blocking waits
-    // Just return success so main loop can proceed
-    printf("[821200D0] #%d EXIT - bypassed internal waits\n", s_count); fflush(stdout);
-    ctx.r3.u32 = 0;  // Return success
+    // Run the actual function
+    __imp__sub_821200D0(ctx, base);
+    
+    printf("[821200D0] #%d EXIT r3=%d\n", s_count, ctx.r3.s32); fflush(stdout);
 }

@@ -6721,14 +6721,26 @@ PPC_FUNC(sub_82120000)
     ++s_count;
     uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
     
-    // TEMPORARY FIX: Always return success (1) to bypass blocking init
-    // The 63-subsystem init completed successfully in previous runs (r3=10)
-    // This allows the main loop to proceed while we debug the blocking
-    ctx.r3.s32 = 1;
-    if (s_count <= 5 || s_count % 100 == 0)
+    // Return cached result if already initialized
+    if (g_initResult.load() != -999)
     {
-        LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} - returning success to bypass blocking init", s_count, threadId);
+        ctx.r3.s32 = g_initResult.load();
+        if (s_count <= 10 || s_count % 100 == 0)
+        {
+            LOGF_WARNING("[INIT] sub_82120000 #{} CACHED r3={}", s_count, ctx.r3.s32);
+        }
+        return;
     }
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} (first call) - running full init", s_count, threadId);
+    
+    // Run the actual init - sub_82857240 is now stubbed to prevent blocking
+    __imp__sub_82120000(ctx, base);
+    
+    // Cache the result
+    g_initResult.store(ctx.r3.s32);
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
 }
 
 // Trace functions called after sub_8218C600 succeeds
@@ -8551,9 +8563,19 @@ PPC_FUNC(sub_82856C90) {
 extern "C" void __imp__sub_82857240(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82857240) {
     static int s_count = 0; ++s_count;
-    LOG_WARNING("[sub_82857240] ENTER - render context vtable[1] method");
-    __imp__sub_82857240(ctx, base);
-    LOG_WARNING("[sub_82857240] EXIT");
+    
+    // REIMPLEMENT: This is vtable[1] on render context - Xbox GPU hardware init
+    // Original blocks on sync primitives waiting for GPU hardware responses
+    // PC replacement: Skip GPU hardware calls, return success
+    // The host rendering layer (Video::*) handles actual GPU state
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[RENDER_INIT] sub_82857240 - Bypassing Xbox GPU init, host layer handles rendering");
+    }
+    
+    // Don't call original - it blocks on hardware waits
+    // Just return success so init chain can continue
+    ctx.r3.u32 = 1;  // Success
 }
 
 // =============================================================================
@@ -11036,6 +11058,58 @@ PPC_FUNC(sub_827EE620)
 extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);  // Main Loop Entry
 
+// =============================================================================
+// FRAME RATE COUNTER - tracks actual FPS and frame timing
+// =============================================================================
+struct FrameRateCounter {
+    std::chrono::steady_clock::time_point lastFrameTime;
+    std::chrono::steady_clock::time_point lastFpsUpdate;
+    int frameCount = 0;
+    int framesThisSecond = 0;
+    double currentFps = 0.0;
+    double avgFrameTimeMs = 0.0;
+    double minFrameTimeMs = 999999.0;
+    double maxFrameTimeMs = 0.0;
+    bool initialized = false;
+    
+    void Init() {
+        lastFrameTime = std::chrono::steady_clock::now();
+        lastFpsUpdate = lastFrameTime;
+        initialized = true;
+    }
+    
+    void Update() {
+        if (!initialized) Init();
+        
+        auto now = std::chrono::steady_clock::now();
+        double frameTimeMs = std::chrono::duration<double, std::milli>(now - lastFrameTime).count();
+        lastFrameTime = now;
+        
+        frameCount++;
+        framesThisSecond++;
+        
+        // Track min/max frame times
+        if (frameTimeMs < minFrameTimeMs && frameCount > 5) minFrameTimeMs = frameTimeMs;
+        if (frameTimeMs > maxFrameTimeMs && frameCount > 5) maxFrameTimeMs = frameTimeMs;
+        
+        // Update FPS every second
+        double timeSinceUpdate = std::chrono::duration<double>(now - lastFpsUpdate).count();
+        if (timeSinceUpdate >= 1.0) {
+            currentFps = framesThisSecond / timeSinceUpdate;
+            avgFrameTimeMs = (timeSinceUpdate * 1000.0) / framesThisSecond;
+            
+            LOGF_WARNING("[FPS] {:.1f} fps | avg={:.2f}ms min={:.2f}ms max={:.2f}ms | total frames={}",
+                        currentFps, avgFrameTimeMs, minFrameTimeMs, maxFrameTimeMs, frameCount);
+            
+            framesThisSecond = 0;
+            lastFpsUpdate = now;
+            minFrameTimeMs = 999999.0;
+            maxFrameTimeMs = 0.0;
+        }
+    }
+};
+static FrameRateCounter g_fpsCounter;
+
 PPC_FUNC(sub_8218BEA8)
 {
     static int s_entered = 0;
@@ -11043,25 +11117,20 @@ PPC_FUNC(sub_8218BEA8)
     if (s_entered == 1)
     {
         LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{}", s_entered);
+        g_fpsCounter.Init();
     }
     
     // Main game loop - directly call sub_82856F08 (main loop entry)
     // This is the function that drives rendering via sub_828529B0 -> sub_828507F8 -> VdSwap
-    int frameCount = 0;
     while (true)
     {
-        ++frameCount;
+        // Update frame rate counter
+        g_fpsCounter.Update();
         
         // Call the main loop entry which orchestrates rendering
         __imp__sub_82856F08(ctx, base);
         
-        // Log progress
-        if (frameCount <= 5 || frameCount % 60 == 0)
-        {
-            LOGF_WARNING("[RENDER] Frame {} completed", frameCount);
-        }
-        
-        // 16ms sleep for ~60fps
+        // 16ms sleep for ~60fps target
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 }
@@ -12799,11 +12868,11 @@ PPC_FUNC(sub_8218C1F0) {
 // =========================================================================
 extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
 
-// STUB: sub_821200A8 - bypass post-init finalization to let main loop proceed
+// TRACE: sub_821200A8 - now running properly since sub_82857240 is fixed
 PPC_FUNC(sub_821200A8) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821200A8] #{} STUBBED - bypassing post-init finalization", s_count);
-    ctx.r3.u32 = 0;  // Return success
+    LOGF_WARNING("[821200A8] #{} ENTER - post-init finalization", s_count);
+    __imp__sub_821200A8(ctx, base);
     LOGF_WARNING("[821200A8] #{} EXIT", s_count);
 }
 
