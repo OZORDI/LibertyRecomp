@@ -11034,6 +11034,7 @@ PPC_FUNC(sub_827EE620)
 // Hook sub_8218BEA8 - Main entry point, implement game loop
 // Xbox 360 runtime called this repeatedly; recomp needs to emulate that
 extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);  // Main Loop Entry
 
 PPC_FUNC(sub_8218BEA8)
 {
@@ -11044,33 +11045,25 @@ PPC_FUNC(sub_8218BEA8)
         LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{}", s_entered);
     }
     
-    // Main game loop - call sub_827D89B8 (frame tick) repeatedly
+    // Main game loop - directly call sub_82856F08 (main loop entry)
+    // This is the function that drives rendering via sub_828529B0 -> sub_828507F8 -> VdSwap
     int frameCount = 0;
     while (true)
     {
         ++frameCount;
         
-        // Call the frame tick function
-        __imp__sub_827D89B8(ctx, base);
-        
-        // Check return value - negative means exit
-        if (ctx.r3.s32 < 0)
-        {
-            LOGF_WARNING("[MAIN] Frame {} returned {} - exiting", frameCount, ctx.r3.s32);
-            break;
-        }
+        // Call the main loop entry which orchestrates rendering
+        __imp__sub_82856F08(ctx, base);
         
         // Log progress
-        if (frameCount <= 5 || frameCount % 500 == 0)
+        if (frameCount <= 5 || frameCount % 60 == 0)
         {
-            LOGF_WARNING("[MAIN] Frame {} r3={}", frameCount, ctx.r3.s32);
+            LOGF_WARNING("[RENDER] Frame {} completed", frameCount);
         }
         
-        // Small sleep to prevent CPU spinning (16ms ~ 60fps)
+        // 16ms sleep for ~60fps
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
-    
-    LOGF_WARNING("[MAIN] Loop exited after {} frames", frameCount);
 }
 
 // Hook sub_828E0AB8 - Scheduler loop (just trace, don't force VdSwap)
@@ -12466,10 +12459,10 @@ PPC_FUNC(sub_822F87E0) {
         LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} ENTER r3=0x{:08X} r4=0x{:08X}", 
                      s_count, ctx.r3.u32, ctx.r4.u32);
         
-        // Check if pointers are valid
-        bool r3Valid = (ctx.r3.u32 >= 0x80000000 && ctx.r3.u32 < 0x100000000ULL) ||
+        // Check if pointers are valid (guest memory ranges)
+        bool r3Valid = (ctx.r3.u32 >= 0x80000000) ||
                        (ctx.r3.u32 >= 0x00020000 && ctx.r3.u32 < 0x7FEA0000);
-        bool r4Valid = (ctx.r4.u32 >= 0x80000000 && ctx.r4.u32 < 0x100000000ULL) ||
+        bool r4Valid = (ctx.r4.u32 >= 0x80000000) ||
                        (ctx.r4.u32 >= 0x00020000 && ctx.r4.u32 < 0x7FEA0000);
         
         if (!r3Valid || !r4Valid) {
