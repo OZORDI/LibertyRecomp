@@ -2453,6 +2453,18 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
 {
     if (Handle == GUEST_INVALID_HANDLE_VALUE)
         return 0xFFFFFFFF;
+    
+    // FIX: NULL handle (0x00000000) means "no object to wait on" - return success immediately
+    // This unblocks the main thread after init completes when game passes NULL handles
+    if (Handle == 0)
+    {
+        static int s_nullWaitCount = 0;
+        if (++s_nullWaitCount <= 5)
+        {
+            LOGF_WARNING("[NtWaitEx] NULL handle wait #{} - returning STATUS_SUCCESS to unblock", s_nullWaitCount);
+        }
+        return STATUS_SUCCESS;  // Return success to let caller proceed
+    }
 
     uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
     
