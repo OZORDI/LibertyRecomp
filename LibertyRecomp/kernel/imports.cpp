@@ -12796,16 +12796,49 @@ PPC_FUNC(sub_82856F08) {
 
 PPC_FUNC(sub_828529B0) {
     static int s_count = 0; ++s_count;
-    if (s_count <= 5 || s_count % 1000 == 0)
-        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 (Orchestrator) #{}", s_count);
+    
+    // Check device context at 0x828D2E38 + 19188 = 0x828D7344
+    uint32_t deviceCtxPtr = PPC_LOAD_U32(0x828D2E38 + 19188);
+    LOGF_WARNING("[MAIN_LOOP] sub_828529B0 ENTER #{} deviceCtx=0x{:08X}", s_count, deviceCtxPtr);
+    
+    if (deviceCtxPtr == 0) {
+        LOG_WARNING("[MAIN_LOOP] Device context is NULL - init may have failed");
+    }
+    
     __imp__sub_828529B0(ctx, base);
+    LOGF_WARNING("[MAIN_LOOP] sub_828529B0 EXIT #{}", s_count);
+}
+
+// Trace sub_828529B0 internal calls to find blocking point
+extern "C" void __imp__sub_8285ACE8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285ACE8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_8285ACE8 ENTER #{}", s_count);
+    __imp__sub_8285ACE8(ctx, base);
+    LOGF_WARNING("[ORCH] sub_8285ACE8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829CA360(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829CA360) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_829CA360 ENTER #{}", s_count);
+    __imp__sub_829CA360(ctx, base);
+    LOGF_WARNING("[ORCH] sub_829CA360 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829CA240(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829CA240) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[ORCH] sub_829CA240 ENTER #{}", s_count);
+    __imp__sub_829CA240(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[ORCH] sub_829CA240 EXIT #{}", s_count);
 }
 
 PPC_FUNC(sub_828507F8) {
     static int s_count = 0; ++s_count;
-    if (s_count <= 5 || s_count % 1000 == 0)
-        LOGF_WARNING("[RENDER] sub_828507F8 (Frame Present) #{}", s_count);
+    LOGF_WARNING("[RENDER] sub_828507F8 (Frame Present) #{}", s_count);
     __imp__sub_828507F8(ctx, base);
+    LOGF_WARNING("[RENDER] sub_828507F8 EXIT #{}", s_count);
 }
 
 PPC_FUNC(sub_829D5388) {
