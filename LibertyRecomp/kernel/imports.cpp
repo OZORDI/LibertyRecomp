@@ -48,6 +48,29 @@
 #endif
 
 // =============================================================================
+// TARGETED TIMING FIXES - Known Wait Loop Registry
+// =============================================================================
+// Instead of global slowdowns, we identify specific wait loops and inject yields
+// only where needed. This fixes timing issues without impacting overall performance.
+// =============================================================================
+
+// Registry of known spin-wait functions that need yield injection
+// These are addresses of functions that contain busy-wait loops
+static const std::unordered_set<uint32_t> g_knownSpinWaitFunctions = {
+    0x82672E50,  // Audio/streaming init - has 2 busy-wait loops
+    0x82672AA8,  // Loop 1 helper in sub_82672E50
+    0x829736F8,  // Loop 2 helper in sub_82672E50
+    0x827E7B38,  // File streaming queue init - infinite loop
+    0x827DB880,  // Worker manager shutdown loop
+    0x823005E0,  // Worker cleanup - waits for workers to exit
+};
+
+// Helper to check if a function address is a known spin-wait
+inline bool IsKnownSpinWait(uint32_t funcAddr) {
+    return g_knownSpinWaitFunctions.count(funcAddr) > 0;
+}
+
+// =============================================================================
 // COMPREHENSIVE SEMAPHORE FIX - Following UnleashedRecomp Pattern
 // =============================================================================
 // Problem: Worker threads wait on semaphores that are never signaled, causing deadlocks.
@@ -4588,46 +4611,115 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
     return STATUS_SUCCESS;
 }
 
+// =============================================================================
+// TLS UNIFICATION: Route KeTls* APIs through Guest Memory (r13 + X360_TLS_OFFSET)
+// =============================================================================
+// Problem: Previously, KeTlsGetValue/SetValue used host thread_local storage,
+// which was completely disconnected from the guest memory TLS at r13+0xAB0.
+// This caused state mismatches where game code and kernel APIs saw different TLS.
+//
+// Solution: Unified TLS - all TLS access goes through guest memory.
+// - Guest threads: read/write from r13 + X360_TLS_OFFSET + (index * 4)
+// - Non-guest threads (VBlank, etc.): fallback to host thread_local storage
+// =============================================================================
+
 static std::vector<size_t> g_tlsFreeIndices;
 static size_t g_tlsNextIndex = 0;
 static Mutex g_tlsAllocationMutex;
 
-static uint32_t& KeTlsGetValueRef(size_t index)
+// Host-side TLS fallback for non-guest threads (VBlank callback thread, etc.)
+static uint32_t& KeTlsGetValueRef_Host(size_t index)
 {
-    // Having this a global thread_local variable
-    // for some reason crashes on boot in debug builds.
     thread_local std::vector<uint32_t> s_tlsValues;
-
     if (s_tlsValues.size() <= index)
     {
         s_tlsValues.resize(index + 1, 0);
     }
-
     return s_tlsValues[index];
 }
 
+// Maximum TLS slots in guest memory (X360_TLS_SIZE = 0x100 = 256 bytes = 64 uint32_t slots)
+static constexpr uint32_t MAX_GUEST_TLS_SLOTS = X360_TLS_SIZE / sizeof(uint32_t);
+
 uint32_t KeTlsGetValue(uint32_t dwTlsIndex)
 {
-    return KeTlsGetValueRef(dwTlsIndex);
+    // Get current thread's PPC context
+    PPCContext* ctx = GetPPCContext();
+    
+    // If no PPC context or r13 is invalid, fall back to host TLS
+    // This handles non-guest threads like VBlank callback thread
+    if (!ctx || ctx->r13.u32 == 0 || ctx->r13.u32 < 0x80000000)
+    {
+        return KeTlsGetValueRef_Host(dwTlsIndex);
+    }
+    
+    // Validate index - guest TLS has limited slots
+    if (dwTlsIndex >= MAX_GUEST_TLS_SLOTS)
+    {
+        // For indices beyond guest TLS capacity, use host fallback
+        return KeTlsGetValueRef_Host(dwTlsIndex);
+    }
+    
+    // Read from guest memory: r13 + X360_TLS_OFFSET + (index * 4)
+    // X360_TLS_OFFSET = 0xAB0 (defined in guest_thread.h)
+    uint32_t tlsAddr = ctx->r13.u32 + X360_TLS_OFFSET + (dwTlsIndex * sizeof(uint32_t));
+    // Direct guest memory access (can't use PPC_LOAD_U32 macro - no 'base' in scope)
+    uint32_t* ptr = reinterpret_cast<uint32_t*>(g_memory.base + tlsAddr);
+    return __builtin_bswap32(*ptr);  // Big-endian to host
 }
 
 uint32_t KeTlsSetValue(uint32_t dwTlsIndex, uint32_t lpTlsValue)
 {
-    KeTlsGetValueRef(dwTlsIndex) = lpTlsValue;
+    PPCContext* ctx = GetPPCContext();
+    
+    if (!ctx || ctx->r13.u32 == 0 || ctx->r13.u32 < 0x80000000)
+    {
+        KeTlsGetValueRef_Host(dwTlsIndex) = lpTlsValue;
+        return TRUE;
+    }
+    
+    if (dwTlsIndex >= MAX_GUEST_TLS_SLOTS)
+    {
+        KeTlsGetValueRef_Host(dwTlsIndex) = lpTlsValue;
+        return TRUE;
+    }
+    
+    // Write to guest memory: r13 + X360_TLS_OFFSET + (index * 4)
+    uint32_t tlsAddr = ctx->r13.u32 + X360_TLS_OFFSET + (dwTlsIndex * sizeof(uint32_t));
+    // Direct guest memory access (can't use PPC_STORE_U32 macro - no 'base' in scope)
+    uint32_t* ptr = reinterpret_cast<uint32_t*>(g_memory.base + tlsAddr);
+    *ptr = __builtin_bswap32(lpTlsValue);  // Host to big-endian
     return TRUE;
 }
 
 uint32_t KeTlsAlloc()
 {
     std::lock_guard<Mutex> lock(g_tlsAllocationMutex);
+    
+    // Try to reuse a freed slot first
     if (!g_tlsFreeIndices.empty())
     {
         size_t index = g_tlsFreeIndices.back();
         g_tlsFreeIndices.pop_back();
-        return index;
+        return static_cast<uint32_t>(index);
     }
-
-    return g_tlsNextIndex++;
+    
+    // Allocate new slot
+    size_t index = g_tlsNextIndex++;
+    
+    // Warn if exceeding guest TLS capacity (still works via host fallback)
+    if (index >= MAX_GUEST_TLS_SLOTS)
+    {
+        static bool warned = false;
+        if (!warned)
+        {
+            LOGF_WARNING("[TLS] Allocated slot {} exceeds guest TLS capacity ({}), using host fallback",
+                         index, MAX_GUEST_TLS_SLOTS);
+            warned = true;
+        }
+    }
+    
+    return static_cast<uint32_t>(index);
 }
 
 uint32_t KeTlsFree(uint32_t dwTlsIndex)
@@ -9755,15 +9847,31 @@ PPC_FUNC(sub_82671E40) {
         LOGF_WARNING("[INIT] sub_82671E40 EXIT #{}", s_count);
 }
 
-// sub_82672E50 - Audio/streaming init with busy-wait loops - STUBBED
-// Analysis: Contains busy-wait loops waiting for worker tasks that are now stubbed
-// Since workers are stubbed, these loops would run forever
+// sub_82672E50 - Audio/streaming init with busy-wait loops - FIXED
+// Analysis: Contains busy-wait loops waiting for worker tasks.
+// Fix: Pre-clear loop exit conditions so loops exit immediately, then run actual init.
+//
+// Loop 1: while ([0x832A5F00 + 24352] != 0) { sub_82672AA8(); }  
+// Loop 2: while (sub_82973598() != 0) { sub_829736F8(); sub_82973598(); }
+//
+// By pre-clearing these conditions, the loops exit immediately and init proceeds.
 PPC_FUNC(sub_82672E50) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[INIT] sub_82672E50 #{} STUBBED - bypassing busy-wait loops", s_count);
-    // Don't call __imp__sub_82672E50 - contains infinite busy-wait loops
-    ctx.r3.u32 = 0;  // Return success
-    return;
+    LOGF_WARNING("[INIT] sub_82672E50 #{} ENTER - pre-clearing loop conditions", s_count);
+    
+    // Pre-clear loop 1 condition: [0x832A5F00 + 24352] = 0
+    // This is the worker task counter that normally gets decremented by workers
+    constexpr uint32_t LOOP1_ADDR = 0x832A5F00 + 24352;  // 0x832A5F20 + offset
+    PPC_STORE_U32(LOOP1_ADDR, 0);
+    
+    // Note: Loop 2 condition is a function return value, can't pre-clear.
+    // The yield in sub_829736F8 hook should prevent tight spinning.
+    // Add iteration limit as safety.
+    
+    // Call original function - loops should now exit quickly
+    __imp__sub_82672E50(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_82672E50 #{} EXIT", s_count);
 }
 
 // sub_82679950 - Graphics/GPU initialization - STUBBED
@@ -9804,13 +9912,32 @@ PPC_FUNC(sub_82672AA8) {
     __imp__sub_82672AA8(ctx, base);
 }
 
+// sub_82973598 - Loop 2 condition check in sub_82672E50
+// Returns non-zero while tasks are pending. Force return 0 after iteration limit.
 PPC_FUNC(sub_82973598) {
     static int s_count = 0; ++s_count;
-    if (s_count <= 10 || s_count % 100 == 0)
-        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{}", s_count);
+    static thread_local int s_loopIter = 0;
+    
+    // Call original to get actual status
     __imp__sub_82973598(ctx, base);
-    if (s_count <= 10 || s_count % 100 == 0)
-        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{} r3={}", s_count, ctx.r3.u32);
+    
+    // Track iterations per loop entry
+    if (ctx.r3.u32 != 0) {
+        ++s_loopIter;
+        // Force exit after 100 iterations to prevent infinite loop
+        if (s_loopIter > 100) {
+            if (s_loopIter == 101) {
+                LOGF_WARNING("[BUSYWAIT] sub_82973598 forcing loop exit after {} iterations", s_loopIter);
+            }
+            ctx.r3.u32 = 0;  // Force loop exit
+        }
+    } else {
+        // Loop condition cleared naturally, reset counter
+        s_loopIter = 0;
+    }
+    
+    if (s_count <= 10 || s_count % 500 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{} r3={} loopIter={}", s_count, ctx.r3.u32, s_loopIter);
 }
 
 PPC_FUNC(sub_829736F8) {
