@@ -6,40 +6,27 @@
 
 namespace GTA
 {
+    // Comprehensive file resolve logging - tracks ALL game file requests
+    static int s_fileResolveCount = 0;
+    
     uint32_t FileResolve(uint32_t context, const char* pathBuffer, 
                         uint32_t outputPtr, uint32_t validationToken)
     {
-        static int s_count = 0; ++s_count;
+        ++s_fileResolveCount;
         
         std::string guestPath(pathBuffer);
         
-        // Check if this is an interesting file type for logging
-        bool isInteresting = false;
-        std::string pathLower = guestPath;
-        std::transform(pathLower.begin(), pathLower.end(), pathLower.begin(), ::tolower);
-        if (pathLower.find(".wtd") != std::string::npos ||
-            pathLower.find(".wdr") != std::string::npos ||
-            pathLower.find(".wft") != std::string::npos ||
-            pathLower.find(".wdd") != std::string::npos ||
-            pathLower.find(".rpf") != std::string::npos ||
-            pathLower.find("shader") != std::string::npos ||
-            pathLower.find("texture") != std::string::npos ||
-            pathLower.find("model") != std::string::npos) {
-            isInteresting = true;
-        }
-        
-        // Log first 200 calls or all interesting files
-        if (s_count <= 200 || isInteresting) {
-            LOGF_WARNING("[FileResolve] #{} path='{}'", s_count, pathBuffer);
-        }
+        // COMPREHENSIVE LOGGING: Log ALL file resolve requests
+        printf("[GTA::FileResolve] #%d path='%s' output=0x%08X token=%u\n", 
+               s_fileResolveCount, pathBuffer, outputPtr, validationToken);
+        fflush(stdout);
         
         // Resolve path via VFS
         auto resolved = VFS::Resolve(guestPath);
         
         if (!VFS::Exists(guestPath)) {
-            if (s_count <= 200 || isInteresting) {
-                LOGF_WARNING("[FileResolve] #{} -> NOT FOUND", s_count);
-            }
+            printf("[GTA::FileResolve] #%d -> NOT FOUND\n", s_fileResolveCount);
+            fflush(stdout);
             
             // Write 0 to output pointer
             if (outputPtr != 0) {
@@ -52,10 +39,9 @@ namespace GTA
         // Get file size
         uint64_t fileSize = VFS::GetFileSize(guestPath);
         
-        if (s_count <= 200 || isInteresting) {
-            LOGF_WARNING("[FileResolve] #{} -> FOUND: '{}' size={} bytes", 
-                        s_count, resolved.string(), fileSize);
-        }
+        printf("[GTA::FileResolve] #%d -> SUCCESS: '%s' size=%llu bytes\n", 
+               s_fileResolveCount, resolved.string().c_str(), (unsigned long long)fileSize);
+        fflush(stdout);
         
         // Write file size to output pointer (big-endian)
         if (outputPtr != 0) {

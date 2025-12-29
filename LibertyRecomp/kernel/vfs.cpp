@@ -102,9 +102,8 @@ namespace VFS
         return result;
     }
     
-    // File request logging - enabled for debugging
-    static bool s_logFileRequests = true;
-    static int s_fileRequestCount = 0;
+    // Comprehensive VFS file request logging - logs ALL requests
+    static int s_resolveCount = 0;
     
     std::filesystem::path Resolve(const std::string& guestPath)
     {
@@ -116,29 +115,13 @@ namespace VFS
         std::string normalized = NormalizePath(guestPath);
         std::string stripped = StripDrivePrefix(normalized);
         
-        static int s_resolveCount = 0;
         ++s_resolveCount;
         
-        // Enhanced file request logging
-        bool isInterestingFile = false;
-        std::string ext = "";
-        size_t dotPos = stripped.rfind('.');
-        if (dotPos != std::string::npos) {
-            ext = stripped.substr(dotPos);
-            // Check for interesting extensions
-            if (ext == ".wtd" || ext == ".wdr" || ext == ".wft" || ext == ".wdd" ||
-                ext == ".xtd" || ext == ".xdr" || ext == ".xft" || ext == ".xdd" ||
-                ext == ".dds" || ext == ".fxc" || ext == ".xpu" || ext == ".xvu" ||
-                ext == ".rpf" || ext == ".dat" || ext == ".ipl" || ext == ".ide") {
-                isInterestingFile = true;
-            }
-        }
-        
-        if (s_logFileRequests && (s_resolveCount <= 100 || isInterestingFile)) {
-            ++s_fileRequestCount;
-            printf("[VFS-REQUEST] #%d: '%s'\n", s_fileRequestCount, guestPath.c_str());
-            fflush(stdout);
-        }
+        // COMPREHENSIVE LOGGING: Log ALL file requests with full details
+        // This helps trace exactly what files the game is requesting
+        printf("[VFS] Resolve #%d: '%s' -> normalized='%s' stripped='%s'\n", 
+               s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
+        fflush(stdout);
         
         // Check path mappings first
         for (const auto& mapping : g_pathMappings)
@@ -168,10 +151,8 @@ namespace VFS
                 if (std::filesystem::exists(resolved, ec))
                 {
                     g_stats.cacheHits++;
-                    if (s_logFileRequests && isInterestingFile) {
-                        printf("[VFS-FOUND] '%s' -> '%s'\n", guestPath.c_str(), resolved.string().c_str());
-                        fflush(stdout);
-                    }
+                    printf("[VFS] FOUND via mapping: '%s' -> '%s'\n", guestPath.c_str(), resolved.string().c_str());
+                    fflush(stdout);
                     return resolved;
                 }
                 
@@ -236,10 +217,8 @@ namespace VFS
         }
         
         g_stats.cacheMisses++;
-        if (s_logFileRequests && isInterestingFile) {
-            printf("[VFS-NOTFOUND] '%s' (stripped='%s')\n", guestPath.c_str(), stripped.c_str());
-            fflush(stdout);
-        }
+        printf("[VFS] NOT FOUND: '%s' (stripped='%s')\n", guestPath.c_str(), stripped.c_str());
+        fflush(stdout);
         return {};
     }
     
