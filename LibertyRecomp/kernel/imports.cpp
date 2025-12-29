@@ -7887,17 +7887,18 @@ static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
         pathBuf[i] = c;
     }
     
-    LOGF_WARNING("[VTABLE27] CALLED #{} path='{}' device=0x{:08X} output=0x{:08X} LR=0x{:08X}",
-                 s_count, pathBuf, devicePtr, outputAddr, ctx.lr);
+    // COMPREHENSIVE LOGGING: Log ALL vtable[27] calls
+    printf("[VTABLE27] #%d path='%s' device=0x%08X output=0x%08X LR=0x%08X\n",
+           s_count, pathBuf, devicePtr, outputAddr, ctx.lr);
+    fflush(stdout);
     
     // Resolve path via VFS
     std::string guestPath(pathBuf);
     auto hostPath = VFS::Resolve(guestPath);
     
     if (!VFS::Exists(guestPath)) {
-        if (s_count <= 20) {
-            LOGF_WARNING("[STORAGE] vtable[27] ReadFile #{} -> file not found", s_count);
-        }
+        printf("[VTABLE27] #%d -> NOT FOUND\n", s_count);
+        fflush(stdout);
         // Write 0 to output pointer
         if (outputAddr != 0) {
             PPC_STORE_U32(outputAddr, 0);
@@ -7909,9 +7910,8 @@ static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
     // Get file size
     uint64_t fileSize = VFS::GetFileSize(guestPath);
     
-    if (s_count <= 20) {
-        LOGF_WARNING("[STORAGE] vtable[27] ReadFile #{} -> found, size={} bytes, returning token=7", s_count, fileSize);
-    }
+    printf("[VTABLE27] #%d -> FOUND size=%llu bytes, returning token=7\n", s_count, (unsigned long long)fileSize);
+    fflush(stdout);
     
     // Write file size to output pointer - this is what sub_8249BDC8 uses
     if (outputAddr != 0) {
@@ -8553,18 +8553,24 @@ extern "C" void __imp__sub_82857240(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82857240) {
     static int s_count = 0; ++s_count;
     
-    // REIMPLEMENT: This is vtable[1] on render context - Xbox GPU hardware init
-    // Original blocks on sync primitives waiting for GPU hardware responses
-    // PC replacement: Skip GPU hardware calls, return success
-    // The host rendering layer (Video::*) handles actual GPU state
+    // FIX: Must call original to run sub_8285E1F0 which initializes global at 0x83127984
+    // This global is used by sub_822B4D68 for vtable calls - without it, we crash on PAC
+    // 
+    // MarathonRecomp approach: Call originals but with blocking functions hooked to be non-blocking
+    // sub_82856BA8 is already stubbed to bypass GPU hardware waits
+    // sub_8285E1F0 and sub_82862088 have hooks that call __imp__ (safe)
     
     if (s_count <= 3) {
-        LOG_WARNING("[RENDER_INIT] sub_82857240 - Bypassing Xbox GPU init, host layer handles rendering");
+        LOG_WARNING("[RENDER_INIT] sub_82857240 - calling original to init render context globals");
     }
     
-    // Don't call original - it blocks on hardware waits
-    // Just return success so init chain can continue
-    ctx.r3.u32 = 1;  // Success
+    // Call original - internal blocking functions are already hooked to be non-blocking
+    // This ensures sub_8285E1F0 runs and initializes the global pointer at 0x83127984
+    __imp__sub_82857240(ctx, base);
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[RENDER_INIT] sub_82857240 - completed, render context globals initialized");
+    }
 }
 
 // =============================================================================
@@ -9298,10 +9304,10 @@ PPC_FUNC(sub_827E8180) {
         }
     }
     
-    if (s_count <= 20) {
-        LOGF_WARNING("[FILE] sub_827E8180 #{} path='{}' flags={} contextAddr=0x{:08X} finalAddr=0x{:08X}", 
-                     s_count, pathBuf, flags, pathContextAddr, pathStrAddr);
-    }
+    // COMPREHENSIVE LOGGING: Log ALL sub_827E8180 calls (file find/open operations)
+    printf("[sub_827E8180] #%d path='%s' flags=%u contextAddr=0x%08X finalAddr=0x%08X\n", 
+           s_count, pathBuf, flags, pathContextAddr, pathStrAddr);
+    fflush(stdout);
     
     // If path is empty, log the context structure for debugging
     if (pathBuf[0] == 0 && s_count <= 20) {
@@ -9350,10 +9356,8 @@ PPC_FUNC(sub_827E8180) {
     //   3. Game retries → infinite loop
     // ==========================================================================
     if (isShaderPath) {
-        if (s_count <= 5) {
-            LOGF_WARNING("[FILE] sub_827E8180 #{} -> SHADER BYPASS: '{}' - using embedded cache (1132 pre-compiled shaders)", 
-                         s_count, pathBuf);
-        }
+        printf("[sub_827E8180] #%d -> SHADER BYPASS: '%s' - using embedded cache\n", s_count, pathBuf);
+        fflush(stdout);
         ctx.r3.u32 = 0;  // Not found via storage device - forces use of embedded cache
         return;
     }
@@ -9361,9 +9365,8 @@ PPC_FUNC(sub_827E8180) {
     // For other files, if path is empty, this might be a spurious call
     // Return 0 to indicate file not found - the game should have fallback logic
     if (pathBuf[0] == 0) {
-        if (s_count <= 20) {
-            LOGF_WARNING("[FILE] sub_827E8180 #{} -> empty path, returning 0 (not found)", s_count);
-        }
+        printf("[sub_827E8180] #%d -> EMPTY PATH, returning 0\n", s_count);
+        fflush(stdout);
         ctx.r3.u32 = 0;  // File not found
         return;
     }
@@ -9371,9 +9374,8 @@ PPC_FUNC(sub_827E8180) {
     // For other files, try to use VFS to check existence
     // For now, return 0 to indicate file not found via this path
     // The caller should have fallback mechanisms
-    if (s_count <= 20) {
-        LOGF_WARNING("[FILE] sub_827E8180 #{} -> returning 0 (not via storage device)", s_count);
-    }
+    printf("[sub_827E8180] #%d -> returning 0 (not via storage device path)\n", s_count);
+    fflush(stdout);
     ctx.r3.u32 = 0;  // Not found via storage device path
 }
 
@@ -10769,21 +10771,122 @@ extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_824E1DD0(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_8249BA90(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_821A8060(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8278(PPCContext& ctx, uint8_t* base);
 
-// STUBBED: sub_821A8868 (HUD/Mission init) - blocks on synchronization primitives
-// Call chain: sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0
-// The sync primitives (semaphores, waits) block indefinitely in recompilation environment
-PPC_FUNC(sub_821A8868) {
+// =============================================================================
+// SYNC PRIMITIVE HOOKS - Make blocking sync functions non-blocking
+// These are the ROOT CAUSE of all the stubbed functions blocking
+// =============================================================================
+extern "C" void __imp__sub_829A39A0(PPCContext& ctx, uint8_t* base);  // Root sync primitive
+extern "C" void __imp__sub_827DB338(PPCContext& ctx, uint8_t* base);  // Sync wait wrapper
+extern "C" void __imp__sub_827DB988(PPCContext& ctx, uint8_t* base);  // Sync init
+extern "C" void __imp__sub_829A3560(PPCContext& ctx, uint8_t* base);  // XamTask + mount integration
+
+// Hook sub_829A39A0 - ROOT SYNC PRIMITIVE
+// This is called by sub_827DB338 and is the actual blocking point
+// Original: Calls sub_829A3560 (XamTaskSchedule) and waits on completion
+// Fix: Call the task scheduling but return success immediately without blocking
+PPC_FUNC(sub_829A39A0) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821A8868] #{} STUBBED - HUD init bypassed (blocks on sync primitives)", s_count);
-    ctx.r3.u32 = 0;  // Return success
+    
+    // r3 = flags, r4 = size/type (8192), r5 = context (0)
+    uint32_t flags = ctx.r3.u32;
+    uint32_t sizeType = ctx.r4.u32;
+    uint32_t context = ctx.r5.u32;
+    
+    printf("[SYNC] sub_829A39A0 #%d ENTER flags=0x%X size=%u ctx=0x%X - executing non-blocking\n", 
+           s_count, flags, sizeType, context);
+    fflush(stdout);
+    
+    // Call the actual task scheduling to let file loading happen
+    // but we've hooked sub_829A3560 to not block
+    __imp__sub_829A39A0(ctx, base);
+    
+    // If it returned negative (error/blocking), force success
+    if (ctx.r3.s32 < 0) {
+        printf("[SYNC] sub_829A39A0 #%d returned %d, forcing success (0)\n", s_count, ctx.r3.s32);
+        ctx.r3.s32 = 0;
+    }
+    
+    printf("[SYNC] sub_829A39A0 #%d EXIT r3=%d\n", s_count, ctx.r3.s32);
+    fflush(stdout);
 }
 
+// Hook sub_827DB338 - SYNC WAIT WRAPPER
+// This calls sub_829A39A0 and then does file lookup operations
+// Original: Blocks waiting for async completion
+// Fix: Execute the pre-wait setup, skip blocking, return success
+PPC_FUNC(sub_827DB338) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = mode (0 or 1), r4 = output ptr 1, r5 = output ptr 2
+    uint32_t mode = ctx.r3.u32;
+    uint32_t outPtr1 = ctx.r4.u32;
+    uint32_t outPtr2 = ctx.r5.u32;
+    
+    printf("[SYNC] sub_827DB338 #%d ENTER mode=%u out1=0x%08X out2=0x%08X - executing non-blocking\n",
+           s_count, mode, outPtr1, outPtr2);
+    fflush(stdout);
+    
+    // Call original but it will use our hooked sub_829A39A0
+    __imp__sub_827DB338(ctx, base);
+    
+    // If returned 0 (failure/blocking), force success (1)
+    if (ctx.r3.u32 == 0) {
+        printf("[SYNC] sub_827DB338 #%d returned 0, forcing success (1)\n", s_count);
+        ctx.r3.u32 = 1;
+    }
+    
+    printf("[SYNC] sub_827DB338 #%d EXIT r3=%u\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+// Hook sub_827DB988 - SYNC INIT
+// Creates semaphores and calls sub_827DB338
+// Fix: Let it run but ensure it doesn't block
+PPC_FUNC(sub_827DB988) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_827DB988 #%d ENTER - sync init (uses hooked sub_827DB338)\n", s_count);
+    fflush(stdout);
+    
+    // Call original - it will use our hooked sub_827DB338
+    __imp__sub_827DB988(ctx, base);
+    
+    printf("[SYNC] sub_827DB988 #%d EXIT r3=%u\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+// =============================================================================
+// REIMPLEMENTED: Previously stubbed functions - now call __imp__ to run fully
+// The sync hooks above prevent blocking, so these can now execute normally
+// =============================================================================
+
+// REIMPLEMENTED: sub_821A8868 (HUD/Mission init)
+// Was stubbed because: sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 blocked
+// Now: Sync hooks prevent blocking, so file loading via VFS will work
+PPC_FUNC(sub_821A8868) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_821A8868(ctx, base);
+    
+    printf("[REIMPL] sub_821A8868 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+// REIMPLEMENTED: sub_821A8278 (HUD component)
 PPC_FUNC(sub_821A8278) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821A8278] #{} STUBBED - HUD component bypassed (depends on stubbed HUD init)", s_count);
-    ctx.r3.u32 = 0;  // Return success
-    return;
+    printf("[REIMPL] sub_821A8278 #%d ENTER - HUD component\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_821A8278(ctx, base);
+    
+    printf("[REIMPL] sub_821A8278 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 PPC_FUNC(sub_821BC9E0) {
@@ -10835,12 +10938,19 @@ PPC_FUNC(sub_821DFD18) {
     LOGF_WARNING("[63-SUBSYS] sub_821DFD18 (Traffic system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 
-// STUBBED: sub_8220E108 (Wanted system) - call 30 (sub_82430C60) blocks
-// Calls 1-29 work, call 30 blocks on sync primitives, skip it and remaining
+// REIMPLEMENTED: sub_8220E108 (Wanted system)
+// Was stubbed because: call 30 (sub_82430C60) blocks on sync primitives
+// Now: Sync hooks prevent blocking, so initialization will complete
+extern "C" void __imp__sub_8220E108(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8220E108) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[8220E108] #{} STUBBED - Wanted system bypassed (call 30 blocks)", s_count);
-    ctx.r3.u32 = 0;  // Return success
+    printf("[REIMPL] sub_8220E108 #%d ENTER - Wanted system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_8220E108(ctx, base);
+    
+    printf("[REIMPL] sub_8220E108 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 PPC_FUNC(sub_821D8358) {
@@ -10858,16 +10968,75 @@ PPC_FUNC(sub_821EA0B8) {
 }
 
 
-// STUBBED: sub_82200EB8 (Stats system) - blocks on sync primitives
+// REIMPLEMENTED: sub_82200EB8 (Stats system)
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_82200EB8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82200EB8) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[82200EB8] #{} STUBBED - Stats system bypassed", s_count);
-    ctx.r3.u32 = 0;
+    printf("[REIMPL] sub_82200EB8 #%d ENTER - Stats system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_82200EB8(ctx, base);
+    
+    printf("[REIMPL] sub_82200EB8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 // =============================================================================
 // Internal functions in sub_82120C48 - FIND EXACT BLOCKER
 // =============================================================================
+
+// sub_821E9658 calls these functions - instrument to find blocking point:
+extern "C" void __imp__sub_8214B508(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B570(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B640(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B6A8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_825B8380(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_823A70A8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_8214B508) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B508 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B508(ctx, base);
+    printf("[821E9658-INT] sub_8214B508 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B570) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B570 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B570(ctx, base);
+    printf("[821E9658-INT] sub_8214B570 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B640) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B640 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B640(ctx, base);
+    printf("[821E9658-INT] sub_8214B640 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B6A8) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B6A8 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B6A8(ctx, base);
+    printf("[821E9658-INT] sub_8214B6A8 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_825B8380) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_825B8380 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_825B8380(ctx, base);
+    printf("[821E9658-INT] sub_825B8380 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_823A70A8) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_823A70A8 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_823A70A8(ctx, base);
+    printf("[821E9658-INT] sub_823A70A8 EXIT #%d\n", s_count); fflush(stdout);
+}
+
 PPC_FUNC(sub_821E9658) {
     static int s_count = 0; ++s_count;
     LOGF_WARNING("[82120C48-INT] sub_821E9658 ENTER #{}", s_count);
@@ -11102,24 +11271,35 @@ static FrameRateCounter g_fpsCounter;
 PPC_FUNC(sub_8218BEA8)
 {
     static int s_entered = 0;
+    static bool s_initDone = false;
     ++s_entered;
+    
     if (s_entered == 1)
     {
-        LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{}", s_entered);
+        LOG_WARNING("[MAIN] sub_8218BEA8 entry #1 - RUNNING FULL INITIALIZATION");
         g_fpsCounter.Init();
     }
     
-    // Main game loop - directly call sub_82856F08 (main loop entry)
-    // This is the function that drives rendering via sub_828529B0 -> sub_828507F8 -> VdSwap
+    // CRITICAL FIX: Call original implementation FIRST to run full initialization
+    // This triggers: sub_8218BEB0 -> sub_82120000 -> 63-subsystem init -> VFS file loading
+    // The original implementation will eventually return after game init completes
+    if (!s_initDone)
+    {
+        LOG_WARNING("[MAIN] Calling __imp__sub_8218BEA8 for game initialization...");
+        __imp__sub_8218BEA8(ctx, base);
+        s_initDone = true;
+        LOG_WARNING("[MAIN] __imp__sub_8218BEA8 returned - initialization complete");
+        // Note: If the original never returns (has its own game loop), we won't reach here
+        // In that case, the original handles everything and we don't need our render loop
+        return;
+    }
+    
+    // Fallback render loop - only used if original returns without its own loop
+    LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{} - using fallback render loop", s_entered);
     while (true)
     {
-        // Update frame rate counter
         g_fpsCounter.Update();
-        
-        // Call the main loop entry which orchestrates rendering
         __imp__sub_82856F08(ctx, base);
-        
-        // 16ms sleep for ~60fps target
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 }
@@ -12671,11 +12851,19 @@ PPC_FUNC(sub_8212FB78) {
     LOGF_WARNING("[63-SUBSYS] sub_8212FB78 (Friend system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 
-// STUBBED: sub_8219ADF0 (Online system)
+// REIMPLEMENTED: sub_8219ADF0 (Online system)
+// Was stubbed because: Xbox Live integration blocks on sync
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_8219ADF0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8219ADF0) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[8219ADF0] #{} STUBBED - Online system bypassed", s_count);
-    ctx.r3.u32 = 0;
+    printf("[REIMPL] sub_8219ADF0 #%d ENTER - Online system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_8219ADF0(ctx, base);
+    
+    printf("[REIMPL] sub_8219ADF0 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 
@@ -12726,13 +12914,19 @@ PPC_FUNC(sub_82208460) {
     LOGF_WARNING("[63-SUBSYS] sub_82208460 (Photo mode) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 
+// REIMPLEMENTED: sub_821B9DA8 (TV system)
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_821B9DA8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_821B9DA8) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821B9DA8] #{} STUBBED - TV system bypassed", s_count);
-    ctx.r3.u32 = 0;
-    return;
-    // Original below
-
+    printf("[REIMPL] sub_821B9DA8 #%d ENTER - TV system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_821B9DA8(ctx, base);
+    
+    printf("[REIMPL] sub_821B9DA8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 PPC_FUNC(sub_82258100) {
     static int s_count = 0; ++s_count;
@@ -12755,11 +12949,19 @@ PPC_FUNC(sub_8232A2C0) {
     LOGF_WARNING("[63-SUBSYS] sub_8232A2C0 (Dating system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 
-// STUBBED: sub_82125478 (Final setup)
+// REIMPLEMENTED: sub_82125478 (Final setup)
+// Was stubbed because: calls sub_82319040 -> sub_829A39A0 which blocks
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_82125478(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82125478) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[82125478] #{} STUBBED - Final setup bypassed", s_count);
-    ctx.r3.u32 = 0;
+    printf("[REIMPL] sub_82125478 #%d ENTER - Final setup (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_82125478(ctx, base);
+    
+    printf("[REIMPL] sub_82125478 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 
