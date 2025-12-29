@@ -3,7 +3,7 @@
 ## Overview
 
 This document describes the comprehensive installation flow that handles:
-1. ISO to folder extraction (using extract-xiso)
+1. ISO to folder extraction (native implementation)
 2. RPF archive parsing and shader extraction
 3. Platform-native shader cache generation
 4. Cross-platform support (Windows, Linux, macOS)
@@ -17,9 +17,12 @@ This document describes the comprehensive installation flow that handles:
 %LOCALAPPDATA%\LibertyRecomp\
 ├── game\                    # Extracted game files
 │   ├── default.xex
-│   ├── xbox360.rpf
-│   └── extracted\           # RPF contents
-│       └── common\shaders\*.fxc
+│   ├── common\              # Extracted from common.rpf
+│   ├── xbox360\             # Extracted from xbox360.rpf
+│   └── audio\               # Extracted from audio.rpf
+├── dlc\                     # DLC content
+│   ├── TLAD\                # The Lost and Damned
+│   └── TBOGT\               # The Ballad of Gay Tony
 ├── shader_cache\            # Compiled DXIL shaders
 ├── saves\                   # Save data
 └── temp\                    # Temporary extraction files
@@ -31,6 +34,9 @@ This document describes the comprehensive installation flow that handles:
 ```
 ~/.local/share/LibertyRecomp/
 ├── game/                    # Extracted game files
+├── dlc/                     # DLC content
+│   ├── TLAD/
+│   └── TBOGT/
 ├── shader_cache/            # Compiled SPIR-V shaders
 ├── saves/
 └── temp/
@@ -43,12 +49,43 @@ This document describes the comprehensive installation flow that handles:
 ```
 ~/Library/Application Support/LibertyRecomp/
 ├── game/                    # Extracted game files
+├── dlc/                     # DLC content
+│   ├── TLAD/
+│   └── TBOGT/
 ├── shader_cache/            # Compiled AIR shaders
 ├── saves/
 └── temp/
 ```
 
 **Path:** `/Users/<username>/Library/Application Support/LibertyRecomp/`
+
+---
+
+## Launch Arguments
+
+Liberty Recompiled supports several command-line arguments for troubleshooting and advanced use:
+
+| Argument | Description |
+|----------|-------------|
+| `--install` | Force the installation wizard to run, even if game is already installed. Useful if game files were modified or corrupted. |
+| `--install-dlc` | Force the DLC installation wizard to run. Allows adding DLC without reinstalling the base game. |
+| `--install-check` | Run file integrity verification. Checks all installed files against known hashes. |
+| `--skip-logos` | Skip intro logos on game startup. |
+| `--use-cwd` | Use current working directory instead of executable path. |
+| `--sdl-video-driver <driver>` | Force specific SDL video driver (e.g., `x11`, `wayland`, `metal`). |
+
+### Examples
+
+```bash
+# Force reinstallation
+./LibertyRecomp --install
+
+# Add DLC to existing installation
+./LibertyRecomp --install-dlc
+
+# Verify file integrity
+./LibertyRecomp --install-check
+```
 
 ---
 
@@ -65,20 +102,25 @@ This document describes the comprehensive installation flow that handles:
 │     ├── Extracted folder                                               │
 │     └── XContent package                                               │
 │                                                                         │
-│  2. SELECT TITLE UPDATE (NEW)                                           │
+│  2. SELECT TITLE UPDATE (Optional)                                      │
 │     ├── Scans 'GAME UPDATES/' folder for STFS packages                 │
 │     ├── Scans install path 'updates/' folder                           │
 │     ├── User selects: No Update (v1.0) or detected TU version          │
 │     └── Selected version stored in config for reference                │
 │                                                                         │
 │  3. SELECT DLC (Optional)                                               │
+│     User provides DLC sources:                                         │
+│     ├── STFS packages (CON/LIVE/PIRS)                                  │
+│     ├── ZIP files containing STFS packages                             │
+│     └── Extracted DLC folders                                          │
+│     Supported DLC:                                                      │
 │     ├── The Lost and Damned (TLAD)                                     │
 │     └── The Ballad of Gay Tony (TBOGT)                                 │
 │                                                                         │
 │  4. DETECT SOURCE TYPE                                                  │
 │     ┌─────────────────┐                                                │
-│     │ Is it an ISO?   │──YES──► Run extract-xiso                       │
-│     └────────┬────────┘         └── Extract to temp directory          │
+│     │ Is it an ISO?   │──YES──► Use native ISOFileSystem               │
+│     └────────┬────────┘         └── Parse and extract directly         │
 │              │NO                                                        │
 │              ▼                                                          │
 │     ┌─────────────────┐                                                │
@@ -97,36 +139,39 @@ This document describes the comprehensive installation flow that handles:
 │                                                                         │
 │  6. APPLY TITLE UPDATE (if selected)                                    │
 │     ├── Extract .xexp from STFS container                              │
-│     ├── Apply patch to default.xex                                     │
-│     └── Fallback to xextool if native patching fails                   │
+│     └── Apply patch to default.xex                                     │
 │                                                                         │
-│  7. SCAN FOR SHADERS                                                    │
+│  7. INSTALL DLC (if selected)                                           │
+│     For each DLC source:                                               │
+│     ├── Detect DLC type (TLAD or TBOGT)                                │
+│     ├── Extract from STFS or copy from folder                          │
+│     └── Install to <install_path>/dlc/<DLC_NAME>/                      │
+│                                                                         │
+│  8. EXTRACT RPF ARCHIVES                                                │
+│     Extract RPF contents using native RPF2 parser:                     │
+│     ├── common.rpf → game/common/                                      │
+│     ├── xbox360.rpf → game/xbox360/                                    │
+│     ├── audio.rpf → game/audio/                                        │
+│     └── Nested RPFs extracted recursively                              │
+│                                                                         │
+│  9. SCAN FOR SHADERS                                                    │
 │     Look for .fxc files in:                                            │
 │     ├── Extracted game folders directly                                │
 │     └── Inside RPF archives (extract if needed)                        │
 │                                                                         │
-│  8. EXTRACT & CONVERT SHADERS                                           │
-│     For each .fxc file found:                                          │
-│     ├── Parse RAGE FXC container (magic: 0x61786772 "rgxa")            │
-│     ├── Extract Xbox 360 shader binaries (magic: 0x102A11XX)           │
-│     └── Store in shader_cache/extracted/                               │
+│  10. COMPILE SHADER CACHE                                               │
+│      Detect platform and compile:                                      │
+│      ├── Windows: HLSL → DXIL (DXC)                                    │
+│      ├── Linux: HLSL → SPIR-V (DXC)                                    │
+│      └── macOS: HLSL → AIR (Metal compiler)                            │
 │                                                                         │
-│  9. COMPILE SHADER CACHE                                                │
-│     Detect platform and compile:                                       │
-│     ├── Windows: HLSL → DXIL (DXC)                                     │
-│     ├── Linux: HLSL → SPIR-V (DXC)                                     │
-│     └── macOS: HLSL → AIR (Metal compiler)                             │
-│                                                                         │
-│  10. MULTIPLAYER SETUP (Optional)                                       │
+│  11. MULTIPLAYER SETUP (Optional)                                       │
 │      User selects multiplayer backend:                                 │
 │      ├── Community Server (Recommended)                                │
-│      │   └── Works out of box, no config needed                        │
 │      ├── Firebase (Self-Hosted)                                        │
-│      │   └── User provides project ID and API key                      │
 │      └── LAN Only                                                      │
-│          └── No internet matchmaking, local network only               │
 │                                                                         │
-│  11. FINALIZE                                                           │
+│  12. FINALIZE                                                           │
 │      ├── Write shader_cache.marker                                     │
 │      ├── Save installed TU version to config                           │
 │      ├── Save multiplayer backend choice to config                     │
@@ -134,6 +179,48 @@ This document describes the comprehensive installation flow that handles:
 │      └── Signal completion                                             │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## DLC System
+
+### Supported DLC
+
+| DLC | Install Directory | Detection Method |
+|-----|-------------------|------------------|
+| The Lost and Damned (TLAD) | `<install_path>/dlc/TLAD/` | Contains `tlad.rpf` or folder named TLAD |
+| The Ballad of Gay Tony (TBOGT) | `<install_path>/dlc/TBOGT/` | Contains `tbogt.rpf` or folder named TBOGT |
+
+### DLC Source Formats
+
+The installer accepts DLC in several formats:
+
+| Format | Description |
+|--------|-------------|
+| STFS (CON/LIVE/PIRS) | Xbox 360 content package (direct from console) |
+| ZIP containing STFS | Compressed archive with STFS package inside |
+| Extracted folder | Pre-extracted DLC directory |
+
+### DLC Detection
+
+The installer automatically detects which DLC is being installed by:
+1. Checking for `tlad.rpf` or `tbogt.rpf` inside the package
+2. Checking folder names for keywords like "lost", "tlad", "ballad", "tbogt"
+3. Checking subfolder structure (TLAD/ or TBOGT/)
+
+### Runtime DLC Loading
+
+At runtime, the game scans `<install_path>/dlc/` for DLC directories:
+```cpp
+for (auto& file : std::filesystem::directory_iterator(GetGamePath() / "dlc", ec))
+{
+    if (file.is_directory())
+    {
+        // Register DLC content
+        XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, fileName), filePath);
+    }
+}
 ```
 
 ---
@@ -188,30 +275,6 @@ See [TITLE_UPDATE_SYSTEM.md](TITLE_UPDATE_SYSTEM.md) for detailed documentation.
 
 ---
 
-## Optional: Install-Time PPC Recompilation (XenonRecomp)
-
-Because GTA IV title updates are distributed as **full `default.xex` replacements**, supporting multiple update versions cleanly can require recompiling against the specific XEX the user provides.
-
-Recent testing indicates XenonRecomp can run fast enough on modern machines that it is reasonable to support an **install-time (or first-run) PPC recompilation** mode. This can allow consumer distributions to avoid shipping the generated `ppc_recomp.*.cpp` sources.
-
-### High-Level Concept
-
-1. User selects base game source and optionally a title update source
-2. Installer extracts/copies the chosen XEX into the install directory
-3. Installer runs `XenonAnalyse` (if switch tables are not provided) and then `XenonRecomp` against the chosen XEX
-4. The generated PPC C++ sources are compiled into the host binary (or into a loadable module, depending on the final architecture)
-
-### Important Constraint
-
-XenonRecomp outputs **C++ source**; it does not produce native machine code by itself. Therefore, install-time PPC recompilation is only viable if the installer can:
-
-1. Bundle a compatible C++ toolchain for the platform, or
-2. Require a system toolchain (macOS: Xcode Command Line Tools; Windows: MSVC Build Tools; Linux: clang/gcc + build essentials)
-
-If neither is acceptable for the target audience, the alternative is to ship pre-generated PPC sources (or separate builds) for the supported XEX versions.
-
----
-
 ## Key Components
 
 ### Platform Paths (`install/platform_paths.h/cpp`)
@@ -234,7 +297,7 @@ auto savesDir = PlatformPaths::GetSavesDirectory();       // <install>/saves/
 
 ### ISO Extractor (`install/iso_extractor.h/cpp`)
 
-Xbox 360 ISO extraction using extract-xiso:
+**Native Xbox 360 ISO extraction** - no external tools required:
 
 ```cpp
 #include "install/iso_extractor.h"
@@ -254,13 +317,11 @@ if (IsoExtractor::IsIsoFile(sourcePath))
 }
 ```
 
-**Requirements:**
-- `extract-xiso` must be installed and in PATH
-- Repository: https://github.com/XboxDev/extract-xiso
+The ISO extractor uses `ISOFileSystem` internally to parse Xbox 360 disc images directly, supporting multiple ISO formats (XGD1, XGD2, XGD3).
 
 ### RPF Extractor (`install/rpf_extractor.h/cpp`)
 
-RAGE Package File extraction:
+**Native RAGE Package File extraction** with AES-256 decryption:
 
 ```cpp
 #include "install/rpf_extractor.h"
@@ -284,6 +345,32 @@ auto result = RpfExtractor::ScanAndExtractShaders(
 printf("Found %zu shader files\n", result.fxcFiles.size());
 ```
 
+### XContent File System (`install/xcontent_file_system.h/cpp`)
+
+**Native STFS/SVOD parsing** for Xbox 360 content packages:
+
+```cpp
+#include "install/xcontent_file_system.h"
+
+// Check if file is an Xbox content package
+if (XContentFileSystem::check(packagePath))
+{
+    auto vfs = XContentFileSystem::create(packagePath);
+    
+    // List all files
+    for (const auto& file : vfs->getFileList())
+    {
+        printf("%s\n", file.c_str());
+    }
+    
+    // Load a specific file
+    std::vector<uint8_t> data;
+    vfs->load("default.xex", data);
+}
+```
+
+Supports CON, LIVE, and PIRS package types.
+
 ---
 
 ## RPF2 Archive Format (GTA IV)
@@ -302,8 +389,8 @@ Offset  Size  Field
 - **Header is ALWAYS plaintext** - never encrypted
 - **TOC is ALWAYS plaintext** - starts at offset 0x800 (2048 bytes)
 - **Encryption is per-file** - only individual file data blocks are encrypted
-- **Algorithm**: AES-256-ECB (no IV, no padding)
-- **Compression**: zlib at block level
+- **Algorithm**: AES-256-ECB (16 rounds, no IV, no padding)
+- **Compression**: Raw deflate (zlib without header)
 
 ### Shader Location
 ```
@@ -314,48 +401,6 @@ common.rpf/
         ├── gta_vehicle_paint1.fxc
         ├── gta_ped.fxc
         └── ...
-```
-
----
-
-## External Tools
-
-### extract-xiso
-
-Cross-platform Xbox 360 ISO extraction tool.
-
-**Installation:**
-```bash
-# Build from source
-git clone https://github.com/XboxDev/extract-xiso.git
-cd extract-xiso
-mkdir build && cd build
-cmake ..
-make
-sudo make install
-
-# macOS (Homebrew)
-brew install extract-xiso
-```
-
-**Usage:**
-```bash
-extract-xiso -x game.iso -d /output/directory/
-```
-
-### SparkCLI (Fallback)
-
-C# tool for RPF extraction, used as fallback for complex encrypted archives.
-
-**Location:** `/SparkIV-master/SRC/SparkCLI/`
-
-**Cross-platform usage:**
-```bash
-# Windows
-SparkCLI.exe extract common.rpf ./output --key ./default.xex
-
-# Linux/macOS (requires Mono)
-mono SparkCLI.exe extract common.rpf ./output --key ./default.xex
 ```
 
 ---
@@ -371,26 +416,29 @@ After extraction, shaders go through the conversion pipeline:
    - Linux: DXC → SPIR-V
    - macOS: Metal compiler → AIR
 
-
-
 ---
 
 ## Error Handling
 
 ### ISO Extraction Failures
-- Check if `extract-xiso` is installed
-- Verify ISO file is a valid Xbox 360 image
+- Verify ISO file is a valid Xbox 360 image (magic: `MICROSOFT*XBOX*MEDIA`)
 - Ensure sufficient disk space for extraction
+- Check file permissions on output directory
 
 ### RPF Extraction Failures
-- For encrypted RPFs, ensure AES key is available
-- Try SparkCLI fallback for complex archives
-- Pre-extract RPFs using OpenIV/SparkIV if automatic extraction fails
+- For encrypted RPFs, ensure AES key is available in `aes_key.bin`
+- Check that key is exactly 32 bytes (256 bits)
+- Verify RPF header magic is `RPF2`
 
 ### Shader Conversion Failures
 - Shader conversion is non-fatal
 - Game can fall back to runtime compilation
 - Check logs for specific shader errors
+
+### DLC Installation Failures
+- Verify STFS package is valid (magic: `CON `, `LIVE`, or `PIRS`)
+- Ensure package contains expected DLC files
+- Check that DLC type can be detected
 
 ---
 
@@ -461,28 +509,12 @@ LibertyRecomp/kernel/io/
 └── session_tracker_lan.cpp        # LAN broadcast backend
 ```
 
-### GTA IV Game Modes Supported
-
-| Mode | Description |
-|------|-------------|
-| Free Mode | Open world sandbox |
-| Deathmatch | Free-for-all combat |
-| Team Deathmatch | Team-based combat |
-| Mafiya Work | Complete jobs for Petrovic |
-| Car Jack City | Steal and deliver vehicles |
-| Race / GTA Race | Vehicle racing |
-| Cops 'n' Crooks | Asymmetric cops vs criminals |
-| Turf War | Territory control |
-| Hangman's NOOSE | Cooperative extraction |
-| Deal Breaker | Cooperative mission |
-| Bomb Da Base II | Cooperative mission |
-
 ---
 
 ## References
 
-- [extract-xiso GitHub](https://github.com/XboxDev/extract-xiso)
-- [SparkIV/RageLib](https://github.com/ahmed605/SparkIV)
+- [ISOFileSystem](../LibertyRecomp/install/iso_file_system.h) - Native Xbox 360 ISO parsing (based on Xenia)
+- [XContentFileSystem](../LibertyRecomp/install/xcontent_file_system.h) - Native STFS/SVOD parsing (based on Xenia)
+- [RpfExtractor](../LibertyRecomp/install/rpf_extractor.h) - Native RPF2 extraction
 - [GTAMods RPF Wiki](https://gtamods.com/wiki/RPF_archive)
 - [XenosRecomp README](../tools/XenosRecomp/README.md)
-- [Shader Pipeline Documentation](SHADER_PIPELINE.md)

@@ -44,7 +44,7 @@ This project is in **early development**. Current progress:
 - [x] Save data handling (full save system with GTA IV format support)
 - [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
 - [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
-- [x] Online multiplayer via Nebula VPN integration
+- [x] Online multiplayer via GameNetworkingSockets (P2P with NAT traversal, no VPN required)
 - [x] File system and RPF archive handling (VFS, GTA file system)
 
 ## Installation
@@ -65,6 +65,14 @@ You need a legal copy of GTA IV for Xbox 360. Supported formats:
 - XContent packages
 
 See [Dumping Guide](/docs/DUMPING-en.md) for detailed extraction instructions.
+
+### Launch Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--install` | Force reinstallation (useful if game files were modified) |
+| `--install-dlc` | Force DLC installation only |
+| `--install-check` | Verify file integrity |
 
 ## Building
 
