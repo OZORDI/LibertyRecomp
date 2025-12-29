@@ -12828,30 +12828,12 @@ PPC_FUNC(sub_828529B0) {
         uint32_t objPtr = PPC_LOAD_U32(globalObjAddr + 0);
         
         if (objPtr == 0 && !s_renderObjectInitialized) {
-            // Create stub render object in guest memory
-            LOG_WARNING("[RENDER_FIX] Creating stub render object to unblock vtable[16] call");
-            
-            // Allocate vtable (17 entries * 4 bytes = 68 bytes, but we only need entry 16)
-            // Use a fixed location in guest memory for the vtable
-            s_stubVtableAddr = 0x82A00000;  // Safe location in code space
-            
-            // Register our render trigger function at a known address
-            uint32_t renderTriggerAddr = 0x82A00100;
-            g_memory.InsertFunction(renderTriggerAddr, RenderTriggerStub);
-            
-            // Write vtable[16] (offset 64) = renderTriggerAddr
-            PPC_STORE_U32(s_stubVtableAddr + 64, renderTriggerAddr);
-            
-            // Allocate stub object (just needs vtable pointer at offset 0)
-            s_stubObjectAddr = 0x82A00200;
-            PPC_STORE_U32(s_stubObjectAddr + 0, s_stubVtableAddr);  // object->vtable
-            
-            // Store stub object pointer at globalObjAddr
-            PPC_STORE_U32(globalObjAddr + 0, s_stubObjectAddr);
-            
-            s_renderObjectInitialized = true;
-            LOGF_WARNING("[RENDER_FIX] Stub object created: obj=0x{:08X} vtable=0x{:08X} vtable[16]=0x{:08X}",
-                         s_stubObjectAddr, s_stubVtableAddr, renderTriggerAddr);
+            // DISABLED: Option B caused crash - writing to read-only code space
+            // The addresses 0x82Axxxxx are in read-only memory region
+            // Instead, just log and skip the vtable creation - rely on VdSwap for rendering
+            LOG_WARNING("[RENDER_FIX] globalObj[0] is NULL - vtable[16] render call will be skipped");
+            LOG_WARNING("[RENDER_FIX] Rendering relies on VdSwap path instead");
+            s_renderObjectInitialized = true;  // Don't log again
         }
         
         if (s_count <= 5 || s_count % 500 == 0) {

@@ -102,6 +102,10 @@ namespace VFS
         return result;
     }
     
+    // File request logging - enabled for debugging
+    static bool s_logFileRequests = true;
+    static int s_fileRequestCount = 0;
+    
     std::filesystem::path Resolve(const std::string& guestPath)
     {
         if (!g_initialized)
@@ -114,9 +118,25 @@ namespace VFS
         
         static int s_resolveCount = 0;
         ++s_resolveCount;
-        if (s_resolveCount <= 30) {
-            printf("[VFS] Resolve #%d: '%s' -> normalized='%s' stripped='%s'\n", 
-                   s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
+        
+        // Enhanced file request logging
+        bool isInterestingFile = false;
+        std::string ext = "";
+        size_t dotPos = stripped.rfind('.');
+        if (dotPos != std::string::npos) {
+            ext = stripped.substr(dotPos);
+            // Check for interesting extensions
+            if (ext == ".wtd" || ext == ".wdr" || ext == ".wft" || ext == ".wdd" ||
+                ext == ".xtd" || ext == ".xdr" || ext == ".xft" || ext == ".xdd" ||
+                ext == ".dds" || ext == ".fxc" || ext == ".xpu" || ext == ".xvu" ||
+                ext == ".rpf" || ext == ".dat" || ext == ".ipl" || ext == ".ide") {
+                isInterestingFile = true;
+            }
+        }
+        
+        if (s_logFileRequests && (s_resolveCount <= 100 || isInterestingFile)) {
+            ++s_fileRequestCount;
+            printf("[VFS-REQUEST] #%d: '%s'\n", s_fileRequestCount, guestPath.c_str());
             fflush(stdout);
         }
         
@@ -148,6 +168,10 @@ namespace VFS
                 if (std::filesystem::exists(resolved, ec))
                 {
                     g_stats.cacheHits++;
+                    if (s_logFileRequests && isInterestingFile) {
+                        printf("[VFS-FOUND] '%s' -> '%s'\n", guestPath.c_str(), resolved.string().c_str());
+                        fflush(stdout);
+                    }
                     return resolved;
                 }
                 
@@ -212,6 +236,10 @@ namespace VFS
         }
         
         g_stats.cacheMisses++;
+        if (s_logFileRequests && isInterestingFile) {
+            printf("[VFS-NOTFOUND] '%s' (stripped='%s')\n", guestPath.c_str(), stripped.c_str());
+            fflush(stdout);
+        }
         return {};
     }
     

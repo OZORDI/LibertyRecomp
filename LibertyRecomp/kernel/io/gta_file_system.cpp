@@ -2,6 +2,7 @@
 #include <kernel/vfs.h>
 #include <kernel/memory.h>
 #include <os/logger.h>
+#include <algorithm>
 
 namespace GTA
 {
@@ -10,17 +11,34 @@ namespace GTA
     {
         static int s_count = 0; ++s_count;
         
-        if (s_count <= 10) {
-            LOGF_WARNING("[GTA::FileResolve] #{} path='{}' output=0x{:08X} token={}", 
-                        s_count, pathBuffer, outputPtr, validationToken);
+        std::string guestPath(pathBuffer);
+        
+        // Check if this is an interesting file type for logging
+        bool isInteresting = false;
+        std::string pathLower = guestPath;
+        std::transform(pathLower.begin(), pathLower.end(), pathLower.begin(), ::tolower);
+        if (pathLower.find(".wtd") != std::string::npos ||
+            pathLower.find(".wdr") != std::string::npos ||
+            pathLower.find(".wft") != std::string::npos ||
+            pathLower.find(".wdd") != std::string::npos ||
+            pathLower.find(".rpf") != std::string::npos ||
+            pathLower.find("shader") != std::string::npos ||
+            pathLower.find("texture") != std::string::npos ||
+            pathLower.find("model") != std::string::npos) {
+            isInteresting = true;
+        }
+        
+        // Log first 200 calls or all interesting files
+        if (s_count <= 200 || isInteresting) {
+            LOGF_WARNING("[FileResolve] #{} path='{}'", s_count, pathBuffer);
         }
         
         // Resolve path via VFS
-        std::string guestPath(pathBuffer);
+        auto resolved = VFS::Resolve(guestPath);
         
         if (!VFS::Exists(guestPath)) {
-            if (s_count <= 10) {
-                LOGF_WARNING("[GTA::FileResolve] #{} -> FILE NOT FOUND", s_count);
+            if (s_count <= 200 || isInteresting) {
+                LOGF_WARNING("[FileResolve] #{} -> NOT FOUND", s_count);
             }
             
             // Write 0 to output pointer
@@ -34,9 +52,9 @@ namespace GTA
         // Get file size
         uint64_t fileSize = VFS::GetFileSize(guestPath);
         
-        if (s_count <= 10) {
-            LOGF_WARNING("[GTA::FileResolve] #{} -> SUCCESS size={} bytes", 
-                        s_count, fileSize);
+        if (s_count <= 200 || isInteresting) {
+            LOGF_WARNING("[FileResolve] #{} -> FOUND: '{}' size={} bytes", 
+                        s_count, resolved.string(), fileSize);
         }
         
         // Write file size to output pointer (big-endian)
