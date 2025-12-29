@@ -1556,15 +1556,24 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
 // =============================================================================
 
 // Signal all tracked blocking semaphores - called after init completes
+// Signals unconditionally to wake workers that may have acquired and are waiting again
 void SignalAllBlockingSemaphores() {
-    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
-    for (uint32_t addr : g_blockingSemaphoreAddrs) {
+    // Copy the set while holding the lock, then release lock before signaling
+    // This prevents deadlock when awakened threads try to track new semaphores
+    std::unordered_set<uint32_t> addrsCopy;
+    {
+        std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
+        addrsCopy = g_blockingSemaphoreAddrs;
+    }
+    
+    int signaled = 0;
+    for (uint32_t addr : addrsCopy) {
         // Try as kernel handle first (from NtCreateSemaphore)
         if (IsKernelObject(addr)) {
             Semaphore* sem = GetKernelObject<Semaphore>(addr);
-            if (sem && sem->count.load() == 0) {
-                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked kernel semaphore handle=0x{:08X}", addr);
+            if (sem) {
                 sem->Release(1, nullptr);
+                signaled++;
             }
             continue;
         }
@@ -1572,11 +1581,14 @@ void SignalAllBlockingSemaphores() {
         XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(addr));
         if (semaphore && semaphore->Header.Type == 5) {
             auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
-            if (object && object->count.load() == 0) {
-                LOGF_WARNING("[SEMAPHORE_FIX] Signaling blocked guest semaphore 0x{:08X}", addr);
+            if (object) {
                 object->Release(1, nullptr);
+                signaled++;
             }
         }
+    }
+    if (signaled > 0) {
+        LOGF_WARNING("[SEMAPHORE_FIX] Signaled {} semaphores", signaled);
     }
 }
 
@@ -1587,6 +1599,64 @@ void SetInitComplete() {
                      g_blockingSemaphoreAddrs.size());
         SignalAllBlockingSemaphores();
     }
+}
+
+// =============================================================================
+// WORKER CONTEXT REGISTRY AND SHUTDOWN
+// =============================================================================
+
+// Worker context structure - describes a worker thread's context in guest memory
+struct WorkerContext {
+    uint32_t contextBase;      // Guest memory address of worker context
+    uint32_t exitFlagOffset;   // Offset to exit flag (byte)
+    uint32_t semHandleOffset;  // Offset to semaphore handle (word)
+    const char* name;          // Debug name
+};
+
+// Registry of known worker contexts
+// Add new workers here as they are discovered
+static std::vector<WorkerContext> g_workerContexts = {
+    // Photo Mode worker - blocks during sub_821A81F0 cleanup
+    // Context at 0x82B9C1D0, exit flag at +10 (decimal), semaphore handle at +20 (decimal)
+    // PPC: lbz r11,10(r26) for exit flag, lwz r3,20(r26) for semaphore
+    {0x82B9C1D0, 10, 20, "PhotoMode"},
+};
+
+// Shutdown all known workers by setting exit flags and signaling semaphores
+// This allows workers to exit their wait loops gracefully
+void ShutdownAllWorkers() {
+    printf("[WORKER_SHUTDOWN] Shutting down %zu known workers...\n", g_workerContexts.size());
+    fflush(stdout);
+    
+    int shutdownCount = 0;
+    for (const auto& worker : g_workerContexts) {
+        // Set exit flag to 1
+        uint8_t* exitFlag = reinterpret_cast<uint8_t*>(g_memory.Translate(worker.contextBase + worker.exitFlagOffset));
+        if (exitFlag) {
+            *exitFlag = 1;
+            printf("[WORKER_SHUTDOWN] %s: Set exit flag at 0x%08X\n", worker.name, worker.contextBase + worker.exitFlagOffset);
+        }
+        
+        // Read semaphore handle from guest memory (big-endian)
+        uint32_t* semHandlePtr = reinterpret_cast<uint32_t*>(g_memory.Translate(worker.contextBase + worker.semHandleOffset));
+        if (semHandlePtr) {
+            uint32_t semHandle = __builtin_bswap32(*semHandlePtr);  // Convert from big-endian
+            if (semHandle != 0) {
+                // Try as kernel handle
+                if (IsKernelObject(semHandle)) {
+                    Semaphore* sem = GetKernelObject<Semaphore>(semHandle);
+                    if (sem) {
+                        sem->Release(1, nullptr);
+                        printf("[WORKER_SHUTDOWN] %s: Signaled semaphore handle 0x%08X\n", worker.name, semHandle);
+                        shutdownCount++;
+                    }
+                }
+            }
+        }
+    }
+    
+    printf("[WORKER_SHUTDOWN] Signaled %d workers\n", shutdownCount);
+    fflush(stdout);
 }
 
 // Timeout-based wait for semaphores during init - prevents infinite blocking
@@ -6574,11 +6644,8 @@ PPC_FUNC(sub_82120000)
     // Cache the result
     g_initResult.store(ctx.r3.s32);
     
-    // Mark init complete when sub_82120000 returns success (1)
-    // This signals all blocked worker semaphores
-    if (ctx.r3.s32 == 1) {
-        SetInitComplete();
-    }
+    // NOTE: SetInitComplete moved to sub_8218BEB0 AFTER sub_821200D0/A8 complete
+    // to prevent race condition where workers wake up during init
     
     LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
 }
@@ -7408,8 +7475,13 @@ PPC_FUNC(sub_827DAC78) {
     
     uint32_t resultHandle = ctx.r3.u32;
     
-    // Log ALL semaphore creations during init to trace the flow
-    if (s_count <= 30) {
+    // Track semaphores created with count=0 for later signaling
+    // This catches semaphores created via internal wrapper, not just NtCreateSemaphore
+    if (originalCount == 0 && resultHandle != 0) {
+        TrackBlockingSemaphoreAddr(resultHandle);
+        if (s_count <= 50)
+            LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} TRACKED handle=0x{:08X} (count=0)", s_count, resultHandle);
+    } else if (s_count <= 30) {
         LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} EXIT handle=0x{:08X} (count={}, caller=0x{:08X})", 
                      s_count, resultHandle, originalCount, callerLR);
     }
@@ -7574,13 +7646,13 @@ PPC_FUNC(sub_82192140) {
     LOGF_WARNING("[TRACE] sub_82192140 EXIT #{}", s_count);
 }
 
-// Deeper tracing for sub_82192140 internals
+// sub_827E0C30 - Path setup (runs naturally now that race condition is fixed)
 extern "C" void __imp__sub_827E0C30(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827E0C30) {
     static int s_count = 0; ++s_count;
-    if (s_count <= 20) LOGF_WARNING("[PATH] sub_827E0C30 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    if (s_count <= 5) LOGF_WARNING("[PATH] sub_827E0C30 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
     __imp__sub_827E0C30(ctx, base);
-    if (s_count <= 20) LOGF_WARNING("[PATH] sub_827E0C30 EXIT #{}", s_count);
+    if (s_count <= 5) LOGF_WARNING("[PATH] sub_827E0C30 EXIT #{}", s_count);
 }
 
 // =============================================================================
@@ -10752,7 +10824,8 @@ PPC_FUNC(sub_82120FB8)
     }
 }
 
-// Hook sub_8218BEB0 - Calls sub_82120000, returns -1 on failure
+// Hook sub_8218BEB0 - Calls sub_82120000, sub_821200D0, sub_821200A8
+// Returns 0 on success (all init complete), -1 on failure
 PPC_FUNC(sub_8218BEB0)
 {
     static int s_count = 0;
@@ -10762,6 +10835,9 @@ PPC_FUNC(sub_8218BEB0)
     LOGF_WARNING("[INIT] sub_8218BEB0 ENTER #{} thread=0x{:04X}", s_count, threadId);
     
     __imp__sub_8218BEB0(ctx, base);
+    
+    // NOTE: SetInitComplete is now called at sub_821200D0 ENTRY (in save_hooks.cpp)
+    // This is the right timing: after 63-subsystem init, before post-init loading
     
     LOGF_WARNING("[INIT] sub_8218BEB0 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.s32);
 }
@@ -12645,4 +12721,123 @@ PPC_FUNC(sub_821219B0) {
     static int s_count = 0; ++s_count;
     printf("[821219B0] #%d STUBBED - bypassing blocking sync primitive\n", s_count);
     ctx.r3.u32 = 0; // Stub - bypass blocking
+}
+
+// =========================================================================
+// sub_821200D0 cleanup function traces - find which one blocks
+// =========================================================================
+extern "C" void __imp__sub_821B8FB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821B8FB0) {
+    static int s_count = 0; ++s_count;
+    printf("[821B8FB0] #%d ENTER\n", s_count);
+    __imp__sub_821B8FB0(ctx, base);
+    printf("[821B8FB0] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_8220E528(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8220E528) {
+    static int s_count = 0; ++s_count;
+    printf("[8220E528] #%d ENTER\n", s_count);
+    __imp__sub_8220E528(ctx, base);
+    printf("[8220E528] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_822C66C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822C66C8) {
+    static int s_count = 0; ++s_count;
+    printf("[822C66C8] #%d ENTER\n", s_count);
+    __imp__sub_822C66C8(ctx, base);
+    printf("[822C66C8] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_821A81F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821A81F0) {
+    static int s_count = 0; ++s_count;
+    printf("[821A81F0] #%d ENTER - signaling workers before cleanup\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to wake Photo mode workers so they can exit
+    // This is the proper fix: workers are waiting for work that won't come,
+    // signaling allows them to check exit flag and terminate
+    SignalAllBlockingSemaphores();
+    
+    __imp__sub_821A81F0(ctx, base);
+    printf("[821A81F0] #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+// sub_823005E0 - Called by sub_821A81F0, performs worker cleanup
+// This function blocks waiting for workers to exit. Stub it to bypass the wait.
+extern "C" void __imp__sub_823005E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_823005E0) {
+    static int s_count = 0; ++s_count;
+    printf("[823005E0] #%d STUBBED - bypassing worker cleanup wait\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to let workers know to exit
+    SignalAllBlockingSemaphores();
+    
+    // Don't call original - it blocks waiting for workers
+    // The workers will exit on their own when they check their exit flags
+    // __imp__sub_823005E0(ctx, base);
+}
+
+// sub_827DB880 - Worker manager shutdown loop
+// This function loops waiting for all workers to exit.
+// We must signal all semaphores before the loop to ensure workers wake up and exit.
+extern "C" void __imp__sub_827DB880(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DB880) {
+    static int s_count = 0; ++s_count;
+    printf("[827DB880] #%d ENTER - worker shutdown loop, signaling all semaphores\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to wake any workers still waiting
+    // This allows them to check their exit flags and terminate
+    SignalAllBlockingSemaphores();
+    
+    // Brief delay to let workers process the signal
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    // Signal again to catch any stragglers
+    SignalAllBlockingSemaphores();
+    
+    printf("[827DB880] #%d calling original function\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_827DB880(ctx, base);
+    
+    printf("[827DB880] #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+extern "C" void __imp__sub_82268260(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82268260) {
+    static int s_count = 0; ++s_count;
+    printf("[82268260] #%d ENTER\n", s_count);
+    __imp__sub_82268260(ctx, base);
+    printf("[82268260] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_8221BFF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221BFF0) {
+    static int s_count = 0; ++s_count;
+    printf("[8221BFF0] #%d ENTER\n", s_count);
+    __imp__sub_8221BFF0(ctx, base);
+    printf("[8221BFF0] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_82297B08(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82297B08) {
+    static int s_count = 0; ++s_count;
+    printf("[82297B08] #%d ENTER\n", s_count);
+    __imp__sub_82297B08(ctx, base);
+    printf("[82297B08] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_82212E08(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82212E08) {
+    static int s_count = 0; ++s_count;
+    printf("[82212E08] #%d ENTER\n", s_count);
+    __imp__sub_82212E08(ctx, base);
+    printf("[82212E08] #%d EXIT\n", s_count);
 }
