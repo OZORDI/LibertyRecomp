@@ -12799,7 +12799,33 @@ PPC_FUNC(sub_828529B0) {
     
     // Check device context at 0x828D2E38 + 19188 = 0x828D7344
     uint32_t deviceCtxPtr = PPC_LOAD_U32(0x828D2E38 + 19188);
+    
+    // Trace the vtable[16] call condition (lines 99844-99868 in ppc_recomp.66.cpp)
+    // This indirect call happens BEFORE sub_829CB818 and sub_828507F8
+    int32_t conditionValue = (int32_t)PPC_LOAD_U32(0x82078000 + 16060);
+    uint32_t globalBase = 0x828D2E38;  // -31982 << 16 + offsets
+    uint32_t globalObjAddr = PPC_LOAD_U32(globalBase + 19648);  // object at global+19648
+    
     LOGF_WARNING("[MAIN_LOOP] sub_828529B0 ENTER #{} deviceCtx=0x{:08X}", s_count, deviceCtxPtr);
+    LOGF_WARNING("[MAIN_LOOP] vtable_cond: (0x82078000+16060)={} globalObj=0x{:08X}", 
+                 conditionValue, globalObjAddr);
+    
+    // If condition > 0 and object exists, vtable[16] will be called
+    // Guest memory can be anywhere, so just check for non-zero
+    if (conditionValue > 0 && globalObjAddr != 0) {
+        uint32_t objPtr = PPC_LOAD_U32(globalObjAddr + 0);  // load object from global
+        LOGF_WARNING("[MAIN_LOOP] globalObj[0]=0x{:08X}", objPtr);
+        if (objPtr != 0) {
+            uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+            LOGF_WARNING("[MAIN_LOOP] obj vtable=0x{:08X}", vtable);
+            if (vtable != 0) {
+                uint32_t vtable16 = PPC_LOAD_U32(vtable + 64);
+                LOGF_WARNING("[MAIN_LOOP] VTABLE[16] CALL PENDING: func=0x{:08X}", vtable16);
+            }
+        }
+    } else {
+        LOG_WARNING("[MAIN_LOOP] vtable[16] call will be SKIPPED (condition not met)");
+    }
     
     if (deviceCtxPtr == 0) {
         LOG_WARNING("[MAIN_LOOP] Device context is NULL - init may have failed");
@@ -12859,6 +12885,23 @@ PPC_FUNC(sub_82852610) {
     LOGF_WARNING("[ORCH] sub_82852610 ENTER #{}", s_count);
     __imp__sub_82852610(ctx, base);
     LOGF_WARNING("[ORCH] sub_82852610 EXIT #{}", s_count);
+}
+
+// Trace sub_828507F8 internal calls to find blocking point
+extern "C" void __imp__sub_829D5920(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D5920) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[RENDER] sub_829D5920 ENTER #{}", s_count);
+    __imp__sub_829D5920(ctx, base);
+    LOGF_WARNING("[RENDER] sub_829D5920 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829D5950(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D5950) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{}", s_count);
+    __imp__sub_829D5950(ctx, base);
+    LOGF_WARNING("[RENDER] sub_829D5950 EXIT #{}", s_count);
 }
 
 PPC_FUNC(sub_828507F8) {
