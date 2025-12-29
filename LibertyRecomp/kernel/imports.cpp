@@ -7048,7 +7048,10 @@ PPC_FUNC(sub_8221B7A0) {
 }
 
 // ============================================================================
-// SHADER BINDING HOOKS - Connect embedded shader cache to rendering pipeline
+// SHADER BINDING HOOKS - Call original PPC code to update device state
+// These hooks trace shader calls and let the original code update the device context.
+// The video.cpp GUEST_FUNCTION_HOOKs for the same functions won't trigger since
+// these PPC_FUNC hooks take precedence (strong symbol override).
 // ============================================================================
 
 extern "C" void __imp__sub_829CD350(PPCContext& ctx, uint8_t* base);
@@ -7058,17 +7061,13 @@ PPC_FUNC(sub_829CD350) {
     uint32_t deviceCtx = ctx.r3.u32;
     uint32_t shaderPtr = ctx.r4.u32;
     
-    if (s_count <= 10 || s_count % 1000 == 0) {
+    if (s_count <= 5 || s_count % 1000 == 0) {
         LOGF_WARNING("[SHADER] SetVertexShader #{} device=0x{:08X} shader=0x{:08X}", 
                      s_count, deviceCtx, shaderPtr);
     }
     
-    // Call original implementation to update device context
-    // Original stores shader at deviceCtx+12700 and sets dirty flag at deviceCtx+12708
+    // Call original to update device context state
     __imp__sub_829CD350(ctx, base);
-    
-    // Shader cache integration will be implemented when Video system is ready
-    // For now, device context updates are sufficient for game logic to progress
 }
 
 extern "C" void __imp__sub_829D6690(PPCContext& ctx, uint8_t* base);
@@ -7078,17 +7077,13 @@ PPC_FUNC(sub_829D6690) {
     uint32_t deviceCtx = ctx.r3.u32;
     uint32_t shaderPtr = ctx.r4.u32;
     
-    if (s_count <= 10 || s_count % 1000 == 0) {
+    if (s_count <= 5 || s_count % 1000 == 0) {
         LOGF_WARNING("[SHADER] SetPixelShader #{} device=0x{:08X} shader=0x{:08X}", 
                      s_count, deviceCtx, shaderPtr);
     }
     
-    // Call original implementation to update device context
-    // Original stores shader at device context and sets dirty flags
+    // Call original to update device context state
     __imp__sub_829D6690(ctx, base);
-    
-    // Shader cache integration will be implemented when Video system is ready
-    // For now, device context updates are sufficient for game logic to progress
 }
 
 // DrawPrimitive hook is implemented in gpu/video.cpp

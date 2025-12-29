@@ -8337,7 +8337,12 @@ struct LightAndIndexBufferResourceV5
 // NOTE: sub_829D87E8 was incorrectly mapped to CreateDevice.
 // sub_829D87E8 is actually a GPU command sync function called every frame,
 // not device creation. The hook is now in imports.cpp as a GPU sync stub.
-// CreateDevice should be called from the actual device init function (TBD).
+//
+// sub_829DF358 is the GTA IV device initialization function that calls:
+// - VdInitializeEngines (kernel function - already hooked in imports.cpp)
+// - VdSetGraphicsInterruptCallback (kernel function - already hooked in imports.cpp)
+// The kernel hooks handle the initialization, so we don't need to hook sub_829DF358 directly.
+// CreateDevice() is called from Video::CreateHostDevice() during startup.
 
 // =============================================================================
 // GTA IV Shader System Stubs
