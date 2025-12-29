@@ -2431,6 +2431,7 @@ static uint32_t getSetAddress(uint32_t base, int index) {
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
+    LOG_WARNING("[CreateDevice] ENTER");
     LOGF_WARNING("{:p} {:p} {:p} {:p} {:p} {:p}\n", reinterpret_cast<void*>(a1), reinterpret_cast<void*>(a2), reinterpret_cast<void*>(a3), reinterpret_cast<void*>(a4), reinterpret_cast<void*>(a5), reinterpret_cast<void*>(a6));
     g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture *>();
 
@@ -2490,6 +2491,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
 
     *a6 = g_memory.MapVirtual(device);
 
+    LOG_WARNING("[CreateDevice] EXIT - device created");
     return 0;
 }
 
@@ -8332,8 +8334,10 @@ struct LightAndIndexBufferResourceV5
 // These addresses were identified by analyzing the PPC recomp code.
 // =============================================================================
 
-// Device creation - This one calls VdInitializeEngines which we hook separately
-GUEST_FUNCTION_HOOK(sub_829D87E8, CreateDevice);
+// NOTE: sub_829D87E8 was incorrectly mapped to CreateDevice.
+// sub_829D87E8 is actually a GPU command sync function called every frame,
+// not device creation. The hook is now in imports.cpp as a GPU sync stub.
+// CreateDevice should be called from the actual device init function (TBD).
 
 // =============================================================================
 // GTA IV Shader System Stubs

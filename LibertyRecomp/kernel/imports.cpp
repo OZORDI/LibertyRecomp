@@ -12896,20 +12896,33 @@ PPC_FUNC(sub_829D5920) {
     LOGF_WARNING("[RENDER] sub_829D5920 EXIT #{}", s_count);
 }
 
-// Trace sub_829D5950 internal call to find blocking
-// sub_829D5950 calls sub_829D87E8 which is hooked to CreateDevice in video.cpp
-// But still blocking - need to trace what happens after CreateDevice returns
+// =============================================================================
+// GPU Command Sync - sub_829D87E8
+// This function was incorrectly hooked to CreateDevice in video.cpp.
+// Original behavior: Writes GPU commands then spins on [r3+11000] waiting for completion.
+// Fix: Skip the spin loop since host GPU handles sync via Video::Present.
+// =============================================================================
+PPC_FUNC(sub_829D87E8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[GPU_SYNC] sub_829D87E8 ENTER #{} deviceCtx=0x{:08X}", s_count, ctx.r3.u32);
+    
+    uint32_t deviceCtx = ctx.r3.u32;
+    if (deviceCtx != 0) {
+        // Set the GPU completion flag to 0 so any dependent code sees "complete"
+        // Original code spins on [deviceCtx+11000] != 0
+        PPC_STORE_U32(deviceCtx + 11000, 0);
+    }
+    
+    if (s_count <= 5) LOGF_WARNING("[GPU_SYNC] sub_829D87E8 EXIT #{} (spin loop bypassed)", s_count);
+}
+
+// Trace sub_829D5950 - calls sub_829D87E8
 extern "C" void __imp__sub_829D5950(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D5950) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.s32);
-    
-    // Check what sub_829D87E8 is mapped to
-    uint32_t deviceCtx = ctx.r3.u32;
-    LOGF_WARNING("[RENDER] sub_829D5950 deviceCtx=0x{:08X}, calling sub_829D87E8", deviceCtx);
-    
+    if (s_count <= 5) LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{}", s_count);
     __imp__sub_829D5950(ctx, base);
-    LOGF_WARNING("[RENDER] sub_829D5950 EXIT #{}", s_count);
+    if (s_count <= 5) LOGF_WARNING("[RENDER] sub_829D5950 EXIT #{}", s_count);
 }
 
 PPC_FUNC(sub_828507F8) {
