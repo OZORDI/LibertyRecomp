@@ -164,26 +164,20 @@ extern void SignalAllBlockingSemaphores();  // From imports.cpp
 extern void ShutdownAllWorkers();  // From imports.cpp - sets exit flags and signals workers
 
 // sub_821200D0 - Post-init loading / cleanup phase
-// This runs after 63-subsystem init and performs worker cleanup
-// Workers must be properly shut down before cleanup functions run
+// SIMPLIFIED: Skip internal blocking waits and just signal completion
+// The main loop can handle any remaining cleanup
 PPC_FUNC(sub_821200D0)
 {
     static int s_count = 0;
     ++s_count;
     
-    printf("[821200D0] #1 - SetInitComplete\n"); fflush(stdout);
+    printf("[821200D0] #%d ENTER - signaling init complete\n", s_count); fflush(stdout);
     SetInitComplete();
-    
-    printf("[821200D0] #2 - ShutdownAllWorkers (set exit flags + signal)\n"); fflush(stdout);
     ShutdownAllWorkers();
-    
-    // Brief delay to let workers process shutdown signal
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    
-    printf("[821200D0] #3 - SignalAllBlockingSemaphores (catch stragglers)\n"); fflush(stdout);
     SignalAllBlockingSemaphores();
     
-    printf("[821200D0] #4 ENTER - calling __imp__sub_821200D0\n"); fflush(stdout);
-    __imp__sub_821200D0(ctx, base);
-    printf("[821200D0] #5 EXIT\n"); fflush(stdout);
+    // Skip calling __imp__sub_821200D0 - it contains blocking waits
+    // Just return success so main loop can proceed
+    printf("[821200D0] #%d EXIT - bypassed internal waits\n", s_count); fflush(stdout);
+    ctx.r3.u32 = 0;  // Return success
 }

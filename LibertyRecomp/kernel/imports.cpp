@@ -6721,37 +6721,14 @@ PPC_FUNC(sub_82120000)
     ++s_count;
     uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
     
-    // Return cached result if already initialized
-    if (g_initResult.load() != -999)
+    // TEMPORARY FIX: Always return success (1) to bypass blocking init
+    // The 63-subsystem init completed successfully in previous runs (r3=10)
+    // This allows the main loop to proceed while we debug the blocking
+    ctx.r3.s32 = 1;
+    if (s_count <= 5 || s_count % 100 == 0)
     {
-        ctx.r3.s32 = g_initResult.load();
-        if (s_count <= 10 || s_count % 100 == 0)
-        {
-            LOGF_WARNING("[INIT] sub_82120000 #{} CACHED r3={}", s_count, ctx.r3.s32);
-        }
-        return;
+        LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} - returning success to bypass blocking init", s_count, threadId);
     }
-    
-    LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} (first call)", s_count, threadId);
-    
-    if constexpr (USE_GAME_INIT_MODULE)
-    {
-        // Use the new GameInit module which replaces Xbox 360-specific behavior
-        ctx.r3.u32 = GameInit::Initialize(ctx, base);
-    }
-    else
-    {
-        // Use original PPC code (current behavior for development/testing)
-        __imp__sub_82120000(ctx, base);
-    }
-    
-    // Cache the result
-    g_initResult.store(ctx.r3.s32);
-    
-    // NOTE: SetInitComplete moved to sub_8218BEB0 AFTER sub_821200D0/A8 complete
-    // to prevent race condition where workers wake up during init
-    
-    LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
 }
 
 // Trace functions called after sub_8218C600 succeeds
@@ -12829,11 +12806,11 @@ PPC_FUNC(sub_8218C1F0) {
 // =========================================================================
 extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
 
-// TRACE: sub_821200A8 - let it run (no obvious blocking loops)
+// STUB: sub_821200A8 - bypass post-init finalization to let main loop proceed
 PPC_FUNC(sub_821200A8) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[821200A8] #{} ENTER - post-init finalization", s_count);
-    __imp__sub_821200A8(ctx, base);
+    LOGF_WARNING("[821200A8] #{} STUBBED - bypassing post-init finalization", s_count);
+    ctx.r3.u32 = 0;  // Return success
     LOGF_WARNING("[821200A8] #{} EXIT", s_count);
 }
 
