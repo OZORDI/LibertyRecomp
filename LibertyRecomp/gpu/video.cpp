@@ -2445,6 +2445,10 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     // }
 
     // Move backbuffer to guest memory.
+    if (g_backBufferHolder == nullptr) {
+        LOG_WARNING("[CreateDevice] g_backBufferHolder is NULL - skipping backbuffer move");
+        return 0;  // Early return, device creation incomplete but won't crash
+    }
     assert(!g_memory.IsInMemoryRange(g_backBuffer) && g_backBufferHolder != nullptr);
     g_backBuffer = g_userHeap.AllocPhysical<GuestSurface>(std::move(*g_backBufferHolder));
 

@@ -12896,10 +12896,18 @@ PPC_FUNC(sub_829D5920) {
     LOGF_WARNING("[RENDER] sub_829D5920 EXIT #{}", s_count);
 }
 
+// Trace sub_829D5950 internal call to find blocking
+// sub_829D5950 calls sub_829D87E8 which is hooked to CreateDevice in video.cpp
+// But still blocking - need to trace what happens after CreateDevice returns
 extern "C" void __imp__sub_829D5950(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D5950) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{}", s_count);
+    LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.s32);
+    
+    // Check what sub_829D87E8 is mapped to
+    uint32_t deviceCtx = ctx.r3.u32;
+    LOGF_WARNING("[RENDER] sub_829D5950 deviceCtx=0x{:08X}, calling sub_829D87E8", deviceCtx);
+    
     __imp__sub_829D5950(ctx, base);
     LOGF_WARNING("[RENDER] sub_829D5950 EXIT #{}", s_count);
 }

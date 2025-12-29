@@ -1,4 +1,4 @@
-# Liberty Recompiled - Enhanced Installation Architecture
+# Liberty Recompiled - Installation Architecture
 
 ## Overview
 
@@ -371,7 +371,7 @@ After extraction, shaders go through the conversion pipeline:
    - Linux: DXC → SPIR-V
    - macOS: Metal compiler → AIR
 
-See [SHADER_PIPELINE.md](SHADER_PIPELINE.md) for detailed shader conversion documentation.
+
 
 ---
 
