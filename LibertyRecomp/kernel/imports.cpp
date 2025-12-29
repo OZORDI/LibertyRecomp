@@ -12834,6 +12834,33 @@ PPC_FUNC(sub_829CA240) {
     if (s_count <= 10) LOGF_WARNING("[ORCH] sub_829CA240 EXIT #{}", s_count);
 }
 
+// Loop function called 20 times in sub_828529B0
+extern "C" void __imp__sub_829D3728(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D3728) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 25) LOGF_WARNING("[ORCH] sub_829D3728 ENTER #{}", s_count);
+    __imp__sub_829D3728(ctx, base);
+    if (s_count <= 25) LOGF_WARNING("[ORCH] sub_829D3728 EXIT #{}", s_count);
+}
+
+// Called after the loop
+extern "C" void __imp__sub_829D14E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D14E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_829D14E0 ENTER #{}", s_count);
+    __imp__sub_829D14E0(ctx, base);
+    LOGF_WARNING("[ORCH] sub_829D14E0 EXIT #{}", s_count);
+}
+
+// Called conditionally before rendering
+extern "C" void __imp__sub_82852610(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82852610) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_82852610 ENTER #{}", s_count);
+    __imp__sub_82852610(ctx, base);
+    LOGF_WARNING("[ORCH] sub_82852610 EXIT #{}", s_count);
+}
+
 PPC_FUNC(sub_828507F8) {
     static int s_count = 0; ++s_count;
     LOGF_WARNING("[RENDER] sub_828507F8 (Frame Present) #{}", s_count);
