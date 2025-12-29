@@ -9847,31 +9847,16 @@ PPC_FUNC(sub_82671E40) {
         LOGF_WARNING("[INIT] sub_82671E40 EXIT #{}", s_count);
 }
 
-// sub_82672E50 - Audio/streaming init with busy-wait loops - FIXED
-// Analysis: Contains busy-wait loops waiting for worker tasks.
-// Fix: Pre-clear loop exit conditions so loops exit immediately, then run actual init.
-//
-// Loop 1: while ([0x832A5F00 + 24352] != 0) { sub_82672AA8(); }  
-// Loop 2: while (sub_82973598() != 0) { sub_829736F8(); sub_82973598(); }
-//
-// By pre-clearing these conditions, the loops exit immediately and init proceeds.
+// sub_82672E50 - Audio/streaming init with busy-wait loops - STUBBED
+// Analysis: Contains busy-wait loops waiting for worker tasks that are stubbed.
+// Since workers are stubbed, these loops would run forever.
+// Stubbing this function allows init to continue.
 PPC_FUNC(sub_82672E50) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[INIT] sub_82672E50 #{} ENTER - pre-clearing loop conditions", s_count);
-    
-    // Pre-clear loop 1 condition: [0x832A5F00 + 24352] = 0
-    // This is the worker task counter that normally gets decremented by workers
-    constexpr uint32_t LOOP1_ADDR = 0x832A5F00 + 24352;  // 0x832A5F20 + offset
-    PPC_STORE_U32(LOOP1_ADDR, 0);
-    
-    // Note: Loop 2 condition is a function return value, can't pre-clear.
-    // The yield in sub_829736F8 hook should prevent tight spinning.
-    // Add iteration limit as safety.
-    
-    // Call original function - loops should now exit quickly
-    __imp__sub_82672E50(ctx, base);
-    
-    LOGF_WARNING("[INIT] sub_82672E50 #{} EXIT", s_count);
+    LOGF_WARNING("[INIT] sub_82672E50 #{} STUBBED - bypassing busy-wait loops", s_count);
+    // Don't call __imp__sub_82672E50 - contains infinite busy-wait loops
+    ctx.r3.u32 = 0;  // Return success
+    return;
 }
 
 // sub_82679950 - Graphics/GPU initialization - STUBBED
