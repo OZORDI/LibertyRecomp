@@ -12783,6 +12783,29 @@ PPC_FUNC(sub_82856F08) {
     __imp__sub_82856F08(ctx, base);
 }
 
+// =============================================================================
+// RENDER OBJECT STUB - Option B: Manual initialization
+// Creates a stub object with vtable[16] pointing to our render trigger function
+// =============================================================================
+static bool s_renderObjectInitialized = false;
+static uint32_t s_stubObjectAddr = 0;
+static uint32_t s_stubVtableAddr = 0;
+
+// Forward declaration for render trigger function
+void RenderTriggerFromVtable();
+
+// PPC wrapper for the render trigger - called from vtable[16]
+PPC_FUNC(RenderTriggerStub) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0) {
+        LOGF_WARNING("[RENDER_TRIGGER] vtable[16] called #{} - triggering host render", s_count);
+    }
+    
+    // Trigger host rendering - call Video::Present or DrawPrimitive
+    // For now, just log that we got here - the actual rendering happens via VdSwap
+    // The important thing is that the render path is now unblocked
+}
+
 PPC_FUNC(sub_828529B0) {
     static int s_count = 0; ++s_count;
     
@@ -12790,38 +12813,66 @@ PPC_FUNC(sub_828529B0) {
     uint32_t deviceCtxPtr = PPC_LOAD_U32(0x828D2E38 + 19188);
     
     // Trace the vtable[16] call condition (lines 99844-99868 in ppc_recomp.66.cpp)
-    // This indirect call happens BEFORE sub_829CB818 and sub_828507F8
     int32_t conditionValue = (int32_t)PPC_LOAD_U32(0x82078000 + 16060);
-    uint32_t globalBase = 0x828D2E38;  // -31982 << 16 + offsets
-    uint32_t globalObjAddr = PPC_LOAD_U32(globalBase + 19648);  // object at global+19648
+    uint32_t globalBase = 0x828D2E38;
+    uint32_t globalObjAddr = PPC_LOAD_U32(globalBase + 19648);
     
-    LOGF_WARNING("[MAIN_LOOP] sub_828529B0 ENTER #{} deviceCtx=0x{:08X}", s_count, deviceCtxPtr);
-    LOGF_WARNING("[MAIN_LOOP] vtable_cond: (0x82078000+16060)={} globalObj=0x{:08X}", 
-                 conditionValue, globalObjAddr);
-    
-    // If condition > 0 and object exists, vtable[16] will be called
-    // Guest memory can be anywhere, so just check for non-zero
-    if (conditionValue > 0 && globalObjAddr != 0) {
-        uint32_t objPtr = PPC_LOAD_U32(globalObjAddr + 0);  // load object from global
-        LOGF_WARNING("[MAIN_LOOP] globalObj[0]=0x{:08X}", objPtr);
-        if (objPtr != 0) {
-            uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
-            LOGF_WARNING("[MAIN_LOOP] obj vtable=0x{:08X}", vtable);
-            if (vtable != 0) {
-                uint32_t vtable16 = PPC_LOAD_U32(vtable + 64);
-                LOGF_WARNING("[MAIN_LOOP] VTABLE[16] CALL PENDING: func=0x{:08X}", vtable16);
-            }
-        }
-    } else {
-        LOG_WARNING("[MAIN_LOOP] vtable[16] call will be SKIPPED (condition not met)");
+    if (s_count <= 5 || s_count % 500 == 0) {
+        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 ENTER #{} deviceCtx=0x{:08X}", s_count, deviceCtxPtr);
+        LOGF_WARNING("[MAIN_LOOP] vtable_cond: (0x82078000+16060)={} globalObj=0x{:08X}", 
+                     conditionValue, globalObjAddr);
     }
     
-    if (deviceCtxPtr == 0) {
-        LOG_WARNING("[MAIN_LOOP] Device context is NULL - init may have failed");
+    // OPTION B: If globalObj[0] is NULL, create a stub object
+    if (conditionValue > 0 && globalObjAddr != 0) {
+        uint32_t objPtr = PPC_LOAD_U32(globalObjAddr + 0);
+        
+        if (objPtr == 0 && !s_renderObjectInitialized) {
+            // Create stub render object in guest memory
+            LOG_WARNING("[RENDER_FIX] Creating stub render object to unblock vtable[16] call");
+            
+            // Allocate vtable (17 entries * 4 bytes = 68 bytes, but we only need entry 16)
+            // Use a fixed location in guest memory for the vtable
+            s_stubVtableAddr = 0x82A00000;  // Safe location in code space
+            
+            // Register our render trigger function at a known address
+            uint32_t renderTriggerAddr = 0x82A00100;
+            g_memory.InsertFunction(renderTriggerAddr, RenderTriggerStub);
+            
+            // Write vtable[16] (offset 64) = renderTriggerAddr
+            PPC_STORE_U32(s_stubVtableAddr + 64, renderTriggerAddr);
+            
+            // Allocate stub object (just needs vtable pointer at offset 0)
+            s_stubObjectAddr = 0x82A00200;
+            PPC_STORE_U32(s_stubObjectAddr + 0, s_stubVtableAddr);  // object->vtable
+            
+            // Store stub object pointer at globalObjAddr
+            PPC_STORE_U32(globalObjAddr + 0, s_stubObjectAddr);
+            
+            s_renderObjectInitialized = true;
+            LOGF_WARNING("[RENDER_FIX] Stub object created: obj=0x{:08X} vtable=0x{:08X} vtable[16]=0x{:08X}",
+                         s_stubObjectAddr, s_stubVtableAddr, renderTriggerAddr);
+        }
+        
+        if (s_count <= 5 || s_count % 500 == 0) {
+            objPtr = PPC_LOAD_U32(globalObjAddr + 0);  // Re-read after potential init
+            LOGF_WARNING("[MAIN_LOOP] globalObj[0]=0x{:08X}", objPtr);
+            if (objPtr != 0) {
+                uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+                LOGF_WARNING("[MAIN_LOOP] obj vtable=0x{:08X}", vtable);
+                if (vtable != 0) {
+                    uint32_t vtable16 = PPC_LOAD_U32(vtable + 64);
+                    LOGF_WARNING("[MAIN_LOOP] VTABLE[16] CALL PENDING: func=0x{:08X}", vtable16);
+                }
+            }
+        }
     }
     
     __imp__sub_828529B0(ctx, base);
-    LOGF_WARNING("[MAIN_LOOP] sub_828529B0 EXIT #{}", s_count);
+    
+    if (s_count <= 5 || s_count % 500 == 0) {
+        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 EXIT #{}", s_count);
+    }
 }
 
 // Trace sub_828529B0 internal calls to find blocking point
