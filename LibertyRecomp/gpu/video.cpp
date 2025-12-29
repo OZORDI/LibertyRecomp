@@ -8618,56 +8618,29 @@ PPC_FUNC(sub_829D1758)
 }
 
 // =============================================================================
-// GTA IV Render Path Tracing Hooks
-// These hooks detect if game code reaches the render functions
+// GTA IV Render Path Hooks - HYBRID APPROACH
+// These PPC_FUNC hooks call BOTH:
+// 1. Original PPC code (to update guest state)
+// 2. Host rendering functions (to draw on screen)
+// This is necessary because the game expects its state to be updated.
 // =============================================================================
 extern "C" void __imp__sub_829D8860(PPCContext& ctx, uint8_t* base);
-extern "C" void __imp__sub_829CD958(PPCContext& ctx, uint8_t* base);
 
 static int s_gtaDrawPrimitiveCount = 0;
-static int s_gtaRenderFuncCount = 0;
 
-// Hook sub_829CD958 - the render function that calls DrawPrimitive
-PPC_FUNC(sub_829CD958)
-{
-    ++s_gtaRenderFuncCount;
-    
-    if (s_gtaRenderFuncCount <= 30 || (s_gtaRenderFuncCount % 500) == 0) {
-        // Check device+12740 which controls if drawing happens
-        uint32_t deviceAddr = ctx.r3.u32;
-        uint32_t vertexCount = 0;
-        if (deviceAddr != 0 && deviceAddr < 0xF0000000) {
-            uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
-            if (devicePtr) {
-                vertexCount = *reinterpret_cast<be<uint32_t>*>(devicePtr + 12740);
-            }
-        }
-        LOGF_WARNING("[GTA4 RENDER] sub_829CD958 #{} device={:#x} vertexCount(+12740)={} LR={:#x}",
-            s_gtaRenderFuncCount, deviceAddr, vertexCount, ctx.lr);
-    }
-    
-    // Call original
-    __imp__sub_829CD958(ctx, base);
-}
-
-// Hook sub_829D8860 - DrawPrimitive
+// Hook sub_829D8860 - GTA IV DrawPrimitive (HYBRID: original + host)
 PPC_FUNC(sub_829D8860)
 {
     ++s_gtaDrawPrimitiveCount;
     
-    if (s_gtaDrawPrimitiveCount <= 50 || (s_gtaDrawPrimitiveCount % 1000) == 0) {
-        uint32_t device = ctx.r3.u32;
-        uint32_t primType = ctx.r4.u32;
-        uint32_t startVert = ctx.r5.u32;
-        uint32_t primCount = ctx.r6.u32;
-        LOGF_WARNING("[GTA4 DRAW] sub_829D8860 #{} device={:#x} type={} start={} count={} LR={:#x}",
-            s_gtaDrawPrimitiveCount, device, primType, startVert, primCount, ctx.lr);
-    }
+    // First: Call original PPC to update guest state
+    __imp__sub_829D8860(ctx, base);
     
-    // Call the standard DrawPrimitive function
+    // Then: Also call host DrawPrimitive for actual rendering
     GuestDevice* guestDevice = static_cast<GuestDevice*>(g_memory.Translate(ctx.r3.u32));
-    if (guestDevice) {
-        DrawPrimitive(guestDevice, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
+    if (guestDevice && s_gtaDrawPrimitiveCount <= 50) {
+        LOGF_WARNING("[GTA4 DRAW] sub_829D8860 #{} device={:#x} type={} start={} count={}",
+            s_gtaDrawPrimitiveCount, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
     }
 }
 
@@ -8911,8 +8884,9 @@ GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader);
 GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
 
 // GTA IV Shader binding hooks
-GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);      // GTA IV SetVertexShader (device+10932)
-GUEST_FUNCTION_HOOK(sub_829D6690, SetPixelShader);       // GTA IV SetPixelShader (device+10936)
+// NOTE: sub_829CD350 sets BOTH vertex shader (device+10932) AND pixel shader (device+10936)
+// sub_829D6690 is UnlockTextureRect, NOT SetPixelShader (see line 8782)
+GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);      // GTA IV SetVertexShader (also sets PS)
 
 GUEST_FUNCTION_HOOK(sub_82636BF8, BeginConditionalSurvey);
 GUEST_FUNCTION_HOOK(sub_82636C08, EndConditionalSurvey);

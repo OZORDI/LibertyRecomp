@@ -7048,42 +7048,36 @@ PPC_FUNC(sub_8221B7A0) {
 }
 
 // ============================================================================
-// SHADER BINDING HOOKS - Call original PPC code to update device state
-// These hooks trace shader calls and let the original code update the device context.
-// The video.cpp GUEST_FUNCTION_HOOKs for the same functions won't trigger since
-// these PPC_FUNC hooks take precedence (strong symbol override).
+// SHADER BINDING HOOKS - HYBRID APPROACH
+// Call original PPC code to maintain game state. The GUEST_FUNCTION_HOOKs
+// in video.cpp won't work because they replace the function entirely,
+// breaking the game's state management.
 // ============================================================================
 
 extern "C" void __imp__sub_829CD350(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829CD350) {
     static int s_count = 0; ++s_count;
     
-    uint32_t deviceCtx = ctx.r3.u32;
-    uint32_t shaderPtr = ctx.r4.u32;
+    // Call original to update game state
+    __imp__sub_829CD350(ctx, base);
     
     if (s_count <= 5 || s_count % 1000 == 0) {
         LOGF_WARNING("[SHADER] SetVertexShader #{} device=0x{:08X} shader=0x{:08X}", 
-                     s_count, deviceCtx, shaderPtr);
+                     s_count, ctx.r3.u32, ctx.r4.u32);
     }
-    
-    // Call original to update device context state
-    __imp__sub_829CD350(ctx, base);
 }
 
 extern "C" void __imp__sub_829D6690(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D6690) {
     static int s_count = 0; ++s_count;
     
-    uint32_t deviceCtx = ctx.r3.u32;
-    uint32_t shaderPtr = ctx.r4.u32;
+    // Call original to update game state
+    __imp__sub_829D6690(ctx, base);
     
     if (s_count <= 5 || s_count % 1000 == 0) {
         LOGF_WARNING("[SHADER] SetPixelShader #{} device=0x{:08X} shader=0x{:08X}", 
-                     s_count, deviceCtx, shaderPtr);
+                     s_count, ctx.r3.u32, ctx.r4.u32);
     }
-    
-    // Call original to update device context state
-    __imp__sub_829D6690(ctx, base);
 }
 
 // DrawPrimitive hook is implemented in gpu/video.cpp
