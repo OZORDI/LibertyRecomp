@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "ppc-recomp": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "/Users/Ozordi/Downloads/LibertyRecomp/tools/ppc-mcp-server",
+      "env": {
+        "PPC_DIR": "/Users/Ozordi/Downloads/LibertyRecomp/LibertyRecompLib/ppc",
+        "IMPORTS_FILE": "/Users/Ozordi/Downloads/LibertyRecomp/LibertyRecomp/kernel/imports.cpp"
+      }
+    }
+  }
+}
