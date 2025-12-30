@@ -48,6 +48,74 @@
 #endif
 
 // =============================================================================
+// RUNTIME FUNCTION PATCHING - Override weak symbols on macOS
+// =============================================================================
+// On macOS, weak symbol override doesn't work with static libraries.
+// This patches PPCFuncMappings before Memory::Memory() runs to ensure
+// our sync primitive hooks are used instead of the weak symbols.
+// =============================================================================
+
+// Forward declarations of our hook functions - use _hook suffix to avoid weak symbol collision
+extern "C" void sub_829A9738_hook(PPCContext& ctx, uint8_t* base);  // Wait helper (NtWaitForSingleObjectEx)
+extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A39A0_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base);  // Sync wait function (KeWaitForSingleObject)
+extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base);  // Intermediate sync function (calls sub_829A3238)
+extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base);
+
+namespace {
+
+// Patch a single entry in PPCFuncMappings by guest address
+bool PatchFuncMapping(size_t guestAddr, PPCFunc* newFunc) {
+    for (size_t i = 0; PPCFuncMappings[i].guest != 0; i++) {
+        if (PPCFuncMappings[i].guest == guestAddr) {
+            PPCFunc* oldFunc = PPCFuncMappings[i].host;
+            PPCFuncMappings[i].host = newFunc;
+            printf("[PATCH] 0x%08zX: %p -> %p\n", guestAddr, (void*)oldFunc, (void*)newFunc);
+            fflush(stdout);
+            return true;
+        }
+    }
+    printf("[PATCH] WARNING: Guest address 0x%08zX not found in PPCFuncMappings\n", guestAddr);
+    fflush(stdout);
+    return false;
+}
+
+// Patch all sync primitive functions to use our hooks
+void PatchSyncPrimitives() {
+    printf("[PATCH] Patching sync primitives in PPCFuncMappings...\n");
+    fflush(stdout);
+    
+    // Patch sync primitives - these cause blocking in HUD init
+    // Use _hook suffix functions to avoid weak symbol collision on macOS
+    PatchFuncMapping(0x829A9738, &sub_829A9738_hook);  // Wait helper (NtWaitForSingleObjectEx) - CRITICAL
+    PatchFuncMapping(0x829A3560, &sub_829A3560_hook);  // XamTask + mount integration (signals completion event)
+    PatchFuncMapping(0x829A39A0, &sub_829A39A0_hook);  // Root sync primitive
+    PatchFuncMapping(0x829A3238, &sub_829A3238_hook);  // Sync wait function (KeWaitForSingleObject) - CRITICAL
+    PatchFuncMapping(0x829A39F0, &sub_829A39F0_hook);  // Intermediate sync (calls sub_829A3238) - CRITICAL
+    PatchFuncMapping(0x827DB338, &sub_827DB338_hook);  // Sync wait wrapper  
+    PatchFuncMapping(0x827DB988, &sub_827DB988_hook);  // Sync init
+    PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // String/resource lookup
+    
+    printf("[PATCH] Sync primitive patching complete.\n");
+    fflush(stdout);
+}
+
+// Static initializer to run patching before Memory::Memory()
+struct SyncPrimitivePatcher {
+    SyncPrimitivePatcher() {
+        PatchSyncPrimitives();
+    }
+};
+
+// This global will be constructed before Memory, patching the function table
+static SyncPrimitivePatcher g_syncPatcher;
+
+} // anonymous namespace
+
+// =============================================================================
 // TARGETED TIMING FIXES - Known Wait Loop Registry
 // =============================================================================
 // Instead of global slowdowns, we identify specific wait loops and inject yields
@@ -4601,9 +4669,6 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
         }
     }
     
-    // Removed all GPU fence bypass hacks - following Unleashed's clean approach
-    // Let proper Event/Semaphore wait/notify work naturally without forced returns
-
     switch (Object->Type)
     {
         case 0:
@@ -5584,6 +5649,19 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
         }
     }
     
+    // SIGNAL COMPLETION EVENT: sub_829A3560 waits on event at 0x82897F5C after scheduling
+    // Since we execute synchronously, signal this event so the wait doesn't block
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
+    XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
+    if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*completionEvent)->Set();
+        if (s_count <= 20)
+        {
+            LOGF_WARNING("[XamTaskSchedule] Signaled completion event at 0x{:08X}", kTaskCompletionEventAddr);
+        }
+    }
+    
     return ERROR_SUCCESS;
 }
 
@@ -5948,8 +6026,10 @@ PPC_FUNC(sub_827DAE40)
 }
 
 // Hook sub_829A9738 - Wait-with-retry helper (calls NtWaitForSingleObjectEx)
+// This is called by sub_829A2380 (semaphore acquire) during init
+// The semaphore isn't released during init, so we make this non-blocking
 extern "C" void __imp__sub_829A9738(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_829A9738)
+extern "C" void sub_829A9738_hook(PPCContext& ctx, uint8_t* base)
 {
     static int s_count = 0;
     ++s_count;
@@ -5959,17 +6039,14 @@ PPC_FUNC(sub_829A9738)
     
     if (s_count <= 20 || s_count % 100 == 0)
     {
-        LOGF_IMPL(Utility, "WaitHelper", "sub_829A9738 #{} obj=0x{:08X} timeout={}", 
+        LOGF_IMPL(Utility, "WaitHelper", "sub_829A9738 #{} obj=0x{:08X} timeout={} - returning success (non-blocking)", 
                   s_count, waitObj, timeout);
     }
     
-    __imp__sub_829A9738(ctx, base);
-    
-    if (s_count <= 20 || s_count % 100 == 0)
-    {
-        LOGF_IMPL(Utility, "WaitHelper", "sub_829A9738 #{} returned r3=0x{:08X}", 
-                  s_count, ctx.r3.u32);
-    }
+    // NON-BLOCKING: Return success immediately
+    // The semaphore release (sub_827DAD60 → sub_829A2290) doesn't happen during init
+    // so this wait would block forever. Return 0 (success) to allow init to continue.
+    ctx.r3.u32 = 0;  // STATUS_SUCCESS / ERROR_SUCCESS
 }
 
 // =============================================================================
@@ -10767,6 +10844,18 @@ PPC_FUNC(sub_8226CB50) {
 
 // Internal functions called by sub_821A8868 - declarations only
 extern "C" void __imp__sub_82300C78(PPCContext& ctx, uint8_t* base);
+
+// Hook sub_82300C78 - Call original to trace blocking point
+extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    printf("[sub_82300C78] #%d ENTER r3=0x%08X - calling original with tracing\n", s_count, ctx.r3.u32); fflush(stdout);
+    
+    // Call the original implementation - it will block at sub_827DB988
+    // We need to trace into sub_827DB988 to find the actual semaphore
+    __imp__sub_82300C78(ctx, base);
+    
+    printf("[sub_82300C78] #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32); fflush(stdout);
+}
 extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_824E1DD0(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_8249BA90(PPCContext& ctx, uint8_t* base);
@@ -10782,12 +10871,132 @@ extern "C" void __imp__sub_829A39A0(PPCContext& ctx, uint8_t* base);  // Root sy
 extern "C" void __imp__sub_827DB338(PPCContext& ctx, uint8_t* base);  // Sync wait wrapper
 extern "C" void __imp__sub_827DB988(PPCContext& ctx, uint8_t* base);  // Sync init
 extern "C" void __imp__sub_829A3560(PPCContext& ctx, uint8_t* base);  // XamTask + mount integration
+extern "C" void __imp__sub_829A3238(PPCContext& ctx, uint8_t* base);  // Sync wait (KeWaitForSingleObject)
+
+// Hook sub_829A3238 - SYNC WAIT FUNCTION (KeWaitForSingleObject)
+// Blocking path: sub_82300C78 → sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
+// This function enters critical section, sets event, WAITS on event at 0x82997F5C, resets event, leaves critical section
+// Fix: Pre-signal the event so the wait returns immediately
+extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A3238 #%d ENTER - pre-signaling sync event\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the sync event at 0x82997F5C
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82997F5C
+    // The function waits on this event after setting another event.
+    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_829A3238 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A3238 #%d Event at 0x%08X not ready (type=%d) - initializing\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event (auto-reset=false) in signaled state
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call the original - it will enter critical section, set event, wait, reset, leave
+    // But since we pre-signaled, the wait will return immediately
+    __imp__sub_829A3238(ctx, base);
+    
+    printf("[SYNC] sub_829A3238 #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+// Hook sub_829A39F0 - INTERMEDIATE SYNC FUNCTION
+// Blocking path: sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
+// This function is called by sub_827DB988 and calls sub_829A3238 directly
+// We pre-signal the event that sub_829A3238 will wait on
+extern "C" void __imp__sub_829A39F0(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A39F0 #%d ENTER - pre-signaling sync event for sub_829A3238\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the sync event at 0x82997F5C that sub_829A3238 waits on
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82997F5C
+    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_829A39F0 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A39F0 #%d Event at 0x%08X not ready (type=%d) - initializing as signaled\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event in signaled state so sub_829A3238's wait returns immediately
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;  // Start signaled
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call the original - it will call sub_829A3238 which does the wait
+    // But since we pre-signaled/initialized the event, the wait returns immediately
+    __imp__sub_829A39F0(ctx, base);
+    
+    printf("[SYNC] sub_829A39F0 #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+// Hook sub_829A3560 - TASK + MOUNT INTEGRATION
+// This function calls XamTaskSchedule, then computes event addr 0x82897F5C, then KeWaitForSingleObject
+// The event must be signaled BEFORE the wait. We pre-signal it so the wait returns immediately.
+extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A3560 #%d ENTER - pre-signaling completion event\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the completion event at 0x82897F5C
+    // This event is waited on after XamTaskSchedule returns.
+    // By signaling it now, the wait will return immediately.
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
+    XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
+    if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*completionEvent)->Set();
+        printf("[SYNC] sub_829A3560 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kTaskCompletionEventAddr, completionEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A3560 #%d Event at 0x%08X not ready (type=%d)\n",
+               s_count, kTaskCompletionEventAddr, completionEvent ? completionEvent->Type : -1);
+    }
+    fflush(stdout);
+    
+    // Call the original - it will do XamTaskSchedule, compute event addr, then wait
+    // But since we pre-signaled, the wait will return immediately
+    __imp__sub_829A3560(ctx, base);
+    
+    printf("[SYNC] sub_829A3560 #%d EXIT r3=%d\n", s_count, ctx.r3.s32);
+    fflush(stdout);
+}
 
 // Hook sub_829A39A0 - ROOT SYNC PRIMITIVE
 // This is called by sub_827DB338 and is the actual blocking point
 // Original: Calls sub_829A3560 (XamTaskSchedule) and waits on completion
 // Fix: Call the task scheduling but return success immediately without blocking
-PPC_FUNC(sub_829A39A0) {
+extern "C" void sub_829A39A0_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     // r3 = flags, r4 = size/type (8192), r5 = context (0)
@@ -10817,7 +11026,7 @@ PPC_FUNC(sub_829A39A0) {
 // This calls sub_829A39A0 and then does file lookup operations
 // Original: Blocks waiting for async completion
 // Fix: Execute the pre-wait setup, skip blocking, return success
-PPC_FUNC(sub_827DB338) {
+extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     // r3 = mode (0 or 1), r4 = output ptr 1, r5 = output ptr 2
@@ -10843,15 +11052,39 @@ PPC_FUNC(sub_827DB338) {
 }
 
 // Hook sub_827DB988 - SYNC INIT
-// Creates semaphores and calls sub_827DB338
-// Fix: Let it run but ensure it doesn't block
-PPC_FUNC(sub_827DB988) {
+// Blocking path: sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
+// Direct PPC calls bypass PPCFuncMappings patches, so we pre-signal the event HERE
+// before calling the original, so the wait in sub_829A3238 returns immediately
+extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
-    printf("[SYNC] sub_827DB988 #%d ENTER - sync init (uses hooked sub_827DB338)\n", s_count);
+    printf("[SYNC] sub_827DB988 #%d ENTER - pre-signaling event for sub_829A3238\n", s_count);
     fflush(stdout);
     
-    // Call original - it will use our hooked sub_827DB338
+    // PRE-SIGNAL the sync event at 0x82997F5C that sub_829A3238 will wait on
+    // This ensures the KeWaitForSingleObject in sub_829A3238 returns immediately
+    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_827DB988 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_827DB988 #%d Event at 0x%08X not ready (type=%d) - initializing as signaled\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event in signaled state
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;  // Start signaled
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call original - the wait in sub_829A3238 will return immediately due to pre-signaling
     __imp__sub_827DB988(ctx, base);
     
     printf("[SYNC] sub_827DB988 #%d EXIT r3=%u\n", s_count, ctx.r3.u32);
@@ -10864,18 +11097,53 @@ PPC_FUNC(sub_827DB988) {
 // =============================================================================
 
 // REIMPLEMENTED: sub_821A8868 (HUD/Mission init)
-// Was stubbed because: sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 blocked
-// Now: Sync hooks prevent blocking, so file loading via VFS will work
+// The original calls sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 -> sub_829A3560
+// sub_829A3560 does XamTaskSchedule then waits on event at 0x82897F5C
+// Since we execute XamTaskSchedule synchronously, we pre-signal the event so the wait succeeds
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
+
+
 PPC_FUNC(sub_821A8868) {
     static int s_count = 0; ++s_count;
-    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (now non-blocking)\n", s_count);
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (pre-signaling sync events)\n", s_count);
     fflush(stdout);
     
+    // PRE-SIGNAL EVENT 1: 0x82897F5C (XamTask completion)
+    // Key insight: QueryKernelObject creates a NEW Event if not initialized
+    // After setting Type=1, we MUST call QueryKernelObject()->Set() to create AND signal
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
+    XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
+    if (completionEvent)
+    {
+        if (completionEvent->Type != 0 && completionEvent->Type != 1) {
+            completionEvent->Type = 1;  // Force to Notification event
+            completionEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+        QueryKernelObject<Event>(*completionEvent)->Set();
+        printf("[REIMPL] sub_821A8868 #%d Pre-signaled event1 at 0x%08X\n", s_count, kTaskCompletionEventAddr);
+    }
+    
+    // PRE-SIGNAL EVENT 2: 0x82997F5C (sub_829A3238 sync wait)
+    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent)
+    {
+        if (syncEvent->Type != 0 && syncEvent->Type != 1) {
+            syncEvent->Type = 1;  // Force to Notification event
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[REIMPL] sub_821A8868 #%d Pre-signaled event2 at 0x%08X\n", s_count, kSyncEventAddr);
+    }
+    fflush(stdout);
+    
+    // Now call the original - waits will return immediately due to pre-signaling
     __imp__sub_821A8868(ctx, base);
     
-    printf("[REIMPL] sub_821A8868 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    printf("[REIMPL] sub_821A8868 #%d EXIT - HUD init complete\n", s_count);
     fflush(stdout);
 }
+
 
 // REIMPLEMENTED: sub_821A8278 (HUD component)
 PPC_FUNC(sub_821A8278) {
@@ -11035,6 +11303,24 @@ PPC_FUNC(sub_823A70A8) {
     printf("[821E9658-INT] sub_823A70A8 ENTER #%d\n", s_count); fflush(stdout);
     __imp__sub_823A70A8(ctx, base);
     printf("[821E9658-INT] sub_823A70A8 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+// sub_82126940 calls these - instrument to find blocking point:
+extern "C" void __imp__sub_822E2510(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214C488(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_822E2510) {
+    static int s_count = 0; ++s_count;
+    printf("[82126940-INT] sub_822E2510 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_822E2510(ctx, base);
+    printf("[82126940-INT] sub_822E2510 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214C488) {
+    static int s_count = 0; ++s_count;
+    printf("[82126940-INT] sub_8214C488 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214C488(ctx, base);
+    printf("[82126940-INT] sub_8214C488 EXIT #%d\n", s_count); fflush(stdout);
 }
 
 PPC_FUNC(sub_821E9658) {
