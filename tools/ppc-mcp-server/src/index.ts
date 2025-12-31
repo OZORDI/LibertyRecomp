@@ -420,6 +420,98 @@ const EXTENDED_TOOLS = [
       required: ['function', 'register'],
     },
   },
+  // VTable Analysis Tools
+  {
+    name: 'vtable_inspector_enhanced',
+    description: 'View entire vtable: all entries, function pointers, initializers, and readers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'VTable address (e.g., "0x82010F0C")' },
+      },
+      required: ['address'],
+    },
+  },
+  {
+    name: 'vtable_init_tracer',
+    description: 'Trace what functions initialize each vtable entry and their call chains.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'VTable address to trace initialization for' },
+      },
+      required: ['address'],
+    },
+  },
+  {
+    name: 'vtable_chain_analyzer',
+    description: 'Check if a function will eventually initialize a vtable (traces call graph).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        function: { type: 'string', description: 'Function to check (e.g., "sub_8221D880")' },
+        vtable: { type: 'string', description: 'VTable address to check initialization for' },
+      },
+      required: ['function', 'vtable'],
+    },
+  },
+  {
+    name: 'vtable_users',
+    description: 'Find all functions that read from a vtable (indirect call sites).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'VTable address' },
+      },
+      required: ['address'],
+    },
+  },
+  {
+    name: 'vtable_scan',
+    description: 'Scan a memory region for potential vtables and their initialization status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        region: { type: 'string', enum: ['header', 'xex_data', 'static_data'], description: 'Memory region to scan' },
+      },
+    },
+  },
+  // Sync Primitive Refactor Analysis Tools
+  {
+    name: 'sync_flow_analyzer',
+    description: 'Map complete flow: create → wait → signal for each sync primitive.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Optional: specific primitive address to analyze' },
+      },
+    },
+  },
+  {
+    name: 'find_broken_signal_chains',
+    description: 'Find sync primitives that are waited on but never signaled (or signaler is stubbed).',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'sync_primitive_inventory',
+    description: 'List ALL sync primitives: events, semaphores, mutexes with their status.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'thread_sync_map',
+    description: 'Show which threads/functions interact with which sync primitives.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'stubbed_signal_detector',
+    description: 'Find stubbed functions that should be signaling primitives.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'xenia_refactor_checklist',
+    description: 'Generate checklist for Xenia-style object table refactor.',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 // Rendering & Build tools
@@ -724,6 +816,43 @@ async function main() {
           break;
         case 'register_flow_tracer':
           result = extendedAnalyzer.traceRegisterFlow(args?.function as string, args?.register as string);
+          break;
+
+        // VTable Analysis Tools
+        case 'vtable_inspector_enhanced':
+          result = extendedAnalyzer.inspectVTableEnhanced(args?.address as string);
+          break;
+        case 'vtable_init_tracer':
+          result = extendedAnalyzer.traceVTableInit(args?.address as string);
+          break;
+        case 'vtable_chain_analyzer':
+          result = extendedAnalyzer.analyzeVTableChain(args?.function as string, args?.vtable as string);
+          break;
+        case 'vtable_users':
+          result = extendedAnalyzer.findVTableUsers(args?.address as string);
+          break;
+        case 'vtable_scan':
+          result = extendedAnalyzer.scanForVTables(args?.region as string);
+          break;
+
+        // Sync Primitive Refactor Analysis Tools
+        case 'sync_flow_analyzer':
+          result = extendedAnalyzer.analyzeSyncFlow(args?.address as string);
+          break;
+        case 'find_broken_signal_chains':
+          result = extendedAnalyzer.findBrokenSignalChains();
+          break;
+        case 'sync_primitive_inventory':
+          result = extendedAnalyzer.getSyncPrimitiveInventory();
+          break;
+        case 'thread_sync_map':
+          result = extendedAnalyzer.getThreadSyncMap();
+          break;
+        case 'stubbed_signal_detector':
+          result = extendedAnalyzer.findStubbedSignalers();
+          break;
+        case 'xenia_refactor_checklist':
+          result = extendedAnalyzer.generateXeniaRefactorChecklist();
           break;
 
         // Rendering & Build tools

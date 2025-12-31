@@ -209,5 +209,210 @@ export declare class ExtendedAnalyzer {
             value?: string;
         }[];
     } | null;
+    inspectVTableEnhanced(address: string): {
+        address: string;
+        addressHex: string;
+        region: string;
+        entryCount: number;
+        entries: {
+            offset: number;
+            funcAddress: string;
+            funcName: string;
+            initializedBy: string;
+            status: string;
+        }[];
+        initializers: string[];
+        readers: string[];
+        warning?: string;
+    } | null;
+    private extractFuncNameFromContext;
+    traceVTableInit(vtableAddress: string): {
+        vtableAddress: string;
+        initTraces: {
+            entry: number;
+            funcPointer: string;
+            initializer: string;
+            initChain: string[];
+            rootFunctions: string[];
+            isBlocked: boolean;
+            blockedBy?: string;
+        }[];
+        summary: {
+            totalEntries: number;
+            initializedEntries: number;
+            blockedChains: number;
+        };
+        recommendations: string[];
+    };
+    private traceCallersRecursive;
+    private findRootCallers;
+    analyzeVTableChain(funcName: string, vtableAddress: string): {
+        function: string;
+        vtableAddress: string;
+        willInitialize: boolean;
+        initPath: string[];
+        directlyInitializes: boolean;
+        initializesVia?: string;
+        blockedBy?: string;
+        recommendation: string;
+    };
+    private findPathToInitializer;
+    findVTableUsers(vtableAddress: string): {
+        vtableAddress: string;
+        users: {
+            function: string;
+            address: string;
+            accessType: string;
+            offset?: number;
+            context: string;
+        }[];
+        indirectCallSites: number;
+        potentialCrashers: string[];
+    };
+    scanForVTables(region?: string): {
+        vtables: {
+            address: string;
+            entryCount: number;
+            initializers: string[];
+            readers: string[];
+            isInitialized: boolean;
+        }[];
+        summary: {
+            totalVTables: number;
+            uninitializedVTables: number;
+            regionScanned: string;
+        };
+    };
+    analyzeSyncFlow(address?: string): {
+        primitives: {
+            address: string;
+            type: string;
+            createdBy: string[];
+            waitedOnBy: string[];
+            signaledBy: string[];
+            status: 'HEALTHY' | 'BROKEN_CHAIN' | 'NEVER_SIGNALED' | 'ORPHAN';
+            issue?: string;
+        }[];
+        summary: {
+            total: number;
+            healthy: number;
+            brokenChains: number;
+            neverSignaled: number;
+        };
+    };
+    findBrokenSignalChains(): {
+        brokenChains: {
+            primitiveAddr: string;
+            type: string;
+            waiters: string[];
+            expectedSignaler: string;
+            stubStatus: string;
+            callChainToSignaler: string[];
+            fix: string;
+        }[];
+        summary: {
+            totalBroken: number;
+            affectedWaiters: number;
+            fixableByUnstubbing: number;
+        };
+    };
+    getSyncPrimitiveInventory(): {
+        events: {
+            address: string;
+            creator: string;
+            waiters: string[];
+            signalers: string[];
+            status: string;
+        }[];
+        semaphores: {
+            address: string;
+            creator: string;
+            waiters: string[];
+            signalers: string[];
+            status: string;
+        }[];
+        mutexes: {
+            address: string;
+            creator: string;
+            waiters: string[];
+            signalers: string[];
+            status: string;
+        }[];
+        spinlocks: {
+            address: string;
+            creator: string;
+            acquirers: string[];
+            releasers: string[];
+        }[];
+        summary: {
+            totalEvents: number;
+            totalSemaphores: number;
+            totalMutexes: number;
+            totalSpinlocks: number;
+            problematicCount: number;
+        };
+    };
+    getThreadSyncMap(): {
+        threads: {
+            entryPoint: string;
+            address: string;
+            waitsOn: {
+                address: string;
+                type: string;
+            }[];
+            signals: {
+                address: string;
+                type: string;
+            }[];
+            creates: {
+                address: string;
+                type: string;
+            }[];
+        }[];
+        interactions: {
+            from: string;
+            to: string;
+            via: string;
+            type: string;
+        }[];
+    };
+    findStubbedSignalers(): {
+        stubbedSignalers: {
+            function: string;
+            address: string;
+            hookType: string;
+            primitivesAffected: string[];
+            waitersBlocked: string[];
+            fix: string;
+        }[];
+        summary: {
+            totalStubbedSignalers: number;
+            totalPrimitivesAffected: number;
+            totalWaitersBlocked: number;
+        };
+    };
+    generateXeniaRefactorChecklist(): {
+        checklist: {
+            category: string;
+            items: {
+                task: string;
+                priority: 'HIGH' | 'MEDIUM' | 'LOW';
+                complexity: string;
+                files: string[];
+                notes: string;
+            }[];
+        }[];
+        xeniaFiles: {
+            path: string;
+            purpose: string;
+            relevant: boolean;
+        }[];
+        currentState: {
+            hasObjectTable: boolean;
+            hasProperBacking: boolean;
+            trackedPrimitives: number;
+            brokenChains: number;
+        };
+    };
 }
 export {};

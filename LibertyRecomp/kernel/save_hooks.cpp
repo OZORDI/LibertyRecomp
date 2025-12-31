@@ -159,8 +159,6 @@ PPC_FUNC(sub_82122CA0)
 // Loads profile and enumerates/opens save files
 // =============================================================================
 extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
-extern void SetInitComplete();  // From imports.cpp - signals worker semaphores
-extern void SignalAllBlockingSemaphores();  // From imports.cpp
 extern void ShutdownAllWorkers();  // From imports.cpp - sets exit flags and signals workers
 
 // sub_821200D0 - Post-init loading / cleanup phase
@@ -172,9 +170,6 @@ PPC_FUNC(sub_821200D0)
     
     printf("[821200D0] #%d ENTER\n", s_count); fflush(stdout);
     
-    // Signal init complete before running cleanup
-    SetInitComplete();
-    SignalAllBlockingSemaphores();
     
     // Run the actual function
     __imp__sub_821200D0(ctx, base);

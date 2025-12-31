@@ -178,3 +178,57 @@ export interface RecursiveCallTree {
   globals_accessed: string[];
   kernel_apis: string[];
 }
+
+// Enhanced VTable types for vtable tracing
+export interface EnhancedVTableEntry {
+  offset: number;              // Offset within vtable (0, 4, 8, ...)
+  funcAddress: string;         // Function pointer stored (e.g., "0x82895300")
+  funcName: string;            // Function name (e.g., "sub_82895300")
+  initializedBy: string;       // Function that stores this entry
+  initLine?: number;           // Line in PPC file where init happens
+  initContext?: string;        // Code context of initialization
+  status: 'initialized' | 'null' | 'unknown';
+}
+
+export interface EnhancedVTable {
+  address: string;             // VTable address (e.g., "0x82010F0C")
+  addressHex: string;          // Normalized hex
+  region: string;              // Memory region name
+  entryCount: number;          // Number of entries detected
+  entries: EnhancedVTableEntry[];
+  initializers: string[];      // All functions that write to this vtable
+  readers: string[];           // Functions that read from this vtable
+  initChain?: string[];        // Call chain to reach initializer
+}
+
+export interface VTableInitTrace {
+  vtableAddress: string;
+  entry: EnhancedVTableEntry;
+  initChain: string[];         // sub_A → sub_B → sub_C (initializer)
+  rootFunction: string;        // Top-level function that triggers init
+  isStubbed: boolean;          // Whether any function in chain is stubbed
+  stubbedFunctions: string[];  // Which functions are stubbed
+  warning?: string;
+}
+
+export interface VTableChainAnalysis {
+  function: string;
+  vtableAddress: string;
+  willInitialize: boolean;
+  initPath?: string[];         // Path from function to vtable init
+  directlyInitializes: boolean;
+  initializesVia?: string;     // Intermediate function that does init
+  blockedBy?: string;          // If stubbed, which stub blocks it
+}
+
+export interface VTableUsage {
+  vtableAddress: string;
+  users: {
+    function: string;
+    address: string;
+    accessType: 'read' | 'indirect_call';
+    offset?: number;           // Which vtable entry is accessed
+    context: string;
+  }[];
+  callSites: number;           // Total call sites using this vtable
+}

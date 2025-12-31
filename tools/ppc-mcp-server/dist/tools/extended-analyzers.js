@@ -663,4 +663,851 @@ export class ExtendedAnalyzer {
         }
         return { function: funcName, register, flow: flow.slice(0, 50) };
     }
+    // ========== VTABLE INSPECTOR (ENHANCED) ==========
+    inspectVTableEnhanced(address) {
+        const normalizedAddr = address.toLowerCase().replace(/^0x/, '');
+        const addrHex = '0x' + normalizedAddr.toUpperCase();
+        const addrNum = parseInt(normalizedAddr, 16);
+        // Determine memory region
+        let region = 'Unknown';
+        if (addrNum >= 0x82000000 && addrNum < 0x82020000)
+            region = 'Stream Pool / Header';
+        else if (addrNum >= 0x82020000 && addrNum < 0x82120000)
+            region = 'XEX Data Region (vtables live here)';
+        else if (addrNum >= 0x82120000 && addrNum < 0x82A00000)
+            region = 'Game Code';
+        else if (addrNum >= 0x83000000 && addrNum < 0x84000000)
+            region = 'Static Data / Heap';
+        // Find all functions that write to addresses near this vtable
+        const entries = [];
+        const initializers = [];
+        const readers = [];
+        // Scan for writes to this address range (vtable entries are typically 4 bytes apart)
+        for (const [, func] of this.index.functions) {
+            for (const write of func.writesGlobals) {
+                const writeAddr = parseInt(write.address.replace(/^0x/, ''), 16);
+                // Check if write is within vtable range (assume up to 64 entries, 256 bytes)
+                if (writeAddr >= addrNum && writeAddr < addrNum + 256) {
+                    const offset = writeAddr - addrNum;
+                    const existingEntry = entries.find(e => e.offset === offset);
+                    if (!existingEntry) {
+                        entries.push({
+                            offset,
+                            funcAddress: write.context.match(/0x[0-9A-Fa-f]+/)?.[0] || 'unknown',
+                            funcName: this.extractFuncNameFromContext(write.context),
+                            initializedBy: func.name,
+                            status: 'initialized',
+                        });
+                    }
+                    if (!initializers.includes(func.name)) {
+                        initializers.push(func.name);
+                    }
+                }
+            }
+            for (const read of func.readsGlobals) {
+                const readAddr = parseInt(read.address.replace(/^0x/, ''), 16);
+                if (readAddr >= addrNum && readAddr < addrNum + 256) {
+                    if (!readers.includes(func.name)) {
+                        readers.push(func.name);
+                    }
+                }
+            }
+        }
+        // Sort entries by offset
+        entries.sort((a, b) => a.offset - b.offset);
+        // Check for potential issues
+        let warning;
+        if (initializers.length === 0) {
+            warning = 'No initializers found - vtable may be uninitialized or initialized via computed address';
+        }
+        else if (readers.length > 0 && initializers.length === 0) {
+            warning = 'VTable is read but never initialized - will cause crash';
+        }
+        return {
+            address: normalizedAddr,
+            addressHex: addrHex,
+            region,
+            entryCount: entries.length,
+            entries,
+            initializers,
+            readers: readers.slice(0, 20),
+            warning,
+        };
+    }
+    extractFuncNameFromContext(context) {
+        // Try to extract function name from context like "sub_82895300" or function address
+        const funcMatch = context.match(/sub_[0-9A-Fa-f]+/);
+        if (funcMatch)
+            return funcMatch[0];
+        const addrMatch = context.match(/0x8[0-9A-Fa-f]{7}/);
+        if (addrMatch)
+            return 'sub_' + addrMatch[0].substring(2).toUpperCase();
+        return 'unknown';
+    }
+    // ========== VTABLE INIT TRACER ==========
+    traceVTableInit(vtableAddress) {
+        const vtable = this.inspectVTableEnhanced(vtableAddress);
+        const initTraces = [];
+        const recommendations = [];
+        let blockedChains = 0;
+        if (!vtable || vtable.initializers.length === 0) {
+            // Try to find initializers by tracing backwards from known patterns
+            recommendations.push('No direct initializers found. Try searching PPC code for stores to ' + vtableAddress);
+            return {
+                vtableAddress,
+                initTraces: [],
+                summary: { totalEntries: 0, initializedEntries: 0, blockedChains: 0 },
+                recommendations,
+            };
+        }
+        for (const initializer of vtable.initializers) {
+            // Trace backwards to find what calls the initializer
+            const initChain = this.traceCallersRecursive(initializer, new Set(), 10);
+            const rootFunctions = this.findRootCallers(initializer);
+            // Check if any function in the chain is stubbed
+            let isBlocked = false;
+            let blockedBy;
+            for (const funcInChain of initChain) {
+                const hook = this.index.hooks.get(funcInChain);
+                if (hook && (hook.type === 'GUEST_FUNCTION_STUB' || hook.type === 'PPC_FUNC')) {
+                    // Check if it actually calls __imp__
+                    const func = this.index.functionsByName.get(funcInChain);
+                    if (func && !func.calls.includes('__imp__' + funcInChain)) {
+                        isBlocked = true;
+                        blockedBy = funcInChain;
+                        blockedChains++;
+                        break;
+                    }
+                }
+            }
+            for (const entry of vtable.entries.filter(e => e.initializedBy === initializer)) {
+                initTraces.push({
+                    entry: entry.offset / 4,
+                    funcPointer: entry.funcAddress,
+                    initializer,
+                    initChain,
+                    rootFunctions,
+                    isBlocked,
+                    blockedBy,
+                });
+            }
+            if (isBlocked && blockedBy) {
+                recommendations.push(`${blockedBy} is stubbed and blocks vtable init. Fix: modify to call __imp__${blockedBy}`);
+            }
+        }
+        return {
+            vtableAddress,
+            initTraces,
+            summary: {
+                totalEntries: vtable.entryCount,
+                initializedEntries: initTraces.length,
+                blockedChains,
+            },
+            recommendations,
+        };
+    }
+    traceCallersRecursive(funcName, visited, maxDepth) {
+        if (visited.has(funcName) || maxDepth <= 0)
+            return [];
+        visited.add(funcName);
+        const func = this.index.functionsByName.get(funcName);
+        if (!func)
+            return [funcName];
+        const chain = [funcName];
+        // Find callers
+        for (const caller of func.calledBy.slice(0, 5)) {
+            const callerChain = this.traceCallersRecursive(caller, visited, maxDepth - 1);
+            if (callerChain.length > 0) {
+                chain.push(...callerChain);
+                break; // Just take one path for simplicity
+            }
+        }
+        return chain;
+    }
+    findRootCallers(funcName) {
+        const roots = [];
+        const visited = new Set();
+        const queue = [funcName];
+        while (queue.length > 0 && roots.length < 5) {
+            const current = queue.shift();
+            if (visited.has(current))
+                continue;
+            visited.add(current);
+            const func = this.index.functionsByName.get(current);
+            if (!func)
+                continue;
+            if (func.calledBy.length === 0) {
+                roots.push(current);
+            }
+            else {
+                queue.push(...func.calledBy.slice(0, 3));
+            }
+        }
+        return roots;
+    }
+    // ========== VTABLE CHAIN ANALYZER ==========
+    analyzeVTableChain(funcName, vtableAddress) {
+        const vtable = this.inspectVTableEnhanced(vtableAddress);
+        const func = this.index.functionsByName.get(funcName);
+        if (!func) {
+            return {
+                function: funcName,
+                vtableAddress,
+                willInitialize: false,
+                initPath: [],
+                directlyInitializes: false,
+                recommendation: 'Function not found in index',
+            };
+        }
+        // Check if this function directly initializes the vtable
+        const directlyInitializes = vtable?.initializers.includes(funcName) || false;
+        if (directlyInitializes) {
+            return {
+                function: funcName,
+                vtableAddress,
+                willInitialize: true,
+                initPath: [funcName],
+                directlyInitializes: true,
+                recommendation: 'Function directly initializes vtable',
+            };
+        }
+        // Trace call tree to find path to vtable initializer
+        const initPath = this.findPathToInitializer(funcName, vtable?.initializers || [], new Set(), 15);
+        if (initPath.length === 0) {
+            return {
+                function: funcName,
+                vtableAddress,
+                willInitialize: false,
+                initPath: [],
+                directlyInitializes: false,
+                recommendation: `${funcName} does not reach any vtable initializer. Check call graph.`,
+            };
+        }
+        // Check if path is blocked by stubs
+        let blockedBy;
+        for (const funcInPath of initPath) {
+            const hook = this.index.hooks.get(funcInPath);
+            if (hook && (hook.type === 'GUEST_FUNCTION_STUB' || hook.type === 'PPC_FUNC')) {
+                const f = this.index.functionsByName.get(funcInPath);
+                // Check if the hook calls the original
+                if (f && !f.calls.some(c => c.includes('__imp__'))) {
+                    blockedBy = funcInPath;
+                    break;
+                }
+            }
+        }
+        const initializesVia = initPath.length > 1 ? initPath[initPath.length - 1] : undefined;
+        let recommendation;
+        if (blockedBy) {
+            recommendation = `Path blocked by stubbed ${blockedBy}. Fix: modify to call __imp__${blockedBy}`;
+        }
+        else {
+            recommendation = `${funcName} will initialize vtable via: ${initPath.join(' -> ')}`;
+        }
+        return {
+            function: funcName,
+            vtableAddress,
+            willInitialize: !blockedBy,
+            initPath,
+            directlyInitializes: false,
+            initializesVia,
+            blockedBy,
+            recommendation,
+        };
+    }
+    findPathToInitializer(funcName, initializers, visited, maxDepth) {
+        if (visited.has(funcName) || maxDepth <= 0)
+            return [];
+        visited.add(funcName);
+        // Check if we've reached an initializer
+        if (initializers.includes(funcName)) {
+            return [funcName];
+        }
+        const func = this.index.functionsByName.get(funcName);
+        if (!func)
+            return [];
+        // Search callees (what this function calls)
+        for (const callee of func.calls) {
+            const path = this.findPathToInitializer(callee, initializers, visited, maxDepth - 1);
+            if (path.length > 0) {
+                return [funcName, ...path];
+            }
+        }
+        return [];
+    }
+    // ========== FIND VTABLE USERS ==========
+    findVTableUsers(vtableAddress) {
+        const normalizedAddr = vtableAddress.toLowerCase().replace(/^0x/, '');
+        const addrNum = parseInt(normalizedAddr, 16);
+        const users = [];
+        const potentialCrashers = [];
+        let indirectCallSites = 0;
+        // Find functions that read from this vtable range
+        for (const [, func] of this.index.functions) {
+            for (const read of func.readsGlobals) {
+                const readAddr = parseInt(read.address.replace(/^0x/, ''), 16);
+                if (readAddr >= addrNum && readAddr < addrNum + 256) {
+                    const offset = readAddr - addrNum;
+                    const isIndirectCall = read.context.includes('PPC_CALL_INDIRECT') ||
+                        read.context.includes('ctx.ctr') ||
+                        read.context.includes('ctx.lr');
+                    users.push({
+                        function: func.name,
+                        address: func.address,
+                        accessType: isIndirectCall ? 'indirect_call' : 'read',
+                        offset,
+                        context: read.context.substring(0, 100),
+                    });
+                    if (isIndirectCall) {
+                        indirectCallSites++;
+                    }
+                }
+            }
+        }
+        // Check for potential crashers (functions that read vtable but vtable may not be initialized)
+        const vtable = this.inspectVTableEnhanced(vtableAddress);
+        if (vtable && vtable.initializers.length === 0) {
+            potentialCrashers.push(...users.map(u => u.function));
+        }
+        return {
+            vtableAddress: '0x' + normalizedAddr.toUpperCase(),
+            users: users.slice(0, 50),
+            indirectCallSites,
+            potentialCrashers,
+        };
+    }
+    // ========== SCAN FOR VTABLES ==========
+    scanForVTables(region) {
+        const vtables = [];
+        // Determine scan range
+        let startAddr = 0x82010000;
+        let endAddr = 0x82020000;
+        if (region === 'xex_data') {
+            startAddr = 0x82020000;
+            endAddr = 0x82120000;
+        }
+        else if (region === 'static_data') {
+            startAddr = 0x83000000;
+            endAddr = 0x831F0000;
+        }
+        // Collect potential vtable addresses from global writes
+        const potentialVTables = new Set();
+        for (const [, func] of this.index.functions) {
+            for (const write of func.writesGlobals) {
+                const writeAddr = parseInt(write.address.replace(/^0x/, ''), 16);
+                if (writeAddr >= startAddr && writeAddr < endAddr) {
+                    // Align to 4-byte boundary as vtable base
+                    const alignedAddr = Math.floor(writeAddr / 4) * 4;
+                    potentialVTables.add('0x' + alignedAddr.toString(16).toUpperCase());
+                }
+            }
+        }
+        // Analyze each potential vtable
+        for (const addr of potentialVTables) {
+            const vtable = this.inspectVTableEnhanced(addr);
+            if (vtable && vtable.entryCount > 0) {
+                vtables.push({
+                    address: addr,
+                    entryCount: vtable.entryCount,
+                    initializers: vtable.initializers,
+                    readers: vtable.readers,
+                    isInitialized: vtable.initializers.length > 0,
+                });
+            }
+        }
+        const uninitializedVTables = vtables.filter(v => !v.isInitialized).length;
+        return {
+            vtables: vtables.slice(0, 100),
+            summary: {
+                totalVTables: vtables.length,
+                uninitializedVTables,
+                regionScanned: `0x${startAddr.toString(16).toUpperCase()}-0x${endAddr.toString(16).toUpperCase()}`,
+            },
+        };
+    }
+    // ========== SYNC FLOW ANALYZER ==========
+    // Map complete flow: create → wait → signal for each primitive address
+    analyzeSyncFlow(address) {
+        const primitives = [];
+        // Build a map of all sync primitive interactions
+        const syncMap = new Map();
+        // Scan all functions for sync primitive interactions
+        for (const [, func] of this.index.functions) {
+            // Check kernel API calls
+            for (const api of func.kernelCalls) {
+                // Creation
+                if (SYNC_CREATE_APIS[api]) {
+                    // Look for the address in function's global writes
+                    for (const write of func.writesGlobals) {
+                        const addr = write.address.toLowerCase();
+                        if (!syncMap.has(addr)) {
+                            syncMap.set(addr, {
+                                type: SYNC_CREATE_APIS[api].type,
+                                creators: new Set(),
+                                waiters: new Set(),
+                                signalers: new Set(),
+                            });
+                        }
+                        syncMap.get(addr).creators.add(func.name);
+                    }
+                }
+                // Wait
+                if (SYNC_WAIT_APIS.has(api)) {
+                    for (const read of func.readsGlobals) {
+                        const addr = read.address.toLowerCase();
+                        if (!syncMap.has(addr)) {
+                            syncMap.set(addr, {
+                                type: 'unknown',
+                                creators: new Set(),
+                                waiters: new Set(),
+                                signalers: new Set(),
+                            });
+                        }
+                        syncMap.get(addr).waiters.add(func.name);
+                    }
+                }
+                // Signal
+                if (SYNC_SIGNAL_APIS[api]) {
+                    for (const write of func.writesGlobals) {
+                        const addr = write.address.toLowerCase();
+                        if (!syncMap.has(addr)) {
+                            syncMap.set(addr, {
+                                type: SYNC_SIGNAL_APIS[api],
+                                creators: new Set(),
+                                waiters: new Set(),
+                                signalers: new Set(),
+                            });
+                        }
+                        syncMap.get(addr).signalers.add(func.name);
+                    }
+                }
+            }
+        }
+        // Filter by address if provided
+        const entries = address
+            ? [[address.toLowerCase(), syncMap.get(address.toLowerCase())]]
+            : Array.from(syncMap.entries());
+        // Analyze each primitive
+        for (const [addr, data] of entries) {
+            if (!data)
+                continue;
+            const createdBy = Array.from(data.creators);
+            const waitedOnBy = Array.from(data.waiters);
+            const signaledBy = Array.from(data.signalers);
+            // Check if any signaler is stubbed
+            let isSignalerStubbed = false;
+            let stubbedSignaler = '';
+            for (const signaler of signaledBy) {
+                const hook = this.index.hooks.get(signaler);
+                if (hook && (hook.type === 'GUEST_FUNCTION_STUB' || hook.type === 'PPC_FUNC')) {
+                    const func = this.index.functionsByName.get(signaler);
+                    if (func && !func.calls.some(c => c.includes('__imp__'))) {
+                        isSignalerStubbed = true;
+                        stubbedSignaler = signaler;
+                        break;
+                    }
+                }
+            }
+            // Determine status
+            let status = 'HEALTHY';
+            let issue;
+            if (waitedOnBy.length > 0 && signaledBy.length === 0) {
+                status = 'NEVER_SIGNALED';
+                issue = `Waited on by ${waitedOnBy.join(', ')} but never signaled`;
+            }
+            else if (isSignalerStubbed) {
+                status = 'BROKEN_CHAIN';
+                issue = `Signaler ${stubbedSignaler} is stubbed - signal never happens`;
+            }
+            else if (createdBy.length === 0 && waitedOnBy.length === 0 && signaledBy.length === 0) {
+                status = 'ORPHAN';
+                issue = 'No interactions found';
+            }
+            primitives.push({
+                address: '0x' + addr.replace(/^0x/, '').toUpperCase(),
+                type: data.type,
+                createdBy,
+                waitedOnBy,
+                signaledBy,
+                status,
+                issue,
+            });
+        }
+        // Calculate summary
+        const healthy = primitives.filter(p => p.status === 'HEALTHY').length;
+        const brokenChains = primitives.filter(p => p.status === 'BROKEN_CHAIN').length;
+        const neverSignaled = primitives.filter(p => p.status === 'NEVER_SIGNALED').length;
+        return {
+            primitives: primitives.slice(0, 100),
+            summary: {
+                total: primitives.length,
+                healthy,
+                brokenChains,
+                neverSignaled,
+            },
+        };
+    }
+    // ========== FIND BROKEN SIGNAL CHAINS ==========
+    findBrokenSignalChains() {
+        const brokenChains = [];
+        const syncFlow = this.analyzeSyncFlow();
+        for (const prim of syncFlow.primitives) {
+            if (prim.status === 'BROKEN_CHAIN' || prim.status === 'NEVER_SIGNALED') {
+                // Find expected signaler
+                let expectedSignaler = prim.signaledBy[0] || 'unknown';
+                let stubStatus = 'not_stubbed';
+                let fix = '';
+                if (prim.signaledBy.length > 0) {
+                    for (const signaler of prim.signaledBy) {
+                        const hook = this.index.hooks.get(signaler);
+                        if (hook) {
+                            stubStatus = `stubbed (${hook.type})`;
+                            fix = `Modify ${signaler} to call __imp__${signaler} before returning`;
+                            expectedSignaler = signaler;
+                            break;
+                        }
+                    }
+                }
+                else {
+                    stubStatus = 'no_signaler_found';
+                    fix = 'Find what function should signal this primitive and implement it';
+                }
+                // Find call chain to signaler
+                const callChain = [];
+                if (prim.waitedOnBy.length > 0 && expectedSignaler !== 'unknown') {
+                    // Simple trace from waiter to signaler through call graph
+                    const waiter = prim.waitedOnBy[0];
+                    callChain.push(waiter);
+                    // This is simplified - real implementation would do BFS/DFS
+                }
+                brokenChains.push({
+                    primitiveAddr: prim.address,
+                    type: prim.type,
+                    waiters: prim.waitedOnBy,
+                    expectedSignaler,
+                    stubStatus,
+                    callChainToSignaler: callChain,
+                    fix,
+                });
+            }
+        }
+        const affectedWaiters = new Set(brokenChains.flatMap(b => b.waiters)).size;
+        const fixableByUnstubbing = brokenChains.filter(b => b.stubStatus.includes('stubbed')).length;
+        return {
+            brokenChains,
+            summary: {
+                totalBroken: brokenChains.length,
+                affectedWaiters,
+                fixableByUnstubbing,
+            },
+        };
+    }
+    // ========== SYNC PRIMITIVE INVENTORY ==========
+    getSyncPrimitiveInventory() {
+        const events = [];
+        const semaphores = [];
+        const mutexes = [];
+        const spinlocks = [];
+        const syncFlow = this.analyzeSyncFlow();
+        for (const prim of syncFlow.primitives) {
+            const entry = {
+                address: prim.address,
+                creator: prim.createdBy[0] || 'unknown',
+                waiters: prim.waitedOnBy,
+                signalers: prim.signaledBy,
+                status: prim.status,
+            };
+            switch (prim.type) {
+                case 'event':
+                    events.push(entry);
+                    break;
+                case 'semaphore':
+                    semaphores.push(entry);
+                    break;
+                case 'mutex':
+                    mutexes.push(entry);
+                    break;
+                case 'spinlock':
+                    spinlocks.push({
+                        address: prim.address,
+                        creator: prim.createdBy[0] || 'unknown',
+                        acquirers: prim.waitedOnBy,
+                        releasers: prim.signaledBy,
+                    });
+                    break;
+            }
+        }
+        const problematicCount = syncFlow.primitives.filter(p => p.status !== 'HEALTHY').length;
+        return {
+            events,
+            semaphores,
+            mutexes,
+            spinlocks,
+            summary: {
+                totalEvents: events.length,
+                totalSemaphores: semaphores.length,
+                totalMutexes: mutexes.length,
+                totalSpinlocks: spinlocks.length,
+                problematicCount,
+            },
+        };
+    }
+    // ========== THREAD SYNC MAP ==========
+    getThreadSyncMap() {
+        const threads = [];
+        const interactions = [];
+        // Find thread entry points (functions passed to ExCreateThread)
+        const threadEntries = new Set();
+        for (const [, func] of this.index.functions) {
+            if (func.kernelCalls.includes('ExCreateThread')) {
+                // The thread entry is typically passed in r4 or r5
+                // For now, mark functions that create threads
+                threadEntries.add(func.name);
+            }
+        }
+        // Analyze each potential thread entry
+        for (const entryName of threadEntries) {
+            const func = this.index.functionsByName.get(entryName);
+            if (!func)
+                continue;
+            const waitsOn = [];
+            const signals = [];
+            const creates = [];
+            // Trace what this thread does with sync primitives
+            const visited = new Set();
+            const toVisit = [entryName];
+            while (toVisit.length > 0 && visited.size < 50) {
+                const current = toVisit.shift();
+                if (visited.has(current))
+                    continue;
+                visited.add(current);
+                const f = this.index.functionsByName.get(current);
+                if (!f)
+                    continue;
+                for (const api of f.kernelCalls) {
+                    if (SYNC_CREATE_APIS[api]) {
+                        for (const w of f.writesGlobals) {
+                            creates.push({ address: w.address, type: SYNC_CREATE_APIS[api].type });
+                        }
+                    }
+                    if (SYNC_WAIT_APIS.has(api)) {
+                        for (const r of f.readsGlobals) {
+                            waitsOn.push({ address: r.address, type: 'sync_object' });
+                        }
+                    }
+                    if (SYNC_SIGNAL_APIS[api]) {
+                        for (const w of f.writesGlobals) {
+                            signals.push({ address: w.address, type: SYNC_SIGNAL_APIS[api] });
+                        }
+                    }
+                }
+                // Add callees to visit
+                toVisit.push(...f.calls.slice(0, 10));
+            }
+            threads.push({
+                entryPoint: entryName,
+                address: func.address,
+                waitsOn,
+                signals,
+                creates,
+            });
+        }
+        // Build interaction graph
+        for (const t1 of threads) {
+            for (const t2 of threads) {
+                if (t1.entryPoint === t2.entryPoint)
+                    continue;
+                // Check if t1 signals something t2 waits on
+                for (const sig of t1.signals) {
+                    for (const wait of t2.waitsOn) {
+                        if (sig.address === wait.address) {
+                            interactions.push({
+                                from: t1.entryPoint,
+                                to: t2.entryPoint,
+                                via: sig.address,
+                                type: 'signal_wait',
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        return { threads: threads.slice(0, 50), interactions };
+    }
+    // ========== STUBBED SIGNAL DETECTOR ==========
+    findStubbedSignalers() {
+        const stubbedSignalers = [];
+        const syncFlow = this.analyzeSyncFlow();
+        const signalerToPrimitives = new Map();
+        const primitiveToWaiters = new Map();
+        // Build maps
+        for (const prim of syncFlow.primitives) {
+            for (const signaler of prim.signaledBy) {
+                if (!signalerToPrimitives.has(signaler)) {
+                    signalerToPrimitives.set(signaler, []);
+                }
+                signalerToPrimitives.get(signaler).push(prim.address);
+            }
+            primitiveToWaiters.set(prim.address, prim.waitedOnBy);
+        }
+        // Find stubbed signalers
+        for (const [signaler, primitives] of signalerToPrimitives) {
+            const hook = this.index.hooks.get(signaler);
+            if (!hook)
+                continue;
+            const func = this.index.functionsByName.get(signaler);
+            if (!func)
+                continue;
+            // Check if stub actually calls original
+            const callsOriginal = func.calls.some(c => c.includes('__imp__'));
+            if (callsOriginal)
+                continue;
+            // Collect affected waiters
+            const waitersBlocked = new Set();
+            for (const prim of primitives) {
+                const waiters = primitiveToWaiters.get(prim) || [];
+                waiters.forEach(w => waitersBlocked.add(w));
+            }
+            stubbedSignalers.push({
+                function: signaler,
+                address: func.address,
+                hookType: hook.type,
+                primitivesAffected: primitives,
+                waitersBlocked: Array.from(waitersBlocked),
+                fix: `Modify ${signaler} to call __imp__${signaler} or signal primitives: ${primitives.join(', ')}`,
+            });
+        }
+        const totalPrimitivesAffected = new Set(stubbedSignalers.flatMap(s => s.primitivesAffected)).size;
+        const totalWaitersBlocked = new Set(stubbedSignalers.flatMap(s => s.waitersBlocked)).size;
+        return {
+            stubbedSignalers,
+            summary: {
+                totalStubbedSignalers: stubbedSignalers.length,
+                totalPrimitivesAffected,
+                totalWaitersBlocked,
+            },
+        };
+    }
+    // ========== XENIA REFACTOR CHECKLIST ==========
+    generateXeniaRefactorChecklist() {
+        const syncFlow = this.analyzeSyncFlow();
+        const brokenChains = this.findBrokenSignalChains();
+        const stubbedSignalers = this.findStubbedSignalers();
+        const checklist = [
+            {
+                category: '1. Object Table Infrastructure',
+                items: [
+                    {
+                        task: 'Create XObject base class hierarchy (XEvent, XSemaphore, XMutant)',
+                        priority: 'HIGH',
+                        complexity: 'Medium - port from Xenia',
+                        files: ['kernel/xobject.h', 'kernel/xobject.cpp', 'kernel/xevent.h', 'kernel/xsemaphore.h'],
+                        notes: 'Base class should handle handle management, retain/release',
+                    },
+                    {
+                        task: 'Create ObjectTable class for handle management',
+                        priority: 'HIGH',
+                        complexity: 'Medium - port from Xenia',
+                        files: ['kernel/util/object_table.h', 'kernel/util/object_table.cpp'],
+                        notes: 'Maps handles to XObject*, handles lifetime',
+                    },
+                    {
+                        task: 'Create host-backed Event class wrapping std::condition_variable or platform event',
+                        priority: 'HIGH',
+                        complexity: 'Low - straightforward threading',
+                        files: ['kernel/xevent.cpp'],
+                        notes: 'Must support manual-reset and auto-reset modes',
+                    },
+                    {
+                        task: 'Create host-backed Semaphore class',
+                        priority: 'HIGH',
+                        complexity: 'Low',
+                        files: ['kernel/xsemaphore.cpp'],
+                        notes: 'counting semaphore with Release(count) support',
+                    },
+                ],
+            },
+            {
+                category: '2. Kernel API Rewrites',
+                items: [
+                    {
+                        task: 'Rewrite KeInitializeEvent to create XEvent in object table',
+                        priority: 'HIGH',
+                        complexity: 'Low',
+                        files: ['kernel/imports.cpp'],
+                        notes: 'Replace current impl that just sets header fields',
+                    },
+                    {
+                        task: 'Rewrite KeInitializeSemaphore to create XSemaphore in object table',
+                        priority: 'HIGH',
+                        complexity: 'Low',
+                        files: ['kernel/imports.cpp'],
+                        notes: 'Replace current QueryKernelObject approach',
+                    },
+                    {
+                        task: 'Rewrite KeWaitForSingleObject to use object table lookup + host wait',
+                        priority: 'HIGH',
+                        complexity: 'Medium',
+                        files: ['kernel/imports.cpp'],
+                        notes: 'Must handle timeout, alertable waits',
+                    },
+                    {
+                        task: 'Rewrite KeSetEvent/KePulseEvent to signal host event',
+                        priority: 'HIGH',
+                        complexity: 'Low',
+                        files: ['kernel/imports.cpp'],
+                        notes: 'Simple delegation to XEvent::Set()',
+                    },
+                    {
+                        task: 'Rewrite KeReleaseSemaphore to release host semaphore',
+                        priority: 'HIGH',
+                        complexity: 'Low',
+                        files: ['kernel/imports.cpp'],
+                        notes: 'Simple delegation to XSemaphore::Release()',
+                    },
+                ],
+            },
+            {
+                category: '3. Fix Broken Signal Chains',
+                items: brokenChains.brokenChains.slice(0, 10).map(chain => ({
+                    task: `Fix ${chain.expectedSignaler} to signal ${chain.primitiveAddr}`,
+                    priority: 'MEDIUM',
+                    complexity: 'Low - unstub or add signal call',
+                    files: ['kernel/imports.cpp'],
+                    notes: chain.fix,
+                })),
+            },
+            {
+                category: '4. Unstub Signaling Functions',
+                items: stubbedSignalers.stubbedSignalers.slice(0, 10).map(s => ({
+                    task: `Unstub ${s.function} - affects ${s.primitivesAffected.length} primitives`,
+                    priority: 'MEDIUM',
+                    complexity: 'Low - modify to call __imp__',
+                    files: ['kernel/imports.cpp'],
+                    notes: `Blocks: ${s.waitersBlocked.join(', ')}`,
+                })),
+            },
+        ];
+        const xeniaFiles = [
+            { path: 'xenia/kernel/xobject.h', purpose: 'Base object class with handle management', relevant: true },
+            { path: 'xenia/kernel/xobject.cc', purpose: 'Object lifecycle, retain/release', relevant: true },
+            { path: 'xenia/kernel/xevent.h', purpose: 'Event object definition', relevant: true },
+            { path: 'xenia/kernel/xevent.cc', purpose: 'Host-backed event implementation', relevant: true },
+            { path: 'xenia/kernel/xsemaphore.h', purpose: 'Semaphore object definition', relevant: true },
+            { path: 'xenia/kernel/xsemaphore.cc', purpose: 'Host-backed semaphore implementation', relevant: true },
+            { path: 'xenia/kernel/util/object_table.h', purpose: 'Handle → Object mapping', relevant: true },
+            { path: 'xenia/kernel/util/object_table.cc', purpose: 'Object table implementation', relevant: true },
+            { path: 'xenia/base/threading.h', purpose: 'Platform-agnostic threading primitives', relevant: true },
+        ];
+        return {
+            checklist,
+            xeniaFiles,
+            currentState: {
+                hasObjectTable: false,
+                hasProperBacking: false,
+                trackedPrimitives: syncFlow.primitives.length,
+                brokenChains: brokenChains.brokenChains.length,
+            },
+        };
+    }
 }
