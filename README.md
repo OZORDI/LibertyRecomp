@@ -45,7 +45,7 @@ This project is in **early development**. Current progress:
 - [x] Input remapping for GTA IV controls (SDL HID driver, GTA4 input patches)
 - [x] Network/multiplayer stubs (NetDll_XNetStartup, XLive stubs)
 - [x] Online multiplayer via GameNetworkingSockets (P2P with NAT traversal, no VPN required)
-- [x] File system and RPF archive handling (VFS, GTA file system)
+- [x] File system and RPF archive handling (VFS)
 
 ## Installation
 
