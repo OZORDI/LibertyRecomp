@@ -7951,37 +7951,180 @@ PPC_FUNC(sub_82192578) {
 }
 
 // =============================================================================
-// sub_827DFFF0 - PLATFORM GLUE: Path Configuration Parser
+// sub_827DFFF0 - REIMPLEMENTATION: Path Configuration Parser
 // =============================================================================
-// Original Xbox behavior: Parses path configuration string, calls strtok in loop
-// to extract path components, stores in context structure.
+// Original Xbox behavior: Parses semicolon-separated path config string using
+// strtok, stores up to 4 paths in context structure at offsets 0, 256, 512, 768.
+// Also handles '*' prefixed paths for special counting.
 //
-// PC replacement: Skip Xbox path parsing - VFS handles all path resolution.
-// Initialize the context structure with default values for success.
+// This reimplementation uses native C++ string handling to avoid TLS issues
+// with the PPC strtok implementation. Properly populates all path slots so
+// sub_827E04F0 and sub_827E0740 can read them for pathConfig values 0-3.
+//
+// Context structure layout:
+//   [ctx+0]    = path slot 0 (256 bytes)
+//   [ctx+256]  = path slot 1 (256 bytes)
+//   [ctx+512]  = path slot 2 (256 bytes)
+//   [ctx+768]  = path slot 3 (256 bytes)
+//   [ctx+3076] = pathCount (number of paths parsed, 1-4)
+//   [ctx+3080] = specialCount (count of '*' prefixed paths)
 // =============================================================================
 extern "C" void __imp__sub_827DFFF0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827DFFF0) {
     static int s_count = 0; ++s_count;
     
-    // Context structure at r3
-    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t contextAddr = ctx.r3.u32;  // Storage device context
+    uint32_t configStrAddr = ctx.r4.u32; // Path config string pointer
     
-    if (s_count <= 5) {
-        LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} context=0x{:08X} -> skip Xbox path parsing", 
-                     s_count, contextAddr);
+    // Check for global override at 0x8310E034 (lis -31983, offset -8140, then +4)
+    // Original: if (global != 0) use global instead of r4
+    uint32_t overrideAddr = PPC_LOAD_U32(0x8310E034 + 4);
+    if (overrideAddr != 0) {
+        configStrAddr = overrideAddr;
     }
     
-    // Initialize context for "successful" path parsing
-    // The context structure has:
-    //   [ctx+3076] = path count (number of parsed paths)
-    //   [ctx+3080] = additional count
-    // Set to 1 to indicate we have a valid path (via VFS)
-    PPC_STORE_U32(contextAddr + 3076, 1);
+    // Initialize pathCount to 0
+    PPC_STORE_U32(contextAddr + 3076, 0);
     PPC_STORE_U32(contextAddr + 3080, 0);
     
-    // Don't call original - it loops on Xbox path parsing that hangs
-    // The VFS system handles all path resolution directly
+    // If no config string, set default and return
+    if (configStrAddr == 0) {
+        // Set empty path at slot 0 and pathCount = 1
+        PPC_STORE_U8(contextAddr, 0);
+        PPC_STORE_U32(contextAddr + 3076, 1);
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} context=0x{:08X} -> NULL config string, set default", 
+                         s_count, contextAddr);
+        }
+        return;
+    }
+    
+    // Read the config string from guest memory (max 255 chars)
+    char configStr[260] = {0};
+    for (int i = 0; i < 255; i++) {
+        char c = (char)PPC_LOAD_U8(configStrAddr + i);
+        configStr[i] = c;
+        if (c == 0) break;
+    }
+    configStr[255] = 0;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} context=0x{:08X} configStr='{}' (from 0x{:08X})", 
+                     s_count, contextAddr, configStr, configStrAddr);
+    }
+    
+    // Parse paths by ';' delimiter using C++ (avoid PPC strtok TLS issues)
+    uint32_t pathCount = 0;
+    uint32_t specialCount = 0;
+    
+    char* str = configStr;
+    char* token = str;
+    
+    while (*str && pathCount < 4) {
+        // Find next ';' or end of string
+        while (*str && *str != ';') str++;
+        
+        // Null-terminate the token
+        bool hasMore = (*str == ';');
+        if (hasMore) *str++ = 0;
+        
+        // Skip empty tokens
+        if (*token == 0) {
+            token = str;
+            continue;
+        }
+        
+        // Check for '*' prefix (special path marker)
+        char* pathStart = token;
+        if (*pathStart == '*') {
+            pathStart++;
+            specialCount = pathCount; // Original stores current pathCount
+        }
+        
+        // Normalize the path:
+        // - Convert Xbox paths (game:\, platform:\, update:\) to VFS format
+        // - Convert backslashes to forward slashes
+        // - Ensure trailing slash
+        char normalizedPath[260] = {0};
+        char* dst = normalizedPath;
+        char* src = pathStart;
+        
+        // Check for colon (Xbox drive letter) and skip to after it
+        char* colonPos = nullptr;
+        for (char* p = src; *p; p++) {
+            if (*p == ':') {
+                colonPos = p;
+                break;
+            }
+        }
+        
+        // If we have a colon, convert to VFS format
+        if (colonPos) {
+            // Map all Xbox mount points to platform:/
+            // game:\shaders -> platform:/shaders/
+            // platform:\textures -> platform:/textures/
+            // update:\data -> platform:/data/
+            strcpy(dst, "platform:");
+            dst += 9; // length of "platform:"
+            
+            // Skip past the colon in source
+            src = colonPos + 1;
+        }
+        
+        // Copy rest of path, converting backslashes to forward slashes
+        while (*src) {
+            if (*src == '\\') {
+                *dst++ = '/';
+            } else {
+                *dst++ = *src;
+            }
+            src++;
+        }
+        
+        // Ensure trailing slash if path is not empty
+        if (dst > normalizedPath && *(dst-1) != '/') {
+            *dst++ = '/';
+        }
+        *dst = 0;
+        
+        // Write to context slot (pathCount * 256)
+        uint32_t slotAddr = contextAddr + (pathCount * 256);
+        size_t pathLen = strlen(normalizedPath);
+        if (pathLen > 255) pathLen = 255;
+        
+        for (size_t i = 0; i < pathLen; i++) {
+            PPC_STORE_U8(slotAddr + i, (uint8_t)normalizedPath[i]);
+        }
+        PPC_STORE_U8(slotAddr + pathLen, 0); // Null terminate
+        
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} slot[{}] = '{}' (from '{}')", 
+                         s_count, pathCount, normalizedPath, token);
+        }
+        
+        pathCount++;
+        token = str;
+    }
+    
+    // If no paths were parsed, set default
+    if (pathCount == 0) {
+        PPC_STORE_U8(contextAddr, 0);
+        pathCount = 1;
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} -> no paths parsed, set default pathCount=1", s_count);
+        }
+    }
+    
+    // Store counts
+    PPC_STORE_U32(contextAddr + 3076, pathCount);
+    PPC_STORE_U32(contextAddr + 3080, specialCount);
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} -> pathCount={} specialCount={}", 
+                     s_count, pathCount, specialCount);
+    }
 }
+
 
 extern "C" void __imp__sub_82192140(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82192140) {
