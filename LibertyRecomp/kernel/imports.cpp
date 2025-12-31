@@ -25,9 +25,45 @@
 #include "io/file_system.h"
 #include "vfs.h"
 #include "io/gta_file_system.h"
+#include "sync_table.h"
+
 #include "game_init.h"
 #include "io/net_socket.h"
 #include "io/net_session.h"
+
+
+// =============================================================================
+// KERNEL PHASE SYSTEM - Fail-open waits during Boot/Init (Xenia-style)
+// =============================================================================
+enum class KernelPhase {
+    Boot,      // Before first guest thread
+    Init,      // Module loaded, subsystems initializing
+    Runtime    // First frame presented or main loop entered
+};
+
+std::atomic<KernelPhase> g_kernelPhase{KernelPhase::Boot};
+
+// Helper to check if fail-open waits are allowed
+inline bool ShouldFailOpenWait() {
+    return g_kernelPhase.load(std::memory_order_acquire) != KernelPhase::Runtime;
+}
+
+// Transition to Init phase (call after LdrLoadModule)
+inline void KernelPhase_EnterInit() {
+    auto expected = KernelPhase::Boot;
+    if (g_kernelPhase.compare_exchange_strong(expected, KernelPhase::Init)) {
+        LOG_WARNING("[KERNEL_PHASE] Boot -> Init");
+    }
+}
+
+// Transition to Runtime phase (call after first VdSwap or main loop entry)
+inline void KernelPhase_EnterRuntime() {
+    auto phase = g_kernelPhase.load();
+    if (phase != KernelPhase::Runtime) {
+        g_kernelPhase.store(KernelPhase::Runtime, std::memory_order_release);
+        LOGF_WARNING("[KERNEL_PHASE] {} -> Runtime", phase == KernelPhase::Boot ? "Boot" : "Init");
+    }
+}
 
 #include <cerrno>
 #include <fstream>
@@ -63,6 +99,11 @@ extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base);  // Sync wait
 extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base);  // Intermediate sync function (calls sub_829A3238)
 extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base);
 extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_827DACD8_hook(PPCContext& ctx, uint8_t* base);  // Semaphore wait
+
+extern "C" void sub_829A2380_hook(PPCContext& ctx, uint8_t* base);  // Semaphore acquire (sync table)
+extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base);  // Semaphore create wrapper (sync table)
+
 extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base);
 
 namespace {
@@ -97,7 +138,12 @@ void PatchSyncPrimitives() {
     PatchFuncMapping(0x829A39F0, &sub_829A39F0_hook);  // Intermediate sync (calls sub_829A3238) - CRITICAL
     PatchFuncMapping(0x827DB338, &sub_827DB338_hook);  // Sync wait wrapper  
     PatchFuncMapping(0x827DB988, &sub_827DB988_hook);  // Sync init
+    PatchFuncMapping(0x827DACD8, &sub_827DACD8_hook);  // Semaphore wait - sync table routing
+
     PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // String/resource lookup
+    PatchFuncMapping(0x829A2380, &sub_829A2380_hook);  // Semaphore acquire (sync table)
+    PatchFuncMapping(0x829A21F8, &sub_829A21F8_hook);  // Semaphore create wrapper (sync table)
+
     
     printf("[PATCH] Sync primitive patching complete.\n");
     fflush(stdout);
@@ -1625,8 +1671,24 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
         }
         else
         {
-            assert(false && "Unhandled timeout value.");
-            return STATUS_TIMEOUT;
+            // Handle arbitrary timeout - convert to timed wait
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
+            uint32_t currentCount;
+            while (true)
+            {
+                currentCount = count.load();
+                if (currentCount != 0)
+                {
+                    if (count.compare_exchange_weak(currentCount, currentCount - 1))
+                        return STATUS_SUCCESS;
+                }
+                else
+                {
+                    if (std::chrono::steady_clock::now() >= deadline)
+                        return STATUS_TIMEOUT;
+                    count.wait(0);
+                }
+            }
         }
     }
 
@@ -2595,6 +2657,22 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
             return STATUS_TIMEOUT;
         }
         
+
+        // KERNEL POLICY: Fail-open during Boot/Init
+        if (timeout == INFINITE && ShouldFailOpenWait()) {
+            uint32_t result = obj->Wait(10);  // Short wait instead of infinite
+            if (result == STATUS_TIMEOUT) {
+                static int s_failOpenObj = 0;
+                ++s_failOpenObj;
+                if (s_failOpenObj <= 50 || s_failOpenObj % 1000 == 0) {
+                    LOGF_WARNING("[FAIL-OPEN] NtWaitEx #{} infinite->success handle=0x{:08X} caller=0x{:08X}", 
+                                s_failOpenObj, Handle, callerLR);
+                }
+                return STATUS_SUCCESS;
+            }
+            return result;
+        }
+
         // Removed worker semaphore bypass hack - let C++20 atomic wait/notify work naturally
         // Following Unleashed's approach: proper synchronization without forced returns
         
@@ -3938,6 +4016,9 @@ bool VdPersistDisplay(uint32_t a1, uint32_t* a2)
 
 void VdSwap()
 {
+    // KERNEL POLICY: First VdSwap = Runtime phase
+    KernelPhase_EnterRuntime();
+
     // VdSwap is called by the Xbox 360 GPU to present frames
     static uint32_t s_frameCount = 0;
     if (s_frameCount < 10 || (s_frameCount % 60 == 0 && s_frameCount < 600))
@@ -4668,6 +4749,35 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
             g_mostWaitedHandle = objAddr;
         }
     }
+
+    // =======================================================================
+    // KERNEL POLICY: Fail-open infinite waits during Boot/Init phases
+    // Exclude GPU thread (0x829DDD48) - it has its own frame timing
+    // =======================================================================
+    if (timeout == INFINITE && ShouldFailOpenWait() && !isGpuWait) {
+        // Try-wait with short timeout (10ms) instead of 0 to give threads a chance
+        KernelObject* obj = nullptr;
+        switch (Object->Type) {
+            case 0: case 1: obj = QueryKernelObject<Event>(*Object); break;
+            case 5: obj = QueryKernelObject<Semaphore>(*Object); break;
+        }
+        
+        if (obj) {
+            uint32_t result = obj->Wait(10);  // Short wait instead of immediate
+            if (result == STATUS_TIMEOUT) {
+                // Still timed out - return success (do not force signal, just let it proceed)
+                static int s_failOpenCount = 0;
+                ++s_failOpenCount;
+                if (s_failOpenCount <= 50 || s_failOpenCount % 1000 == 0) {
+                    LOGF_WARNING("[FAIL-OPEN] #{} KeWait timeout->success obj=0x{:08X} type={} caller=0x{:08X}", 
+                                s_failOpenCount, objAddr, Object->Type, caller);
+                }
+                return STATUS_SUCCESS;
+            }
+            return result;
+        }
+    }
+
     
     switch (Object->Type)
     {
@@ -5312,6 +5422,14 @@ uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* 
         LOGF_IMPL(Utility, "ExCreateThread", "startContext@0x{:08X}: [0]=0x{:08X}, [1]=0x{:08X}, [2]=0x{:08X}, [3]=0x{:08X}",
             startContext, 
             ByteSwap(ctxMem[0]), ByteSwap(ctxMem[1]), ByteSwap(ctxMem[2]), ByteSwap(ctxMem[3]));
+    }
+
+
+    // FIX: Force threads to start immediately - suspended threads cause deadlocks
+    // because they cannot signal semaphores that other code waits on
+    if (creationFlags != 0) {
+        LOGF_WARNING("[ExCreateThread] FORCING flags=0 (was 0x{:X}) entry=0x{:08X}", creationFlags, entry);
+        creationFlags = 0;
     }
 
     LOGF_WARNING("[ExCreateThread] Creating thread entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", 
@@ -6023,6 +6141,58 @@ PPC_FUNC(sub_827DAE40)
     // Return success - don't loop (original would block forever on semaphore)
     ctx.r3.u32 = 0;
     return;
+}
+
+
+// Hook sub_829A2380 - Semaphore acquire (routes through sync table)
+// This function acquires a semaphore - route through sync table for proper tracking
+extern "C" void __imp__sub_829A2380(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A2380_hook(PPCContext& ctx, uint8_t* base)
+{
+    static int s_count = 0; ++s_count;
+    uint32_t handle = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    if (s_count <= 30 || s_count % 500 == 0) {
+        printf("[sub_829A2380] #%d SYNC_TABLE acquire handle=0x%08X caller=0x%08X\n", 
+               s_count, handle, callerLR);
+        fflush(stdout);
+    }
+    
+    // Route through sync table - creates on-the-fly if not tracked
+    if (handle != 0) {
+        SyncObject* syncObj = SyncTable_GetOrCreate(handle, SyncType::Semaphore, callerLR);
+        if (syncObj) {
+            // Pre-signal so wait returns immediately during init
+            syncObj->Signal(1);
+        }
+    }
+    
+    ctx.r3.u32 = 1;  // Return success
+}
+
+// Hook sub_829A21F8 - Semaphore create wrapper (routes through sync table)
+extern "C" void __imp__sub_829A21F8(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base)
+{
+    static int s_count = 0; ++s_count;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    // Call original to create the semaphore
+    __imp__sub_829A21F8(ctx, base);
+    
+    uint32_t handle = ctx.r3.u32;
+    
+    if (s_count <= 50 || s_count % 100 == 0) {
+        printf("[SYNC-TABLE] CREATE semaphore @ 0x%08X (caller=0x%08X) total=%d\n", 
+               handle, callerLR, s_count);
+        fflush(stdout);
+    }
+    
+    // Register with sync table
+    if (handle != 0) {
+        SyncTable_InitSemaphore(handle, 0, 32767, callerLR);
+    }
 }
 
 // Hook sub_829A9738 - Wait-with-retry helper (calls NtWaitForSingleObjectEx)
@@ -7636,14 +7806,26 @@ PPC_FUNC(sub_827DAC78) {
     
     // Track semaphores created with count=0 for later signaling
     // This catches semaphores created via internal wrapper, not just NtCreateSemaphore
-    if (originalCount == 0 && resultHandle != 0) {
-        TrackBlockingSemaphoreAddr(resultHandle);
-        if (s_count <= 50)
-            LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} TRACKED handle=0x{:08X} (count=0)", s_count, resultHandle);
-    } else if (s_count <= 30) {
-        LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} EXIT handle=0x{:08X} (count={}, caller=0x{:08X})", 
-                     s_count, resultHandle, originalCount, callerLR);
+    // Route through sync table for proper tracking
+    if (resultHandle != 0) {
+        SyncTable_InitSemaphore(resultHandle, originalCount, 32767, callerLR);
+        printf("[SYNC-TABLE] CREATE semaphore @ 0x%08X (caller=0x%08X) total=%d\n", resultHandle, callerLR, s_count);
+        fflush(stdout);
+        if (originalCount == 0) {
+            TrackBlockingSemaphoreAddr(resultHandle);  // Also track for fail-open
+            if (s_count <= 50)
+                printf("[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #%d SYNC_TABLE handle=0x%08X count=0 max=0\n", s_count, resultHandle);
+        }
     }
+
+
+
+
+
+
+
+
+
 }
 
 PPC_FUNC(sub_827DAF50) {
@@ -7659,9 +7841,10 @@ PPC_FUNC(sub_827DAF50) {
     LOGF_WARNING("[THREAD_CREATE] sub_827DAF50 #{} EXIT threadHandle=0x{:08X}", s_count, ctx.r3.u32);
 }
 
-PPC_FUNC(sub_827DACD8) {
+extern "C" void sub_827DACD8_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     uint32_t semHandle = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
     
     // Skip null handles
     if (semHandle == 0) {
@@ -7669,50 +7852,42 @@ PPC_FUNC(sub_827DACD8) {
         return;
     }
     
-    // Check if this is a tracked blocking semaphore
-    bool isBlocking = IsBlockingSemaphore(semHandle);
-    
-    if (s_count <= 50 || isBlocking) {
-        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ENTERING wait on semaphore 0x{:08X} (LR=0x{:08X}) blocking={}", 
-                     s_count, semHandle, (uint32_t)ctx.lr, isBlocking);
+    if (s_count <= 50 || s_count % 100 == 0) {
+        printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d wait on semaphore 0x%08X (LR=0x%08X)\n", 
+               s_count, semHandle, callerLR);
+        fflush(stdout);
     }
     
-    // For blocking semaphores during init, use timeout-based approach
-    if (isBlocking && !IsInitComplete()) {
-        // Try to acquire with timeout to prevent infinite blocking
-        constexpr uint32_t INIT_TIMEOUT_MS = 100;  // 100ms timeout during init
-        
-        if (TryWaitSemaphoreWithTimeout(semHandle, INIT_TIMEOUT_MS)) {
-            LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} ACQUIRED semaphore 0x{:08X} within timeout", 
-                         s_count, semHandle);
-            ctx.r3.u32 = 1;  // Return success
-        } else {
-            // Timeout - signal the semaphore ourselves and acquire
-            LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} TIMEOUT on semaphore 0x{:08X} - auto-signaling", 
-                         s_count, semHandle);
-            
-            // Signal the semaphore to unblock
-            XKSEMAPHORE* semaphore = reinterpret_cast<XKSEMAPHORE*>(g_memory.Translate(semHandle));
-            if (semaphore && semaphore->Header.Type == 5) {
-                auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
-                if (object) {
-                    object->Release(1, nullptr);  // Release to unblock
-                }
-            }
-            
-            // Now call original which should succeed
-            __imp__sub_827DACD8(ctx, base);
+    // Check sync table first
+    SyncObject* syncObj = SyncTable_Get(semHandle);
+    if (syncObj) {
+        if (s_count <= 50 || s_count % 100 == 0) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE FOUND 0x%08X, calling Wait(INFINITE=0xFFFFFFFF)\n",
+                   s_count, semHandle);
+            fflush(stdout);
         }
+        
+        uint32_t result = syncObj->Wait(INFINITE);
+        uint32_t signalState = syncObj->signalState.load();
+        
+        if (s_count <= 50 || s_count % 100 == 0) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE Wait returned result=%u signalState=%u\n",
+                   s_count, result, signalState);
+            fflush(stdout);
+        }
+        
+        ctx.r3.u32 = (result == 0) ? 1 : 0;
     } else {
-        // Normal path - call original implementation
         __imp__sub_827DACD8(ctx, base);
-    }
-    
-    if (s_count <= 50 || isBlocking) {
-        LOGF_WARNING("[SEM_WAIT] sub_827DACD8 #{} PASSED wait on semaphore 0x{:08X} r3={}", 
-                     s_count, semHandle, ctx.r3.u32);
+        
+        if (s_count <= 50) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d PASSED (original) r3=%u\n",
+                   s_count, ctx.r3.u32);
+            fflush(stdout);
+        }
     }
 }
+
 
 // Render worker task function - STUBBED to prevent infinite blocking
 // Analysis: This worker loops forever waiting on semaphore at context+24940
@@ -9848,14 +10023,30 @@ extern "C" void __imp__sub_827DAD60(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827DAD60) {
     static int s_count = 0; ++s_count;
     uint32_t handle = ctx.r3.u32;
+    uint32_t release = ctx.r4.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
     if (s_count <= 30 || s_count % 100 == 0) {
-        LOGF_WARNING("[SIGNAL] sub_827DAD60 #{} handle=0x{:08X} (worker thread startup signal?)", s_count, handle);
+        printf("[sub_827DAD60] [SEM_SIGNAL] sub_827DAD60 #%d SYNC_TABLE handle=0x%08X release=%u\n",
+               s_count, handle, release);
+        fflush(stdout);
     }
+    
+    // Route through sync table
+    if (handle != 0) {
+        SyncTable_Signal(handle, release > 0 ? release : 1, callerLR);
+    }
+    
+    // Call original
     __imp__sub_827DAD60(ctx, base);
+    
     if (s_count <= 30 || s_count % 100 == 0) {
-        LOGF_WARNING("[SIGNAL] sub_827DAD60 #{} EXIT", s_count);
+        printf("[sub_827DAD60] [SEM_SIGNAL] sub_827DAD60 #%d EXIT handle=0x%08X\n",
+               s_count, handle);
+        fflush(stdout);
     }
 }
+
 
 // sub_8298E700 - resource worker task function - STUBBED to prevent infinite blocking
 // Analysis: This worker uses virtual dispatch (vtable+12) and loops forever waiting on semaphore
@@ -9956,11 +10147,35 @@ PPC_FUNC(sub_82679950) {
 extern "C" void __imp__sub_8221D880(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8221D880) {
     static int s_count = 0; ++s_count;
-    LOGF_WARNING("[WORLD] sub_8221D880 #{} STUBBED - Xbox world init bypassed", s_count);
-    // Don't call __imp__sub_8221D880 - contains Xbox world initialization
-    ctx.r3.u32 = 0;  // Return success
-    return;
+    LOGF_WARNING("[WORLD] sub_8221D880 #{} UN-STUBBED - sync table handles waits", s_count);
+    __imp__sub_8221D880(ctx, base);  // Let original run - sync table handles blocking
+    LOGF_WARNING("[WORLD] sub_8221D880 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
 }
+
+// sub_82893888 - World thread pool init - SKIPPED
+// Analysis: Creates worker threads for world processing - VFS handles files so we skip this
+PPC_FUNC(sub_82893888) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[WORLD_POOL] sub_82893888 #%d SKIPPED - world thread pool init (VFS handles files)", s_count);
+    ctx.r3.u32 = 1;  // Return success
+}
+
+// sub_828A1880 - Semaphore-based synchronization - BYPASS
+// Analysis: Would block on NULL semaphores during init
+PPC_FUNC(sub_828A1880) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[FIX] sub_828A1880 #%d BYPASS - NULL semaphores would block main thread", s_count);
+    ctx.r3.u32 = 1;  // Return success
+}
+
+
+
+
+
+
+
+
+
 
 // Functions in sub_82672E50's busy-wait loops
 extern "C" void __imp__sub_82672AA8(PPCContext& ctx, uint8_t* base);
@@ -11379,6 +11594,10 @@ PPC_FUNC(sub_82120FB8)
     __imp__sub_82120FB8(ctx, base);
     
     LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{} thread=0x{:04X} r3={} - 63-subsystem init complete", s_count, threadId, ctx.r3.u32);
+
+    // KERNEL POLICY: 63-subsystem init complete = transition to Init phase (if still in Boot)
+    KernelPhase_EnterInit();
+
     
     // FORCE: Start VBlank timer with known callback since GPU init path is never reached
     extern void StartVBlankTimer();

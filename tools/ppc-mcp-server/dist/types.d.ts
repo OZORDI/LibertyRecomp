@@ -161,3 +161,51 @@ export interface RecursiveCallTree {
     globals_accessed: string[];
     kernel_apis: string[];
 }
+export interface EnhancedVTableEntry {
+    offset: number;
+    funcAddress: string;
+    funcName: string;
+    initializedBy: string;
+    initLine?: number;
+    initContext?: string;
+    status: 'initialized' | 'null' | 'unknown';
+}
+export interface EnhancedVTable {
+    address: string;
+    addressHex: string;
+    region: string;
+    entryCount: number;
+    entries: EnhancedVTableEntry[];
+    initializers: string[];
+    readers: string[];
+    initChain?: string[];
+}
+export interface VTableInitTrace {
+    vtableAddress: string;
+    entry: EnhancedVTableEntry;
+    initChain: string[];
+    rootFunction: string;
+    isStubbed: boolean;
+    stubbedFunctions: string[];
+    warning?: string;
+}
+export interface VTableChainAnalysis {
+    function: string;
+    vtableAddress: string;
+    willInitialize: boolean;
+    initPath?: string[];
+    directlyInitializes: boolean;
+    initializesVia?: string;
+    blockedBy?: string;
+}
+export interface VTableUsage {
+    vtableAddress: string;
+    users: {
+        function: string;
+        address: string;
+        accessType: 'read' | 'indirect_call';
+        offset?: number;
+        context: string;
+    }[];
+    callSites: number;
+}

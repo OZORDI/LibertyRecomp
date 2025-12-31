@@ -1,0 +1,1603 @@
+[PATCH] Patching sync primitives in PPCFuncMappings...
+[PATCH] 0x829A9738: 0x102772b70 -> 0x1003cf9c4
+[PATCH] 0x829A3560: 0x102759e34 -> 0x1003f9a3c
+[PATCH] 0x829A39A0: 0x102759f3c -> 0x1003f9c18
+[PATCH] 0x829A3238: 0x10275859c -> 0x1003f95b0
+[PATCH] 0x829A39F0: 0x102759f40 -> 0x1003f979c
+[PATCH] 0x827DB338: 0x10205d634 -> 0x1003f9cd0
+[PATCH] 0x827DB988: 0x10205ed58 -> 0x1003f9d88
+[PATCH] 0x82300C78: 0x100ddf870 -> 0x1003f9524
+[PATCH] Sync primitive patching complete.
+[*] OS does not support registry.
+[*] Failed to parse configuration: Error while parsing table header: cannot redefine existing table 'Input'
+[*] Saving configuration...
+[*] Host Startup
+[Main] Calling KiSystemStartup...
+[InitializeXenonMemoryRegions] [Xenon] Initializing Xbox 360 memory regions per Xenon contract
+[InitializeXenonMemoryRegions] [Xenon] Zeroing stream pool: 0x82000000-0x82020000 (128 KB)
+[InitializeXenonMemoryRegions] [Xenon] Zeroing XEX data region: 0x82020000-0x82120000 (1 MB)
+[InitializeXenonMemoryRegions] [Xenon] Zeroing kernel runtime: 0x82A90000-0x82AA0000 (64 KB)
+[InitializeXenonMemoryRegions] [Xenon] Zeroing static data (BSS): 0x83000000-0x831F0000 (1.99 MB)
+[InitializeXenonMemoryRegions] [Xenon] Memory region initialization complete
+[InitializeXenonMemoryRegions] [Xenon] IMPORTANT: Import region 0x82A00000-0x82B00000 left untouched (system-managed)
+[SaveSystem] ========================================
+[SaveSystem] Initializing GTA IV Save System
+[SaveSystem] ========================================
+[SaveSystem] Save directory: /Users/ozordi/Library/Application Support/LibertyRecomp/save
+[SaveSystem] Save directory created/verified
+[SaveSystem] Found save file: SGTA400
+[SaveSystem] Enumerated 1 save files
+[SaveSystem] Registered save slot 0: SGTA400 -> /Users/ozordi/Library/Application Support/LibertyRecomp/save
+[SaveSystem] Registered root: SaveData -> /Users/ozordi/Library/Application Support/LibertyRecomp/save
+[SaveSystem] ========================================
+[SaveSystem] Save system initialized successfully
+[SaveSystem] Found 1 existing save files
+[SaveSystem] ========================================
+[Main] No update directory found (this is normal if no Title Update installed)
+[XamContentCreateEx] ========================================
+[XamContentCreateEx] Root: 'game', Content: 'Game'
+[XamContentCreateEx] Type: 50331648, Flags: 0x3, User: 0
+[XamContentCreateEx] Mode: OPEN_EXISTING
+[XamContentCreateEx] Content found and opened
+[XamContentCreateEx] Result: SUCCESS
+[XamContentCreateEx] ========================================
+[XamContentCreateEx] ========================================
+[XamContentCreateEx] Root: 'D', Content: 'Game'
+[XamContentCreateEx] Type: 50331648, Flags: 0x3, User: 0
+[XamContentCreateEx] Mode: OPEN_EXISTING
+[XamContentCreateEx] Content found and opened
+[XamContentCreateEx] Result: SUCCESS
+[XamContentCreateEx] ========================================
+[Main] Game root: /Users/ozordi/Library/Application Support/LibertyRecomp/game
+[Main] Registered common: -> /Users/ozordi/Library/Application Support/LibertyRecomp/game/common
+[Main] Registered platform: -> /Users/ozordi/Library/Application Support/LibertyRecomp/game/xbox360
+[Main] Registered audio: -> /Users/ozordi/Library/Application Support/LibertyRecomp/game/audio
+[VFS] Initialize called with: /Users/ozordi/Library/Application Support/LibertyRecomp/game
+[VFS] Got mutex lock
+[VFS] Calling ResetPathMappings...
+[VFS] ResetPathMappings done
+[VFS] Calling RebuildIndex...
+[VFS] RebuildIndex done
+[Initialize] [VFS] Initialized with root: /Users/ozordi/Library/Application Support/LibertyRecomp/game
+[Initialize] [VFS] Indexed 1992 files, 153 directories, 7069518359 bytes total
+[Main] VFS initialized with root: /Users/ozordi/Library/Application Support/LibertyRecomp/game
+[Main] KiSystemStartup done
+[Main] Loading module: /Users/ozordi/Library/Application Support/LibertyRecomp/game/default.xex
+[LdrLoadModule] Zeroed worker globals 0x830F5000-0x830F8000
+[Main] Module loaded, entry=0x829A0860
+[Main] Creating video device...
+[*] SDL video driver: "cocoa"
+[*] Using native display resolution: 1728x1117
+2025-12-30 19:21:47.275 Liberty Recompiled[69874:73115368] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/vw/zkgh5tjj5lz07rzj05_hns500000gq/T/OZORDI.LibertyRecomp.savedState
+[TryLoadEmbeddedShaderCache] Using embedded shader cache (29421858 bytes)
+[*] Saving configuration...
+[Main] Video device created
+[*] Start Guest Thread
+[*] /Users/ozordi/Library/Application Support/LibertyRecomp/game/default.xex
+[GuestThread] Starting guest code at 0x829A0860
+[GuestThread] Calling function...
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #1 thread=0x0270
+[MmAllocatePhysicalMemoryEx] caller_lr=0x829A21AC flags=0x0 size=0x6000000 prot=0x80000004 min=0x00000000 max=0xFFFFFFFF align=0x0
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #1 ENTER count=0 LR=0x82192A90
+[SYNC-TABLE] CREATE semaphore @ 0xA8340270 (caller=0x829A2248) total=1
+[NtCreateSemaphore] [NtCreateSemaphore] #1 handle=0xA8340270 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #1 TRACKED handle=0xA8340270 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #2 ENTER count=0 LR=0x82192AA0
+[SYNC-TABLE] CREATE semaphore @ 0xA83402B0 (caller=0x829A2248) total=2
+[NtCreateSemaphore] [NtCreateSemaphore] #2 handle=0xA83402B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #2 TRACKED handle=0xA83402B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #3 ENTER count=0 LR=0x82192AB0
+[SYNC-TABLE] CREATE semaphore @ 0xA83402F0 (caller=0x829A2248) total=3
+[NtCreateSemaphore] [NtCreateSemaphore] #3 handle=0xA83402F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #3 TRACKED handle=0xA83402F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #4 ENTER count=1 LR=0x82192AC0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340330 (caller=0x829A2248) total=4
+[NtCreateSemaphore] [NtCreateSemaphore] #4 handle=0xA8340330 count=1 max=32767
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #4 EXIT handle=0xA8340330 (count=1, caller=0x82192AC0)
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #1 r5=0x828E0AB8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #1
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #2 r5=0x828E0AB8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #2
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #1 r3=0x82009B00
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #1
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #2 r3=0x82009B14
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #2
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #3 r3=0x82009B2C
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #3
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #4 r3=0x82009B40
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #4
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #5 r3=0x82009B68
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #5
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #6 r3=0x82009B98
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #6
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #7 r3=0x82009BB0
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #7
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #8 r3=0x82009BC8
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #8
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #9 r3=0x82009BE8
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #9
+[sub_827DF490] [sub_827E7B38] sub_827DF490 ENTER #10 r3=0x82009C08
+[sub_827DF490] [sub_827E7B38] sub_827DF490 EXIT #10
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #1
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #1
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #1
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #1 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #2
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #2
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #2
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #2 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #3
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #3
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #3
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #3 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #4
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #4
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #4
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #4 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #5
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #5
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #5
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #5 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #6
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #6
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #6
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #6 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #7
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #7
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #7
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #7 r3=0x00
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #2 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #3 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #4 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #5 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #6 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #7 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #8 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #9 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #10 thread=0x0270
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #8
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #8
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #8
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #8 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #9
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #9
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #9
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #9 r3=0x00
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 ENTER #10
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #10
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #10
+[sub_82850BF8] [824A0898-LATE] sub_82850BF8 EXIT #10 r3=0x00
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #11
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #11
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #12
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #12
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #13
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #13
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #14
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #14
+[sub_8218BE28] [ALLOC] sub_8218BE28 #1 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #1 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #1 ENTER size=48
+[sub_827D9C50] [ALLOC] sub_827D9C50 #1 ENTER size=16384
+[sub_827D9C50] [ALLOC] sub_827D9C50 #1 EXIT r3=0x80304000
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #1 EXIT r3=0x80304020
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #1 EXIT r3=0x80304020
+[sub_8218BE28] [ALLOC] sub_8218BE28 #1 PPC alloc 48 bytes -> 0x80304020
+[sub_8218BE28] [ALLOC] sub_8218BE28 #2 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #2 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #2 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #2 EXIT r3=0x80304060
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #2 EXIT r3=0x80304060
+[sub_8218BE28] [ALLOC] sub_8218BE28 #2 PPC alloc 48 bytes -> 0x80304060
+[sub_8218BE28] [ALLOC] sub_8218BE28 #3 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #3 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #3 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #3 EXIT r3=0x803040A0
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #3 EXIT r3=0x803040A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #3 PPC alloc 48 bytes -> 0x803040A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #4 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #4 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #4 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #4 EXIT r3=0x803040E0
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #4 EXIT r3=0x803040E0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #4 PPC alloc 48 bytes -> 0x803040E0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #5 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #5 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #5 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #5 EXIT r3=0x80304120
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #5 EXIT r3=0x80304120
+[sub_8218BE28] [ALLOC] sub_8218BE28 #5 PPC alloc 48 bytes -> 0x80304120
+[sub_8218BE28] [ALLOC] sub_8218BE28 #6 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #6 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #6 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #6 EXIT r3=0x80304160
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #6 EXIT r3=0x80304160
+[sub_8218BE28] [ALLOC] sub_8218BE28 #6 PPC alloc 48 bytes -> 0x80304160
+[sub_8218BE28] [ALLOC] sub_8218BE28 #7 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #7 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #7 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #7 EXIT r3=0x803041A0
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #7 EXIT r3=0x803041A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #7 PPC alloc 48 bytes -> 0x803041A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #8 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #8 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #8 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #8 EXIT r3=0x803041E0
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #8 EXIT r3=0x803041E0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #8 PPC alloc 48 bytes -> 0x803041E0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #9 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #9 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #9 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #9 EXIT r3=0x80304220
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #9 EXIT r3=0x80304220
+[sub_8218BE28] [ALLOC] sub_8218BE28 #9 PPC alloc 48 bytes -> 0x80304220
+[sub_8218BE28] [ALLOC] sub_8218BE28 #10 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #10 ENTER size=48 r6=0 -> indirect_target=0x827DA8E0
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #10 ENTER size=48
+[sub_827DA8E0] [ALLOC] sub_827DA8E0 #10 EXIT r3=0x80304260
+[sub_827D8AF8] [ALLOC] sub_827D8AF8 #10 EXIT r3=0x80304260
+[sub_8218BE28] [ALLOC] sub_8218BE28 #10 PPC alloc 48 bytes -> 0x80304260
+[sub_8218BE28] [ALLOC] sub_8218BE28 #11 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_8218BE28] [ALLOC] sub_8218BE28 #11 PPC alloc 48 bytes -> 0x803042A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #12 size=48 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_8218BE28] [ALLOC] sub_8218BE28 #12 PPC alloc 48 bytes -> 0x803042E0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #13 size=327680 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #2 ENTER size=327680
+[sub_827D9C50] [ALLOC] sub_827D9C50 #2 EXIT r3=0x80308010
+[sub_8218BE28] [ALLOC] sub_8218BE28 #13 PPC alloc 327680 bytes -> 0x80308010
+[sub_822DE5F0] [sub_821915F8] sub_822DE5F0 ENTER #1
+[sub_822DE5F0] [sub_821915F8] sub_822DE5F0 EXIT #1
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #15
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #15
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #16
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #16
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #17
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #17
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #18
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #18
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #19
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #19
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #20
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #20
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #21
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #21
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #5000 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #10000 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #15000 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #20000 thread=0x0270
+[sub_828E0AB8] [Scheduler] sub_828E0AB8 #25000 thread=0x0270
+[sub_8218BE28] [ALLOC] sub_8218BE28 #14 size=256 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #3 ENTER size=256
+[sub_827D9C50] [ALLOC] sub_827D9C50 #3 EXIT r3=0x80301020
+[sub_8218BE28] [ALLOC] sub_8218BE28 #14 PPC alloc 256 bytes -> 0x80301020
+[sub_8218BE28] [ALLOC] sub_8218BE28 #15 size=16 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #4 ENTER size=16384
+[sub_827D9C50] [ALLOC] sub_827D9C50 #4 EXIT r3=0x8035C000
+[sub_8218BE28] [ALLOC] sub_8218BE28 #15 PPC alloc 16 bytes -> 0x8035C020
+[sub_8218BE28] [ALLOC] sub_8218BE28 #16 size=92 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #5 ENTER size=92
+[sub_827D9C50] [ALLOC] sub_827D9C50 #5 EXIT r3=0x80301130
+[sub_8218BE28] [ALLOC] sub_8218BE28 #16 PPC alloc 92 bytes -> 0x80301130
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #5 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340370 (caller=0x829A2248) total=5
+[NtCreateSemaphore] [NtCreateSemaphore] #5 handle=0xA8340370 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #5 TRACKED handle=0xA8340370 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #6 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83403B0 (caller=0x829A2248) total=6
+[NtCreateSemaphore] [NtCreateSemaphore] #6 handle=0xA83403B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #6 TRACKED handle=0xA83403B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #7 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83403F0 (caller=0x829A2248) total=7
+[NtCreateSemaphore] [NtCreateSemaphore] #7 handle=0xA83403F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #7 TRACKED handle=0xA83403F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #8 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340430 (caller=0x829A2248) total=8
+[NtCreateSemaphore] [NtCreateSemaphore] #8 handle=0xA8340430 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #8 TRACKED handle=0xA8340430 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #9 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340470 (caller=0x829A2248) total=9
+[NtCreateSemaphore] [NtCreateSemaphore] #9 handle=0xA8340470 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #9 TRACKED handle=0xA8340470 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #10 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83404B0 (caller=0x829A2248) total=10
+[NtCreateSemaphore] [NtCreateSemaphore] #10 handle=0xA83404B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #10 TRACKED handle=0xA83404B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #11 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83404F0 (caller=0x829A2248) total=11
+[NtCreateSemaphore] [NtCreateSemaphore] #11 handle=0xA83404F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #11 TRACKED handle=0xA83404F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #12 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340530 (caller=0x829A2248) total=12
+[NtCreateSemaphore] [NtCreateSemaphore] #12 handle=0xA8340530 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #12 TRACKED handle=0xA8340530 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #13 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340570 (caller=0x829A2248) total=13
+[NtCreateSemaphore] [NtCreateSemaphore] #13 handle=0xA8340570 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #13 TRACKED handle=0xA8340570 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #14 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83405B0 (caller=0x829A2248) total=14
+[NtCreateSemaphore] [NtCreateSemaphore] #14 handle=0xA83405B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #14 TRACKED handle=0xA83405B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #15 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83405F0 (caller=0x829A2248) total=15
+[NtCreateSemaphore] [NtCreateSemaphore] #15 handle=0xA83405F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #15 TRACKED handle=0xA83405F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #16 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340630 (caller=0x829A2248) total=16
+[NtCreateSemaphore] [NtCreateSemaphore] #16 handle=0xA8340630 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #16 TRACKED handle=0xA8340630 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #17 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340670 (caller=0x829A2248) total=17
+[NtCreateSemaphore] [NtCreateSemaphore] #17 handle=0xA8340670 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #17 TRACKED handle=0xA8340670 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #18 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83406B0 (caller=0x829A2248) total=18
+[NtCreateSemaphore] [NtCreateSemaphore] #18 handle=0xA83406B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #18 TRACKED handle=0xA83406B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #19 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83406F0 (caller=0x829A2248) total=19
+[NtCreateSemaphore] [NtCreateSemaphore] #19 handle=0xA83406F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #19 TRACKED handle=0xA83406F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #20 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340730 (caller=0x829A2248) total=20
+[NtCreateSemaphore] [NtCreateSemaphore] #20 handle=0xA8340730 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #20 TRACKED handle=0xA8340730 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #21 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340770 (caller=0x829A2248) total=21
+[NtCreateSemaphore] [NtCreateSemaphore] #21 handle=0xA8340770 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #21 TRACKED handle=0xA8340770 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #22 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83407B0 (caller=0x829A2248) total=22
+[NtCreateSemaphore] [NtCreateSemaphore] #22 handle=0xA83407B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #22 TRACKED handle=0xA83407B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #23 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83407F0 (caller=0x829A2248) total=23
+[NtCreateSemaphore] [NtCreateSemaphore] #23 handle=0xA83407F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #23 TRACKED handle=0xA83407F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #24 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340830 (caller=0x829A2248) total=24
+[NtCreateSemaphore] [NtCreateSemaphore] #24 handle=0xA8340830 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #24 TRACKED handle=0xA8340830 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #25 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340870 (caller=0x829A2248) total=25
+[NtCreateSemaphore] [NtCreateSemaphore] #25 handle=0xA8340870 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #25 TRACKED handle=0xA8340870 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #26 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83408B0 (caller=0x829A2248) total=26
+[NtCreateSemaphore] [NtCreateSemaphore] #26 handle=0xA83408B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #26 TRACKED handle=0xA83408B0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #27 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA83408F0 (caller=0x829A2248) total=27
+[NtCreateSemaphore] [NtCreateSemaphore] #27 handle=0xA83408F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #27 TRACKED handle=0xA83408F0 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #28 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340930 (caller=0x829A2248) total=28
+[NtCreateSemaphore] [NtCreateSemaphore] #28 handle=0xA8340930 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #28 TRACKED handle=0xA8340930 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #29 ENTER count=0 LR=0x8272A3C0
+[SYNC-TABLE] CREATE semaphore @ 0xA8340970 (caller=0x829A2248) total=29
+[NtCreateSemaphore] [NtCreateSemaphore] #29 handle=0xA8340970 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #29 TRACKED handle=0xA8340970 (count=0)
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #30 ENTER count=0 LR=0x8272A3D0
+[SYNC-TABLE] CREATE semaphore @ 0xA83409B0 (caller=0x829A2248) total=30
+[NtCreateSemaphore] [NtCreateSemaphore] #30 handle=0xA83409B0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #30 TRACKED handle=0xA83409B0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA83409F0 (caller=0x829A2248) total=31
+[NtCreateSemaphore] [NtCreateSemaphore] #31 handle=0xA83409F0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #31 TRACKED handle=0xA83409F0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340A30 (caller=0x829A2248) total=32
+[NtCreateSemaphore] [NtCreateSemaphore] #32 handle=0xA8340A30 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #32 TRACKED handle=0xA8340A30 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340A70 (caller=0x829A2248) total=33
+[NtCreateSemaphore] [NtCreateSemaphore] #33 handle=0xA8340A70 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #33 TRACKED handle=0xA8340A70 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340AB0 (caller=0x829A2248) total=34
+[NtCreateSemaphore] [NtCreateSemaphore] #34 handle=0xA8340AB0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #34 TRACKED handle=0xA8340AB0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340AF0 (caller=0x829A2248) total=35
+[NtCreateSemaphore] [NtCreateSemaphore] #35 handle=0xA8340AF0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #35 TRACKED handle=0xA8340AF0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340B30 (caller=0x829A2248) total=36
+[NtCreateSemaphore] [NtCreateSemaphore] #36 handle=0xA8340B30 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #36 TRACKED handle=0xA8340B30 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340B70 (caller=0x829A2248) total=37
+[NtCreateSemaphore] [NtCreateSemaphore] #37 handle=0xA8340B70 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #37 TRACKED handle=0xA8340B70 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340BB0 (caller=0x829A2248) total=38
+[NtCreateSemaphore] [NtCreateSemaphore] #38 handle=0xA8340BB0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #38 TRACKED handle=0xA8340BB0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340BF0 (caller=0x829A2248) total=39
+[NtCreateSemaphore] [NtCreateSemaphore] #39 handle=0xA8340BF0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #39 TRACKED handle=0xA8340BF0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340C30 (caller=0x829A2248) total=40
+[NtCreateSemaphore] [NtCreateSemaphore] #40 handle=0xA8340C30 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #40 TRACKED handle=0xA8340C30 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340C70 (caller=0x829A2248) total=41
+[NtCreateSemaphore] [NtCreateSemaphore] #41 handle=0xA8340C70 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #41 TRACKED handle=0xA8340C70 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340CB0 (caller=0x829A2248) total=42
+[NtCreateSemaphore] [NtCreateSemaphore] #42 handle=0xA8340CB0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #42 TRACKED handle=0xA8340CB0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340CF0 (caller=0x829A2248) total=43
+[NtCreateSemaphore] [NtCreateSemaphore] #43 handle=0xA8340CF0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #43 TRACKED handle=0xA8340CF0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340D30 (caller=0x829A2248) total=44
+[NtCreateSemaphore] [NtCreateSemaphore] #44 handle=0xA8340D30 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #44 TRACKED handle=0xA8340D30 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340D70 (caller=0x829A2248) total=45
+[NtCreateSemaphore] [NtCreateSemaphore] #45 handle=0xA8340D70 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #45 TRACKED handle=0xA8340D70 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340DB0 (caller=0x829A2248) total=46
+[NtCreateSemaphore] [NtCreateSemaphore] #46 handle=0xA8340DB0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #46 TRACKED handle=0xA8340DB0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340DF0 (caller=0x829A2248) total=47
+[NtCreateSemaphore] [NtCreateSemaphore] #47 handle=0xA8340DF0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #47 TRACKED handle=0xA8340DF0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340E30 (caller=0x829A2248) total=48
+[NtCreateSemaphore] [NtCreateSemaphore] #48 handle=0xA8340E30 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #48 TRACKED handle=0xA8340E30 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340E70 (caller=0x829A2248) total=49
+[NtCreateSemaphore] [NtCreateSemaphore] #49 handle=0xA8340E70 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #49 TRACKED handle=0xA8340E70 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340EB0 (caller=0x829A2248) total=50
+[NtCreateSemaphore] [NtCreateSemaphore] #50 handle=0xA8340EB0 count=0 max=32767 - TRACKED for signaling
+[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #50 TRACKED handle=0xA8340EB0 (count=0)
+[SYNC-TABLE] CREATE semaphore @ 0xA8340EF0 (caller=0x829A2248) total=51
+[NtCreateSemaphore] [NtCreateSemaphore] #51 handle=0xA8340EF0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8340F30 (caller=0x829A2248) total=52
+[NtCreateSemaphore] [NtCreateSemaphore] #52 handle=0xA8340F30 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8340F70 (caller=0x829A2248) total=53
+[NtCreateSemaphore] [NtCreateSemaphore] #53 handle=0xA8340F70 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8340FB0 (caller=0x829A2248) total=54
+[NtCreateSemaphore] [NtCreateSemaphore] #54 handle=0xA8340FB0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8340FF0 (caller=0x829A2248) total=55
+[NtCreateSemaphore] [NtCreateSemaphore] #55 handle=0xA8340FF0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341030 (caller=0x829A2248) total=56
+[NtCreateSemaphore] [NtCreateSemaphore] #56 handle=0xA8341030 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341070 (caller=0x829A2248) total=57
+[NtCreateSemaphore] [NtCreateSemaphore] #57 handle=0xA8341070 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83410B0 (caller=0x829A2248) total=58
+[NtCreateSemaphore] [NtCreateSemaphore] #58 handle=0xA83410B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83410F0 (caller=0x829A2248) total=59
+[NtCreateSemaphore] [NtCreateSemaphore] #59 handle=0xA83410F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341130 (caller=0x829A2248) total=60
+[NtCreateSemaphore] [NtCreateSemaphore] #60 handle=0xA8341130 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341170 (caller=0x829A2248) total=61
+[NtCreateSemaphore] [NtCreateSemaphore] #61 handle=0xA8341170 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83411B0 (caller=0x829A2248) total=62
+[NtCreateSemaphore] [NtCreateSemaphore] #62 handle=0xA83411B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83411F0 (caller=0x829A2248) total=63
+[NtCreateSemaphore] [NtCreateSemaphore] #63 handle=0xA83411F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341230 (caller=0x829A2248) total=64
+[NtCreateSemaphore] [NtCreateSemaphore] #64 handle=0xA8341230 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341270 (caller=0x829A2248) total=65
+[NtCreateSemaphore] [NtCreateSemaphore] #65 handle=0xA8341270 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83412B0 (caller=0x829A2248) total=66
+[NtCreateSemaphore] [NtCreateSemaphore] #66 handle=0xA83412B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83412F0 (caller=0x829A2248) total=67
+[NtCreateSemaphore] [NtCreateSemaphore] #67 handle=0xA83412F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341330 (caller=0x829A2248) total=68
+[NtCreateSemaphore] [NtCreateSemaphore] #68 handle=0xA8341330 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341370 (caller=0x829A2248) total=69
+[NtCreateSemaphore] [NtCreateSemaphore] #69 handle=0xA8341370 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83413B0 (caller=0x829A2248) total=70
+[NtCreateSemaphore] [NtCreateSemaphore] #70 handle=0xA83413B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83413F0 (caller=0x829A2248) total=71
+[NtCreateSemaphore] [NtCreateSemaphore] #71 handle=0xA83413F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341430 (caller=0x829A2248) total=72
+[NtCreateSemaphore] [NtCreateSemaphore] #72 handle=0xA8341430 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341470 (caller=0x829A2248) total=73
+[NtCreateSemaphore] [NtCreateSemaphore] #73 handle=0xA8341470 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83414B0 (caller=0x829A2248) total=74
+[NtCreateSemaphore] [NtCreateSemaphore] #74 handle=0xA83414B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83414F0 (caller=0x829A2248) total=75
+[NtCreateSemaphore] [NtCreateSemaphore] #75 handle=0xA83414F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341530 (caller=0x829A2248) total=76
+[NtCreateSemaphore] [NtCreateSemaphore] #76 handle=0xA8341530 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341570 (caller=0x829A2248) total=77
+[NtCreateSemaphore] [NtCreateSemaphore] #77 handle=0xA8341570 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83415B0 (caller=0x829A2248) total=78
+[NtCreateSemaphore] [NtCreateSemaphore] #78 handle=0xA83415B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83415F0 (caller=0x829A2248) total=79
+[NtCreateSemaphore] [NtCreateSemaphore] #79 handle=0xA83415F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341630 (caller=0x829A2248) total=80
+[NtCreateSemaphore] [NtCreateSemaphore] #80 handle=0xA8341630 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341670 (caller=0x829A2248) total=81
+[NtCreateSemaphore] [NtCreateSemaphore] #81 handle=0xA8341670 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83416B0 (caller=0x829A2248) total=82
+[NtCreateSemaphore] [NtCreateSemaphore] #82 handle=0xA83416B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83416F0 (caller=0x829A2248) total=83
+[NtCreateSemaphore] [NtCreateSemaphore] #83 handle=0xA83416F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341730 (caller=0x829A2248) total=84
+[NtCreateSemaphore] [NtCreateSemaphore] #84 handle=0xA8341730 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341770 (caller=0x829A2248) total=85
+[NtCreateSemaphore] [NtCreateSemaphore] #85 handle=0xA8341770 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83417B0 (caller=0x829A2248) total=86
+[NtCreateSemaphore] [NtCreateSemaphore] #86 handle=0xA83417B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83417F0 (caller=0x829A2248) total=87
+[NtCreateSemaphore] [NtCreateSemaphore] #87 handle=0xA83417F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341830 (caller=0x829A2248) total=88
+[NtCreateSemaphore] [NtCreateSemaphore] #88 handle=0xA8341830 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341870 (caller=0x829A2248) total=89
+[NtCreateSemaphore] [NtCreateSemaphore] #89 handle=0xA8341870 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83418B0 (caller=0x829A2248) total=90
+[NtCreateSemaphore] [NtCreateSemaphore] #90 handle=0xA83418B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83418F0 (caller=0x829A2248) total=91
+[NtCreateSemaphore] [NtCreateSemaphore] #91 handle=0xA83418F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341930 (caller=0x829A2248) total=92
+[NtCreateSemaphore] [NtCreateSemaphore] #92 handle=0xA8341930 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341970 (caller=0x829A2248) total=93
+[NtCreateSemaphore] [NtCreateSemaphore] #93 handle=0xA8341970 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83419B0 (caller=0x829A2248) total=94
+[NtCreateSemaphore] [NtCreateSemaphore] #94 handle=0xA83419B0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA83419F0 (caller=0x829A2248) total=95
+[NtCreateSemaphore] [NtCreateSemaphore] #95 handle=0xA83419F0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341A30 (caller=0x829A2248) total=96
+[NtCreateSemaphore] [NtCreateSemaphore] #96 handle=0xA8341A30 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341A70 (caller=0x829A2248) total=97
+[NtCreateSemaphore] [NtCreateSemaphore] #97 handle=0xA8341A70 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341AB0 (caller=0x829A2248) total=98
+[NtCreateSemaphore] [NtCreateSemaphore] #98 handle=0xA8341AB0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341AF0 (caller=0x829A2248) total=99
+[NtCreateSemaphore] [NtCreateSemaphore] #99 handle=0xA8341AF0 count=0 max=32767 - TRACKED for signaling
+[SYNC-TABLE] CREATE semaphore @ 0xA8341B30 (caller=0x829A2248) total=100
+[NtCreateSemaphore] [NtCreateSemaphore] #100 handle=0xA8341B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #101 handle=0xA8341B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #102 handle=0xA8341BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #103 handle=0xA8341BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #104 handle=0xA8341C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #105 handle=0xA8341C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #106 handle=0xA8341CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #107 handle=0xA8341CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #108 handle=0xA8341D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #109 handle=0xA8341D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #110 handle=0xA8341DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #111 handle=0xA8341DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #112 handle=0xA8341E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #113 handle=0xA8341E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #114 handle=0xA8341EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #115 handle=0xA8341EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #116 handle=0xA8341F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #117 handle=0xA8341F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #118 handle=0xA8341FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #119 handle=0xA8341FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #120 handle=0xA8342030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #121 handle=0xA8342070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #122 handle=0xA83420B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #123 handle=0xA83420F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #124 handle=0xA8342130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #125 handle=0xA8342170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #126 handle=0xA83421B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #127 handle=0xA83421F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #128 handle=0xA8342230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #129 handle=0xA8342270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #130 handle=0xA83422B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #131 handle=0xA83422F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #132 handle=0xA8342330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #133 handle=0xA8342370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #134 handle=0xA83423B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #135 handle=0xA83423F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #136 handle=0xA8342430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #137 handle=0xA8342470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #138 handle=0xA83424B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #139 handle=0xA83424F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #140 handle=0xA8342530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #141 handle=0xA8342570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #142 handle=0xA83425B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #143 handle=0xA83425F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #144 handle=0xA8342630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #145 handle=0xA8342670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #146 handle=0xA83426B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #147 handle=0xA83426F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #148 handle=0xA8342730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #149 handle=0xA8342770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #150 handle=0xA83427B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #151 handle=0xA83427F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #152 handle=0xA8342830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #153 handle=0xA8342870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #154 handle=0xA83428B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #155 handle=0xA83428F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #156 handle=0xA8342930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #157 handle=0xA8342970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #158 handle=0xA83429B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #159 handle=0xA83429F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #160 handle=0xA8342A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #161 handle=0xA8342A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #162 handle=0xA8342AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #163 handle=0xA8342AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #164 handle=0xA8342B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #165 handle=0xA8342B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #166 handle=0xA8342BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #167 handle=0xA8342BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #168 handle=0xA8342C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #169 handle=0xA8342C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #170 handle=0xA8342CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #171 handle=0xA8342CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #172 handle=0xA8342D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #173 handle=0xA8342D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #174 handle=0xA8342DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #175 handle=0xA8342DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #176 handle=0xA8342E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #177 handle=0xA8342E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #178 handle=0xA8342EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #179 handle=0xA8342EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #180 handle=0xA8342F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #181 handle=0xA8342F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #182 handle=0xA8342FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #183 handle=0xA8342FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #184 handle=0xA8343030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #185 handle=0xA8343070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #186 handle=0xA83430B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #187 handle=0xA83430F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #188 handle=0xA8343130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #189 handle=0xA8343170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #190 handle=0xA83431B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #191 handle=0xA83431F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #192 handle=0xA8343230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #193 handle=0xA8343270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #194 handle=0xA83432B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #195 handle=0xA83432F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #196 handle=0xA8343330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #197 handle=0xA8343370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #198 handle=0xA83433B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #199 handle=0xA83433F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #200 handle=0xA8343430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #201 handle=0xA8343470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #202 handle=0xA83434B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #203 handle=0xA83434F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #204 handle=0xA8343530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #205 handle=0xA8343570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #206 handle=0xA83435B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #207 handle=0xA83435F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #208 handle=0xA8343630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #209 handle=0xA8343670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #210 handle=0xA83436B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #211 handle=0xA83436F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #212 handle=0xA8343730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #213 handle=0xA8343770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #214 handle=0xA83437B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #215 handle=0xA83437F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #216 handle=0xA8343830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #217 handle=0xA8343870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #218 handle=0xA83438B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #219 handle=0xA83438F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #220 handle=0xA8343930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #221 handle=0xA8343970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #222 handle=0xA83439B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #223 handle=0xA83439F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #224 handle=0xA8343A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #225 handle=0xA8343A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #226 handle=0xA8343AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #227 handle=0xA8343AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #228 handle=0xA8343B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #229 handle=0xA8343B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #230 handle=0xA8343BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #231 handle=0xA8343BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #232 handle=0xA8343C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #233 handle=0xA8343C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #234 handle=0xA8343CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #235 handle=0xA8343CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #236 handle=0xA8343D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #237 handle=0xA8343D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #238 handle=0xA8343DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #239 handle=0xA8343DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #240 handle=0xA8343E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #241 handle=0xA8343E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #242 handle=0xA8343EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #243 handle=0xA8343EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #244 handle=0xA8343F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #245 handle=0xA8343F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #246 handle=0xA8343FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #247 handle=0xA8343FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #248 handle=0xA8344030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #249 handle=0xA8344070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #250 handle=0xA83440B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #251 handle=0xA83440F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #252 handle=0xA8344130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #253 handle=0xA8344170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #254 handle=0xA83441B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #255 handle=0xA83441F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #256 handle=0xA8344230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #257 handle=0xA8344270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #258 handle=0xA83442B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #259 handle=0xA83442F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #260 handle=0xA8344330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #261 handle=0xA8344370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #262 handle=0xA83443B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #263 handle=0xA83443F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #264 handle=0xA8344430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #265 handle=0xA8344470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #266 handle=0xA83444B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #267 handle=0xA83444F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #268 handle=0xA8344530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #269 handle=0xA8344570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #270 handle=0xA83445B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #271 handle=0xA83445F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #272 handle=0xA8344630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #273 handle=0xA8344670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #274 handle=0xA83446B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #275 handle=0xA83446F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #276 handle=0xA8344730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #277 handle=0xA8344770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #278 handle=0xA83447B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #279 handle=0xA83447F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #280 handle=0xA8344830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #281 handle=0xA8344870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #282 handle=0xA83448B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #283 handle=0xA83448F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #284 handle=0xA8344930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #285 handle=0xA8344970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #286 handle=0xA83449B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #287 handle=0xA83449F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #288 handle=0xA8344A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #289 handle=0xA8344A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #290 handle=0xA8344AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #291 handle=0xA8344AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #292 handle=0xA8344B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #293 handle=0xA8344B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #294 handle=0xA8344BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #295 handle=0xA8344BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #296 handle=0xA8344C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #297 handle=0xA8344C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #298 handle=0xA8344CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #299 handle=0xA8344CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #300 handle=0xA8344D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #301 handle=0xA8344D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #302 handle=0xA8344DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #303 handle=0xA8344DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #304 handle=0xA8344E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #305 handle=0xA8344E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #306 handle=0xA8344EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #307 handle=0xA8344EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #308 handle=0xA8344F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #309 handle=0xA8344F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #310 handle=0xA8344FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #311 handle=0xA8344FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #312 handle=0xA8345030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #313 handle=0xA8345070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #314 handle=0xA83450B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #315 handle=0xA83450F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #316 handle=0xA8345130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #317 handle=0xA8345170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #318 handle=0xA83451B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #319 handle=0xA83451F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #320 handle=0xA8345230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #321 handle=0xA8345270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #322 handle=0xA83452B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #323 handle=0xA83452F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #324 handle=0xA8345330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #325 handle=0xA8345370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #326 handle=0xA83453B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #327 handle=0xA83453F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #328 handle=0xA8345430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #329 handle=0xA8345470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #330 handle=0xA83454B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #331 handle=0xA83454F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #332 handle=0xA8345530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #333 handle=0xA8345570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #334 handle=0xA83455B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #335 handle=0xA83455F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #336 handle=0xA8345630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #337 handle=0xA8345670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #338 handle=0xA83456B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #339 handle=0xA83456F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #340 handle=0xA8345730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #341 handle=0xA8345770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #342 handle=0xA83457B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #343 handle=0xA83457F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #344 handle=0xA8345830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #345 handle=0xA8345870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #346 handle=0xA83458B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #347 handle=0xA83458F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #348 handle=0xA8345930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #349 handle=0xA8345970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #350 handle=0xA83459B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #351 handle=0xA83459F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #352 handle=0xA8345A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #353 handle=0xA8345A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #354 handle=0xA8345AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #355 handle=0xA8345AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #356 handle=0xA8345B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #357 handle=0xA8345B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #358 handle=0xA8345BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #359 handle=0xA8345BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #360 handle=0xA8345C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #361 handle=0xA8345C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #362 handle=0xA8345CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #363 handle=0xA8345CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #364 handle=0xA8345D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #365 handle=0xA8345D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #366 handle=0xA8345DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #367 handle=0xA8345DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #368 handle=0xA8345E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #369 handle=0xA8345E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #370 handle=0xA8345EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #371 handle=0xA8345EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #372 handle=0xA8345F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #373 handle=0xA8345F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #374 handle=0xA8345FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #375 handle=0xA8345FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #376 handle=0xA8346030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #377 handle=0xA8346070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #378 handle=0xA83460B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #379 handle=0xA83460F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #380 handle=0xA8346130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #381 handle=0xA8346170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #382 handle=0xA83461B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #383 handle=0xA83461F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #384 handle=0xA8346230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #385 handle=0xA8346270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #386 handle=0xA83462B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #387 handle=0xA83462F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #388 handle=0xA8346330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #389 handle=0xA8346370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #390 handle=0xA83463B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #391 handle=0xA83463F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #392 handle=0xA8346430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #393 handle=0xA8346470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #394 handle=0xA83464B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #395 handle=0xA83464F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #396 handle=0xA8346530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #397 handle=0xA8346570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #398 handle=0xA83465B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #399 handle=0xA83465F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #400 handle=0xA8346630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #401 handle=0xA8346670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #402 handle=0xA83466B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #403 handle=0xA83466F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #404 handle=0xA8346730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #405 handle=0xA8346770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #406 handle=0xA83467B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #407 handle=0xA83467F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #408 handle=0xA8346830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #409 handle=0xA8346870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #410 handle=0xA83468B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #411 handle=0xA83468F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #412 handle=0xA8346930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #413 handle=0xA8346970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #414 handle=0xA83469B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #415 handle=0xA83469F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #416 handle=0xA8346A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #417 handle=0xA8346A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #418 handle=0xA8346AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #419 handle=0xA8346AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #420 handle=0xA8346B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #421 handle=0xA8346B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #422 handle=0xA8346BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #423 handle=0xA8346BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #424 handle=0xA8346C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #425 handle=0xA8346C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #426 handle=0xA8346CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #427 handle=0xA8346CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #428 handle=0xA8346D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #429 handle=0xA8346D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #430 handle=0xA8346DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #431 handle=0xA8346DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #432 handle=0xA8346E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #433 handle=0xA8346E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #434 handle=0xA8346EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #435 handle=0xA8346EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #436 handle=0xA8346F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #437 handle=0xA8346F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #438 handle=0xA8346FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #439 handle=0xA8346FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #440 handle=0xA8347030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #441 handle=0xA8347070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #442 handle=0xA83470B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #443 handle=0xA83470F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #444 handle=0xA8347130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #445 handle=0xA8347170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #446 handle=0xA83471B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #447 handle=0xA83471F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #448 handle=0xA8347230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #449 handle=0xA8347270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #450 handle=0xA83472B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #451 handle=0xA83472F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #452 handle=0xA8347330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #453 handle=0xA8347370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #454 handle=0xA83473B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #455 handle=0xA83473F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #456 handle=0xA8347430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #457 handle=0xA8347470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #458 handle=0xA83474B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #459 handle=0xA83474F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #460 handle=0xA8347530 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #461 handle=0xA8347570 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #462 handle=0xA83475B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #463 handle=0xA83475F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #464 handle=0xA8347630 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #465 handle=0xA8347670 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #466 handle=0xA83476B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #467 handle=0xA83476F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #468 handle=0xA8347730 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #469 handle=0xA8347770 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #470 handle=0xA83477B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #471 handle=0xA83477F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #472 handle=0xA8347830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #473 handle=0xA8347870 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #474 handle=0xA83478B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #475 handle=0xA83478F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #476 handle=0xA8347930 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #477 handle=0xA8347970 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #478 handle=0xA83479B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #479 handle=0xA83479F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #480 handle=0xA8347A30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #481 handle=0xA8347A70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #482 handle=0xA8347AB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #483 handle=0xA8347AF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #484 handle=0xA8347B30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #485 handle=0xA8347B70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #486 handle=0xA8347BB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #487 handle=0xA8347BF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #488 handle=0xA8347C30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #489 handle=0xA8347C70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #490 handle=0xA8347CB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #491 handle=0xA8347CF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #492 handle=0xA8347D30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #493 handle=0xA8347D70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #494 handle=0xA8347DB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #495 handle=0xA8347DF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #496 handle=0xA8347E30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #497 handle=0xA8347E70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #498 handle=0xA8347EB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #499 handle=0xA8347EF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #500 handle=0xA8347F30 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #501 handle=0xA8347F70 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #502 handle=0xA8347FB0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #503 handle=0xA8347FF0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #504 handle=0xA8348030 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #505 handle=0xA8348070 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #506 handle=0xA83480B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #507 handle=0xA83480F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #508 handle=0xA8348130 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #509 handle=0xA8348170 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #510 handle=0xA83481B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #511 handle=0xA83481F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #512 handle=0xA8348230 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #513 handle=0xA8348270 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #514 handle=0xA83482B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #515 handle=0xA83482F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #516 handle=0xA8348330 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #517 handle=0xA8348370 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #518 handle=0xA83483B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #519 handle=0xA83483F0 count=0 max=32767 - TRACKED for signaling
+[sub_8218BE28] [ALLOC] sub_8218BE28 #17 size=216 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #6 ENTER size=216
+[sub_827D9C50] [ALLOC] sub_827D9C50 #6 EXIT r3=0x803011A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #17 PPC alloc 216 bytes -> 0x803011A0
+[sub_8218BE28] [ALLOC] sub_8218BE28 #18 size=216 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #7 ENTER size=216
+[sub_827D9C50] [ALLOC] sub_827D9C50 #7 EXIT r3=0x80301290
+[sub_8218BE28] [ALLOC] sub_8218BE28 #18 PPC alloc 216 bytes -> 0x80301290
+[sub_8218BE28] [ALLOC] sub_8218BE28 #19 size=216 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #8 ENTER size=216
+[sub_827D9C50] [ALLOC] sub_827D9C50 #8 EXIT r3=0x80301380
+[sub_8218BE28] [ALLOC] sub_8218BE28 #19 PPC alloc 216 bytes -> 0x80301380
+[sub_8218BE28] [ALLOC] sub_8218BE28 #20 size=216 direct=NO thread_ctx=0x80000D20 mem_mgr=0x82AA1880
+[sub_827D9C50] [ALLOC] sub_827D9C50 #9 ENTER size=216
+[sub_827D9C50] [ALLOC] sub_827D9C50 #9 EXIT r3=0x80301470
+[sub_8218BE28] [ALLOC] sub_8218BE28 #20 PPC alloc 216 bytes -> 0x80301470
+[sub_827D9C50] [ALLOC] sub_827D9C50 #10 ENTER size=216
+[sub_827D9C50] [ALLOC] sub_827D9C50 #10 EXIT r3=0x80301560
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #22
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #22
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #23
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #23
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #24
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #24
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #25
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #25
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #26
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #26
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #27
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #27
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 ENTER #28
+[sub_827DAE20] [sub_82851F30] sub_827DAE20 EXIT #28
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #3 r5=0x828E0AB8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #3
+[sub_8296C060] [INIT] sub_8296C060 #1
+[sub_8296C060] [INIT] sub_8296C060 #2
+[sub_8296C060] [INIT] sub_8296C060 #3
+[NtCreateSemaphore] [NtCreateSemaphore] #520 handle=0xA8348430 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #521 handle=0xA8348470 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #522 handle=0xA83484B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #523 handle=0xA83484F0 count=0 max=32767 - TRACKED for signaling
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #230 r1=0x80080DA0 r3=0x830EEB00 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #230 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #320 r1=0x80080DA0 r3=0x830EEB00 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #320 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #231 r1=0x80080DA0 r3=0x830EEB30 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #231 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #321 r1=0x80080DA0 r3=0x830EEB30 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #321 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #232 r1=0x80080DA0 r3=0x830EEB60 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #232 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #322 r1=0x80080DA0 r3=0x830EEB60 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #322 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #233 r1=0x80080DA0 r3=0x830EEB90 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #233 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #323 r1=0x80080DA0 r3=0x830EEB90 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #323 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #234 r1=0x80080DA0 r3=0x830EEBC0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #234 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #324 r1=0x80080DA0 r3=0x830EEBC0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #324 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #235 r1=0x80080DA0 r3=0x830EEBF0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #235 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #325 r1=0x80080DA0 r3=0x830EEBF0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #325 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #236 r1=0x80080DA0 r3=0x830EEC20 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #236 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #326 r1=0x80080DA0 r3=0x830EEC20 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #326 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #237 r1=0x80080DA0 r3=0x830EEC50 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #237 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #327 r1=0x80080DA0 r3=0x830EEC50 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #327 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #238 r1=0x80080DA0 r3=0x830EEC80 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #238 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #328 r1=0x80080DA0 r3=0x830EEC80 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #328 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #239 r1=0x80080DA0 r3=0x830EECB0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #239 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #329 r1=0x80080DA0 r3=0x830EECB0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #329 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #240 r1=0x80080DA0 r3=0x830EECE0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #240 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #330 r1=0x80080DA0 r3=0x830EECE0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #330 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #241 r1=0x80080DA0 r3=0x830EED10 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #241 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #331 r1=0x80080DA0 r3=0x830EED10 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #331 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #242 r1=0x80080DA0 r3=0x830EED40 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #242 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #332 r1=0x80080DA0 r3=0x830EED40 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #332 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #243 r1=0x80080DA0 r3=0x830EED70 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #243 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #333 r1=0x80080DA0 r3=0x830EED70 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #333 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #244 r1=0x80080DA0 r3=0x830EEDA0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #244 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #334 r1=0x80080DA0 r3=0x830EEDA0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #334 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #245 r1=0x80080DA0 r3=0x830EEDD0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #245 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #335 r1=0x80080DA0 r3=0x830EEDD0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #335 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #246 r1=0x80080DA0 r3=0x830EEE00 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #246 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #336 r1=0x80080DA0 r3=0x830EEE00 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #336 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #247 r1=0x80080DA0 r3=0x830EEE30 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #247 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #337 r1=0x80080DA0 r3=0x830EEE30 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #337 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #248 r1=0x80080DA0 r3=0x830EEE60 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #248 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #338 r1=0x80080DA0 r3=0x830EEE60 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #338 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #249 r1=0x80080DA0 r3=0x830EEE90 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #249 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #339 r1=0x80080DA0 r3=0x830EEE90 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #339 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #250 r1=0x80080DA0 r3=0x830EEEC0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #250 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #340 r1=0x80080DA0 r3=0x830EEEC0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #340 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #251 r1=0x80080DA0 r3=0x830EEEF0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #251 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #341 r1=0x80080DA0 r3=0x830EEEF0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #341 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #252 r1=0x80080DA0 r3=0x830EEF20 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #252 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #342 r1=0x80080DA0 r3=0x830EEF20 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #342 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #253 r1=0x80080DA0 r3=0x830EEF50 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #253 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #343 r1=0x80080DA0 r3=0x830EEF50 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #343 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #254 r1=0x80080DA0 r3=0x830EEF80 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #254 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #344 r1=0x80080DA0 r3=0x830EEF80 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #344 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #255 r1=0x80080DA0 r3=0x830EEFB0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #255 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #345 r1=0x80080DA0 r3=0x830EEFB0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #345 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #256 r1=0x80080DA0 r3=0x830EEFE0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #256 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #346 r1=0x80080DA0 r3=0x830EEFE0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #346 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #257 r1=0x80080DA0 r3=0x830EF010 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #257 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #347 r1=0x80080DA0 r3=0x830EF010 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #347 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #258 r1=0x80080DA0 r3=0x830EF040 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #258 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #348 r1=0x80080DA0 r3=0x830EF040 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #348 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #259 r1=0x80080DA0 r3=0x830EF070 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #259 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #349 r1=0x80080DA0 r3=0x830EF070 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #349 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #260 r1=0x80080DA0 r3=0x830EF0A0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #260 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #350 r1=0x80080DA0 r3=0x830EF0A0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #350 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #261 r1=0x80080DA0 r3=0x830EF0D0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #261 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #351 r1=0x80080DA0 r3=0x830EF0D0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #351 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #262 r1=0x80080DA0 r3=0x830EF100 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #262 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #352 r1=0x80080DA0 r3=0x830EF100 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #352 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #263 r1=0x80080DA0 r3=0x830EF130 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #263 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #353 r1=0x80080DA0 r3=0x830EF130 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #353 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #264 r1=0x80080DA0 r3=0x830EF160 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #264 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #354 r1=0x80080DA0 r3=0x830EF160 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #354 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #265 r1=0x80080DA0 r3=0x830EF190 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #265 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #355 r1=0x80080DA0 r3=0x830EF190 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #355 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #266 r1=0x80080DA0 r3=0x830EF1C0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #266 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #356 r1=0x80080DA0 r3=0x830EF1C0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #356 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #267 r1=0x80080DA0 r3=0x830EF1F0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #267 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #357 r1=0x80080DA0 r3=0x830EF1F0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #357 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #268 r1=0x80080DA0 r3=0x830EF220 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #268 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #358 r1=0x80080DA0 r3=0x830EF220 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #358 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #269 r1=0x80080DA0 r3=0x830EF250 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #269 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #359 r1=0x80080DA0 r3=0x830EF250 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #359 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #270 r1=0x80080DA0 r3=0x830EF280 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #270 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #360 r1=0x80080DA0 r3=0x830EF280 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #360 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #271 r1=0x80080DA0 r3=0x830EF2B0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #271 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #361 r1=0x80080DA0 r3=0x830EF2B0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #361 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #272 r1=0x80080DA0 r3=0x830EF2E0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #272 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #362 r1=0x80080DA0 r3=0x830EF2E0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #362 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #273 r1=0x80080DA0 r3=0x830EF310 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #273 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #363 r1=0x80080DA0 r3=0x830EF310 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #363 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #274 r1=0x80080DA0 r3=0x830EF340 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #274 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #364 r1=0x80080DA0 r3=0x830EF340 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #364 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #275 r1=0x80080DA0 r3=0x830EF370 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #275 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #365 r1=0x80080DA0 r3=0x830EF370 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #365 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #276 r1=0x80080DA0 r3=0x830EF3A0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #276 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #366 r1=0x80080DA0 r3=0x830EF3A0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #366 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #277 r1=0x80080DA0 r3=0x830EF3D0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #277 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #367 r1=0x80080DA0 r3=0x830EF3D0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #367 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #278 r1=0x80080DA0 r3=0x830EF400 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #278 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #368 r1=0x80080DA0 r3=0x830EF400 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #368 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #279 r1=0x80080DA0 r3=0x830EF430 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #279 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #369 r1=0x80080DA0 r3=0x830EF430 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #369 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #280 r1=0x80080DA0 r3=0x830EF460 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #280 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #370 r1=0x80080DA0 r3=0x830EF460 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #370 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #281 r1=0x80080DA0 r3=0x830EF490 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #281 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #371 r1=0x80080DA0 r3=0x830EF490 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #371 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #282 r1=0x80080DA0 r3=0x830EF4C0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #282 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #372 r1=0x80080DA0 r3=0x830EF4C0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #372 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #283 r1=0x80080DA0 r3=0x830EF4F0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #283 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #373 r1=0x80080DA0 r3=0x830EF4F0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #373 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #284 r1=0x80080DA0 r3=0x830EF520 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #284 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #374 r1=0x80080DA0 r3=0x830EF520 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #374 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #285 r1=0x80080DA0 r3=0x830EF550 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #285 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #375 r1=0x80080DA0 r3=0x830EF550 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #375 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #286 r1=0x80080DA0 r3=0x830EF580 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #286 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #376 r1=0x80080DA0 r3=0x830EF580 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #376 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #287 r1=0x80080DA0 r3=0x830EF5B0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #287 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #377 r1=0x80080DA0 r3=0x830EF5B0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #377 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #288 r1=0x80080DA0 r3=0x830EF5E0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #288 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #378 r1=0x80080DA0 r3=0x830EF5E0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #378 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #289 r1=0x80080DA0 r3=0x830EF610 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #289 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #379 r1=0x80080DA0 r3=0x830EF610 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #379 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #290 r1=0x80080DA0 r3=0x830EF640 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #290 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #380 r1=0x80080DA0 r3=0x830EF640 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #380 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #291 r1=0x80080DA0 r3=0x830EF670 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #291 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #381 r1=0x80080DA0 r3=0x830EF670 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #381 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #292 r1=0x80080DA0 r3=0x830EF6A0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #292 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #382 r1=0x80080DA0 r3=0x830EF6A0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #382 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #293 r1=0x80080DA0 r3=0x830EF6D0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #293 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #383 r1=0x80080DA0 r3=0x830EF6D0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #383 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #294 r1=0x80080DA0 r3=0x830EF700 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #294 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #384 r1=0x80080DA0 r3=0x830EF700 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #384 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #295 r1=0x80080DA0 r3=0x830EF730 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #295 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #385 r1=0x80080DA0 r3=0x830EF730 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #385 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #296 r1=0x80080DA0 r3=0x830EF760 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #296 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #386 r1=0x80080DA0 r3=0x830EF760 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #386 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #297 r1=0x80080DA0 r3=0x830EF790 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #297 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #387 r1=0x80080DA0 r3=0x830EF790 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #387 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #298 r1=0x80080DA0 r3=0x830EF7C0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #298 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #388 r1=0x80080DA0 r3=0x830EF7C0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #388 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #299 r1=0x80080DA0 r3=0x830EF7F0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #299 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #389 r1=0x80080DA0 r3=0x830EF7F0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #389 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #300 r1=0x80080DA0 r3=0x830EF820 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #300 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #390 r1=0x80080DA0 r3=0x830EF820 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #390 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #301 r1=0x80080DA0 r3=0x830EF850 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #301 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #391 r1=0x80080DA0 r3=0x830EF850 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #391 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #302 r1=0x80080DA0 r3=0x830EF880 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #302 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #392 r1=0x80080DA0 r3=0x830EF880 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #392 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #303 r1=0x80080DA0 r3=0x830EF8B0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #303 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #393 r1=0x80080DA0 r3=0x830EF8B0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #393 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #304 r1=0x80080DA0 r3=0x830EF8E0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #304 r1=0x80080DA0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 ENTER #394 r1=0x80080DA0 r3=0x830EF8E0 align=0
+[sub_829743A8] [TRACE_EARLY] sub_829743A8 EXIT #394 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #305 r1=0x80080DA0 r3=0x830EFAA0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #305 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #306 r1=0x80080DA0 r3=0x830EFAB8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #306 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #307 r1=0x80080DA0 r3=0x830EFAD0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #307 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #308 r1=0x80080DA0 r3=0x830EFAE8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #308 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #309 r1=0x80080DA0 r3=0x830EFB00 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #309 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #310 r1=0x80080DA0 r3=0x830EFB18 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #310 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #311 r1=0x80080DA0 r3=0x830EFB30 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #311 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #312 r1=0x80080DA0 r3=0x830EFB48 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #312 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #313 r1=0x80080DA0 r3=0x830EFB60 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #313 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #314 r1=0x80080DA0 r3=0x830EFB78 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #314 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #315 r1=0x80080DA0 r3=0x830EFB90 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #315 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #316 r1=0x80080DA0 r3=0x830EFBA8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #316 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #317 r1=0x80080DA0 r3=0x830EFBC0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #317 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #318 r1=0x80080DA0 r3=0x830EFBD8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #318 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #319 r1=0x80080DA0 r3=0x830EFBF0 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #319 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #320 r1=0x80080DA0 r3=0x830EFC08 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #320 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #321 r1=0x80080DA0 r3=0x830EFC38 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #321 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #322 r1=0x80080DA0 r3=0x830EFC48 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #322 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #323 r1=0x80080DA0 r3=0x830EFC58 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #323 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #324 r1=0x80080DA0 r3=0x830EFC68 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #324 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #325 r1=0x80080DA0 r3=0x830EFC78 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #325 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #326 r1=0x80080DA0 r3=0x830EFC88 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #326 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #327 r1=0x80080DA0 r3=0x830EFC98 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #327 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #328 r1=0x80080DA0 r3=0x830EFCA8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #328 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #329 r1=0x80080DA0 r3=0x830EFCB8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #329 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #330 r1=0x80080DA0 r3=0x830EFCC8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #330 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #331 r1=0x80080DA0 r3=0x830EFCD8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #331 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #332 r1=0x80080DA0 r3=0x830EFCE8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #332 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #333 r1=0x80080DA0 r3=0x830EFCF8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #333 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #334 r1=0x80080DA0 r3=0x830EFD08 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #334 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #335 r1=0x80080DA0 r3=0x830EFD18 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #335 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #336 r1=0x80080DA0 r3=0x830EFD28 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #336 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #337 r1=0x80080DA0 r3=0x830EFD38 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #337 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #338 r1=0x80080DA0 r3=0x830EFD48 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #338 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #339 r1=0x80080DA0 r3=0x830EFD58 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #339 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #340 r1=0x80080DA0 r3=0x830EFD68 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #340 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #341 r1=0x80080DA0 r3=0x830EFD78 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #341 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #342 r1=0x80080DA0 r3=0x830EFD88 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #342 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #343 r1=0x80080DA0 r3=0x830EFD98 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #343 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #344 r1=0x80080DA0 r3=0x830EFDA8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #344 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #345 r1=0x80080DA0 r3=0x830EFDB8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #345 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #346 r1=0x80080DA0 r3=0x830EFDC8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #346 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #347 r1=0x80080DA0 r3=0x830EFDD8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #347 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #348 r1=0x80080DA0 r3=0x830EFDE8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #348 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #349 r1=0x80080DA0 r3=0x830EFDF8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #349 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #350 r1=0x80080DA0 r3=0x830EFE08 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #350 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #351 r1=0x80080DA0 r3=0x830EFE18 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #351 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #352 r1=0x80080DA0 r3=0x830EFE28 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #352 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #353 r1=0x80080DA0 r3=0x830EFE38 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #353 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #354 r1=0x80080DA0 r3=0x830EFE48 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #354 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #355 r1=0x80080DA0 r3=0x830EFE58 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #355 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #356 r1=0x80080DA0 r3=0x830EFE68 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #356 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #357 r1=0x80080DA0 r3=0x830EFE78 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #357 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #358 r1=0x80080DA0 r3=0x830EFE88 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #358 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #359 r1=0x80080DA0 r3=0x830EFE98 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #359 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #360 r1=0x80080DA0 r3=0x830EFEA8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #360 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #361 r1=0x80080DA0 r3=0x830EFEB8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #361 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #362 r1=0x80080DA0 r3=0x830EFEC8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #362 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #363 r1=0x80080DA0 r3=0x830EFED8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #363 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #364 r1=0x80080DA0 r3=0x830EFEE8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #364 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #365 r1=0x80080DA0 r3=0x830EFEF8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #365 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #366 r1=0x80080DA0 r3=0x830EFF08 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #366 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #367 r1=0x80080DA0 r3=0x830EFF18 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #367 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #368 r1=0x80080DA0 r3=0x830EFF28 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #368 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #369 r1=0x80080DA0 r3=0x830EFF38 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #369 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #370 r1=0x80080DA0 r3=0x830EFF48 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #370 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #371 r1=0x80080DA0 r3=0x830EFF58 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #371 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #372 r1=0x80080DA0 r3=0x830EFF68 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #372 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #373 r1=0x80080DA0 r3=0x830EFF78 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #373 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #374 r1=0x80080DA0 r3=0x830EFF88 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #374 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #375 r1=0x80080DA0 r3=0x830EFF98 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #375 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #376 r1=0x80080DA0 r3=0x830EFFA8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #376 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #377 r1=0x80080DA0 r3=0x830EFFB8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #377 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #378 r1=0x80080DA0 r3=0x830EFFC8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #378 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #379 r1=0x80080DA0 r3=0x830EFFD8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #379 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #380 r1=0x80080DA0 r3=0x830EFFE8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #380 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #381 r1=0x80080DA0 r3=0x830EFFF8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #381 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #382 r1=0x80080DA0 r3=0x830F0008 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #382 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #383 r1=0x80080DA0 r3=0x830F0018 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #383 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #384 r1=0x80080DA0 r3=0x830F0028 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #384 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #385 r1=0x80080DA0 r3=0x830F0038 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #385 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #386 r1=0x80080DA0 r3=0x830F0048 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #386 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #387 r1=0x80080DA0 r3=0x830F0058 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #387 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #388 r1=0x80080DA0 r3=0x830F0068 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #388 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #389 r1=0x80080DA0 r3=0x830F0078 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #389 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #390 r1=0x80080DA0 r3=0x830F0088 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #390 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #391 r1=0x80080DA0 r3=0x830F0098 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #391 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #392 r1=0x80080DA0 r3=0x830F00A8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #392 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #393 r1=0x80080DA0 r3=0x830F00B8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #393 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #394 r1=0x80080DA0 r3=0x830F00C8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #394 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #395 r1=0x80080DA0 r3=0x830F00D8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #395 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #396 r1=0x80080DA0 r3=0x830F00E8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #396 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #397 r1=0x80080DA0 r3=0x830F00F8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #397 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #398 r1=0x80080DA0 r3=0x830F0108 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #398 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #399 r1=0x80080DA0 r3=0x830F0118 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #399 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #400 r1=0x80080DA0 r3=0x830F0128 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #400 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #401 r1=0x80080DA0 r3=0x830F0138 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #401 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #402 r1=0x80080DA0 r3=0x830F0148 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #402 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #403 r1=0x80080DA0 r3=0x830F0158 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #403 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #404 r1=0x80080DA0 r3=0x830F0168 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #404 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #405 r1=0x80080DA0 r3=0x830F0178 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #405 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #406 r1=0x80080DA0 r3=0x830F0188 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #406 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #407 r1=0x80080DA0 r3=0x830F0198 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #407 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #408 r1=0x80080DA0 r3=0x830F01A8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #408 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #409 r1=0x80080DA0 r3=0x830F01B8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #409 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #410 r1=0x80080DA0 r3=0x830F01C8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #410 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #411 r1=0x80080DA0 r3=0x830F01D8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #411 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #412 r1=0x80080DA0 r3=0x830F01E8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #412 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #413 r1=0x80080DA0 r3=0x830F01F8 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #413 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #414 r1=0x80080DA0 r3=0x830F0208 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #414 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #415 r1=0x80080DA0 r3=0x830F0218 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #415 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #416 r1=0x80080DA0 r3=0x830F0228 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #416 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #417 r1=0x80080DA0 r3=0x830F0238 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #417 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #418 r1=0x80080DA0 r3=0x830F0248 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #418 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #419 r1=0x80080DA0 r3=0x830F0258 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #419 r1=0x80080DA0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 ENTER #420 r1=0x80080DA0 r3=0x830F0268 align=0
+[sub_829745B0] [TRACE_EARLY] sub_829745B0 EXIT #420 r1=0x80080DA0
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x0 shouldSuspend=0 suspended=0
+[GuestThreadHandle] CTOR flags=0x0 shouldSuspend=0 suspended=0
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadHandle] CTOR flags=0x1 shouldSuspend=1 suspended=1
+[GuestThreadFunc] Thread starting, suspended=0, waiting...
+[GuestThreadFunc] Thread NOT suspended, running immediately
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #4 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #4
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #5 r5=0x82779110
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #5
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #6 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #6
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #7 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #7
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #8 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #9 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #9
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #10 r5=0x8278A330
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #10
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #11 r5=0x8278A398
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #11
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #12 r5=0x8278CAC0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #12
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #13 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #13
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #14 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #14
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #15 r5=0x8279B0A0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #15
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #16 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #16
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #17 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #17
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #18 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #18
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #19 r5=0x8279F2A8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #19
+[sub_829A1950] [INIT] sub_829A1950 ENTER #1 r3=1
+[sub_829A1950] [INIT] sub_829A1950 EXIT #1 r3=2822014256
+[sub_829A1950] [INIT] sub_829A1950 ENTER #2 r3=1
+[sub_829A1950] [INIT] sub_829A1950 EXIT #2 r3=2822014384
+[sub_829A1950] [INIT] sub_829A1950 ENTER #3 r3=1
+[sub_829A1950] [INIT] sub_829A1950 EXIT #3 r3=2822014512
+[sub_829A1950] [INIT] sub_829A1950 ENTER #4 r3=1
+[sub_829A1950] [INIT] sub_829A1950 EXIT #4 r3=2822014640
+[sub_829A1950] [INIT] sub_829A1950 ENTER #5 r3=1
+[sub_829A1950] [INIT] sub_829A1950 EXIT #5 r3=2822014768
+[NtCreateSemaphore] [NtCreateSemaphore] #524 handle=0xA83487B0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #525 handle=0xA83487F0 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #526 handle=0xA8348830 count=0 max=32767 - TRACKED for signaling
+[NtCreateSemaphore] [NtCreateSemaphore] #527 handle=0xA8348870 count=0 max=32767 - TRACKED for signaling
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #20 r5=0x8261DED8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #20
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #21 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #21
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #22 r5=0x8278C3C0
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #22
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) ENTER #23 r5=0x8287E8B8
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker init) EXIT #23
+[sub_827DB118] [63-SUBSYS] sub_827DB118 (thread worker ini
