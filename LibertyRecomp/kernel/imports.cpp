@@ -2693,7 +2693,7 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
 
 uint32_t NtWriteFile(
     uint32_t FileHandle,
-    uint32_t /*Event*/, 
+    uint32_t Event,  // Signal on completion for async I/O 
     uint32_t /*ApcRoutine*/,
     uint32_t /*ApcContext*/,
     XIO_STATUS_BLOCK* IoStatusBlock,
@@ -2734,6 +2734,17 @@ uint32_t NtWriteFile(
     {
         IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
         IoStatusBlock->Information = ok ? Length : 0;
+    }
+
+
+    // Signal completion event for async I/O
+    if (Event != 0 && ok) {
+        static int s_eventSignalCount = 0;
+        ++s_eventSignalCount;
+        if (s_eventSignalCount <= 20 || s_eventSignalCount % 100 == 0) {
+            LOGF_WARNING("[ASYNC COMPLETE] NtWriteFile signaling event 0x{:08X} (count={})", Event, s_eventSignalCount);
+        }
+        SyncTable_Signal(Event, 1, 0);
     }
 
     return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
@@ -3281,7 +3292,7 @@ uint32_t NtQueryVolumeInformationFile(
 
 uint32_t NtQueryDirectoryFile(
     uint32_t FileHandle,
-    uint32_t /*Event*/,
+    uint32_t Event,  // Signal on completion for async I/O
     uint32_t /*ApcRoutine*/,
     uint32_t /*ApcContext*/,
     XIO_STATUS_BLOCK* IoStatusBlock,
@@ -5767,9 +5778,9 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
         }
     }
     
-    // SIGNAL COMPLETION EVENT: sub_829A3560 waits on event at 0x82897F5C after scheduling
+    // SIGNAL COMPLETION EVENT: sub_829A3560 waits on event at 0x82A97F5C after scheduling
     // Since we execute synchronously, signal this event so the wait doesn't block
-    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
     if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
     {
@@ -11090,7 +11101,7 @@ extern "C" void __imp__sub_829A3238(PPCContext& ctx, uint8_t* base);  // Sync wa
 
 // Hook sub_829A3238 - SYNC WAIT FUNCTION (KeWaitForSingleObject)
 // Blocking path: sub_82300C78 → sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
-// This function enters critical section, sets event, WAITS on event at 0x82997F5C, resets event, leaves critical section
+// This function enters critical section, sets event, WAITS on event at 0x82A97F5C, resets event, leaves critical section
 // Fix: Pre-signal the event so the wait returns immediately
 extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
@@ -11098,10 +11109,10 @@ extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base) {
     printf("[SYNC] sub_829A3238 #%d ENTER - pre-signaling sync event\n", s_count);
     fflush(stdout);
     
-    // PRE-SIGNAL the sync event at 0x82997F5C
-    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82997F5C
+    // PRE-SIGNAL the sync event at 0x82A97F5C
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82A97F5C
     // The function waits on this event after setting another event.
-    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
     if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
     {
@@ -11141,9 +11152,9 @@ extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base) {
     printf("[SYNC] sub_829A39F0 #%d ENTER - pre-signaling sync event for sub_829A3238\n", s_count);
     fflush(stdout);
     
-    // PRE-SIGNAL the sync event at 0x82997F5C that sub_829A3238 waits on
-    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82997F5C
-    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    // PRE-SIGNAL the sync event at 0x82A97F5C that sub_829A3238 waits on
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82A97F5C
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
     if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
     {
@@ -11173,7 +11184,7 @@ extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base) {
 }
 
 // Hook sub_829A3560 - TASK + MOUNT INTEGRATION
-// This function calls XamTaskSchedule, then computes event addr 0x82897F5C, then KeWaitForSingleObject
+// This function calls XamTaskSchedule, then computes event addr 0x82A97F5C, then KeWaitForSingleObject
 // The event must be signaled BEFORE the wait. We pre-signal it so the wait returns immediately.
 extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
@@ -11181,10 +11192,10 @@ extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base) {
     printf("[SYNC] sub_829A3560 #%d ENTER - pre-signaling completion event\n", s_count);
     fflush(stdout);
     
-    // PRE-SIGNAL the completion event at 0x82897F5C
+    // PRE-SIGNAL the completion event at 0x82A97F5C
     // This event is waited on after XamTaskSchedule returns.
     // By signaling it now, the wait will return immediately.
-    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
     if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
     {
@@ -11276,9 +11287,9 @@ extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base) {
     printf("[SYNC] sub_827DB988 #%d ENTER - pre-signaling event for sub_829A3238\n", s_count);
     fflush(stdout);
     
-    // PRE-SIGNAL the sync event at 0x82997F5C that sub_829A3238 will wait on
+    // PRE-SIGNAL the sync event at 0x82A97F5C that sub_829A3238 will wait on
     // This ensures the KeWaitForSingleObject in sub_829A3238 returns immediately
-    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
     if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
     {
@@ -11313,50 +11324,57 @@ extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base) {
 
 // REIMPLEMENTED: sub_821A8868 (HUD/Mission init)
 // The original calls sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 -> sub_829A3560
-// sub_829A3560 does XamTaskSchedule then waits on event at 0x82897F5C
+// sub_829A3560 does XamTaskSchedule then waits on event at 0x82A97F5C
 // Since we execute XamTaskSchedule synchronously, we pre-signal the event so the wait succeeds
 extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
 
 
 PPC_FUNC(sub_821A8868) {
     static int s_count = 0; ++s_count;
-    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (pre-signaling sync events)\n", s_count);
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (non-blocking reimplementation)\n", s_count);
     fflush(stdout);
     
-    // PRE-SIGNAL EVENT 1: 0x82897F5C (XamTask completion)
-    // Key insight: QueryKernelObject creates a NEW Event if not initialized
-    // After setting Type=1, we MUST call QueryKernelObject()->Set() to create AND signal
-    constexpr uint32_t kTaskCompletionEventAddr = 0x82897F5C;
-    XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
-    if (completionEvent)
-    {
-        if (completionEvent->Type != 0 && completionEvent->Type != 1) {
-            completionEvent->Type = 1;  // Force to Notification event
-            completionEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
-        }
-        QueryKernelObject<Event>(*completionEvent)->Set();
-        printf("[REIMPL] sub_821A8868 #%d Pre-signaled event1 at 0x%08X\n", s_count, kTaskCompletionEventAddr);
-    }
+    // HOLISTIC REIMPLEMENTATION: Skip blocking sub_82300C78, call non-blocking parts
+    // Original call tree:
+    // 1. sub_82300C78 - BLOCKING (sync primitives) - SKIP, but initialize its output
+    // 2. sub_8218BE28 - allocation (non-blocking)
+    // 3. sub_824E1DD0 - allocation wrapper (non-blocking)
+    // 4. sub_8249BA90 - allocation (non-blocking)
+    // 5. sub_821A8060 - file/stream setup (non-blocking)
     
-    // PRE-SIGNAL EVENT 2: 0x82997F5C (sub_829A3238 sync wait)
-    constexpr uint32_t kSyncEventAddr = 0x82997F5C;
-    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
-    if (syncEvent)
-    {
-        if (syncEvent->Type != 0 && syncEvent->Type != 1) {
-            syncEvent->Type = 1;  // Force to Notification event
-            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
-        }
-        QueryKernelObject<Event>(*syncEvent)->Set();
-        printf("[REIMPL] sub_821A8868 #%d Pre-signaled event2 at 0x%08X\n", s_count, kSyncEventAddr);
-    }
-    fflush(stdout);
+    // 1. SKIP sub_82300C78, but allocate what it would return and store to global
+    constexpr uint32_t kGlobalAddr = 0x82ad6958;
     
-    // Now call the original - waits will return immediately due to pre-signaling
-    __imp__sub_821A8868(ctx, base);
+    // Allocate 16 bytes (what sub_82300C78 allocates internally)
+    PPCContext allocCtx = ctx;
+    allocCtx.r3.u32 = 16;
+    __imp__sub_8218BE28(allocCtx, base);
+    uint32_t allocResult = allocCtx.r3.u32;
+    
+    // Store to global 0x82ad6958 (what sub_82300C78 would do)
+    if (allocResult != 0) {
+        uint32_t* globalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kGlobalAddr));
+        if (globalPtr) {
+            *globalPtr = ByteSwap(allocResult);
+            printf("[REIMPL] sub_821A8868 #%d Initialized global 0x%08X = 0x%08X\n", 
+                   s_count, kGlobalAddr, allocResult);
+        }
+    }
+
+    
+    // 2. Call sub_824E1DD0 (non-blocking allocation wrapper)
+    __imp__sub_824E1DD0(ctx, base);
+    
+    // 3. Call sub_8249BA90 (non-blocking allocation)
+    __imp__sub_8249BA90(ctx, base);
+    
+    // 4. Call sub_821A8060 (non-blocking file/stream setup)
+    __imp__sub_821A8060(ctx, base);
     
     printf("[REIMPL] sub_821A8868 #%d EXIT - HUD init complete\n", s_count);
     fflush(stdout);
+    
+    ctx.r3.u32 = 1;  // Return success
 }
 
 
