@@ -508,3 +508,19 @@ FodyWeavers.xsd
 
 UnleashedRecompLib/build
 UnleashedRecompLib/ppc*
+
+# Local MCP servers and debug logs (DO NOT COMMIT)
+tools/math-mcp-server/
+tools/ppc-mcp-server/dist/
+tools/ppc-mcp-server/.ppc-index-cache.json
+
+blocking_analysis.txt
+context_fix_test.txt
+crash_diag.txt
+failopen_test*.txt
+fresh_log*.txt
+long_test*.txt
+longer_test*.txt
+network_bypass_test*.txt
+profile_bypass_test*.txt
+watchdog_test*.txt

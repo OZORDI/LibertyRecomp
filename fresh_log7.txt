@@ -1,1 +1,0 @@
-zsh:1: no such file or directory: ./out/build/macos-release/LibertyRecomp/Liberty Recompiled.app/Contents/MacOS/Liberty Recompiled
