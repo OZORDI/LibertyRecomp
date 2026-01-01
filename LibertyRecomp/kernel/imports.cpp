@@ -7636,24 +7636,22 @@ PPC_FUNC(sub_8297B8C0) {
 // =============================================================================
 // sub_829735C8 - Audio/Media Init (Xbox XAudio2)
 // =============================================================================
-// This function initializes Xbox audio device via vtable[11] call.
-// The host audio layer (apu/audio.cpp) handles audio via XAudioRegisterRenderDriverClient.
-//
-// SOLUTION: Bypass - set initialized flag, skip Xbox vtable calls
+// FIXED: Let original run - no blocking detected in call tree.
+// This triggers XAudioRegisterRenderDriverClient via vtable call.
 // =============================================================================
 extern "C" void __imp__sub_829735C8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829735C8) {
     static int s_count = 0; ++s_count;
     
     if (s_count <= 3) {
-        LOG_WARNING("[AUDIO] sub_829735C8 BYPASSING - Xbox audio init (host audio layer handles this)");
+        LOG_WARNING("[AUDIO] sub_829735C8 ENTER - calling original (audio init)");
     }
     
-    // Set the initialized flag at global+3128 so subsequent calls skip init
-    uint32_t globalBase = uint32_t(-2095906816);  // 0x82B90000  
-    PPC_STORE_U8(globalBase + 3120 + 8, 1);  // Set initialized flag
+    __imp__sub_829735C8(ctx, base);  // Let it run!
     
-    return;
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_829735C8 EXIT - audio init complete");
+    }
 }
 
 // Trace internal calls of sub_829735C8
@@ -7684,27 +7682,22 @@ PPC_FUNC(sub_8296D468) {
 // =============================================================================
 // sub_82974F90 - Audio Stream Registration
 // =============================================================================
-// This function registers audio streams with the audio subsystem.
-// It runs immediately after sub_829735C8 (audio init) which is bypassed.
-// Since sub_829735C8 bypass doesn't initialize the memory structures this
-// function expects (linked list heads, atomic counters), calling the original
-// causes a crash at sub_827DFA10 (atomic compare-and-swap on uninitialized memory).
-//
-// The host audio layer (SDL2) handles audio via XAudioRegisterRenderDriverClient
-// which is hooked separately and works independently.
-//
-// SOLUTION: Stub this function - audio works via hooked XAudio functions
+// FIXED: Now that sub_829735C8 runs and initializes memory structures,
+// this function can also run safely.
 // =============================================================================
+extern "C" void __imp__sub_82974F90(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82974F90) {
     static int s_count = 0; ++s_count;
     
     if (s_count <= 3) {
-        LOG_WARNING("[AUDIO] sub_82974F90 STUBBED - audio stream registration (host SDL2 audio handles this)");
+        LOG_WARNING("[AUDIO] sub_82974F90 ENTER - calling original (audio stream registration)");
     }
     
-    // Don't call __imp__sub_82974F90 - it expects memory initialized by bypassed sub_829735C8
-    // Audio works via hooked XAudioRegisterRenderDriverClient / XAudioSubmitRenderDriverFrame
-    return;
+    __imp__sub_82974F90(ctx, base);  // Now safe - memory initialized by sub_829735C8
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_82974F90 EXIT");
+    }
 }
 
 PPC_FUNC(sub_82670660) {
@@ -11231,6 +11224,7 @@ extern "C" void __imp__sub_8249BA90(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_821A8060(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_821A8278(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_824E14B8(PPCContext& ctx, uint8_t* base);  // Init function called by sub_82300C78
 
 // =============================================================================
 // SYNC PRIMITIVE HOOKS - Make blocking sync functions non-blocking
@@ -11474,37 +11468,106 @@ extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
 
 PPC_FUNC(sub_821A8868) {
     static int s_count = 0; ++s_count;
-    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (non-blocking reimplementation)\n", s_count);
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (expanded reimplementation)\n", s_count);
     fflush(stdout);
     
-    // HOLISTIC REIMPLEMENTATION: Skip blocking sub_82300C78, call non-blocking parts
-    // Original call tree:
-    // 1. sub_82300C78 - BLOCKING (sync primitives) - SKIP, but initialize its output
-    // 2. sub_8218BE28 - allocation (non-blocking)
+    // EXPANDED HOLISTIC REIMPLEMENTATION of sub_821A8868
+    // This now includes the full functionality of sub_82300C78 (non-blocking version)
+    // 
+    // Original sub_821A8868 call tree:
+    // 1. sub_82300C78 - string/resource init (has blocking sync) - REIMPLEMENTED INLINE
+    // 2. sub_8218BE28 - allocation (non-blocking)  
     // 3. sub_824E1DD0 - allocation wrapper (non-blocking)
     // 4. sub_8249BA90 - allocation (non-blocking)
     // 5. sub_821A8060 - file/stream setup (non-blocking)
     
-    // 1. SKIP sub_82300C78, but allocate what it would return and store to global
-    constexpr uint32_t kGlobalAddr = 0x82ad6958;
+    // =========================================================================
+    // REIMPLEMENTATION OF sub_82300C78 (non-blocking version)
+    // This initializes the critical global at 0x82CFA2E4 that sub_821A8278 needs
+    // =========================================================================
     
-    // Allocate 16 bytes (what sub_82300C78 allocates internally)
-    PPCContext allocCtx = ctx;
-    allocCtx.r3.u32 = 16;
-    __imp__sub_8218BE28(allocCtx, base);
-    uint32_t allocResult = allocCtx.r3.u32;
+    uint32_t inputArg = ctx.r3.u32;  // Capture input before modifying r3
     
-    // Store to global 0x82ad6958 (what sub_82300C78 would do)
-    if (allocResult != 0) {
-        uint32_t* globalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kGlobalAddr));
-        if (globalPtr) {
-            *globalPtr = ByteSwap(allocResult);
-            printf("[REIMPL] sub_821A8868 #%d Initialized global 0x%08X = 0x%08X\n", 
-                   s_count, kGlobalAddr, allocResult);
+    // Step 1: Store input to 0x82CFA2E0
+    constexpr uint32_t kInputGlobal = 0x82CFA2E0;
+    uint32_t* inputGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kInputGlobal));
+    if (inputGlobalPtr) {
+        *inputGlobalPtr = ByteSwap(inputArg);
+    }
+    
+    // Step 2: Clear flag bytes at 0x82D04248 and 0x82D04249
+    uint8_t* flag1 = g_memory.Translate(0x82D04248);
+    uint8_t* flag2 = g_memory.Translate(0x82D04249);
+    if (flag1) *flag1 = 0;
+    if (flag2) *flag2 = 0;
+    
+    // Step 3: Call sub_824E14B8 (non-blocking init)
+    __imp__sub_824E14B8(ctx, base);
+    
+    // Step 4: Allocate 12616 bytes (the size sub_82300C78 allocates)
+    ctx.r3.u32 = 12616;
+    __imp__sub_8218BE28(ctx, base);
+    uint32_t objPtr = ctx.r3.u32;
+    
+    printf("[REIMPL] sub_821A8868 #%d Allocated HUD object: 0x%08X (12616 bytes)\n", s_count, objPtr);
+    
+    if (objPtr != 0) {
+        // Step 5: Store vtable pointer 0x82010F0C to [obj+0]
+        constexpr uint32_t kVtableAddr = 0x82010F0C;
+        PPC_STORE_U32(objPtr + 0, kVtableAddr);
+        
+        // Step 6: Init loop - zero 7 entries at stride 1568 starting at offset 48
+        for (int i = 0; i < 7; i++) {
+            uint32_t offset = 48 + (i * 1568);
+            PPC_STORE_U16(objPtr + offset, 0);
+            PPC_STORE_U16(objPtr + offset + 2, 0);
+        }
+        
+        // Step 7: Zero trailing fields at +12596, +12600, +12604
+        PPC_STORE_U32(objPtr + 12596, 0);
+        PPC_STORE_U32(objPtr + 12600, 0);
+        PPC_STORE_U32(objPtr + 12604, 0);
+    }
+    
+    // Step 8: Store object pointer to 0x82CFA2E4 (THE CRITICAL GLOBAL!)
+    constexpr uint32_t kHudObjectGlobal = 0x82CFA2E4;
+    uint32_t* hudGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudObjectGlobal));
+    if (hudGlobalPtr) {
+        *hudGlobalPtr = ByteSwap(objPtr);
+        printf("[REIMPL] sub_821A8868 #%d Initialized critical global 0x%08X = 0x%08X\n", 
+               s_count, kHudObjectGlobal, objPtr);
+    }
+    
+    // Step 9: Call vtable[1] (offset 4) on the object
+    if (objPtr != 0) {
+        uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+        uint32_t vtableFunc = PPC_LOAD_U32(vtable + 4);
+        if (vtableFunc != 0) {
+            printf("[REIMPL] sub_821A8868 #%d Calling vtable[1] at 0x%08X\n", s_count, vtableFunc);
+            ctx.r3.u32 = objPtr;
+            PPC_CALL_INDIRECT_FUNC(vtableFunc);
         }
     }
-
     
+    // Step 10: Set ready flag at 0x82D0424A
+    uint8_t* readyFlag = g_memory.Translate(0x82D0424A);
+    if (readyFlag) *readyFlag = 1;
+    
+    // Step 11: SKIP sub_827DB988 and sub_827DB2A8 (blocking sync functions)
+    // These are the sync primitives that would block - we bypass them entirely
+    
+    // =========================================================================
+    // END OF sub_82300C78 REIMPLEMENTATION
+    // =========================================================================
+    
+    // Also initialize the original global at 0x82AD6958 for sub_821A8868's own use
+    constexpr uint32_t kHudInitGlobal = 0x82AD6958;
+    uint32_t* hudInitPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudInitGlobal));
+    if (hudInitPtr && objPtr != 0) {
+        *hudInitPtr = ByteSwap(objPtr);
+    }
+    
+    // Continue with remaining non-blocking calls from original sub_821A8868
     // 2. Call sub_824E1DD0 (non-blocking allocation wrapper)
     __imp__sub_824E1DD0(ctx, base);
     
