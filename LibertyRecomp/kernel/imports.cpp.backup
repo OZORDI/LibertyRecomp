@@ -57,7 +57,7 @@ inline void KernelPhase_EnterInit() {
 }
 
 // Transition to Runtime phase (call after first VdSwap or main loop entry)
-void KernelPhase_EnterRuntime() {
+inline void KernelPhase_EnterRuntime() {
     auto phase = g_kernelPhase.load();
     if (phase != KernelPhase::Runtime) {
         g_kernelPhase.store(KernelPhase::Runtime, std::memory_order_release);
@@ -132,15 +132,15 @@ void PatchSyncPrimitives() {
     // Patch sync primitives - these cause blocking in HUD init
     // Use _hook suffix functions to avoid weak symbol collision on macOS
     PatchFuncMapping(0x829A9738, &sub_829A9738_hook);  // Wait helper (NtWaitForSingleObjectEx) - CRITICAL
-    // PatchFuncMapping(0x829A3560, &sub_829A3560_hook);  // Now using PPC_FUNC instead  // XamTask + mount integration (signals completion event)
-    // PatchFuncMapping(0x829A39A0, &sub_829A39A0_hook);  // Now using PPC_FUNC instead  // Root sync primitive
-    // PatchFuncMapping(0x829A3238, &sub_829A3238_hook);  // Now using PPC_FUNC instead  // Sync wait function (KeWaitForSingleObject) - CRITICAL
-    // PatchFuncMapping(0x829A39F0, &sub_829A39F0_hook);  // Now using PPC_FUNC instead  // Intermediate sync (calls sub_829A3238) - CRITICAL
-    // PatchFuncMapping(0x827DB338, &sub_827DB338_hook);  // Now using PPC_FUNC instead  // Sync wait wrapper  
-    // PatchFuncMapping(0x827DB988, &sub_827DB988_hook);  // Now using PPC_FUNC instead  // Sync init
+    PatchFuncMapping(0x829A3560, &sub_829A3560_hook);  // XamTask + mount integration (signals completion event)
+    PatchFuncMapping(0x829A39A0, &sub_829A39A0_hook);  // Root sync primitive
+    PatchFuncMapping(0x829A3238, &sub_829A3238_hook);  // Sync wait function (KeWaitForSingleObject) - CRITICAL
+    PatchFuncMapping(0x829A39F0, &sub_829A39F0_hook);  // Intermediate sync (calls sub_829A3238) - CRITICAL
+    PatchFuncMapping(0x827DB338, &sub_827DB338_hook);  // Sync wait wrapper  
+    PatchFuncMapping(0x827DB988, &sub_827DB988_hook);  // Sync init
     PatchFuncMapping(0x827DACD8, &sub_827DACD8_hook);  // Semaphore wait - sync table routing
 
-    // PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // Now using PPC_FUNC instead  // String/resource lookup
+    PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // String/resource lookup
     PatchFuncMapping(0x829A2380, &sub_829A2380_hook);  // Semaphore acquire (sync table)
     PatchFuncMapping(0x829A21F8, &sub_829A21F8_hook);  // Semaphore create wrapper (sync table)
 
@@ -2609,16 +2609,6 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
                   s_waitCount, Handle, timeout, callerLR);
     }
     
-    // POST-INIT FIX: timeout=0 polls are frame sync checks
-    // After init completes, return success to let scheduler invoke render callbacks
-    if (timeout == 0 && !ShouldFailOpenWait()) {
-        static int s_postInitPoll = 0;
-        if (++s_postInitPoll <= 5) {
-            LOGF_WARNING("[NtWaitEx] POST-INIT timeout=0 poll #{} returning SUCCESS for render loop", s_postInitPoll);
-        }
-        return STATUS_SUCCESS;
-    }
-    
     // VBlank removed - following UnleashedRecomp pattern (no force-firing)
     // Game progresses naturally without interrupt-driven timing
 
@@ -2683,17 +2673,8 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
             return result;
         }
 
-        // POST-INIT: timeout=0 polls should return success to allow scheduler to proceed
-        // The game polls with timeout=0 waiting for frame signals - VBlank timer provides timing
-        if (timeout == 0 && !ShouldFailOpenWait()) {
-            // After init, timeout=0 polls are frame sync checks
-            // Return success to let scheduler invoke render callback
-            static int s_postInitPoll = 0;
-            if (++s_postInitPoll <= 5) {
-                LOGF_WARNING("[NtWaitEx] POST-INIT timeout=0 poll #{} returning SUCCESS", s_postInitPoll);
-            }
-            return STATUS_SUCCESS;
-        }
+        // Removed worker semaphore bypass hack - let C++20 atomic wait/notify work naturally
+        // Following Unleashed's approach: proper synchronization without forced returns
         
         return obj->Wait(timeout);
     }
@@ -2867,7 +2848,6 @@ uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t event
 {
     static int s_count = 0;
     ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     // Log BEFORE creation to detect if CreateKernelObject crashes
     if (s_count <= 30)
@@ -2880,9 +2860,11 @@ uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t event
     uint32_t h = GetKernelHandle(evt);
     *handle = h;
     
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
-    // eventType: 0 = NotificationEvent (manual reset), 1 = SynchronizationEvent (auto reset)
-    SyncTable_InitEvent(h, eventType == 0, initialState != 0, callerLR);
+    // Track this event so we can signal it later
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        g_trackedEventHandles.push_back(h);
+    }
     
     // Log AFTER creation to confirm success
     if (s_count <= 30)
@@ -4045,10 +4027,85 @@ bool VdPersistDisplay(uint32_t a1, uint32_t* a2)
 
 void VdSwap()
 {
-    // MarathonRecomp-style: VdSwap is a stub
-    // Frame presentation is handled by Video::Present() hooked to game's D3D Present
-    // Phase transition and FPS limiting happen in Video::Present()
-    LOG_UTILITY("!!! STUB !!!");
+    // KERNEL POLICY: First VdSwap = Runtime phase
+    KernelPhase_EnterRuntime();
+
+    // VdSwap is called by the Xbox 360 GPU to present frames
+    static uint32_t s_frameCount = 0;
+    if (s_frameCount < 10 || (s_frameCount % 60 == 0 && s_frameCount < 600))
+    {
+        LOGF_UTILITY("VdSwap frame {} - presenting!", s_frameCount);
+    }
+    ++s_frameCount;
+    
+    // Pump SDL events to keep the window responsive
+    // IMPORTANT: On macOS, this MUST happen on the main thread
+    if (IsMainThread())
+    {
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        GameWindow::Update();
+    }
+    
+    // Call our host rendering system to present the frame
+    Video::Present();
+    
+    // Signal "End of Frame" to unblock workers waiting on GPU fences
+    // The GPU fence at 0x8006F844 and 0x8006F7F4 need to be signaled
+    // Also increment the global KeSetEvent generation to wake any waiters
+    ++g_keSetEventGeneration;
+    g_keSetEventGeneration.notify_all();
+    
+    // Signal ALL tracked Event objects to unblock workers
+    // Workers are waiting on events with infinite timeout - they need to be signaled
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        static int s_signalLogCount = 0;
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        if (s_signalLogCount < 5)
+        {
+            ++s_signalLogCount;
+            LOGF_UTILITY("VdSwap signaled {} events (gen={})", g_trackedEventHandles.size(), g_keSetEventGeneration.load());
+        }
+    }
+    
+    // Signal worker semaphores to process queued work
+    // Based on PPC analysis: workers wait on semaphores created during init
+    // These semaphores need periodic signaling to drive worker processing
+    static const std::vector<uint32_t> workerSemaphores = {
+        0xA8240270, 0xA82402B0, 0xA82402F0, 0xA8240370,
+        0xA82403B0, 0xA82403F0, 0xA8240430, 0xA8240470,
+        0xA82404B0, 0xA82404F0, 0xA8240530, 0xA8240570
+    };
+    
+    static int s_semSignalCount = 0;
+    for (uint32_t semHandle : workerSemaphores)
+    {
+        if (IsKernelObject(semHandle))
+        {
+            Semaphore* sem = GetKernelObject<Semaphore>(semHandle);
+            if (sem && sem->count.load() == 0)
+            {
+                sem->Release(1, nullptr);  // Signal one worker
+            }
+        }
+    }
+    
+    if (s_semSignalCount < 5)
+    {
+        ++s_semSignalCount;
+        LOGF_UTILITY("VdSwap signaled {} worker semaphores", workerSemaphores.size());
+    }
 }
 
 void VdGetSystemCommandBuffer()
@@ -4360,59 +4417,75 @@ void VdSetDisplayMode()
 }
 
 // =============================================================================
-// VBlank Timer - ENABLED for GTA IV (needs periodic VBlank signals)
+// VBlank Timer Thread - Fires at 60Hz to drive timing-dependent systems
 // =============================================================================
-static std::atomic<bool> g_vblankTimerRunning{false};
+// GTA IV expects VBlank interrupts at exactly 60Hz even during initialization.
+// This is different from Sonic Unleashed which doesn't need VBlank timing.
+// The timer fires the registered graphics interrupt callback and wakes event waiters.
+
+static std::atomic<bool> g_vblankThreadRunning{false};
 static std::thread g_vblankThread;
 
-// Forward declaration for main loop entry
-extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);
-
-void FireVBlankCallback() {
-    if (g_gpuRingBuffer.interruptCallback != 0) {
-        // Create a temporary context to call the guest callback
-        PPCContext ctx{};
-        ctx.r3.u32 = g_gpuRingBuffer.interruptUserData;
-        ctx.r4.u32 = 0;  // Interrupt type 0 = VBlank
+void StartVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+        return;  // Already running
+    
+    g_vblankThreadRunning = true;
+    printf("[StartVBlankTimer] Starting VBlank thread...\n");
+    g_vblankThread = std::thread([]() {
+        using namespace std::chrono;
+        auto nextVBlank = steady_clock::now();
+        constexpr auto VBLANK_INTERVAL = nanoseconds(16666667);  // 60Hz = 16.666ms
         
-        auto* callbackFunc = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
-        if (callbackFunc) {
-            callbackFunc(ctx, g_memory.base);
-        }
+        uint32_t vblankCount = 0;
         
-        // After VBlank callback, try to invoke main loop entry directly
-        // This forces the render path to execute
-        static int s_mainLoopCalls = 0;
-        if (++s_mainLoopCalls <= 5) {
-            printf("[VBlank] Calling main loop entry sub_82856F08 #%d\n", s_mainLoopCalls);
-            fflush(stdout);
+        while (g_vblankThreadRunning)
+        {
+            nextVBlank += VBLANK_INTERVAL;
+            std::this_thread::sleep_until(nextVBlank);
+            
+            ++vblankCount;
+            
+            // Fire VBlank callback if registered
+            // NOTE: g_ppcContext is thread_local and NULL on this thread!
+            // We create our own context for VBlank callbacks.
+            if (vblankCount <= 3) { printf("[VBlank] Thread tick #%u callback=0x%08X\n", vblankCount, g_gpuRingBuffer.interruptCallback); }
+            if (g_gpuRingBuffer.interruptCallback != 0)
+            {
+                PPCFunc* callback = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
+                if (callback)
+                {
+                    // Create a minimal context for VBlank callback
+                    // Cannot use g_ppcContext - it's thread_local and null here
+                    static PPCContext vblankCtx{};
+                    vblankCtx.r3.u32 = 0;  // Interrupt type 0 = VBlank
+                    vblankCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                    vblankCtx.r1.u64 = 0x80080000;  // Minimal stack pointer
+                    vblankCtx.r13.u64 = 0x80000D20; // Minimal TLS base
+                    callback(vblankCtx, g_memory.base);
+                    
+                    if (vblankCount <= 5 || vblankCount % 60 == 0)
+                    {
+                        LOGF_UTILITY("[VBlank] Fired callback #{} at 60Hz", vblankCount);
+                    }
+                }
+            }
+            
+            // Increment event generation to wake any waiters
+            ++g_keSetEventGeneration;
+            g_keSetEventGeneration.notify_all();
         }
-        __imp__sub_82856F08(ctx, g_memory.base);
-    }
+    });
 }
 
-void VBlankTimerThread() {
-    while (g_vblankTimerRunning.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60Hz
-        FireVBlankCallback();
-    }
-}
-
-void StartVBlankTimer() {
-    if (!g_vblankTimerRunning.load()) {
-        g_vblankTimerRunning.store(true);
-        g_vblankThread = std::thread(VBlankTimerThread);
-        printf("[VBlank] Timer started (60Hz)\n");
-    }
-}
-
-void StopVBlankTimer() {
-    if (g_vblankTimerRunning.load()) {
-        g_vblankTimerRunning.store(false);
-        if (g_vblankThread.joinable()) {
+void StopVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+    {
+        g_vblankThreadRunning = false;
+        if (g_vblankThread.joinable())
             g_vblankThread.join();
-        }
-        printf("[VBlank] Timer stopped\n");
     }
 }
 
@@ -4421,18 +4494,43 @@ void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
     g_gpuRingBuffer.interruptCallback = callback;
     g_gpuRingBuffer.interruptUserData = userData;
     
-    printf("[VdSetGraphicsInterruptCallback] callback=0x%08X userData=0x%08X\n", callback, userData);
-    
     // Start VBlank timer when callback is registered (GTA IV requirement)
     StartVBlankTimer();
+    
+    printf("[VdSetGraphicsInterruptCallback] callback=0x%08X userData=0x%08X - VBlank timer started at 60Hz\n", callback, userData);
 }
 
 uint32_t VdInitializeEngines()
 {
     g_gpuRingBuffer.enginesInitialized = true;
     
+    // FORCE: Register VBlank callback since VdSetGraphicsInterruptCallback is never called
+    // The callback 0x829D7368 is the known VBlank handler from GTA IV
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[VdInitializeEngines] FORCE-registering VBlank callback 0x829D7368\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
     LOG_UTILITY("enginesInitialized = true");
     
+    // Signal all tracked events to wake waiting threads
+    // Workers may be blocked waiting for GPU initialization to complete
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        LOGF_UTILITY("VdInitializeEngines signaled {} events", g_trackedEventHandles.size());
+    }
     
     return 1;
 }
@@ -4480,8 +4578,26 @@ uint32_t VdRetrainEDRAM()
         LOGF_UTILITY("edramTrainingComplete = true (call #{})", s_callCount);
     }
     
-    // DISABLED: Event signaling - MarathonRecomp style
-    // Sync primitives work via fail-open during init, proper waits during runtime
+    // Signal all tracked events to wake waiting threads
+    // GPU initialization complete - workers can proceed
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        if (s_callCount <= 3)
+        {
+            LOGF_UTILITY("VdRetrainEDRAM signaled {} events", g_trackedEventHandles.size());
+        }
+    }
     
     return 0;  // Success
 }
@@ -4570,16 +4686,11 @@ bool KeSetEvent(XKEVENT* pEvent, uint32_t Increment, bool Wait)
 {
     static int s_count = 0;
     ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     if (s_count <= 20 || s_count % 100 == 0)
     {
         LOGF_IMPL(Utility, "Event", "KeSetEvent #{}", s_count);
     }
-    
-    // SYNC TABLE INTEGRATION: Signal in sync table first
-    uint32_t eventAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pEvent) - reinterpret_cast<uintptr_t>(g_memory.base));
-    SyncTable_Signal(eventAddr, 1, callerLR);
     
     bool result = QueryKernelObject<Event>(*pEvent)->Set();
 
@@ -4679,14 +4790,6 @@ uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, 
     }
 
     
-    // SYNC TABLE INTEGRATION: Check SyncTable first before KernelObject path
-    SyncObject* syncObj = SyncTable_Get(objAddr);
-    if (syncObj) {
-        uint32_t result = syncObj->Wait(timeout);
-        return result;
-    }
-    
-    // Fall back to legacy KernelObject path
     switch (Object->Type)
     {
         case 0:
@@ -5060,14 +5163,9 @@ uint32_t NtSetEvent(Event* handle, uint32_t* previousState)
 uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttributes, uint32_t InitialCount, uint32_t MaximumCount)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    
     Semaphore* sem = CreateKernelObject<Semaphore>(InitialCount, MaximumCount);
     *Handle = GetKernelHandle(sem);
     uint32_t handle = *Handle;
-    
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
-    SyncTable_InitSemaphore(handle, InitialCount, MaximumCount, callerLR);
     
     // Track blocking semaphores (count=0) for signaling after init
     if (InitialCount == 0) {
@@ -5099,10 +5197,6 @@ uint32_t NtReleaseSemaphore(uint32_t Handle, uint32_t ReleaseCount, int32_t* Pre
         }
         return STATUS_INVALID_HANDLE;
     }
-    
-        // SYNC TABLE INTEGRATION: Signal in sync table first
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    SyncTable_Signal(Handle, ReleaseCount > 0 ? ReleaseCount : 1, callerLR);
     
     KernelObject* obj = GetKernelObject(Handle);
     if (!obj)
@@ -5464,27 +5558,60 @@ uint32_t NetDll_XNetGetTitleXnAddr(uint32_t pAddr)
 
 uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* Objects, uint32_t WaitType, uint32_t WaitReason, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
-    // Host equivalent using SyncTable - handles both Events and Semaphores
-    // WaitType: 0 = WaitAll, 1 = WaitAny
-    // Returns: STATUS_WAIT_0 + index for WaitAny, STATUS_SUCCESS for WaitAll
+    // FIXME: This function is only accounting for events.
+    static int s_callCount = 0;
+    ++s_callCount;
     
-    uint32_t callerLR = g_ppcContext ? g_ppcContext->lr : 0;
-    uint64_t timeoutMs = GuestTimeoutToMilliseconds(Timeout);
+    uint32_t caller = g_ppcContext ? g_ppcContext->lr : 0;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
     
-    // Convert timeout to uint32_t (clamp if needed)
-    uint32_t timeoutMs32 = (timeoutMs > 0xFFFFFFFF) ? INFINITE : static_cast<uint32_t>(timeoutMs);
-    
-    // Collect object addresses from the dispatcher headers
-    // Convert host pointers back to guest addresses
-    std::vector<uint32_t> addresses(Count);
-    for (size_t i = 0; i < Count; i++)
+    if (s_callCount <= 20 || s_callCount % 100 == 0)
     {
-        // Objects[i].get() returns host pointer, convert to guest address
-        addresses[i] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Objects[i].get()) - reinterpret_cast<uintptr_t>(g_memory.base));
+        LOGF_WARNING("[KeWaitMultiple] #{} thread=0x{:04X} count={} waitType={} caller=0x{:08X}", 
+                    s_callCount, threadId, Count, WaitType, caller);
     }
-    
-    // Delegate to SyncTable_WaitMultiple
-    return SyncTable_WaitMultiple(Count, addresses.data(), WaitType, timeoutMs32, callerLR);
+
+    const uint64_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    assert(timeout == INFINITE);
+
+    if (WaitType == 0) // Wait all
+    {
+        for (size_t i = 0; i < Count; i++)
+            QueryKernelObject<Event>(*Objects[i])->Wait(timeout);
+    }
+    else
+    {
+        thread_local std::vector<Event*> s_events;
+        s_events.resize(Count);
+
+        for (size_t i = 0; i < Count; i++)
+            s_events[i] = QueryKernelObject<Event>(*Objects[i]);
+
+        int loopCount = 0;
+        while (true)
+        {
+            ++loopCount;
+            if (loopCount <= 5 || loopCount % 1000 == 0)
+            {
+                LOGF_WARNING("[KeWaitMultiple] Loop #{} thread=0x{:04X} waiting on {} objects", 
+                            loopCount, threadId, Count);
+            }
+            
+            uint32_t generation = g_keSetEventGeneration.load();
+
+            for (size_t i = 0; i < Count; i++)
+            {
+                if (s_events[i]->Wait(0) == STATUS_SUCCESS)
+                {
+                    return STATUS_WAIT_0 + i;
+                }
+            }
+
+            g_keSetEventGeneration.wait(generation);
+        }
+    }
+
+    return STATUS_SUCCESS;
 }
 
 uint32_t KeRaiseIrqlToDpcLevel()
@@ -5497,16 +5624,12 @@ void KfLowerIrql() { }
 uint32_t KeReleaseSemaphore(XKSEMAPHORE* semaphore, uint32_t increment, uint32_t adjustment, uint32_t wait)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     // Log all releases to see if blocking semaphores are ever signaled
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
     if (s_count <= 30 || (semAddr >= 0xEB2D0000 && semAddr <= 0xEB2E0000)) {
         LOGF_WARNING("[KeReleaseSemaphore] #{} sem=0x{:08X} adj={}", s_count, semAddr, adjustment);
     }
-    
-    // SYNC TABLE INTEGRATION: Signal in sync table first
-    SyncTable_Signal(semAddr, adjustment > 0 ? adjustment : 1, callerLR);
     
     auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
     if (!object) {
@@ -5543,7 +5666,6 @@ uint32_t KeResumeThread(GuestThreadHandle* object)
 void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limit)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     semaphore->Header.Type = 5;
     semaphore->Header.SignalState = count;
@@ -5553,10 +5675,6 @@ void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limi
     
     // Track semaphores initialized with count=0 (will block immediately)
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
-    
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
-    SyncTable_InitSemaphore(semAddr, count, limit, callerLR);
-    
     if (count == 0) {
         TrackBlockingSemaphoreAddr(semAddr);
         LOGF_WARNING("[KeInitializeSemaphore] #{} BLOCKING sem=0x{:08X} count=0 limit={} - TRACKED", 
@@ -5662,7 +5780,7 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
     
     // SIGNAL COMPLETION EVENT: sub_829A3560 waits on event at 0x82A97F5C after scheduling
     // Since we execute synchronously, signal this event so the wait doesn't block
-    constexpr uint32_t kTaskCompletionEventAddr = 0x83131B34;  // FIXED: was 0x82A97F5C
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
     if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
     {
@@ -11127,88 +11245,16 @@ PPC_FUNC(sub_8226CB50) {
 // Internal functions called by sub_821A8868 - declarations only
 extern "C" void __imp__sub_82300C78(PPCContext& ctx, uint8_t* base);
 
-// HOLISTIC REIMPLEMENTATION: sub_82300C78 (string/resource init)
-// Does all non-blocking parts, skips blocking sync calls (sub_827DB988, sub_827DB2A8)
-// Based on PPC disassembly analysis - addresses verified with MCP math tools
-extern "C" void __imp__sub_82300C78(PPCContext& ctx, uint8_t* base);
-extern "C" void __imp__sub_824E14B8(PPCContext& ctx, uint8_t* base);
-extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_82300C78) {
+// Hook sub_82300C78 - Call original to trace blocking point
+extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
-    printf("[REIMPL] sub_82300C78 #%d ENTER r3=0x%08X - holistic reimplementation\n", s_count, ctx.r3.u32);
-    fflush(stdout);
+    printf("[sub_82300C78] #%d ENTER r3=0x%08X - calling original with tracing\n", s_count, ctx.r3.u32); fflush(stdout);
     
-    // Step 1: Store input argument to 0x82CFA2E0
-    uint32_t inputArg = ctx.r3.u32;
-    constexpr uint32_t kInputGlobal = 0x82CFA2E0;
-    PPC_STORE_U32(kInputGlobal, inputArg);
+    // Call the original implementation - it will block at sub_827DB988
+    // We need to trace into sub_827DB988 to find the actual semaphore
+    __imp__sub_82300C78(ctx, base);
     
-    // Step 2: Clear flag bytes at 0x82D04248 and 0x82D04249
-    PPC_STORE_U8(0x82D04249, 0);  // offset 16969
-    PPC_STORE_U8(0x82D04248, 0);  // offset 16968
-    
-    // Step 3: Call sub_824E14B8 (non-blocking init)
-    // Set r3 to the string pointer at 0x82A3EEB4 (lis -32093 + addi -4428)
-    ctx.r3.u32 = 0x82A3EEB4;
-    __imp__sub_824E14B8(ctx, base);
-    printf("[REIMPL] sub_82300C78 #%d sub_824E14B8 completed\n", s_count);
-    
-    // Step 4: Allocate 12616 bytes
-    ctx.r3.u32 = 12616;
-    __imp__sub_8218BE28(ctx, base);
-    uint32_t objPtr = ctx.r3.u32;
-    printf("[REIMPL] sub_82300C78 #%d Allocated object: 0x%08X (12616 bytes)\n", s_count, objPtr);
-    
-    if (objPtr != 0) {
-        // Step 5: Store vtable pointer 0x82010F0C to [obj+0]
-        constexpr uint32_t kVtableAddr = 0x82010F0C;
-        PPC_STORE_U32(objPtr, kVtableAddr);
-        
-        // Step 6: Init loop - zero 7 entries starting at [obj+48] with stride 1568
-        // PPC: addi r11,r3,20 -> addi r11,r11,28 = offset 48
-        uint32_t loopPtr = objPtr + 48;
-        for (int i = 0; i < 7; i++) {
-            PPC_STORE_U16(loopPtr + 2, 0);
-            PPC_STORE_U16(loopPtr, 0);
-            loopPtr += 1568;
-        }
-        
-        // Step 7: Zero trailing fields
-        PPC_STORE_U32(objPtr + 12604, 0);
-        PPC_STORE_U32(objPtr + 12600, 0);
-        PPC_STORE_U32(objPtr + 12596, 0);
-    }
-    
-    // Step 8: Store object pointer to 0x82CFA2E4 (THE CRITICAL GLOBAL!)
-    constexpr uint32_t kHudObjectGlobal = 0x82CFA2E4;
-    PPC_STORE_U32(kHudObjectGlobal, objPtr);
-    printf("[REIMPL] sub_82300C78 #%d Stored to critical global 0x%08X = 0x%08X\n", 
-           s_count, kHudObjectGlobal, objPtr);
-    
-    // Step 9: Call vtable[1] (offset 4) on the object
-    if (objPtr != 0) {
-        uint32_t vtable = PPC_LOAD_U32(objPtr);
-        uint32_t vtableFunc = PPC_LOAD_U32(vtable + 4);
-        if (vtableFunc != 0) {
-            printf("[REIMPL] sub_82300C78 #%d Calling vtable[1] at 0x%08X\n", s_count, vtableFunc);
-            ctx.r3.u32 = objPtr;
-            PPC_CALL_INDIRECT_FUNC(vtableFunc);
-        }
-    }
-    
-    // Step 10: Set ready flag at 0x82D0424A
-    PPC_STORE_U8(0x82D0424A, 1);  // offset 16970
-    
-    // Step 11: SKIP sub_827DB988 and sub_827DB2A8 (blocking sync functions)
-    // These are sync primitives that would block indefinitely
-    printf("[REIMPL] sub_82300C78 #%d SKIPPING blocking sync (sub_827DB988, sub_827DB2A8)\n", s_count);
-    
-    // Return the object pointer in r3
-    ctx.r3.u32 = objPtr;
-    
-    printf("[REIMPL] sub_82300C78 #%d EXIT r3=0x%08X - reimpl complete\n", s_count, ctx.r3.u32);
-    fflush(stdout);
+    printf("[sub_82300C78] #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32); fflush(stdout);
 }
 extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_824E1DD0(PPCContext& ctx, uint8_t* base);
@@ -11232,7 +11278,7 @@ extern "C" void __imp__sub_829A3238(PPCContext& ctx, uint8_t* base);  // Sync wa
 // Blocking path: sub_82300C78 → sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
 // This function enters critical section, sets event, WAITS on event at 0x82A97F5C, resets event, leaves critical section
 // Fix: Pre-signal the event so the wait returns immediately
-PPC_FUNC(sub_829A3238) {
+extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     printf("[SYNC] sub_829A3238 #%d ENTER - pre-signaling sync event\n", s_count);
@@ -11275,7 +11321,7 @@ PPC_FUNC(sub_829A3238) {
 // This function is called by sub_827DB988 and calls sub_829A3238 directly
 // We pre-signal the event that sub_829A3238 will wait on
 extern "C" void __imp__sub_829A39F0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_829A39F0) {
+extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     printf("[SYNC] sub_829A39F0 #%d ENTER - pre-signaling sync event for sub_829A3238\n", s_count);
@@ -11315,7 +11361,7 @@ PPC_FUNC(sub_829A39F0) {
 // Hook sub_829A3560 - TASK + MOUNT INTEGRATION
 // This function calls XamTaskSchedule, then computes event addr 0x82A97F5C, then KeWaitForSingleObject
 // The event must be signaled BEFORE the wait. We pre-signal it so the wait returns immediately.
-PPC_FUNC(sub_829A3560) {
+extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     printf("[SYNC] sub_829A3560 #%d ENTER - pre-signaling completion event\n", s_count);
@@ -11324,7 +11370,7 @@ PPC_FUNC(sub_829A3560) {
     // PRE-SIGNAL the completion event at 0x82A97F5C
     // This event is waited on after XamTaskSchedule returns.
     // By signaling it now, the wait will return immediately.
-    constexpr uint32_t kTaskCompletionEventAddr = 0x83131B34;  // FIXED: was 0x82A97F5C
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
     if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
     {
@@ -11351,7 +11397,7 @@ PPC_FUNC(sub_829A3560) {
 // This is called by sub_827DB338 and is the actual blocking point
 // Original: Calls sub_829A3560 (XamTaskSchedule) and waits on completion
 // Fix: Call the task scheduling but return success immediately without blocking
-PPC_FUNC(sub_829A39A0) {
+extern "C" void sub_829A39A0_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     // r3 = flags, r4 = size/type (8192), r5 = context (0)
@@ -11381,7 +11427,7 @@ PPC_FUNC(sub_829A39A0) {
 // This calls sub_829A39A0 and then does file lookup operations
 // Original: Blocks waiting for async completion
 // Fix: Execute the pre-wait setup, skip blocking, return success
-PPC_FUNC(sub_827DB338) {
+extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     // r3 = mode (0 or 1), r4 = output ptr 1, r5 = output ptr 2
@@ -11410,7 +11456,7 @@ PPC_FUNC(sub_827DB338) {
 // Blocking path: sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
 // Direct PPC calls bypass PPCFuncMappings patches, so we pre-signal the event HERE
 // before calling the original, so the wait in sub_829A3238 returns immediately
-PPC_FUNC(sub_827DB988) {
+extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base) {
     static int s_count = 0; ++s_count;
     
     printf("[SYNC] sub_827DB988 #%d ENTER - pre-signaling event for sub_829A3238\n", s_count);
@@ -11451,37 +11497,141 @@ PPC_FUNC(sub_827DB988) {
 // The sync hooks above prevent blocking, so these can now execute normally
 // =============================================================================
 
-// HOOK: sub_821A8868 (HUD/Mission init)
+// REIMPLEMENTED: sub_821A8868 (HUD/Mission init)
 // The original calls sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 -> sub_829A3560
-// sub_829A3560 does XamTaskSchedule then waits on event at 0x83131B34
-// The blocking sync functions are already hooked to be non-blocking, so let original run
-// This follows MarathonRecomp pattern: hook blocking sub-functions, let parent run full init
+// sub_829A3560 does XamTaskSchedule then waits on event at 0x82A97F5C
+// Since we execute XamTaskSchedule synchronously, we pre-signal the event so the wait succeeds
 extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
 
 
 PPC_FUNC(sub_821A8868) {
     static int s_count = 0; ++s_count;
-    printf("[HUD] sub_821A8868 #%d ENTER - calling original (sync hooks prevent blocking)\n", s_count);
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (expanded reimplementation)\n", s_count);
     fflush(stdout);
     
-    // Call the original - blocking sync functions are already hooked:
-    // - sub_829A3560_hook pre-signals event at 0x83131B34
-    // - sub_829A39A0_hook handles root sync primitive
-    // - sub_829A3238_hook handles KeWaitForSingleObject
-    // - sub_829A2380_hook handles semaphore acquire
-    __imp__sub_821A8868(ctx, base);
+    // EXPANDED HOLISTIC REIMPLEMENTATION of sub_821A8868
+    // This now includes the full functionality of sub_82300C78 (non-blocking version)
+    // 
+    // Original sub_821A8868 call tree:
+    // 1. sub_82300C78 - string/resource init (has blocking sync) - REIMPLEMENTED INLINE
+    // 2. sub_8218BE28 - allocation (non-blocking)  
+    // 3. sub_824E1DD0 - allocation wrapper (non-blocking)
+    // 4. sub_8249BA90 - allocation (non-blocking)
+    // 5. sub_821A8060 - file/stream setup (non-blocking)
     
-    printf("[HUD] sub_821A8868 #%d EXIT r3=0x%08X - HUD init complete\n", s_count, ctx.r3.u32);
+    // =========================================================================
+    // REIMPLEMENTATION OF sub_82300C78 (non-blocking version)
+    // This initializes the critical global at 0x82CFA2E4 that sub_821A8278 needs
+    // =========================================================================
+    
+    uint32_t inputArg = ctx.r3.u32;  // Capture input before modifying r3
+    
+    // Step 1: Store input to 0x82CFA2E0
+    constexpr uint32_t kInputGlobal = 0x82CFA2E0;
+    uint32_t* inputGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kInputGlobal));
+    if (inputGlobalPtr) {
+        *inputGlobalPtr = ByteSwap(inputArg);
+    }
+    
+    // Step 2: Clear flag bytes at 0x82D04248 and 0x82D04249
+    uint8_t* flag1 = static_cast<uint8_t*>(g_memory.Translate(0x82D04248));
+    uint8_t* flag2 = static_cast<uint8_t*>(g_memory.Translate(0x82D04249));
+    if (flag1) *flag1 = 0;
+    if (flag2) *flag2 = 0;
+    
+    // Step 3: Call sub_824E14B8 (non-blocking init)
+    __imp__sub_824E14B8(ctx, base);
+    
+    // Step 4: Allocate 12616 bytes (the size sub_82300C78 allocates)
+    ctx.r3.u32 = 12616;
+    __imp__sub_8218BE28(ctx, base);
+    uint32_t objPtr = ctx.r3.u32;
+    
+    printf("[REIMPL] sub_821A8868 #%d Allocated HUD object: 0x%08X (12616 bytes)\n", s_count, objPtr);
+    
+    if (objPtr != 0) {
+        // Step 5: Store vtable pointer 0x82010F0C to [obj+0]
+        constexpr uint32_t kVtableAddr = 0x82010F0C;
+        PPC_STORE_U32(objPtr + 0, kVtableAddr);
+        
+        // Step 6: Init loop - zero 7 entries at stride 1568 starting at offset 48
+        for (int i = 0; i < 7; i++) {
+            uint32_t offset = 48 + (i * 1568);
+            PPC_STORE_U16(objPtr + offset, 0);
+            PPC_STORE_U16(objPtr + offset + 2, 0);
+        }
+        
+        // Step 7: Zero trailing fields at +12596, +12600, +12604
+        PPC_STORE_U32(objPtr + 12596, 0);
+        PPC_STORE_U32(objPtr + 12600, 0);
+        PPC_STORE_U32(objPtr + 12604, 0);
+    }
+    
+    // Step 8: Store object pointer to 0x82CFA2E4 (THE CRITICAL GLOBAL!)
+    constexpr uint32_t kHudObjectGlobal = 0x82CFA2E4;
+    uint32_t* hudGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudObjectGlobal));
+    if (hudGlobalPtr) {
+        *hudGlobalPtr = ByteSwap(objPtr);
+        printf("[REIMPL] sub_821A8868 #%d Initialized critical global 0x%08X = 0x%08X\n", 
+               s_count, kHudObjectGlobal, objPtr);
+    }
+    
+    // Step 9: Call vtable[1] (offset 4) on the object
+    if (objPtr != 0) {
+        uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+        uint32_t vtableFunc = PPC_LOAD_U32(vtable + 4);
+        if (vtableFunc != 0) {
+            printf("[REIMPL] sub_821A8868 #%d Calling vtable[1] at 0x%08X\n", s_count, vtableFunc);
+            ctx.r3.u32 = objPtr;
+            PPC_CALL_INDIRECT_FUNC(vtableFunc);
+        }
+    }
+    
+    // Step 10: Set ready flag at 0x82D0424A
+    uint8_t* readyFlag = static_cast<uint8_t*>(g_memory.Translate(0x82D0424A));
+    if (readyFlag) *readyFlag = 1;
+    
+    // Step 11: SKIP sub_827DB988 and sub_827DB2A8 (blocking sync functions)
+    // These are the sync primitives that would block - we bypass them entirely
+    
+    // =========================================================================
+    // END OF sub_82300C78 REIMPLEMENTATION
+    // =========================================================================
+    
+    // Also initialize the original global at 0x82AD6958 for sub_821A8868's own use
+    constexpr uint32_t kHudInitGlobal = 0x82AD6958;
+    uint32_t* hudInitPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudInitGlobal));
+    if (hudInitPtr && objPtr != 0) {
+        *hudInitPtr = ByteSwap(objPtr);
+    }
+    
+    // Continue with remaining non-blocking calls from original sub_821A8868
+    // 2. Call sub_824E1DD0 (non-blocking allocation wrapper)
+    __imp__sub_824E1DD0(ctx, base);
+    
+    // 3. Call sub_8249BA90 (non-blocking allocation)
+    __imp__sub_8249BA90(ctx, base);
+    
+    // 4. Call sub_821A8060 (non-blocking file/stream setup)
+    __imp__sub_821A8060(ctx, base);
+    
+    printf("[REIMPL] sub_821A8868 #%d EXIT - HUD init complete\n", s_count);
     fflush(stdout);
+    
+    ctx.r3.u32 = 1;  // Return success
 }
 
 
-// STUBBED: sub_821A8278 (HUD component) - bypass to reach main loop
+// REIMPLEMENTED: sub_821A8278 (HUD component)
 PPC_FUNC(sub_821A8278) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_821A8278 #%d - HUD component bypassed\n", s_count);
+    printf("[REIMPL] sub_821A8278 #%d ENTER - HUD component\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;  // Return success
+    
+    __imp__sub_821A8278(ctx, base);
+    
+    printf("[REIMPL] sub_821A8278 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 PPC_FUNC(sub_821BC9E0) {
@@ -11534,13 +11684,18 @@ PPC_FUNC(sub_821DFD18) {
 }
 
 // REIMPLEMENTED: sub_8220E108 (Wanted system)
-// STUBBED: sub_8220E108 (Wanted system) - PAC crash in sub_82430C60
+// Was stubbed because: call 30 (sub_82430C60) blocks on sync primitives
+// Now: Sync hooks prevent blocking, so initialization will complete
 extern "C" void __imp__sub_8220E108(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8220E108) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_8220E108 #%d - Wanted system bypassed (PAC crash)\n", s_count);
+    printf("[REIMPL] sub_8220E108 #%d ENTER - Wanted system (now non-blocking)\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;  // Return success
+    
+    __imp__sub_8220E108(ctx, base);
+    
+    printf("[REIMPL] sub_8220E108 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 PPC_FUNC(sub_821D8358) {
@@ -11559,13 +11714,18 @@ PPC_FUNC(sub_821EA0B8) {
 
 
 // REIMPLEMENTED: sub_82200EB8 (Stats system)
-// STUBBED: sub_82200EB8 (Stats system) - PAC crash in texture create
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
 extern "C" void __imp__sub_82200EB8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82200EB8) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_82200EB8 #%d - Stats system bypassed\n", s_count);
+    printf("[REIMPL] sub_82200EB8 #%d ENTER - Stats system (now non-blocking)\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;
+    
+    __imp__sub_82200EB8(ctx, base);
+    
+    printf("[REIMPL] sub_82200EB8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 // =============================================================================
@@ -11697,14 +11857,19 @@ PPC_FUNC(sub_82120FB8)
     
     LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{} thread=0x{:04X} r3={} - 63-subsystem init complete", s_count, threadId, ctx.r3.u32);
 
-    // KERNEL POLICY: 63-subsystem init complete = transition to Runtime phase
-    // This allows timeout=0 polls to return success, breaking the scheduler loop
+    // KERNEL POLICY: 63-subsystem init complete = transition to Init phase (if still in Boot)
     KernelPhase_EnterInit();
-    KernelPhase_EnterRuntime();  // Critical: enable render loop entry
 
     
-    // DISABLED: VBlank timer - MarathonRecomp style (no forced VBlanks)
-    // Frame timing is handled by Video::Present() FPS limiter
+    // FORCE: Start VBlank timer with known callback since GPU init path is never reached
+    extern void StartVBlankTimer();
+    
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[FORCE] Starting VBlank timer with callback 0x829D7368 after 63-subsystem init\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
 }
 
 // Hook sub_8218BEB0 - Calls sub_82120000, sub_821200D0, sub_821200A8
@@ -11939,23 +12104,13 @@ PPC_FUNC(sub_829D4C48)
 }
 
 // Hook sub_829D7368 - VBlank interrupt callback
-// This callback needs to signal semaphores that the scheduler is waiting on
 extern "C" void __imp__sub_829D7368(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829D7368)
 {
     static int s_count = 0; ++s_count;
     if (s_count <= 5 || s_count % 1000 == 0)
         LOGF_WARNING("[VBLANK] sub_829D7368 #{}", s_count);
-    
-    // Call original VBlank handler
     __imp__sub_829D7368(ctx, base);
-    
-    // Signal VBlank event to wake up any waiters
-    // The scheduler polls with timeout=0 waiting for frame signal
-    if (g_gpuRingBuffer.interruptCallback != 0) {
-        g_gpuRingBuffer.interruptFired = true;
-        g_gpuRingBuffer.interruptSeen = true;
-    }
 }
 
 
@@ -13464,13 +13619,18 @@ PPC_FUNC(sub_8212FB78) {
 }
 
 // REIMPLEMENTED: sub_8219ADF0 (Online system)
-// STUBBED: sub_8219ADF0 (Online system) - PAC crash
+// Was stubbed because: Xbox Live integration blocks on sync
+// Now: Sync hooks prevent blocking
 extern "C" void __imp__sub_8219ADF0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8219ADF0) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_8219ADF0 #%d - Online system bypassed\n", s_count);
+    printf("[REIMPL] sub_8219ADF0 #%d ENTER - Online system (now non-blocking)\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;
+    
+    __imp__sub_8219ADF0(ctx, base);
+    
+    printf("[REIMPL] sub_8219ADF0 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 
@@ -13522,13 +13682,18 @@ PPC_FUNC(sub_82208460) {
 }
 
 // REIMPLEMENTED: sub_821B9DA8 (TV system)
-// STUBBED: sub_821B9DA8 (TV system) - PAC crash
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
 extern "C" void __imp__sub_821B9DA8(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_821B9DA8) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_821B9DA8 #%d - TV system bypassed\n", s_count);
+    printf("[REIMPL] sub_821B9DA8 #%d ENTER - TV system (now non-blocking)\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;
+    
+    __imp__sub_821B9DA8(ctx, base);
+    
+    printf("[REIMPL] sub_821B9DA8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 PPC_FUNC(sub_82258100) {
     static int s_count = 0; ++s_count;
@@ -13552,13 +13717,18 @@ PPC_FUNC(sub_8232A2C0) {
 }
 
 // REIMPLEMENTED: sub_82125478 (Final setup)
-// STUBBED: sub_82125478 (Final setup) - PAC crash
+// Was stubbed because: calls sub_82319040 -> sub_829A39A0 which blocks
+// Now: Sync hooks prevent blocking
 extern "C" void __imp__sub_82125478(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_82125478) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_82125478 #%d - Final setup bypassed\n", s_count);
+    printf("[REIMPL] sub_82125478 #%d ENTER - Final setup (now non-blocking)\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;
+    
+    __imp__sub_82125478(ctx, base);
+    
+    printf("[REIMPL] sub_82125478 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
 }
 
 
@@ -13765,14 +13935,10 @@ PPC_FUNC(sub_828507F8) {
 }
 
 PPC_FUNC(sub_829D5388) {
-    // MarathonRecomp-style: Hook game's D3D Present directly to Video::Present()
-    // This is the frame boundary - triggers host rendering and phase transition
     static int s_count = 0; ++s_count;
     if (s_count <= 5 || s_count % 1000 == 0)
-        LOGF_WARNING("[RENDER] sub_829D5388 (D3D Present) #{} -> Video::Present()", s_count);
-    
-    Video::Present();
-    // Don't call original - we handle presentation via host GPU
+        LOGF_WARNING("[RENDER] sub_829D5388 (D3D Present/VdSwap) #{}", s_count);
+    __imp__sub_829D5388(ctx, base);
 }
 
 // =========================================================================
@@ -13828,12 +13994,12 @@ PPC_FUNC(sub_8218C1F0) {
 // =========================================================================
 extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
 
-// STUBBED: sub_821200A8 - PAC crash in sub_82327190
+// TRACE: sub_821200A8 - now running properly since sub_82857240 is fixed
 PPC_FUNC(sub_821200A8) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_821200A8 #%d - post-init finalization bypassed\n", s_count);
-    fflush(stdout);
-    ctx.r3.u32 = 1;
+    LOGF_WARNING("[821200A8] #{} ENTER - post-init finalization", s_count);
+    __imp__sub_821200A8(ctx, base);
+    LOGF_WARNING("[821200A8] #{} EXIT", s_count);
 }
 
 // =========================================================================
@@ -13873,13 +14039,20 @@ PPC_FUNC(sub_822C66C8) {
     printf("[822C66C8] #%d EXIT\n", s_count);
 }
 
-// STUBBED: sub_821A81F0 - worker cleanup that crashes in SignalAllBlockingSemaphores
 extern "C" void __imp__sub_821A81F0(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_821A81F0) {
     static int s_count = 0; ++s_count;
-    printf("[STUB] sub_821A81F0 #%d - worker cleanup bypassed\n", s_count);
+    printf("[821A81F0] #%d ENTER - signaling workers before cleanup\n", s_count);
     fflush(stdout);
-    ctx.r3.u32 = 1;
+    
+    // Signal all semaphores to wake Photo mode workers so they can exit
+    // This is the proper fix: workers are waiting for work that won't come,
+    // signaling allows them to check exit flag and terminate
+    SignalAllBlockingSemaphores();
+    
+    __imp__sub_821A81F0(ctx, base);
+    printf("[821A81F0] #%d EXIT\n", s_count);
+    fflush(stdout);
 }
 
 // sub_823005E0 - Called by sub_821A81F0, performs worker cleanup
@@ -13932,15 +14105,6 @@ PPC_FUNC(sub_82268260) {
     printf("[82268260] #%d ENTER\n", s_count);
     __imp__sub_82268260(ctx, base);
     printf("[82268260] #%d EXIT\n", s_count);
-}
-
-// STUBBED: sub_8221BCD8 - crashes in texture/rendering code (sub_828935D0)
-extern "C" void __imp__sub_8221BCD8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8221BCD8) {
-    static int s_count = 0; ++s_count;
-    printf("[STUB] sub_8221BCD8 #%d - texture init bypassed\n", s_count);
-    fflush(stdout);
-    ctx.r3.u32 = 1;
 }
 
 extern "C" void __imp__sub_8221BFF0(PPCContext& ctx, uint8_t* base);

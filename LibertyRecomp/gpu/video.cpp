@@ -42,6 +42,9 @@
 #endif
 
 #include "../../tools/XenosRecomp/XenosRecomp/shader_common.h"
+// MarathonRecomp-style: Transition to Runtime phase on first Present
+extern void KernelPhase_EnterRuntime();
+
 
 #ifdef LIBERTY_RECOMP_D3D12
 #include "shader/hlsl/blend_color_alpha_ps.hlsl.dxil.h"
@@ -3245,6 +3248,10 @@ static std::atomic<bool> g_executedCommandList;
 
 void Video::Present() 
 {
+    // MarathonRecomp-style: First Present = transition to Runtime phase
+    // This enables proper synchronization (fail-open during init, proper waits after)
+    KernelPhase_EnterRuntime();
+    
     static uint32_t s_presentCount = 0;
     static uint32_t s_droppedFrames = 0;
     ++s_presentCount;
