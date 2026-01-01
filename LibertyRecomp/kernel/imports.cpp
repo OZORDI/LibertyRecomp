@@ -131,7 +131,7 @@ void PatchSyncPrimitives() {
     
     // Patch sync primitives - these cause blocking in HUD init
     // Use _hook suffix functions to avoid weak symbol collision on macOS
-    PatchFuncMapping(0x829A9738, &sub_829A9738_hook);  // Wait helper (NtWaitForSingleObjectEx) - CRITICAL
+    // PatchFuncMapping(0x829A9738, &sub_829A9738_hook);  // Now using PPC_FUNC instead  // Wait helper (NtWaitForSingleObjectEx) - CRITICAL
     // PatchFuncMapping(0x829A3560, &sub_829A3560_hook);  // Now using PPC_FUNC instead  // XamTask + mount integration (signals completion event)
     // PatchFuncMapping(0x829A39A0, &sub_829A39A0_hook);  // Now using PPC_FUNC instead  // Root sync primitive
     // PatchFuncMapping(0x829A3238, &sub_829A3238_hook);  // Now using PPC_FUNC instead  // Sync wait function (KeWaitForSingleObject) - CRITICAL
@@ -141,7 +141,7 @@ void PatchSyncPrimitives() {
     PatchFuncMapping(0x827DACD8, &sub_827DACD8_hook);  // Semaphore wait - sync table routing
 
     // PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // Now using PPC_FUNC instead  // String/resource lookup
-    PatchFuncMapping(0x829A2380, &sub_829A2380_hook);  // Semaphore acquire (sync table)
+    // PatchFuncMapping(0x829A2380, &sub_829A2380_hook);  // Now using PPC_FUNC instead  // Semaphore acquire (sync table)
     PatchFuncMapping(0x829A21F8, &sub_829A21F8_hook);  // Semaphore create wrapper (sync table)
 
     
@@ -6167,7 +6167,7 @@ PPC_FUNC(sub_827DAE40)
 // Hook sub_829A2380 - Semaphore acquire (routes through sync table)
 // This function acquires a semaphore - route through sync table for proper tracking
 extern "C" void __imp__sub_829A2380(PPCContext& ctx, uint8_t* base);
-extern "C" void sub_829A2380_hook(PPCContext& ctx, uint8_t* base)
+PPC_FUNC(sub_829A2380)
 {
     static int s_count = 0; ++s_count;
     uint32_t handle = ctx.r3.u32;
@@ -6219,7 +6219,7 @@ extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base)
 // This is called by sub_829A2380 (semaphore acquire) during init
 // The semaphore isn't released during init, so we make this non-blocking
 extern "C" void __imp__sub_829A9738(PPCContext& ctx, uint8_t* base);
-extern "C" void sub_829A9738_hook(PPCContext& ctx, uint8_t* base)
+PPC_FUNC(sub_829A9738)
 {
     static int s_count = 0;
     ++s_count;
