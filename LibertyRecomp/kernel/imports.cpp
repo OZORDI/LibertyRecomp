@@ -6102,40 +6102,44 @@ int32_t NetDll_WSAGetLastError()
 // Previously STUBBED: This function called an indirect task function that blocks forever
 // FIX: Execute the task function ONCE synchronously, then return
 // This allows resource loading to complete while avoiding the infinite semaphore-wait loop
+//
+// CRITICAL: Startup context structure is:
+//   [0] = task function pointer
+//   [1] = REAL worker context (with semaphores at +36, +40)
+// Must pass ctxData[1] to task function, NOT the startup context!
 extern "C" void __imp__sub_827DAE40(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_827DAE40)
 {
     static int s_count = 0;
     ++s_count;
     
-    uint32_t context = ctx.r3.u32;  // Worker context pointer
+    uint32_t startupContext = ctx.r3.u32;  // Startup context pointer
     
     // Validate context pointer
-    if (context < 0x80000000 || context >= 0x90000000) {
+    if (startupContext < 0x80000000 || startupContext >= 0x90000000) {
         LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} INVALID context 0x{:08X} - skipping", 
-                     s_count, context);
+                     s_count, startupContext);
         ctx.r3.u32 = 0;
         return;
     }
     
-    uint32_t* ctxData = reinterpret_cast<uint32_t*>(base + context);
-    uint32_t taskFunc = ByteSwap(ctxData[0]);  // First dword of context = task function
+    uint32_t* ctxData = reinterpret_cast<uint32_t*>(base + startupContext);
+    uint32_t taskFunc = ByteSwap(ctxData[0]);     // [0] = task function
+    uint32_t realContext = ByteSwap(ctxData[1]);  // [1] = REAL worker context
     
-    LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} ctx=0x{:08X} taskFunc=0x{:08X}", 
-                 s_count, context, taskFunc);
+    LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} startupCtx=0x{:08X} taskFunc=0x{:08X} realCtx=0x{:08X}", 
+                 s_count, startupContext, taskFunc, realContext);
     
     // Execute the task function synchronously instead of blocking on semaphore
-    // This follows the same pattern as XamTaskSchedule (lines 5354-5377)
     if (taskFunc != 0 && taskFunc >= 0x82000000 && taskFunc < 0x83000000) {
         auto func = g_memory.FindFunction(taskFunc);
         if (func) {
-            LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} EXECUTING taskFunc 0x{:08X} with ctx=0x{:08X}", 
-                         s_count, taskFunc, context);
+            LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} EXECUTING taskFunc 0x{:08X} with realCtx=0x{:08X}", 
+                         s_count, taskFunc, realContext);
             
-            // Execute the task function with context as r3
-            // Create a copy of the context to avoid corrupting the caller's state
+            // Execute task with REAL context (has semaphores), not startup context
             PPCContext taskCtx = ctx;
-            taskCtx.r3.u32 = context;
+            taskCtx.r3.u32 = realContext;  // FIX: Pass real context, not startup context
             func(taskCtx, base);
             
             LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} taskFunc 0x{:08X} COMPLETED", 
@@ -7724,19 +7728,29 @@ PPC_FUNC(sub_8297AD60) {
 // =============================================================================
 // sub_8297B260 - Audio Stream Init (Xbox vtable[1])
 // =============================================================================
-// Calls vtable[1] on audio stream object - Xbox audio hardware init.
-// Host audio layer handles streaming.
-// SOLUTION: Bypass and return success (r3=1)
+// OPTION C: Let worker thread model run - audio plays via sdl2_driver
+// 
+// Strategy: Worker init runs normally. Audio thread is started when
+// XAudioRegisterRenderDriverClient is called (if it ever is).
+// For now, just let the worker model do its thing.
 // =============================================================================
 PPC_FUNC(sub_8297B260) {
     static int s_count = 0; ++s_count;
     
+    uint32_t audioObjPtr = ctx.r3.u32;
+    
     if (s_count <= 3) {
-        LOG_WARNING("[AUDIO] sub_8297B260 BYPASSING - Xbox audio stream vtable[1]");
+        uint32_t vtablePtr = PPC_LOAD_U32(audioObjPtr + 0);
+        uint32_t vt1 = PPC_LOAD_U32(vtablePtr + 4);
+        LOGF_WARNING("[AUDIO] sub_8297B260 #{} obj=0x{:08X} vtable[1]=0x{:08X}", 
+                     s_count, audioObjPtr, vt1);
     }
     
-    ctx.r3.s64 = 1;  // Return success
-    return;
+    __imp__sub_8297B260(ctx, base);  // Let worker init run
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_8297B260 EXIT - worker thread model");
+    }
 }
 
 // More functions after sub_8297B260 in sub_82673718
@@ -7776,17 +7790,26 @@ PPC_FUNC(sub_829A1950) {
 }
 
 // sub_8298E810 - Worker creator with semaphore wait - STUBBED
-// Analysis: Creates a worker via sub_827DAE40 and waits on semaphore for completion
-// Since sub_827DAE40 is stubbed, the semaphore is never signaled, causing infinite block
+// Analysis: Creates a worker via sub_827DAF50 and waits on semaphore for completion
+// The semaphore wait blocks forever even with sync table because worker never runs properly.
+// SOLUTION: Stub and return success. Audio callback registration handled separately.
+// Option B: Un-stubbed - let worker thread model run with sync table
+extern "C" void __imp__sub_8298E810(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8298E810) {
     static int s_count = 0; ++s_count;
     uint32_t contextAddr = ctx.r3.u32;
     uint32_t taskFunc = ctx.r4.u32;
-    LOGF_WARNING("[INIT_WORKER] sub_8298E810 #{} STUBBED ctx=0x{:08X} taskFunc=0x{:08X}", 
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E810 #{} UN-STUBBED ctx=0x{:08X} taskFunc=0x{:08X}", 
                  s_count, contextAddr, taskFunc);
-    // Don't call __imp__sub_8298E810 - it creates worker and waits forever
-    ctx.r3.u32 = 0;  // Return success
-    return;
+    
+    // Call original - it will:
+    // 1. Create semaphores at ctx+36 and ctx+40 (tracked by sub_827DAC78 hook)
+    // 2. Create worker thread via sub_827DAF50
+    // 3. Wait on sem2 (ctx+40) for worker to signal it's running
+    // Sync table handles the semaphore wait/signal coordination
+    __imp__sub_8298E810(ctx, base);
+    
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E810 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
 }
 
 // Functions inside sub_8298E810 - trace to find blocker on 2nd call
@@ -10195,38 +10218,53 @@ PPC_FUNC(sub_827DAD60) {
 }
 
 
-// sub_8298E700 - resource worker task function - STUBBED to prevent infinite blocking
-// Analysis: This worker uses virtual dispatch (vtable+12) and loops forever waiting on semaphore
-// The semaphore at context+36 is never signaled because task dispatcher is not initialized
-// Stubbing allows init to complete while preventing worker deadlock
-// 
-// CRITICAL FIX: Must signal sem2 (ctx+40) before returning!
-// sub_8298E810 creates this worker and waits on sem2. If we don't signal it,
-// sub_8298E810 blocks forever, preventing sub_82673718 from returning,
-// which prevents sub_82269098 and sub_82124080 from ever being called.
+// sub_8298E700 - audio worker task function
+// Analysis: This worker uses virtual dispatch (vtable[3]) and loops forever waiting on semaphore
+// Worker pattern:
+//   1. Signal sem2 (ctx+40) - tells creator "I'm running"
+//   2. Wait on sem1 (ctx+36) - wait for work (BLOCKS forever - sem1 never signaled)
+//   3. Call vtable[3] (ctx+0 → vtable → offset 12) - audio processing
+//   4. Loop back to step 2
+//
+// FIX: Signal sem2, call vtable[3] once for audio, then return (no blocking)
 extern "C" void __imp__sub_8298E700(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8298E700) {
     static int s_count = 0; ++s_count;
     uint32_t ctx_ptr = ctx.r3.u32;
     
-    // Read semaphore handles from context struct
-    uint32_t sem1 = 0, sem2 = 0;
+    // Read struct fields
+    uint32_t sem1 = 0, sem2 = 0, vtablePtr = 0;
     if (ctx_ptr >= 0x82000000 && ctx_ptr < 0x90000000) {
-        sem1 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 36)); // wait semaphore
-        sem2 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 40)); // signal semaphore
+        vtablePtr = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 0));   // vtable
+        sem1 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 36));       // wait semaphore
+        sem2 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 40));       // signal semaphore
     }
     
-    LOGF_WARNING("[WORKER_TASK] sub_8298E700 #{} STUBBED ctx=0x{:08X} sem1=0x{:08X} sem2=0x{:08X}", 
-                 s_count, ctx_ptr, sem1, sem2);
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} ctx=0x{:08X} vtable=0x{:08X} sem1=0x{:08X} sem2=0x{:08X}", 
+                 s_count, ctx_ptr, vtablePtr, sem1, sem2);
     
-    // CRITICAL: Signal sem2 so sub_8298E810 can continue!
-    // This unblocks the init flow and allows sub_82673718 to return.
+    // Step 1: Signal sem2 so sub_8298E810 can continue
     if (sem2 != 0) {
         NtReleaseSemaphore(sem2, 1, nullptr);
-        LOGF_WARNING("[WORKER_TASK] sub_8298E700 #{} signaled sem2=0x{:08X}", s_count, sem2);
+        LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} signaled sem2=0x{:08X}", s_count, sem2);
     }
     
-    // Don't call __imp__sub_8298E700 - it would block forever
+    // Step 2: Call vtable[3] (audio processing) if valid
+    // vtable[3] is at vtable+12
+    if (vtablePtr >= 0x82000000 && vtablePtr < 0x83000000) {
+        uint32_t audioFunc = ByteSwap(*(uint32_t*)g_memory.Translate(vtablePtr + 12));
+        if (audioFunc >= 0x82000000 && audioFunc < 0x83000000) {
+            auto func = g_memory.FindFunction(audioFunc);
+            if (func) {
+                LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} calling vtable[3]=0x{:08X}", s_count, audioFunc);
+                PPCContext audioCtx = ctx;
+                audioCtx.r3.u32 = ctx_ptr;  // Pass context as 'this'
+                func(audioCtx, base);
+                LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} vtable[3] returned", s_count);
+            }
+        }
+    }
+    
     ctx.r3.u32 = 0;  // Return success
     return;
 }
@@ -11496,8 +11534,8 @@ PPC_FUNC(sub_821A8868) {
     }
     
     // Step 2: Clear flag bytes at 0x82D04248 and 0x82D04249
-    uint8_t* flag1 = g_memory.Translate(0x82D04248);
-    uint8_t* flag2 = g_memory.Translate(0x82D04249);
+    uint8_t* flag1 = static_cast<uint8_t*>(g_memory.Translate(0x82D04248));
+    uint8_t* flag2 = static_cast<uint8_t*>(g_memory.Translate(0x82D04249));
     if (flag1) *flag1 = 0;
     if (flag2) *flag2 = 0;
     
@@ -11550,7 +11588,7 @@ PPC_FUNC(sub_821A8868) {
     }
     
     // Step 10: Set ready flag at 0x82D0424A
-    uint8_t* readyFlag = g_memory.Translate(0x82D0424A);
+    uint8_t* readyFlag = static_cast<uint8_t*>(g_memory.Translate(0x82D0424A));
     if (readyFlag) *readyFlag = 1;
     
     // Step 11: SKIP sub_827DB988 and sub_827DB2A8 (blocking sync functions)
