@@ -4,6 +4,7 @@
 
 #include "audio.h"
 #include <kernel/memory.h>
+#include <os/logger.h>
 
 #define AUDIO_DRIVER_KEY (uint32_t)('DAUD')
 
@@ -16,12 +17,17 @@ std::ofstream g_audioDumpStream;
 
 uint32_t XAudioRegisterRenderDriverClient(be<uint32_t>* callback, be<uint32_t>* driver)
 {
+    LOGF_WARNING("[AUDIO] XAudioRegisterRenderDriverClient CALLED! callback=0x{:08X} param=0x{:08X}", 
+                 (uint32_t)*callback, (uint32_t)callback[1]);
+
 #ifdef AUDIO_DUMP_SAMPLES_PATH
     g_audioDumpStream.open(AUDIO_DUMP_SAMPLES_PATH, std::ios::binary);
 #endif
 
     *driver = AUDIO_DRIVER_KEY;
     XAudioRegisterClient(g_memory.FindFunction(*callback), callback[1]);
+    
+    LOG_WARNING("[AUDIO] XAudioRegisterRenderDriverClient SUCCESS - audio thread started!");
     return 0;
 }
 
