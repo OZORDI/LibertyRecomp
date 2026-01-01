@@ -733,7 +733,7 @@ uint32_t XNetGetTitleXnAddr(uint32_t caller, XNADDR* addr) {
     }
     
     // Return XNET_GET_XNADDR_STATIC - we have a static IP
-    return XNET_GET_XNADDR_STATIC | XNET_GET_XNADDR_ETHERNET;
+    return XNET_GET_XNADDR_STATIC | XNET_GET_XNADDR_ETHERNET | XNET_GET_XNADDR_ONLINE;
 }
 
 uint32_t XNetGetConnectStatus(uint32_t caller, void* addr) {
