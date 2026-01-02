@@ -593,13 +593,51 @@ const RENDERING_TOOLS = [
 
 const TOOLS = [...CORE_TOOLS, ...EXTENDED_TOOLS, ...RENDERING_TOOLS];
 
+// Get the newest modification time from source files
+function getSourceMtimes(): { importsMtime: number; ppcNewestMtime: number } {
+  let importsMtime = 0;
+  let ppcNewestMtime = 0;
+  
+  // Check imports.cpp mtime
+  if (fs.existsSync(DEFAULT_IMPORTS_FILE)) {
+    importsMtime = fs.statSync(DEFAULT_IMPORTS_FILE).mtimeMs;
+  }
+  
+  // Check PPC files for newest mtime
+  if (fs.existsSync(DEFAULT_PPC_DIR)) {
+    const files = fs.readdirSync(DEFAULT_PPC_DIR)
+      .filter(f => f.startsWith('ppc_recomp.') && f.endsWith('.cpp'));
+    
+    for (const file of files) {
+      const filePath = path.join(DEFAULT_PPC_DIR, file);
+      const mtime = fs.statSync(filePath).mtimeMs;
+      if (mtime > ppcNewestMtime) {
+        ppcNewestMtime = mtime;
+      }
+    }
+  }
+  
+  return { importsMtime, ppcNewestMtime };
+}
+
 async function loadOrBuildIndex(): Promise<PPCIndex> {
   if (fs.existsSync(INDEX_CACHE_FILE)) {
     try {
-      const stat = fs.statSync(INDEX_CACHE_FILE);
-      const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+      const cacheStat = fs.statSync(INDEX_CACHE_FILE);
+      const cacheAgeHours = (Date.now() - cacheStat.mtimeMs) / (1000 * 60 * 60);
       
-      if (ageHours < 24) {
+      // Check if source files were modified since cache was built
+      const sourceMtimes = getSourceMtimes();
+      const cacheIsStale = 
+        sourceMtimes.importsMtime > cacheStat.mtimeMs ||
+        sourceMtimes.ppcNewestMtime > cacheStat.mtimeMs;
+      
+      if (cacheIsStale) {
+        console.error('Source files modified since cache was built, rebuilding...');
+        return rebuildIndex();
+      }
+      
+      if (cacheAgeHours < 24) {
         console.error('Loading cached index...');
         const cached = JSON.parse(fs.readFileSync(INDEX_CACHE_FILE, 'utf-8'));
         return deserializeIndex(cached);
