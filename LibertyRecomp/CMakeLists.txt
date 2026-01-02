@@ -89,7 +89,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/p2p_manager.cpp"
     "kernel/io/signaling_client.cpp"
     "kernel/game_init.cpp"
-    "kernel/sync_table.cpp"
+    # "kernel/sync_table.cpp"  # REMOVED - using Sonic approach
 )
 
 set(LIBERTY_RECOMP_LOCALE_CXX_SOURCES

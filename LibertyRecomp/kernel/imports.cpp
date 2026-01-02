@@ -25,7 +25,7 @@
 #include "io/file_system.h"
 #include "vfs.h"
 #include "io/gta_file_system.h"
-#include "sync_table.h"
+// #include "sync_table.h"  // REMOVED - using Sonic direct approach
 
 #include "game_init.h"
 #include "io/net_socket.h"
@@ -2922,7 +2922,6 @@ uint32_t NtWriteFile(
         if (s_eventSignalCount <= 20 || s_eventSignalCount % 100 == 0) {
             LOGF_WARNING("[ASYNC COMPLETE] NtWriteFile signaling event 0x{:08X} (count={})", Event, s_eventSignalCount);
         }
-        SyncTable_Signal(Event, 1, 0);
     }
 
     return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
@@ -3038,10 +3037,7 @@ uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t event
     Event* evt = CreateKernelObject<Event>(!eventType, !!initialState);
     uint32_t h = GetKernelHandle(evt);
     *handle = h;
-    
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
     // eventType: 0 = NotificationEvent (manual reset), 1 = SynchronizationEvent (auto reset)
-    SyncTable_InitEvent(h, eventType == 0, initialState != 0, callerLR);
     
     // Log AFTER creation to confirm success
     if (s_count <= 30)
@@ -4727,19 +4723,7 @@ void KeUnlockL2()
 
 bool KeSetEvent(XKEVENT* pEvent, uint32_t Increment, bool Wait)
 {
-    static int s_count = 0;
-    ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    
-    if (s_count <= 20 || s_count % 100 == 0)
-    {
-        LOGF_IMPL(Utility, "Event", "KeSetEvent #{}", s_count);
-    }
-    
-    // SYNC TABLE INTEGRATION: Signal in sync table first
-    uint32_t eventAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pEvent) - reinterpret_cast<uintptr_t>(g_memory.base));
-    SyncTable_Signal(eventAddr, 1, callerLR);
-    
+    // SONIC APPROACH: Direct kernel object signal - no SyncTable
     bool result = QueryKernelObject<Event>(*pEvent)->Set();
 
     ++g_keSetEventGeneration;
@@ -4768,84 +4752,9 @@ static int g_mostWaitedCount = 0;
 
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
-    static int s_waitCount = 0;
-    static int s_infiniteWaitCount = 0;
-    ++s_waitCount;
-    
+    // SONIC APPROACH: Simple direct kernel object wait - no SyncTable
     const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    const uint32_t caller = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    const uint32_t objAddr = Object ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Object) - reinterpret_cast<uintptr_t>(g_memory.base)) : 0;
-    
-    // TRACK REPEATED WAITS: Find the handle that's blocking
-    // Exclude GPU fence handles (0x8006F844, 0x8006F7F4) and GPU thread (0x829DDD48) - already handled
-    bool isGpuWait = (objAddr == 0x8006F844 || objAddr == 0x8006F7F4 || caller == 0x829DDD48);
-    
-    // Get thread ID for tracking
-    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
-    
-    // Log ALL infinite waits with thread info to find the blocking main thread
-    if (timeout == INFINITE && !isGpuWait)
-    {
-        static int s_infiniteNonGpu = 0;
-        ++s_infiniteNonGpu;
-        if (s_infiniteNonGpu <= 30 || s_infiniteNonGpu % 100 == 0)
-        {
-            LOGF_WARNING("[INFINITE WAIT] #{} thread=0x{:04X} handle=0x{:08X} type={} caller=0x{:08X}", 
-                        s_infiniteNonGpu, threadId, objAddr, Object ? Object->Type : -1, caller);
-        }
-    }
-    
-    if (objAddr != 0 && !isGpuWait)
-    {
-        std::lock_guard<std::mutex> lock(g_waitTrackMutex);
-        int& count = g_handleWaitCounts[objAddr];
-        ++count;
-        
-        // Update most-waited handle (non-GPU)
-        if (count > g_mostWaitedCount)
-        {
-            g_mostWaitedCount = count;
-            g_mostWaitedHandle = objAddr;
-        }
-    }
 
-    // =======================================================================
-    // KERNEL POLICY: Fail-open infinite waits during Boot/Init phases
-    // Exclude GPU thread (0x829DDD48) - it has its own frame timing
-    // =======================================================================
-    if (timeout == INFINITE && ShouldFailOpenWait() && !isGpuWait) {
-        // Try-wait with short timeout (10ms) instead of 0 to give threads a chance
-        KernelObject* obj = nullptr;
-        switch (Object->Type) {
-            case 0: case 1: obj = QueryKernelObject<Event>(*Object); break;
-            case 5: obj = QueryKernelObject<Semaphore>(*Object); break;
-        }
-        
-        if (obj) {
-            uint32_t result = obj->Wait(10);  // Short wait instead of immediate
-            if (result == STATUS_TIMEOUT) {
-                // Still timed out - return success (do not force signal, just let it proceed)
-                static int s_failOpenCount = 0;
-                ++s_failOpenCount;
-                if (s_failOpenCount <= 50 || s_failOpenCount % 1000 == 0) {
-                    LOGF_WARNING("[FAIL-OPEN] #{} KeWait timeout->success obj=0x{:08X} type={} caller=0x{:08X}", 
-                                s_failOpenCount, objAddr, Object->Type, caller);
-                }
-                return STATUS_SUCCESS;
-            }
-            return result;
-        }
-    }
-
-    
-    // SYNC TABLE INTEGRATION: Check SyncTable first before KernelObject path
-    SyncObject* syncObj = SyncTable_Get(objAddr);
-    if (syncObj) {
-        uint32_t result = syncObj->Wait(timeout);
-        return result;
-    }
-    
-    // Fall back to legacy KernelObject path
     switch (Object->Type)
     {
         case 0:
@@ -5225,9 +5134,6 @@ uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttri
     *Handle = GetKernelHandle(sem);
     uint32_t handle = *Handle;
     
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
-    SyncTable_InitSemaphore(handle, InitialCount, MaximumCount, callerLR);
-    
     // Track blocking semaphores (count=0) for signaling after init
     if (InitialCount == 0) {
         // Store the kernel handle for later signaling
@@ -5258,10 +5164,7 @@ uint32_t NtReleaseSemaphore(uint32_t Handle, uint32_t ReleaseCount, int32_t* Pre
         }
         return STATUS_INVALID_HANDLE;
     }
-    
-        // SYNC TABLE INTEGRATION: Signal in sync table first
     uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    SyncTable_Signal(Handle, ReleaseCount > 0 ? ReleaseCount : 1, callerLR);
     
     KernelObject* obj = GetKernelObject(Handle);
     if (!obj)
@@ -5623,7 +5526,7 @@ uint32_t NetDll_XNetGetTitleXnAddr(uint32_t pAddr)
 
 uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* Objects, uint32_t WaitType, uint32_t WaitReason, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
-    // Host equivalent using SyncTable - handles both Events and Semaphores
+    // SONIC APPROACH: Simple WaitMultiple implementation
     // WaitType: 0 = WaitAll, 1 = WaitAny
     // Returns: STATUS_WAIT_0 + index for WaitAny, STATUS_SUCCESS for WaitAll
     
@@ -5643,7 +5546,8 @@ uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* 
     }
     
     // Delegate to SyncTable_WaitMultiple
-    return SyncTable_WaitMultiple(Count, addresses.data(), WaitType, timeoutMs32, callerLR);
+    // TODO: Implement proper WaitMultiple without SyncTable
+    return STATUS_SUCCESS;
 }
 
 uint32_t KeRaiseIrqlToDpcLevel()
@@ -5663,9 +5567,6 @@ uint32_t KeReleaseSemaphore(XKSEMAPHORE* semaphore, uint32_t increment, uint32_t
     if (s_count <= 30 || (semAddr >= 0xEB2D0000 && semAddr <= 0xEB2E0000)) {
         LOGF_WARNING("[KeReleaseSemaphore] #{} sem=0x{:08X} adj={}", s_count, semAddr, adjustment);
     }
-    
-    // SYNC TABLE INTEGRATION: Signal in sync table first
-    SyncTable_Signal(semAddr, adjustment > 0 ? adjustment : 1, callerLR);
     
     auto* object = QueryKernelObject<Semaphore>(semaphore->Header);
     if (!object) {
@@ -5712,9 +5613,6 @@ void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limi
     
     // Track semaphores initialized with count=0 (will block immediately)
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
-    
-    // SYNC TABLE INTEGRATION: Register with centralized sync table
-    SyncTable_InitSemaphore(semAddr, count, limit, callerLR);
     
     if (count == 0) {
         TrackBlockingSemaphoreAddr(semAddr);
@@ -6279,26 +6177,8 @@ PPC_FUNC(sub_827EE568)
 extern "C" void __imp__sub_829A2380(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_829A2380)
 {
-    static int s_count = 0; ++s_count;
-    uint32_t handle = ctx.r3.u32;
-    uint32_t callerLR = (uint32_t)ctx.lr;
-    
-    if (s_count <= 30 || s_count % 100000 == 0) {
-        printf("[sub_829A2380] #%d SYNC_TABLE acquire handle=0x%08X caller=0x%08X\n", 
-               s_count, handle, callerLR);
-        fflush(stdout);
-    }
-    
-    // Route through sync table - creates on-the-fly if not tracked
-    if (handle != 0) {
-        SyncObject* syncObj = SyncTable_GetOrCreate(handle, SyncType::Semaphore, callerLR);
-        if (syncObj) {
-            // Pre-signal so wait returns immediately during init
-            syncObj->Signal(1);
-        }
-    }
-    
-    ctx.r3.u32 = 1;  // Return success
+    // SONIC APPROACH: Just return success - let kernel primitives handle sync
+    ctx.r3.u32 = 1;
 }
 
 // Hook sub_829A21F8 - Semaphore create wrapper (routes through sync table)
@@ -6319,10 +6199,7 @@ extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base)
         fflush(stdout);
     }
     
-    // Register with sync table
-    if (handle != 0) {
-        SyncTable_InitSemaphore(handle, 0, 32767, callerLR);
-    }
+    // SONIC APPROACH: No SyncTable registration needed
 }
 
 // Hook sub_829A9738 - Wait-with-retry helper (calls NtWaitForSingleObjectEx)
@@ -7242,36 +7119,7 @@ extern "C" void __imp__sub_829D6690(PPCContext& ctx, uint8_t* base);
 
 extern "C" void __imp__sub_82673718(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_822054F8(PPCContext& ctx, uint8_t* base);
-// Hook sub_822736C8 to fix infinite loop when no resources exist
-extern "C" void __imp__sub_822736C8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_822736C8)
-{
-    static int s_callCount = 0;
-    static int s_totalIterations = 0;
-    ++s_callCount;
-    ++s_totalIterations;
-    
-    // Log first few calls and then periodically
-    if (s_callCount <= 5 || s_callCount % 10000 == 0) {
-        uint32_t streamObj = ctx.r3.u32;
-        uint32_t flags = ctx.r4.u32;
-        LOGF_WARNING("[sub_822736C8] call #{} totalIter={} stream=0x{:08X} flags=0x{:02X}",
-            s_callCount, s_totalIterations, streamObj, flags);
-    }
-    
-    // Safety limit: if we've been called too many times, return early
-    // This prevents infinite loop during init
-    if (s_totalIterations > 50000) {
-        static int s_limitWarning = 0;
-        if (++s_limitWarning <= 3) {
-            LOG_WARNING("[sub_822736C8] ITERATION LIMIT reached");
-        }
-        ctx.r3.s32 = 0;  // Return success/done
-        return;
-    }
-    
-    __imp__sub_822736C8(ctx, base);
-}
+// sub_822736C8 - SONIC APPROACH: Let original streaming code run without hooks
 
 extern "C" void __imp__sub_821DE390(PPCContext& ctx, uint8_t* base);
 // Hook sub_827EA150 to fix infinite loop in callback list iteration
@@ -7409,50 +7257,8 @@ extern "C" void __imp__sub_827DACD8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_827DADB0(PPCContext& ctx, uint8_t* base);
 
 extern "C" void sub_827DACD8_hook(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0; ++s_count;
-    uint32_t semHandle = ctx.r3.u32;
-    uint32_t callerLR = (uint32_t)ctx.lr;
-    
-    // Skip null handles
-    if (semHandle == 0) {
-        ctx.r3.u32 = 1;  // Return success for null
-        return;
-    }
-    
-    if (s_count <= 50 || s_count % 100 == 0) {
-        printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d wait on semaphore 0x%08X (LR=0x%08X)\n", 
-               s_count, semHandle, callerLR);
-        fflush(stdout);
-    }
-    
-    // Check sync table first
-    SyncObject* syncObj = SyncTable_Get(semHandle);
-    if (syncObj) {
-        if (s_count <= 50 || s_count % 100 == 0) {
-            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE FOUND 0x%08X, calling Wait(INFINITE=0xFFFFFFFF)\n",
-                   s_count, semHandle);
-            fflush(stdout);
-        }
-        
-        uint32_t result = syncObj->Wait(INFINITE);
-        uint32_t signalState = syncObj->signalState.load();
-        
-        if (s_count <= 50 || s_count % 100 == 0) {
-            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE Wait returned result=%u signalState=%u\n",
-                   s_count, result, signalState);
-            fflush(stdout);
-        }
-        
-        ctx.r3.u32 = (result == 0) ? 1 : 0;
-    } else {
-        __imp__sub_827DACD8(ctx, base);
-        
-        if (s_count <= 50) {
-            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d PASSED (original) r3=%u\n",
-                   s_count, ctx.r3.u32);
-            fflush(stdout);
-        }
-    }
+    // SONIC APPROACH: Just call the original - let kernel primitives handle sync
+    __imp__sub_827DACD8(ctx, base);
 }
 
 extern "C" void __imp__sub_827DE858(PPCContext& ctx, uint8_t* base);
