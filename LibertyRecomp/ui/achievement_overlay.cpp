@@ -18,7 +18,7 @@ constexpr double OVERLAY_CONTAINER_INTRO_FADE_END = 9;
 constexpr double OVERLAY_CONTAINER_OUTRO_FADE_START = 0;
 constexpr double OVERLAY_CONTAINER_OUTRO_FADE_END = 4;
 
-constexpr double OVERLAY_DURATION = 3;
+constexpr double OVERLAY_DURATION = 5.0; // GTA IV style - slightly longer display
 
 static bool g_isClosing = false;
 
@@ -28,7 +28,8 @@ static Achievement g_achievement;
 
 static ImFont* g_rodinFont;
 
-static bool DrawContainer(ImVec2 min, ImVec2 max, float cornerRadius = 25)
+// Draw a rounded rectangle with semi-transparent background (GTA IV style)
+static bool DrawContainer(ImVec2 min, ImVec2 max, float cornerRadius = 12.0f)
 {
     auto drawList = ImGui::GetBackgroundDrawList();
 
@@ -59,10 +60,16 @@ static bool DrawContainer(ImVec2 min, ImVec2 max, float cornerRadius = 25)
         : ComputeMotion(g_appearTime, OVERLAY_CONTAINER_INTRO_FADE_START, OVERLAY_CONTAINER_INTRO_FADE_END);
 
     auto alpha = g_isClosing
-        ? Hermite(1, 0, colourMotion)
-        : Hermite(0, 1, colourMotion);
+        ? Hermite(1.0f, 0.0f, colourMotion)
+        : Hermite(0.0f, 1.0f, colourMotion);
 
-    // DrawPauseContainer(min, max, alpha);
+    // Draw semi-transparent dark background (GTA IV style)
+    uint8_t bgAlpha = static_cast<uint8_t>(200 * alpha);
+    drawList->AddRectFilled(min, max, IM_COL32(20, 20, 20, bgAlpha), cornerRadius);
+    
+    // Draw subtle border
+    uint8_t borderAlpha = static_cast<uint8_t>(150 * alpha);
+    drawList->AddRect(min, max, IM_COL32(80, 80, 80, borderAlpha), cornerRadius, 0, 2.0f);
 
     if (containerMotion >= 1.0f)
     {
@@ -80,24 +87,21 @@ void AchievementOverlay::Init()
     g_rodinFont = ImFontAtlasSnapshot::GetFont("FOT-RodinPro-DB.otf");
 }
 
-// Dequeue achievements only when we can actually play sounds.
-// Loading thread does not update this object.
-static bool g_soundAdministratorUpdated;
-
-// PPC_FUNC_IMPL(__imp__sub_82B43480);
-// PPC_FUNC(sub_82B43480)
-// {
-//     g_soundAdministratorUpdated = true;
-//     __imp__sub_82B43480(ctx, base);
-// }
-
-// Dequeue achievements only in the main thread. This is also extra thread safety.
+// Dequeue achievements only in the main thread for thread safety.
 static std::thread::id g_mainThreadId = std::this_thread::get_id();
 
 static bool CanDequeueAchievement()
 {
-    // TODO
-    return false;
+    // Allow dequeuing if:
+    // 1. We have achievements in the queue
+    // 2. We're in the main thread
+    if (AchievementOverlay::s_queue.empty())
+        return false;
+    
+    if (std::this_thread::get_id() != g_mainThreadId)
+        return false;
+    
+    return true;
 }
 
 void AchievementOverlay::Draw()
@@ -112,90 +116,118 @@ void AchievementOverlay::Draw()
         
         if (Config::Language == ELanguage::English)
             g_achievement.Name = xdbf::FixInvalidSequences(g_achievement.Name);
-        
-        Game_PlaySound("obj_navi_appear");
     }
 
     if (!s_isVisible)
-    {
-        g_soundAdministratorUpdated = false;
         return;
-    }
     
     if (ImGui::GetTime() - g_appearTime >= OVERLAY_DURATION)
         AchievementOverlay::Close();
-
-    // Close function can use this bool so reset it after.
-    g_soundAdministratorUpdated = false;
 
     auto drawList = ImGui::GetBackgroundDrawList();
     auto& res = ImGui::GetIO().DisplaySize;
 
     auto strAchievementUnlocked = Localise("Achievements_Unlock").c_str();
     auto strAchievementName = g_achievement.Name.c_str();
+    auto strGamerScore = std::to_string(g_achievement.Score) + "G";
 
     // Calculate text sizes.
-    auto fontSize = Scale(24);
+    auto fontSize = Scale(22);
+    auto smallFontSize = Scale(18);
     auto headerSize = g_rodinFont->CalcTextSizeA(fontSize, FLT_MAX, 0, strAchievementUnlocked);
     auto bodySize = g_rodinFont->CalcTextSizeA(fontSize, FLT_MAX, 0, strAchievementName);
-    auto maxSize = std::max(headerSize.x, bodySize.x) + Scale(5);
+    auto scoreSize = g_rodinFont->CalcTextSizeA(smallFontSize, FLT_MAX, 0, strGamerScore.c_str());
+    auto maxTextWidth = std::max({headerSize.x, bodySize.x, scoreSize.x}) + Scale(10);
 
     // Calculate image margins.
-    auto imageMarginX = Scale(25);
-    auto imageMarginY = Scale(22.5f);
-    auto imageSize = Scale(60);
+    auto imageMarginX = Scale(15);
+    auto imageMarginY = Scale(15);
+    auto imageSize = Scale(64); // Xbox achievement icon size
 
     // Calculate text margins.
-    auto textMarginX = imageMarginX * 2 + imageSize - Scale(5);
-    auto textMarginY = imageMarginY + Scale(2);
+    auto textMarginX = imageMarginX + imageSize + Scale(15);
+    auto textMarginY = imageMarginY;
 
-    auto containerWidth = imageMarginX + textMarginX + maxSize;
+    auto containerWidth = textMarginX + maxTextWidth + Scale(20);
+    auto containerHeight = Scale(94);
 
-    ImVec2 min = { (res.x / 2) - (containerWidth / 2), Scale(55) };
-    ImVec2 max = { min.x + containerWidth, min.y + Scale(105) };
+    // Position at BOTTOM CENTER of screen
+    float bottomMargin = Scale(80);
+    ImVec2 min = { (res.x / 2) - (containerWidth / 2), res.y - bottomMargin - containerHeight };
+    ImVec2 max = { min.x + containerWidth, min.y + containerHeight };
 
     if (DrawContainer(min, max))
     {
         if (!g_isClosing)
         {
-            // Draw achievement icon.
-            drawList->AddImage
-            (
-                g_xdbfTextureCache[g_achievement.ID],                                                   // user_texture_id
-                { /* X */ min.x + imageMarginX, /* Y */ min.y + imageMarginY },                         // p_min
-                { /* X */ min.x + imageMarginX + imageSize, /* Y */ min.y + imageMarginY + imageSize }, // p_max
-                { 0, 0 },                                                                               // uv_min
-                { 1, 1 },                                                                               // uv_max
-                IM_COL32(255, 255, 255, 255)                                                            // col
-            );
+            // Draw achievement icon if available
+            auto iconIt = g_xdbfTextureCache.find(g_achievement.ID);
+            if (iconIt != g_xdbfTextureCache.end() && iconIt->second != nullptr)
+            {
+                drawList->AddImage
+                (
+                    iconIt->second,
+                    { min.x + imageMarginX, min.y + imageMarginY },
+                    { min.x + imageMarginX + imageSize, min.y + imageMarginY + imageSize },
+                    { 0, 0 },
+                    { 1, 1 },
+                    IM_COL32(255, 255, 255, 255)
+                );
+            }
+            else
+            {
+                // Draw placeholder rectangle if no icon
+                drawList->AddRectFilled(
+                    { min.x + imageMarginX, min.y + imageMarginY },
+                    { min.x + imageMarginX + imageSize, min.y + imageMarginY + imageSize },
+                    IM_COL32(60, 60, 60, 255),
+                    4.0f
+                );
+            }
 
             // Use low quality text.
             SetShaderModifier(IMGUI_SHADER_MODIFIER_LOW_QUALITY_TEXT);
 
-            // Draw header text.
+            // Draw "Achievement Unlocked" header (green color like Xbox)
+            float textY = min.y + textMarginY + Scale(5);
             DrawTextWithShadow
             (
-                g_rodinFont,                                                                                 // font
-                fontSize,                                                                                    // fontSize
-                { /* X */ min.x + textMarginX + (maxSize - headerSize.x) / 2, /* Y */ min.y + textMarginY }, // pos
-                IM_COL32(252, 243, 5, 255),                                                                  // colour
-                strAchievementUnlocked,                                                                      // text
-                2,                                                                                           // offset
-                1.0f,                                                                                        // radius
-                IM_COL32(0, 0, 0, 255)                                                                       // shadowColour
+                g_rodinFont,
+                fontSize,
+                { min.x + textMarginX, textY },
+                IM_COL32(80, 200, 80, 255), // Xbox green
+                strAchievementUnlocked,
+                1,
+                0.5f,
+                IM_COL32(0, 0, 0, 180)
             );
 
-            // Draw achievement name.
+            // Draw achievement name (white)
+            textY += headerSize.y + Scale(6);
             DrawTextWithShadow
             (
-                g_rodinFont,                                                                                                       // font
-                fontSize,                                                                                                          // fontSize
-                { /* X */ min.x + textMarginX + (maxSize - bodySize.x) / 2, /* Y */ min.y + textMarginY + bodySize.y + Scale(6) }, // pos
-                IM_COL32(255, 255, 255, 255),                                                                                      // colour
-                strAchievementName,                                                                                                // text
-                2,                                                                                                                 // offset
-                1.0f,                                                                                                              // radius
-                IM_COL32(0, 0, 0, 255)                                                                                             // shadowColour
+                g_rodinFont,
+                fontSize,
+                { min.x + textMarginX, textY },
+                IM_COL32(255, 255, 255, 255),
+                strAchievementName,
+                1,
+                0.5f,
+                IM_COL32(0, 0, 0, 180)
+            );
+
+            // Draw gamerscore (yellow/gold)
+            textY += bodySize.y + Scale(4);
+            DrawTextWithShadow
+            (
+                g_rodinFont,
+                smallFontSize,
+                { min.x + textMarginX, textY },
+                IM_COL32(255, 215, 0, 255), // Gold
+                strGamerScore.c_str(),
+                1,
+                0.5f,
+                IM_COL32(0, 0, 0, 180)
             );
 
             // Reset low quality text shader modifier.
@@ -224,6 +256,8 @@ void AchievementOverlay::Close()
         g_isClosing = true;
     }
 
-    if (CanDequeueAchievement())
+    // When closing animation is done, allow visibility to be reset
+    auto containerMotion = ComputeMotion(g_appearTime, OVERLAY_CONTAINER_COMMON_MOTION_START, OVERLAY_CONTAINER_COMMON_MOTION_END);
+    if (containerMotion >= 1.0f)
         s_isVisible = false;
 }

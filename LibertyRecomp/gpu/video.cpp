@@ -2438,15 +2438,15 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     LOGF_WARNING("{:p} {:p} {:p} {:p} {:p} {:p}\n", reinterpret_cast<void*>(a1), reinterpret_cast<void*>(a2), reinterpret_cast<void*>(a3), reinterpret_cast<void*>(a4), reinterpret_cast<void*>(a5), reinterpret_cast<void*>(a6));
     g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture *>();
 
-    // for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
-    // {
-    //     // huh?
-    //     if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
-    //         continue;
+    for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
+    {
+        // huh?
+        if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
+            continue;
 
-    //     g_xdbfTextureCache[achievement.ID] =
-    //         LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize).release();
-    // }
+        g_xdbfTextureCache[achievement.ID] =
+            LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize).release();
+    }
 
     // Move backbuffer to guest memory.
     if (g_backBufferHolder == nullptr) {
@@ -2727,6 +2727,26 @@ static const char *DeviceTypeName(RenderDeviceType type)
     default:
         return "Unknown";
     }
+}
+
+
+// Debug: F10 to test achievement unlock
+static bool g_achievementDebugWasToggled = false;
+static uint16_t g_debugAchievementId = 1;
+
+static void HandleAchievementDebugKey()
+{
+    bool toggleAchievement = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F10] != 0;
+
+    if (!g_achievementDebugWasToggled && toggleAchievement)
+    {
+        // Unlock test achievement (cycles through IDs 1-10)
+        AchievementOverlay::Open(g_debugAchievementId);
+        LOG_WARNING("[DEBUG] Achievement test: unlocked ID {}", g_debugAchievementId);
+        g_debugAchievementId = (g_debugAchievementId % 10) + 1;
+    }
+
+    g_achievementDebugWasToggled = toggleAchievement;
 }
 
 static void DrawProfiler()
@@ -3055,6 +3075,7 @@ static void DrawImGui()
     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
 
     DrawFPS();
+    HandleAchievementDebugKey();
     DrawProfiler();
     ImGui::Render();
 
