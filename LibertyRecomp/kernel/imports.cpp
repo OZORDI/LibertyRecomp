@@ -2164,6 +2164,7 @@ uint32_t NtOpenFile(
 
     const uint32_t handleValue = GetKernelHandle(h);
     g_ntFileHandles.emplace(handleValue, h);
+    LOGF_IMPL(Utility, "NtCreateFile", "[FALLBACK] File handle 0x{:08X} for {}", handleValue, h->path.string());
 
     *FileHandle = handleValue;
     LOGF_IMPL(Utility, "NtOpenFile", "Opened file handle 0x{:08X} for {}", handleValue, resolved.string());
@@ -2625,6 +2626,7 @@ uint32_t NtCreateFile
 
     const uint32_t handleValue = GetKernelHandle(h);
     g_ntFileHandles.emplace(handleValue, h);
+    LOGF_IMPL(Utility, "NtCreateFile", "[FALLBACK] File handle 0x{:08X} for {}", handleValue, h->path.string());
 
     *FileHandle = handleValue;
     if (IoStatusBlock)
@@ -3760,8 +3762,8 @@ uint32_t NtReadFile(
     const uint64_t offset = ByteOffset ? static_cast<uint64_t>(ByteOffset->get()) : 0ull;
     if (s_readCount <= 50 || s_readCount % 500 == 0)
     {
-        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X} event=0x{:08X}", 
-                  s_readCount, FileHandle, Length, offset, Event);
+        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X} ByteOffset={} event=0x{:08X}", 
+                  s_readCount, FileHandle, Length, offset, ByteOffset ? "SET" : "NULL", Event);
     }
     
     // Helper lambda to signal completion event if provided
@@ -3958,6 +3960,7 @@ uint32_t NtReadFile(
     hFile->stream.read(reinterpret_cast<char*>(Buffer), Length);
     const uint32_t bytesRead = static_cast<uint32_t>(hFile->stream.gcount());
 
+
     if (bytesRead == 0 && Length != 0 && hFile->stream.eof())
     {
         IoStatusBlock->Status = STATUS_END_OF_FILE;
@@ -3988,6 +3991,7 @@ uint32_t NtReadFile(
     const bool ok = !hFile->stream.bad();
     IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
     IoStatusBlock->Information = ok ? bytesRead : 0;
+
     
     // Signal completion event for async I/O
     signalCompletionEvent();
