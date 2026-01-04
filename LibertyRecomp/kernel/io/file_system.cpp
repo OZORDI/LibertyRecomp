@@ -10,11 +10,6 @@
 #include <user/paths.h>
 #include <stdafx.h>
 
-struct FileHandle : KernelObject
-{
-    std::fstream stream;
-    std::filesystem::path path;
-};
 
 struct FindHandle : KernelObject
 {

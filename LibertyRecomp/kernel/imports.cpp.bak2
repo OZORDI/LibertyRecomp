@@ -3,7 +3,6 @@
 #include <unordered_set>
 #include <thread>
 #include <atomic>
-#include <future>
 #include <stdafx.h>
 #include <cpu/ppc_context.h>
 #include <cpu/guest_thread.h>
@@ -183,7 +182,6 @@ inline bool IsKnownSpinWait(uint32_t funcAddr) {
 // Forward declarations - actual tracking functions defined after Semaphore struct
 static std::mutex g_semaphoreTrackMutex;
 static std::unordered_set<uint32_t> g_blockingSemaphoreAddrs;  // Guest addresses of blocking semaphores
-static std::unordered_map<uint32_t, KernelObject*> g_ntCreateHandleMap;  // NtCreate* handle -> KernelObject*
 static std::atomic<bool> g_initComplete{false};
 static std::atomic<int> g_semaphoreWaitCount{0};
 
@@ -196,19 +194,6 @@ void TrackBlockingSemaphoreAddr(uint32_t addr) {
 bool IsBlockingSemaphore(uint32_t addr) {
     std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
     return g_blockingSemaphoreAddrs.count(addr) > 0;
-}
-
-// Get KernelObject for NtCreate* handle (returns nullptr if not found)
-KernelObject* GetNtCreateObject(uint32_t handle) {
-    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
-    auto it = g_ntCreateHandleMap.find(handle);
-    return it != g_ntCreateHandleMap.end() ? it->second : nullptr;
-}
-
-// Register NtCreate* handle -> KernelObject mapping
-void RegisterNtCreateHandle(uint32_t handle, KernelObject* obj) {
-    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
-    g_ntCreateHandleMap[handle] = obj;
 }
 
 bool IsInitComplete() {
@@ -1664,33 +1649,22 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
         }
         else
         {
-            // Handle arbitrary timeout - use polling with short sleep
+            // Handle arbitrary timeout - convert to timed wait
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
             uint32_t currentCount;
-            int iterations = 0;
             while (true)
             {
                 currentCount = count.load();
                 if (currentCount != 0)
                 {
                     if (count.compare_exchange_weak(currentCount, currentCount - 1))
-                    {
-                        if (s_waitCount <= 30)
-                            LOGF_WARNING("[SemWait] #{} ACQUIRED count={} after {} iterations", s_waitCount, currentCount, iterations);
                         return STATUS_SUCCESS;
-                    }
                 }
                 else
                 {
-                    auto now = std::chrono::steady_clock::now();
-                    if (now >= deadline)
-                    {
-                        if (s_waitCount <= 30)
-                            LOGF_WARNING("[SemWait] #{} TIMEOUT after {} iterations ({}ms)", s_waitCount, iterations, timeout);
+                    if (std::chrono::steady_clock::now() >= deadline)
                         return STATUS_TIMEOUT;
-                    }
-                    ++iterations;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    count.wait(0);
                 }
             }
         }
@@ -2661,15 +2635,6 @@ uint32_t NtClose(uint32_t handle)
             return 0;
         }
 
-        // HANDLE LIFECYCLE: Log what type of handle is being closed
-        bool wasNtFile = g_ntFileHandles.count(handle) > 0;
-        bool wasNtDir = g_ntDirHandles.count(handle) > 0;
-        bool wasNtVirt = g_ntVirtFileHandles.count(handle) > 0;
-        static int s_closeLogCount = 0;
-        if (++s_closeLogCount <= 50 || s_closeLogCount % 200 == 0) {
-            LOGF_WARNING("[HANDLE-CLOSE] h=0x{:08X} wasFile={} wasDir={} wasVirt={}", handle, wasNtFile, wasNtDir, wasNtVirt);
-        }
-        
         // Close NT file handles we created.
         if (auto fhIt = g_ntFileHandles.find(handle); fhIt != g_ntFileHandles.end())
         {
@@ -2802,77 +2767,63 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
 
     if (IsKernelObject(Handle))
     {
+        // FIX: Handle can be either:
+        // 1. A kernel object handle (from NtCreateSemaphore/NtCreateEvent) - directly a KernelObject*
+        // 2. A guest dispatcher object address (XKSEMAPHORE/XKEVENT from KeInitialize*) - needs QueryKernelObject
+        
+        // Check if this is a guest dispatcher object by looking at the header
+        XDISPATCHER_HEADER* header = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Handle));
+        uint8_t objType = header->Type;
+        
         KernelObject* obj = nullptr;
         
-        // FIRST: Check if this is a registered NtCreate* handle
-        obj = GetNtCreateObject(Handle);
-        if (obj)
+        // Type 5 = Semaphore, Type 0/1 = Event (synchronization/notification)
+        if (objType == 5)
         {
+            // Guest XKSEMAPHORE - use QueryKernelObject to get actual Semaphore
+            obj = QueryKernelObject<Semaphore>(*header);
+            if (s_waitCount <= 30 || (Handle >= 0xEB2D0000 && Handle < 0xEB2E0000))
+            {
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKSEMAPHORE, queried kernel obj={}", 
+                            s_waitCount, Handle, obj ? "OK" : "NULL");
+            }
+        }
+        else if (objType == 0 || objType == 1)
+        {
+            // Guest XKEVENT - use QueryKernelObject to get actual Event
+            obj = QueryKernelObject<Event>(*header);
             if (s_waitCount <= 30)
             {
-                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} from NtCreate* map, obj=OK", 
-                            s_waitCount, Handle);
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKEVENT type={}, queried kernel obj={}", 
+                            s_waitCount, Handle, objType, obj ? "OK" : "NULL");
             }
         }
         else
         {
-            // FALLBACK: Try as guest dispatcher object (from KeInitialize*)
-            XDISPATCHER_HEADER* header = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Handle));
-            uint8_t objType = header->Type;
-            
-            // Type 5 = Semaphore, Type 0/1 = Event (synchronization/notification)
-            if (objType == 5)
-            {
-                obj = QueryKernelObject<Semaphore>(*header);
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} guest type=5 (Semaphore), obj={}", 
-                                s_waitCount, Handle, obj ? "OK" : "NULL");
-                }
-            }
-            else if (objType == 0 || objType == 1)
-            {
-                obj = QueryKernelObject<Event>(*header);
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} guest type={} (Event), obj={}", 
-                                s_waitCount, Handle, objType, obj ? "OK" : "NULL");
-                }
-            }
-            else
-            {
-                // Unrecognized type - return success for fail-open
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} unknown type={} - returning SUCCESS", 
-                                s_waitCount, Handle, objType);
-                }
-                return STATUS_SUCCESS;  // Fail-open for unknown objects
-            }
+            // Likely a direct kernel object handle (from NtCreate*)
+            obj = GetKernelObject(Handle);
         }
         
         if (!obj)
         {
-            LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} - no kernel object found!", s_waitCount, Handle);
+            LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} type={} - no kernel object found!", s_waitCount, Handle, objType);
             return STATUS_TIMEOUT;
         }
         
 
         // KERNEL POLICY: Fail-open during Boot/Init
-        // SIMPLIFIED: During init, just return SUCCESS immediately for INFINITE waits
-        // This follows MarathonRecomp pattern - don't block init, let game code proceed
         if (timeout == INFINITE && ShouldFailOpenWait()) {
-            static int s_failOpenCount = 0;
-            ++s_failOpenCount;
-            if (s_failOpenCount <= 50 || s_failOpenCount % 500 == 0) {
-                LOGF_WARNING("[FAIL-OPEN] #{} handle=0x{:08X} INFINITE->SUCCESS (init phase)", s_failOpenCount, Handle);
+            uint32_t result = obj->Wait(10);  // Short wait instead of infinite
+            if (result == STATUS_TIMEOUT) {
+                static int s_failOpenObj = 0;
+                ++s_failOpenObj;
+                if (s_failOpenObj <= 50 || s_failOpenObj % 1000 == 0) {
+                    LOGF_WARNING("[FAIL-OPEN] NtWaitEx #{} infinite->success handle=0x{:08X} caller=0x{:08X}", 
+                                s_failOpenObj, Handle, callerLR);
+                }
+                return STATUS_SUCCESS;
             }
-            return STATUS_SUCCESS;
-        }
-        
-        // Normal wait path (post-init or finite timeout)
-        if (timeout == INFINITE) {
-            return obj->Wait(timeout);
+            return result;
         }
 
         // POST-INIT: timeout=0 polls should return success to allow scheduler to proceed
@@ -3866,55 +3817,6 @@ uint32_t NtReadFile(
     auto it = g_ntFileHandles.find(FileHandle);
     if (it == g_ntFileHandles.end() || !it->second || it->second->magic != kNtFileHandleMagic)
     {
-        // FALLBACK: Check if this is a FileHandle from XCreateFileA (Win32 API path)
-        // This bridges the two file handle systems that were previously disconnected.
-        if (IsKernelObject(FileHandle))
-        {
-            ::FileHandle* xFileHandle = GetKernelObject<::FileHandle>(FileHandle);
-            if (xFileHandle && xFileHandle->magic == kFileHandleMagic && xFileHandle->stream.is_open())
-            {
-                static int s_fallbackCount = 0;
-                if (++s_fallbackCount <= 20 || s_fallbackCount % 100 == 0)
-                {
-                    LOGF_WARNING("[NtReadFile] FALLBACK to XCreateFileA handle 0x{:08X} (count={})", 
-                                 FileHandle, s_fallbackCount);
-                }
-                
-                if (!IoStatusBlock || !Buffer)
-                    return STATUS_INVALID_PARAMETER;
-                
-                const uint64_t fileOffset = ByteOffset ? static_cast<uint64_t>(ByteOffset->get()) : 0ull;
-                if (ByteOffset != nullptr)
-                {
-                    xFileHandle->stream.clear();
-                    xFileHandle->stream.seekg(fileOffset, std::ios::beg);
-                    if (xFileHandle->stream.bad())
-                    {
-                        IoStatusBlock->Status = STATUS_FAIL_CHECK;
-                        IoStatusBlock->Information = 0;
-                        return STATUS_FAIL_CHECK;
-                    }
-                }
-                
-                xFileHandle->stream.read(reinterpret_cast<char*>(Buffer), Length);
-                const uint32_t bytesRead = static_cast<uint32_t>(xFileHandle->stream.gcount());
-                
-                if (bytesRead == 0 && Length != 0 && xFileHandle->stream.eof())
-                {
-                    IoStatusBlock->Status = STATUS_END_OF_FILE;
-                    IoStatusBlock->Information = 0;
-                    signalCompletionEvent();
-                    return STATUS_END_OF_FILE;
-                }
-                
-                const bool ok = !xFileHandle->stream.bad();
-                IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
-                IoStatusBlock->Information = ok ? bytesRead : 0;
-                signalCompletionEvent();
-                return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
-            }
-        }
-        
         LOGF_IMPL(Utility, "NtReadFile", "Not a file handle 0x{:08X}", FileHandle);
         return STATUS_INVALID_HANDLE;
     }
@@ -4851,19 +4753,8 @@ static int g_mostWaitedCount = 0;
 
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
+    // SONIC APPROACH: Simple direct kernel object wait - no SyncTable
     const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    
-    // FAIL-OPEN: During init, return SUCCESS with small delay to prevent spin loops
-    if (timeout == INFINITE && ShouldFailOpenWait()) {
-        static int s_keFailOpen = 0;
-        ++s_keFailOpen;
-        if (s_keFailOpen <= 50 || s_keFailOpen % 5000 == 0) {
-            LOGF_WARNING("[KeWait-FAIL-OPEN] #{} type={} INFINITE->SUCCESS (init phase)", s_keFailOpen, Object->Type);
-        }
-        // Small delay to prevent tight spin loops burning CPU
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        return STATUS_SUCCESS;
-    }
 
     switch (Object->Type)
     {
@@ -5244,18 +5135,15 @@ uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttri
     *Handle = GetKernelHandle(sem);
     uint32_t handle = *Handle;
     
-    // Register handle -> object mapping for NtWaitForSingleObjectEx
-    RegisterNtCreateHandle(handle, sem);
-    
     // Track blocking semaphores (count=0) for signaling after init
     if (InitialCount == 0) {
         // Store the kernel handle for later signaling
         std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
         g_blockingSemaphoreAddrs.insert(handle);  // Track handle directly
-        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count=0 max={} - REGISTERED", 
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count=0 max={} - TRACKED for signaling", 
                      s_count, handle, MaximumCount);
     } else if (s_count <= 50) {
-        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={} - REGISTERED", 
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={}", 
                      s_count, handle, InitialCount, MaximumCount);
     }
     
@@ -5524,9 +5412,7 @@ uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* 
         creationFlags = 0;
     }
 
-    static int s_threadCount = 0;
-    ++s_threadCount;
-    LOGF_WARNING("[ExCreateThread] Thread #{} entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", s_threadCount, 
+    LOGF_WARNING("[ExCreateThread] Creating thread entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", 
                  entry, r3, r4, creationFlags);
     *handle = GetKernelHandle(GuestThread::Start({ entry, r3, r4, creationFlags }, &hostThreadId));
     LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X} {:X}",

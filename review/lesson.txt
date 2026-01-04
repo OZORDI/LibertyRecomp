@@ -1,0 +1,82 @@
+I Need a Runtime.
+Tom Clay
+Tom Clay
+21 Sep 2025 — 5 min read
+Right this way...
+Right this way...
+In my previous post, I talked about XenonRecomp and its remarkable ability to transform Xbox 360 games into native PC executables. I can imagine this concept makes a lot of people excited, believing recompilation is just a matter of dragging and dropping a binary into some magical tool that spits out a perfectly functional PC game.
+
+If only it were that simple :(
+
+The binary translation, while technically impressive, is merely the opening act of a much longer and considerably more exciting (or painful) show. Today's adventure focuses on the unglamorous but essential work that happens after the recompilation – implementing the runtime that makes your freshly translated code actually, you know, run.
+
+The Moment of Truth (and Despair)
+Picture this: you've just received your freshly recompiled source code from XenonRecomp. You're excited. You're ready. You hit compile and...
+
+
+Nothing. Well, not nothing – you get a lovely cascade of linker errors that would make even seasoned developers question their career choices. Welcome to the world of unresolved import symbols, where every function starting with __imp__ is a tiny cry for help from code that has no idea how to exist outside its native Xbox 360 habitat. Poor guy.
+
+The Missing Piece: System Calls and the Runtime
+During the recompilation process, Xbox 360 system calls and API imports are translated into function calls within the generated code. This approach differs fundamentally from dynamic emulation systems like Xenia, which patch import functions directly in memory at runtime as part of their Just-In-Time compilation process. In static recompilation, these missing system calls require explicit implementation through a custom runtime environment – essentially, we need to teach our PC how to speak Xbox 360.
+
+The recompilation process converts Xbox 360 system calls into external function declarations using a macro system that's both elegant and terrifying:
+
+// ppc_context.h
+#define PPC_FUNC(x) void x(PPCContext& __restrict ctx, uint8_t* base)
+#define PPC_EXTERN_FUNC(x) extern PPC_FUNC(x)
+
+// ppc_recomp_shared.h
+// Example declarations generated during recompilation
+PPC_EXTERN_FUNC(__imp__NtCreateFile);
+PPC_EXTERN_FUNC(__imp__NtReadFile);
+PPC_EXTERN_FUNC(__imp__XamShowMessageBoxUIEx);
+PPC_EXTERN_FUNC(__imp__VdSwap);
+This macro expansion results in external function declarations like:
+
+extern void __imp__NtCreateFile(PPCContext& __restrict ctx, uint8_t* base);
+Each of these declarations is essentially a promise to the linker that somewhere, somehow, you'll provide an implementation. Break that promise and the linker will break your build.
+
+The Implementation, From Trivial to Traumatic
+Not all system calls are created equal. When implementing a runtime, you quickly learn there's a hierarchy of pain, ranging from "I can do this in my sleep" to "I need therapy after debugging this."
+
+Level 1: The Blessed Stubs
+At the bottom of our difficulty ladder, we have imports that can be blindly stubbed with a constant return value. Take privilege level checking, for example. On the Xbox 360, the hypervisor constantly monitored what userland code was allowed to do – a paranoid parent watching over every system call.
+
+On PC? We couldn't care less.
+
+
+The modern OS handles security for us, and we can happily return success for most privilege-related queries (or the expected OK response). It's liberating, really – like moving out of your parents' house and realizing you can write code in your underwear.
+
+Level 2: The Translation Layer
+The next tier involves creating native wrappers that perform equivalent operations to the Xbox 360 imports. These range from trivial (file I/O that maps almost directly to Win32 calls) to moderately complex (thread management with slightly different semantics).
+
+The complexity here depends entirely on how robust your underlying runtime components are at emulating Xbox 360 behavior. Some functions are close enough to their PC counterparts that a thin wrapper suffices. Others require you to maintain state, translate parameters, or handle edge cases that only existed on the Xbox 360.
+
+
+I'll dive deeper into specific wrapper implementations in future posts, but for now, know that this is where most of your runtime development time goes – writing hundreds of functions that are individually boring but collectively essential.
+
+Level 3: The GPU Nightmare
+And then there's rendering. Oh, sweet summer child, there's rendering.
+
+GPU-related functions sit firmly in the "traumatic" category. These require intercepting and reimplementing the D3D9 libraries that are compiled directly into the game. While these functions might look similar to the classic Win32 implementation of D3D9, they're different enough to cause endless headaches. It's like reading Shakespeare in the original Klingon – technically the same story, but good luck understanding it without significant translation effort.
+
+
+The key insight here is performance: to achieve superior results in recompilation, you must intercept rendering calls before they're packaged and sent to the GPU pipeline. The alternative – emulating the Xenos GPU at a low level – means foregoing the opportunity to truly optimize the rendering pipeline. And that's before we even mention the proper memory fencing required to keep the CPU and GPU from stepping on each other's toes. Get the synchronization wrong, and you'll be debugging race conditions that only manifest on Tuesdays during full moons.
+
+This is why most recompilation projects spend an enormous amount of time on the GPU implementation. It's not just about making pixels appear on screen – it's about doing so without turning your computer into a space heater or introducing frame timing issues that would make a speedrunner weep.
+
+The Current State of Affairs
+Currently, no widely available compatible runtime exists specifically designed for XenonRecomp projects. It's the chicken-and-egg problem of static recompilation: you need a runtime to run games, but you need games running to justify building a runtime.
+
+
+The Sonic Unleashed Recompiled project represents the most successful implementation to date, demonstrating that custom runtime development is indeed achievable. However, this wasn't a weekend project – it required substantial engineering effort, borrowing portions of Xenia's kernel implementation while developing a custom GPU pipeline from scratch. It's the kind of project that makes you appreciate why dynamic emulation became popular in the first place.
+
+What's Next?
+Understanding these fundamentals is just the beginning of our journey into the depths of Xbox 360 runtime implementation. We've established that Xbox 360 games expect a very specific environment – one where system calls work just right, memory is laid out precisely, and the GPU speaks fluent Xenos. The runtime needs to provide a convincing simulation of that environment while running on completely different hardware.
+
+In the next installment, we'll dive into the nitty-gritty of implementing a specific function, complete with all the edge cases, undocumented behaviors, and existential crises that come with reverse engineering a closed platform.
+
+Until then, remember: every unresolved symbol is just an opportunity to learn something new.
+
+Thanks,
+Tom
