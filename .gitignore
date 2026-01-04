@@ -524,3 +524,6 @@ longer_test*.txt
 network_bypass_test*.txt
 profile_bypass_test*.txt
 watchdog_test*.txt
+
+# Review files - local development notes only
+review/
