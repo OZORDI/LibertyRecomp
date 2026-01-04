@@ -2742,7 +2742,7 @@ static void HandleAchievementDebugKey()
     {
         // Unlock test achievement (cycles through IDs 1-10)
         AchievementOverlay::Open(g_debugAchievementId);
-        LOG_WARNING("[DEBUG] Achievement test: unlocked ID {}", g_debugAchievementId);
+        LOGF_WARNING("[DEBUG] Achievement test: unlocked ID {}", g_debugAchievementId);
         g_debugAchievementId = (g_debugAchievementId % 10) + 1;
     }
 
