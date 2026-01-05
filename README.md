@@ -20,7 +20,6 @@ Liberty Recompiled is an unofficial PC port of the Xbox 360 version of Grand The
 - [Installation](#installation)
 - [Building](#building)
 - [Documentation](#documentation)
-- [Credits](#credits)
 
 ## Project Status
 
@@ -105,8 +104,6 @@ Performance comparison of GTA IV running on macOS using different methods:
 | **RPCS3 (PS3 Emulator)** | ![RPCS3 Performance](docs/images/perf_rpcs3.png) |
 
 > **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
-
-## Credits
 
 ### Liberty Recompiled
 - Based on [MarathonRecomp](https://github.com/sonicnext-dev/MarathonRecomp) by the sonicnext-dev team
