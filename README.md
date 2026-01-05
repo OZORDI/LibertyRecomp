@@ -18,7 +18,6 @@ Marathon Recompiled is an unofficial PC port of the Xbox 360 version of Sonic th
 - [Known Issues](#known-issues)
 - [FAQ](#faq)
 - [Building](#building)
-- [Credits](#credits)
 
 ## Known Issues
 
@@ -150,8 +149,6 @@ This project does not plan to support any more platforms other than Windows, Lin
 ## Building
 
 [Check out the building instructions here](/docs/BUILDING.md).
-
-## Credits
 
 ### Marathon Recompiled
 - [ga2mer](https://github.com/ga2mer): Creator and Lead Developer of the recompilation.
