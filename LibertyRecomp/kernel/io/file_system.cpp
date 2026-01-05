@@ -788,15 +788,3 @@ std::filesystem::path FileSystem::ResolvePath(const std::string_view& path, bool
     return resolvedPath;
 }
 
-GUEST_FUNCTION_HOOK(sub_82537400, XCreateFileA); // replaced
-GUEST_FUNCTION_HOOK(sub_826FD090, XGetFileSizeA); // replaced
-GUEST_FUNCTION_HOOK(sub_826FDC88, XGetFileSizeExA); // replaced
-GUEST_FUNCTION_HOOK(sub_82537118, XReadFile); // replaced
-GUEST_FUNCTION_HOOK(sub_825372B8, XSetFilePointer); // replaced
-// GUEST_FUNCTION_HOOK(sub_831CE888, XSetFilePointerEx);
-GUEST_FUNCTION_HOOK(sub_826F2570, XFindFirstFileA); // replaced
-GUEST_FUNCTION_HOOK(sub_826FD2B8, XFindNextFileA); // replaced
-// GUEST_FUNCTION_HOOK(sub_831CDF40, XReadFileEx);
-GUEST_FUNCTION_HOOK(sub_826FD250, XGetFileAttributesA); // replaced
-// GUEST_FUNCTION_HOOK(sub_831CE3F8, XCreateFileA);
-GUEST_FUNCTION_HOOK(sub_826FCBD0, XWriteFile); // replaced

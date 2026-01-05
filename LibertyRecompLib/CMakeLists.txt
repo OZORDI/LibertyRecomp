@@ -21,7 +21,7 @@ set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp_shared.h"
 )
 
-foreach(i RANGE 0 86)
+foreach(i RANGE 0 143)
     list(APPEND LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp.${i}.cpp")
 endforeach()
 
@@ -95,5 +95,5 @@ add_library(LibertyRecompLib
 )
 
 target_include_directories(LibertyRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(LibertyRecompLib PRIVATE "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde")
+target_include_directories(LibertyRecompLib PRIVATE "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde" "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils")
 target_precompile_headers(LibertyRecompLib PUBLIC "ppc/ppc_recomp_shared.h")
