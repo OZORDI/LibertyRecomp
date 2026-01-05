@@ -105,21 +105,3 @@ Performance comparison of GTA IV running on macOS using different methods:
 
 > **Note:** Add your performance screenshots to `docs/images/` with the filenames above.
 
-### Liberty Recompiled
-- Based on [MarathonRecomp](https://github.com/sonicnext-dev/MarathonRecomp) by the sonicnext-dev team
-
-### Original Framework Credits
-- [ga2mer](https://github.com/ga2mer): Creator of the original recompilation framework
-- [IsaacMarovitz](https://github.com/IsaacMarovitz): Graphics Programmer
-- [squidbus](https://github.com/squidbus): Graphics Programmer
-- [Hyper](https://github.com/hyperbx): System level features developer
-- And the entire MarathonRecomp team
-
-### Special Thanks
-- Unleashed Recompiled Development Team
-- [Skyth](https://github.com/blueskythlikesclouds): Graphics consultation
-- [Darío](https://github.com/DarioSamo): Creator of [plume](https://github.com/renderbag/plume) graphics abstraction layer
-- [ocornut](https://github.com/ocornut): Creator of [Dear ImGui](https://github.com/ocornut/imgui)
-
-### Developer Tools
-- [SparkIV](https://github.com/ahmed605/SparkIV) by aru & Ahmed Walid (GPL-3.0) — vendored in this repo for RPF archive inspection
