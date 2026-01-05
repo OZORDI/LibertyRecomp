@@ -23,7 +23,7 @@ void Heap::Init()
     
     // Physical heap - simple bump allocator
     physBumpPtr = (uint8_t*)g_memory.Translate(PHYS_HEAP_START);
-    physBumpEnd = (uint8_t*)g_memory.Translate(PHYS_HEAP_END);
+    physBumpEnd = g_memory.base + PHYS_HEAP_END;  // Don't use Translate - PHYS_HEAP_END == PPC_MEMORY_SIZE
     physicalHeap = (O1HeapInstance*)physBumpPtr; // Just for the NULL check
     
     std::fprintf(stderr, "[Heap::Init] heap=%p\n", (void*)heap);
@@ -82,7 +82,7 @@ void* Heap::AllocPhysical(size_t size, size_t alignment)
 void Heap::Free(void* ptr)
 {
     // Check if it's from the physical bump allocator region
-    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < g_memory.Translate(PHYS_HEAP_END)) {
+    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < (g_memory.base + PHYS_HEAP_END)) {
         // Bump allocator doesn't free - memory is leaked until reset
         // This is fine for game memory that lives for the session
         return;
@@ -97,7 +97,7 @@ size_t Heap::Size(void* ptr)
 {
     // For bump allocator, we don't track individual sizes
     // Return 0 for physical allocations
-    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < g_memory.Translate(PHYS_HEAP_END)) {
+    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < (g_memory.base + PHYS_HEAP_END)) {
         return 0;
     }
     return 0; // TODO: implement for regular heap if needed

@@ -8103,56 +8103,50 @@ PPC_FUNC(RenderTriggerStub) {
 // This is a "dirty disc" UI function - stub it to skip
 // =============================================================================
 
+
 // =============================================================================
 // =============================================================================
 // =============================================================================
 
 // =============================================================================
 // STRONG SYMBOL: sub_82994700 - CRT/TLS initialization
-// Original crashes on NULL callback table - provide safe implementation
+// OPTION A: Initialize callback tables and call original implementation
 // =============================================================================
+extern "C" void __imp__sub_82994700(PPCContext& ctx, uint8_t* base);
+
 PPC_FUNC(sub_82994700) {
-    // This function initializes CRT/TLS support
-    // Original code tries to call function pointers from uninitialized callback tables
-    // We implement the core functionality without the problematic indirect calls
+    LOG_WARNING("[CRT] sub_82994700 - Option A: Init callbacks then call original");
     
-    LOG_WARNING("[CRT] sub_82994700 - Safe CRT/TLS initialization");
+    // Step 1: Initialize the CRT callback table at 0x831317E4-0x831317F0
+    // These are function pointers the original uses for indirect calls
+    // From PPC analysis:
+    //   lis r11,-32103 ; addi r11,r11,17384 -> 0x829943E8 (callback 1)
+    //   lis r8,-32096 ; addi r11,r8,9996 -> 0x82A0270C (KeTlsGetValue wrapper)
+    //   lis r9,-32096 ; addi r11,r9,10012 -> 0x82A0271C (KeTlsSetValue)
+    //   lis r10,-32096 ; addi r11,r10,10028 -> 0x82A0272C (callback 4)
     
-    // Step 1: Allocate TLS slot
-    uint32_t tlsIndex = KeTlsAlloc();
+    PPC_STORE_U32(0x831317E4, 0x829943E8);  // Callback 1 - CRT function
+    PPC_STORE_U32(0x831317E8, 0x82A0270C);  // KeTlsGetValue wrapper
+    PPC_STORE_U32(0x831317EC, 0x82A0271C);  // KeTlsSetValue 
+    PPC_STORE_U32(0x831317F0, 0x82A0272C);  // Callback 4
     
-    if (tlsIndex == 0xFFFFFFFF) {
-        LOG_WARNING("[CRT] KeTlsAlloc failed, returning 0");
-        ctx.r3.u32 = 0;
-        return;
-    }
+    LOG_WARNING("[CRT] Callback table initialized:");
+    LOGF_WARNING("[CRT]   [0x831317E4] = 0x{:08X}", PPC_LOAD_U32(0x831317E4));
+    LOGF_WARNING("[CRT]   [0x831317E8] = 0x{:08X}", PPC_LOAD_U32(0x831317E8));
+    LOGF_WARNING("[CRT]   [0x831317EC] = 0x{:08X}", PPC_LOAD_U32(0x831317EC));
+    LOGF_WARNING("[CRT]   [0x831317F0] = 0x{:08X}", PPC_LOAD_U32(0x831317F0));
     
-    // Store TLS index at 0x82A96E64 (calculated from lis r11,-32087; stw r3,28260(r11))
-    PPC_STORE_U32(0x82A96E64, tlsIndex);
-    LOGF_WARNING("[CRT] TLS index {} stored at 0x82A96E64", tlsIndex);
+    // Step 2: Call the original implementation
+    LOG_WARNING("[CRT] Calling __imp__sub_82994700...");
+    __imp__sub_82994700(ctx, base);
     
-    // Step 2: Set initial TLS value
-    uint32_t result = KeTlsSetValue(tlsIndex, 0);
-    
-    if (result == 0) {
-        LOG_WARNING("[CRT] KeTlsSetValue failed, returning 0");
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    // Success
-    LOG_WARNING("[CRT] CRT/TLS initialization complete");
-    ctx.r3.u32 = 1;
+    LOGF_WARNING("[CRT] __imp__sub_82994700 returned r3={}", ctx.r3.u32);
 }
 
 // =============================================================================
 // STRONG SYMBOL: sub_82998CA0 - CRT lock acquisition
-// Original causes infinite recursion with sub_82998B60 due to uninitialized state
-// Return immediately to break the recursion loop
+// Keep stub - if Option A works and original sets up proper state, we can remove
 // =============================================================================
 PPC_FUNC(sub_82998CA0) {
-    // This function is part of CRT initialization that checks if a TLS slot is initialized
-    // It causes infinite recursion because our sub_82994700 stub doesn't set up the
-    // expected data structures. Just return success to break the loop.
     ctx.r3.u32 = 1;  // Return success
 }
