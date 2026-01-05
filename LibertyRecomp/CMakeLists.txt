@@ -440,12 +440,18 @@ target_link_libraries(LibertyRecomp PRIVATE
     SDL2::SDL2-static
     SDL2_mixer
     tomlplusplus::tomlplusplus
-    LibertyRecompLib
     xxHash::xxhash
     CURL::libcurl
     plume
     GameNetworkingSockets::static
 )
+
+# Force-load LibertyRecompLib on macOS to include all weak symbols (PPC recompiled functions)
+if (APPLE)
+    target_link_libraries(LibertyRecomp PRIVATE -Wl,-force_load,$<TARGET_FILE:LibertyRecompLib>)
+else()
+    target_link_libraries(LibertyRecomp PRIVATE LibertyRecompLib)
+endif()
 
 target_link_libraries(LibertyRecomp PRIVATE ffmpeg)
 
@@ -476,6 +482,7 @@ if (APPLE)
 endif()
 
 target_include_directories(LibertyRecomp PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../LibertyRecompLib"
     ${CMAKE_CURRENT_SOURCE_DIR}
     "${CMAKE_CURRENT_SOURCE_DIR}/api"
     ${LIBERTY_RECOMP_THIRDPARTY_INCLUDES}
@@ -486,7 +493,8 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     find_package(X11 REQUIRED)
     pkg_search_module(GLIB REQUIRED glib-2.0)
     pkg_search_module(GIO REQUIRED gio-2.0)
-    target_include_directories(LibertyRecomp PRIVATE ${X11_INCLUDE_DIR} ${GLIB_INCLUDE_DIRS} ${GIO_INCLUDE_DIRS})
+    target_include_directories(LibertyRecomp PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../LibertyRecompLib" ${X11_INCLUDE_DIR} ${GLIB_INCLUDE_DIRS} ${GIO_INCLUDE_DIRS})
     target_link_libraries(LibertyRecomp PRIVATE ${X11_LIBRARIES} ${GLIB_LIBRARIES} ${GIO_LIBRARIES})
 endif()
 

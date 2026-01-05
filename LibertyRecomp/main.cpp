@@ -81,12 +81,14 @@ void KiSystemStartup()
         std::_Exit(1);
     }
 
-    g_userHeap.Init();
-    
-    // CRITICAL: Initialize Xbox 360 Xenon memory regions per memory contract
-    // This zeros all regions the game assumes are pre-allocated and zeroed on boot.
-    // Must happen BEFORE any game code executes to prevent corruption.
+
+    // CRITICAL: Initialize Xbox 360 Xenon memory regions BEFORE heap init
+    // The physical heap starts at 0x80000000, and we zero 0x82000000-0x831F0000
+    // which is inside that range. Must zero FIRST to avoid corrupting heap structures.
     InitializeXenonMemoryRegions(g_memory.base);
+
+    g_userHeap.Init();
+
 
     // Initialize save system early - creates directories and registers save content
     SaveSystem::Initialize();

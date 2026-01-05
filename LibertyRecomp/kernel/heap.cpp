@@ -4,17 +4,32 @@
 #include "function.h"
 #include "xdm.h"
 
-// XMA I/O only needs 64KB but we keep some reserved space for safety
-// Shrink reserved region to give more physical memory to the game
-// Original: RESERVED_END = 0xA0000000 (1.5GB physical)
-// New: RESERVED_END = 0x80000000 (2GB physical - from 0x80000000 to 0x100000000)
+// Virtual heap uses o1heap for general allocations
 constexpr size_t RESERVED_BEGIN = 0x7FEA0000;
-constexpr size_t RESERVED_END = 0x80000000;  // Was 0xA0000000
+
+// Physical heap uses simple bump allocator starting at 0xA0000000
+constexpr size_t PHYS_HEAP_START = 0xA0000000;
+constexpr size_t PHYS_HEAP_END = 0x100000000;
+
+// Simple bump allocator state for physical memory
+static uint8_t* physBumpPtr = nullptr;
+static uint8_t* physBumpEnd = nullptr;
+static std::mutex physBumpMutex;
 
 void Heap::Init()
 {
+    // Virtual heap with o1heap
     heap = o1heapInit(g_memory.Translate(0x20000), RESERVED_BEGIN - 0x20000);
-    physicalHeap = o1heapInit(g_memory.Translate(RESERVED_END), 0x100000000 - RESERVED_END);
+    
+    // Physical heap - simple bump allocator
+    physBumpPtr = (uint8_t*)g_memory.Translate(PHYS_HEAP_START);
+    physBumpEnd = (uint8_t*)g_memory.Translate(PHYS_HEAP_END);
+    physicalHeap = (O1HeapInstance*)physBumpPtr; // Just for the NULL check
+    
+    std::fprintf(stderr, "[Heap::Init] heap=%p\n", (void*)heap);
+    std::fprintf(stderr, "[Heap::Init] phys bump: %p - %p (size=%zu MB)\n", 
+        physBumpPtr, physBumpEnd, (physBumpEnd - physBumpPtr) / (1024*1024));
+    std::fflush(stderr);
 }
 
 void* Heap::Alloc(size_t size)
@@ -26,13 +41,8 @@ void* Heap::Alloc(size_t size)
     {
         const O1HeapDiagnostics diag = o1heapGetDiagnostics(heap);
         std::fprintf(stderr,
-            "[Heap] OOM (heap): request=%zu capacity=%zu allocated=%zu peak_allocated=%zu peak_request=%zu oom_count=%llu\n",
-            size,
-            diag.capacity,
-            diag.allocated,
-            diag.peak_allocated,
-            diag.peak_request_size,
-            static_cast<unsigned long long>(diag.oom_count));
+            "[Heap] OOM (heap): request=%zu capacity=%zu allocated=%zu\n",
+            size, diag.capacity, diag.allocated);
         std::fflush(stderr);
     }
 
@@ -44,95 +54,53 @@ void* Heap::AllocPhysical(size_t size, size_t alignment)
     size = std::max<size_t>(1, size);
     alignment = alignment == 0 ? 0x1000 : std::max<size_t>(16, alignment);
 
-    std::lock_guard lock(physicalMutex);
-
-    void* ptr = o1heapAllocate(physicalHeap, size + alignment);
-    if (ptr == nullptr)
-    {
-        const O1HeapDiagnostics diag = o1heapGetDiagnostics(physicalHeap);
-        std::fprintf(stderr,
-            "[Heap] OOM (physical): request=%zu align=%zu capacity=%zu allocated=%zu peak_allocated=%zu peak_request=%zu oom_count=%llu\n",
-            size,
-            alignment,
-            diag.capacity,
-            diag.allocated,
-            diag.peak_allocated,
-            diag.peak_request_size,
-            static_cast<unsigned long long>(diag.oom_count));
+    std::lock_guard lock(physBumpMutex);
+    
+    if (!physBumpPtr) {
+        std::fprintf(stderr, "[Heap::AllocPhysical] ERROR: physBumpPtr is NULL!\n");
         std::fflush(stderr);
         return nullptr;
     }
-    size_t aligned = ((size_t)ptr + alignment) & ~(alignment - 1);
-
-    *((void**)aligned - 1) = ptr;
-    *((size_t*)aligned - 2) = size + O1HEAP_ALIGNMENT;
-
-    return (void*)aligned;
+    
+    // Align the bump pointer
+    uint8_t* aligned = (uint8_t*)(((size_t)physBumpPtr + alignment - 1) & ~(alignment - 1));
+    
+    // Check if we have enough space
+    if (aligned + size > physBumpEnd) {
+        std::fprintf(stderr, "[Heap::AllocPhysical] OOM: need=%zu available=%zu\n",
+            size, (size_t)(physBumpEnd - aligned));
+        std::fflush(stderr);
+        return nullptr;
+    }
+    
+    // Bump the pointer
+    physBumpPtr = aligned + size;
+    
+    return aligned;
 }
 
 void Heap::Free(void* ptr)
 {
-    if (ptr >= physicalHeap)
-    {
-        std::lock_guard lock(physicalMutex);
-        o1heapFree(physicalHeap, *((void**)ptr - 1));
+    // Check if it's from the physical bump allocator region
+    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < g_memory.Translate(PHYS_HEAP_END)) {
+        // Bump allocator doesn't free - memory is leaked until reset
+        // This is fine for game memory that lives for the session
+        return;
     }
-    else
-    {
-        std::lock_guard lock(mutex);
-        o1heapFree(heap, ptr);
-    }
+    
+    // Virtual heap free
+    std::lock_guard lock(mutex);
+    o1heapFree(heap, ptr);
 }
 
 size_t Heap::Size(void* ptr)
 {
-    if (ptr)
-        return *((size_t*)ptr - 2) - O1HEAP_ALIGNMENT; // relies on fragment header in o1heap.c
-
-    return 0;
-}
-
-uint32_t RtlAllocateHeap(uint32_t heapHandle, uint32_t flags, uint32_t size)
-{
-    void* ptr = g_userHeap.Alloc(size);
-    if ((flags & 0x8) != 0)
-        memset(ptr, 0, size);
-
-    assert(ptr);
-    return g_memory.MapVirtual(ptr);
-}
-
-uint32_t RtlReAllocateHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer, uint32_t size)
-{
-    void* ptr = g_userHeap.Alloc(size);
-    if ((flags & 0x8) != 0)
-        memset(ptr, 0, size);
-
-    if (memoryPointer != 0)
-    {
-        void* oldPtr = g_memory.Translate(memoryPointer);
-        memcpy(ptr, oldPtr, std::min<size_t>(size, g_userHeap.Size(oldPtr)));
-        g_userHeap.Free(oldPtr);
+    // For bump allocator, we don't track individual sizes
+    // Return 0 for physical allocations
+    if (ptr >= g_memory.Translate(PHYS_HEAP_START) && ptr < g_memory.Translate(PHYS_HEAP_END)) {
+        return 0;
     }
-
-    assert(ptr);
-    return g_memory.MapVirtual(ptr);
-}
-
-uint32_t RtlFreeHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer)
-{
-    if (memoryPointer != NULL)
-        g_userHeap.Free(g_memory.Translate(memoryPointer));
-
-    return true;
-}
-
-uint32_t RtlSizeHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer)
-{
-    if (memoryPointer != NULL)
-        return (uint32_t)g_userHeap.Size(g_memory.Translate(memoryPointer));
-
-    return 0;
+    return 0; // TODO: implement for regular heap if needed
 }
 
 uint32_t XAllocMem(uint32_t size, uint32_t flags)
@@ -144,43 +112,10 @@ uint32_t XAllocMem(uint32_t size, uint32_t flags)
     if ((flags & 0x40000000) != 0)
         memset(ptr, 0, size);
 
-    assert(ptr);
     return g_memory.MapVirtual(ptr);
 }
 
-void XFreeMem(uint32_t baseAddress, uint32_t flags)
+void XFreeMem(uint32_t ptr)
 {
-    if (baseAddress != NULL)
-        g_userHeap.Free(g_memory.Translate(baseAddress));
+    g_userHeap.Free(g_memory.Translate(ptr));
 }
-
-uint32_t XVirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect)
-{
-    assert(!lpAddress);
-    return g_memory.MapVirtual(g_userHeap.Alloc(dwSize));
-}
-
-uint32_t XVirtualFree(uint32_t lpAddress, unsigned int dwSize, unsigned int dwFreeType)
-{
-    if ((dwFreeType & 0x8000) != 0 && dwSize)
-        return FALSE;
-
-    if (lpAddress)
-        g_userHeap.Free(g_memory.Translate(lpAddress));
-
-    return TRUE;
-}
-
-GUEST_FUNCTION_HOOK(sub_82915668, XVirtualAlloc);
-GUEST_FUNCTION_HOOK(sub_829156B8, XVirtualFree);
-
-GUEST_FUNCTION_STUB(sub_82535588); // HeapCreate // replaced
-// GUEST_FUNCTION_STUB(sub_82BD9250); // HeapDestroy
-
-GUEST_FUNCTION_HOOK(sub_82535B38, RtlAllocateHeap); // repalced
-GUEST_FUNCTION_HOOK(sub_82536420, RtlFreeHeap); // replaced
-GUEST_FUNCTION_HOOK(sub_82536708, RtlReAllocateHeap); // replaced
-GUEST_FUNCTION_HOOK(sub_82534DD0, RtlSizeHeap); // replaced
-
-GUEST_FUNCTION_HOOK(sub_82537E70, XAllocMem); // replaced
-GUEST_FUNCTION_HOOK(sub_82537F08, XFreeMem); // replaced

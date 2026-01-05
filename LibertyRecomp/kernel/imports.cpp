@@ -4164,6 +4164,7 @@ uint32_t KeSetAffinityThread(uint32_t Thread, uint32_t Affinity, be<uint32_t>* l
 
 void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    if (!cs) return;  // Handle NULL gracefully
     // printf("RtlLeaveCriticalSection");
     cs->RecursionCount = cs->RecursionCount.get() - 1;
 
@@ -7727,7 +7728,6 @@ PPC_FUNC(sub_82192578) {
     ctx.r3.u32 = 1;  // Return success
 }
 
-GUEST_FUNCTION_HOOK(sub_825383D8, XapiInitProcess)
 GUEST_FUNCTION_HOOK(__imp__XGetVideoMode, VdQueryVideoMode); // XGetVideoMode
 GUEST_FUNCTION_HOOK(__imp__XNotifyGetNext, XNotifyGetNext);
 GUEST_FUNCTION_HOOK(__imp__XGetGameRegion, XGetGameRegion);
@@ -8106,3 +8106,53 @@ PPC_FUNC(RenderTriggerStub) {
 // =============================================================================
 // =============================================================================
 // =============================================================================
+
+// =============================================================================
+// STRONG SYMBOL: sub_82994700 - CRT/TLS initialization
+// Original crashes on NULL callback table - provide safe implementation
+// =============================================================================
+PPC_FUNC(sub_82994700) {
+    // This function initializes CRT/TLS support
+    // Original code tries to call function pointers from uninitialized callback tables
+    // We implement the core functionality without the problematic indirect calls
+    
+    LOG_WARNING("[CRT] sub_82994700 - Safe CRT/TLS initialization");
+    
+    // Step 1: Allocate TLS slot
+    uint32_t tlsIndex = KeTlsAlloc();
+    
+    if (tlsIndex == 0xFFFFFFFF) {
+        LOG_WARNING("[CRT] KeTlsAlloc failed, returning 0");
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Store TLS index at 0x82A96E64 (calculated from lis r11,-32087; stw r3,28260(r11))
+    PPC_STORE_U32(0x82A96E64, tlsIndex);
+    LOGF_WARNING("[CRT] TLS index {} stored at 0x82A96E64", tlsIndex);
+    
+    // Step 2: Set initial TLS value
+    uint32_t result = KeTlsSetValue(tlsIndex, 0);
+    
+    if (result == 0) {
+        LOG_WARNING("[CRT] KeTlsSetValue failed, returning 0");
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Success
+    LOG_WARNING("[CRT] CRT/TLS initialization complete");
+    ctx.r3.u32 = 1;
+}
+
+// =============================================================================
+// STRONG SYMBOL: sub_82998CA0 - CRT lock acquisition
+// Original causes infinite recursion with sub_82998B60 due to uninitialized state
+// Return immediately to break the recursion loop
+// =============================================================================
+PPC_FUNC(sub_82998CA0) {
+    // This function is part of CRT initialization that checks if a TLS slot is initialized
+    // It causes infinite recursion because our sub_82994700 stub doesn't set up the
+    // expected data structures. Just return success to break the loop.
+    ctx.r3.u32 = 1;  // Return success
+}
