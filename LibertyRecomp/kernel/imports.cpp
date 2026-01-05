@@ -8208,45 +8208,6 @@ PPC_FUNC(sub_82994700) {
     PPC_STORE_U32(threadCtx + 20, 1);
     PPC_STORE_U32(threadCtx + 92, THREAD_CTX_LIST);
     
-    // =========================================================================
-    // Step 9b: Initialize Mock Device Context at TLS+1676
-    // =========================================================================
-    // The TLS+1676 pattern: [r13+0] gives TLS base, then offset 1676 (0x68C)
-    // stores a pointer to the device context. The device context has a vtable
-    // at offset 0. Various vtable indices are called: 2, 3, 4, 11, 14, 15, 25.
-    //
-    // We create a mock device context with a vtable pointing to stub functions.
-    // =========================================================================
-    LOG_WARNING("[CRT] Initializing mock device context at TLS+1676...");
-    
-    // Addresses for mock device context (in unused guest memory area)
-    constexpr uint32_t MOCK_DEVICE_CTX_ADDR   = 0x83133000;  // Device context object
-    constexpr uint32_t MOCK_DEVICE_VTABLE_ADDR = 0x83133100;  // Vtable for device
-    
-    // Use a universal stub function that just returns r3=1 (success)
-    // sub_8218BE78 is already hooked and returns success
-    constexpr uint32_t STUB_FUNC_ADDR = 0x8218BE78;
-    
-    // Initialize vtable with stub function pointers for all used indices:
-    // vtable[0-25] - fill with stub to be safe
-    for (uint32_t i = 0; i < 26; i++) {
-        PPC_STORE_U32(MOCK_DEVICE_VTABLE_ADDR + (i * 4), STUB_FUNC_ADDR);
-    }
-    
-    // Set vtable pointer at device context offset 0
-    PPC_STORE_U32(MOCK_DEVICE_CTX_ADDR + 0, MOCK_DEVICE_VTABLE_ADDR);
-    
-    // Initialize critical device context fields (from MCP device_context_inspector):
-    // offset 11000 (0x2AF8) = gpuSyncFlag - must be 0 to avoid spin loops
-    PPC_STORE_U32(MOCK_DEVICE_CTX_ADDR + 11000, 0);
-    
-    // Get TLS base from r13+0 and store device context pointer at TLS+1676
-    uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
-    PPC_STORE_U32(tlsBase + 1676, MOCK_DEVICE_CTX_ADDR);
-    
-    LOGF_WARNING("[CRT] Mock device context at 0x{:08X}, vtable at 0x{:08X}, stored at TLS+1676 (0x{:08X})",
-                 MOCK_DEVICE_CTX_ADDR, MOCK_DEVICE_VTABLE_ADDR, tlsBase + 1676);
-    
     // Step 10: Store CRT exit handler
     PPC_STORE_U32(CRT_CONTEXT_ADDR + 8, 0x829FBE38);
     
@@ -8299,17 +8260,6 @@ PPC_FUNC(sub_8218BE28) {
     } else {
         ctx.r3.u32 = 0;
     }
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8218BE78 - Device context deallocator via TLS+1676 vtable
-// =============================================================================
-// This calls vtable[3] on device context from TLS. Used as universal stub for
-// mock device context vtable entries. Returns success.
-// =============================================================================
-PPC_FUNC(sub_8218BE78) {
-    // Universal stub - just return success
-    ctx.r3.u32 = 1;
 }
 
 // =============================================================================
