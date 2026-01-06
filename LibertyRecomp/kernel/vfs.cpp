@@ -1,5 +1,8 @@
 #include "vfs.h"
 #include "mod_overlay.h"
+#include "io/rpf_loader.h"
+#include "io/img_loader.h"
+#include "io/texture_convert.h"
 #include <os/logger.h>
 #include <algorithm>
 #include <cctype>
@@ -56,6 +59,15 @@ namespace VFS
         ModOverlay::Initialize(gameRoot);
         
         auto modStats = ModOverlay::GetStats();
+        
+        // Initialize RPF loader for runtime RPF extraction
+        printf("[VFS] Initializing RpfLoader...\n"); fflush(stdout);
+        RpfLoader::Initialize();
+        RpfLoader::ScanForRpfFiles(gameRoot);
+        
+        // Initialize IMG loader
+        printf("[VFS] Initializing ImgLoader...\n"); fflush(stdout);
+        ImgLoader::Initialize();
         printf("[VFS] ModOverlay initialized: %llu overlays, %llu override files\n",
             modStats.totalOverlays, modStats.totalOverrideFiles); fflush(stdout);
         
@@ -152,6 +164,20 @@ namespace VFS
                     fflush(stdout);
                     return overridePath;
                 }
+            }
+        }
+        
+        // === RPF LOADER CHECK (SECOND PRIORITY) ===
+        // Check if file exists in any loaded RPF from mods
+        if (RpfLoader::IsInitialized() && RpfLoader::HasFile(stripped))
+        {
+            auto tempPath = RpfLoader::ExtractToTemp(stripped);
+            if (!tempPath.empty())
+            {
+                g_stats.cacheHits++;
+                printf("[VFS] RPF EXTRACT: '%s' -> '%s'\n", guestPath.c_str(), tempPath.string().c_str());
+                fflush(stdout);
+                return tempPath;
             }
         }
         

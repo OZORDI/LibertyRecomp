@@ -91,6 +91,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/signaling_client.cpp"
     "kernel/io/img_loader.cpp"
     "kernel/io/texture_convert.cpp"
+    "kernel/io/rpf_loader.cpp"
     "kernel/game_init.cpp"
     # "kernel/sync_table.cpp"  # REMOVED - using Sonic approach
 )

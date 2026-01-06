@@ -251,6 +251,34 @@ namespace ModOverlay
             }
         }
         
+        // === TEXTURE AUTO-CONVERSION ===
+        // If requesting Xbox texture (.xtd) but PC texture (.wtd) exists, convert it
+        if (key.size() > 4)
+        {
+            std::string ext = key.substr(key.size() - 4);
+            if (ext == ".xtd" || ext == ".xdr" || ext == ".xft" || ext == ".xbd")
+            {
+                // Try PC equivalent
+                std::string pcKey = key.substr(0, key.size() - 4);
+                if (ext == ".xtd") pcKey += ".wtd";
+                else if (ext == ".xdr") pcKey += ".wdr";
+                else if (ext == ".xft") pcKey += ".wft";
+                else if (ext == ".xbd") pcKey += ".wbd";
+                
+                auto pcIt = g_fileIndex.find(pcKey);
+                if (pcIt != g_fileIndex.end())
+                {
+                    // Found PC texture - convert and cache
+                    auto converted = ConvertAndCacheTexture(pcIt->second.hostPath, ext);
+                    if (!converted.empty())
+                    {
+                        g_stats.overrideHits++;
+                        return converted;
+                    }
+                }
+            }
+        }
+        
         g_stats.overrideMisses++;
         return {};
     }
@@ -529,5 +557,103 @@ namespace ModOverlay
         }
 
         return result;
+    }
+}
+
+// ============================================================================
+// Texture Auto-Conversion (PC .wtd -> Xbox .xtd)
+// ============================================================================
+
+namespace ModOverlay
+{
+    // Cache for converted textures
+    static std::unordered_map<std::string, std::filesystem::path> g_convertedTextureCache;
+
+    /**
+     * Convert a PC texture to Xbox 360 format and cache it.
+     * 
+     * @param pcTexturePath Path to PC texture file
+     * @param targetExt Target extension (.xtd, .xdr, etc.)
+     * @return Path to converted file, or empty on failure
+     */
+    std::filesystem::path ConvertAndCacheTexture(
+        const std::filesystem::path& pcTexturePath,
+        const std::string& targetExt)
+    {
+        // Check cache first
+        std::string cacheKey = pcTexturePath.string() + targetExt;
+        auto cacheIt = g_convertedTextureCache.find(cacheKey);
+        if (cacheIt != g_convertedTextureCache.end())
+        {
+            std::error_code ec;
+            if (std::filesystem::exists(cacheIt->second, ec))
+            {
+                return cacheIt->second;
+            }
+        }
+
+        // Read PC texture
+        std::ifstream file(pcTexturePath, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+            return {};
+        }
+
+        size_t fileSize = static_cast<size_t>(file.tellg());
+        file.seekg(0, std::ios::beg);
+
+        std::vector<uint8_t> pcData(fileSize);
+        if (!file.read(reinterpret_cast<char*>(pcData.data()), fileSize))
+        {
+            return {};
+        }
+
+        // Convert to Xbox 360 format
+        auto xboxData = TextureConvert::ConvertPCToXbox360(pcData);
+        if (!xboxData.has_value() || xboxData->empty())
+        {
+            // Conversion failed - try to use as-is (some files may be compatible)
+            xboxData = pcData;
+        }
+
+        // Write to cache directory
+        std::filesystem::path cacheDir = std::filesystem::temp_directory_path() / 
+                                         "LibertyRecomp" / "texture_cache";
+        std::error_code ec;
+        std::filesystem::create_directories(cacheDir, ec);
+
+        // Create unique filename based on original path
+        std::hash<std::string> hasher;
+        std::string cacheName = std::to_string(hasher(pcTexturePath.string())) + targetExt;
+        std::filesystem::path cachePath = cacheDir / cacheName;
+
+        std::ofstream outFile(cachePath, std::ios::binary);
+        if (!outFile)
+        {
+            return {};
+        }
+
+        outFile.write(reinterpret_cast<const char*>(xboxData->data()), xboxData->size());
+        
+        // Add to cache
+        g_convertedTextureCache[cacheKey] = cachePath;
+
+        LOGF_UTILITY("[ModOverlay] Converted PC texture: {} -> {}", 
+            pcTexturePath.filename().string(), cachePath.filename().string());
+
+        return cachePath;
+    }
+
+    /**
+     * Clear the texture conversion cache.
+     */
+    void ClearTextureCache()
+    {
+        g_convertedTextureCache.clear();
+        
+        std::filesystem::path cacheDir = std::filesystem::temp_directory_path() / 
+                                         "LibertyRecomp" / "texture_cache";
+        std::error_code ec;
+        std::filesystem::remove_all(cacheDir, ec);
     }
 }
