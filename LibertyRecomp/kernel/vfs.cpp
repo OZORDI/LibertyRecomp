@@ -198,6 +198,18 @@ namespace VFS
                     }
                 }
                 
+                // FIX: For RPF mappings (e.g., common.rpf -> common/), only apply when
+                // there's a subpath. Opening "common.rpf" directly should NOT map to
+                // the "common/" directory - that breaks archive mounting.
+                // RPF mappings are for paths INSIDE the archive like "common.rpf/data/file.dat"
+                bool isRpfMapping = mappingNorm.find(".rpf") != std::string::npos;
+                if (isRpfMapping && remainder.empty())
+                {
+                    // Skip this mapping - let the game fail to open the RPF file
+                    // so it uses the fallback file resolution path
+                    continue;
+                }
+                
                 std::filesystem::path resolved = g_extractedRoot / mapping.hostPrefix;
                 if (!remainder.empty())
                 {
