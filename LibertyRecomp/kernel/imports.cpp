@@ -4909,6 +4909,16 @@ static Mutex g_tlsAllocationMutex;
 static uint32_t& KeTlsGetValueRef_Host(size_t index)
 {
     thread_local std::vector<uint32_t> s_tlsValues;
+    
+    // Sanity check - limit to reasonable TLS slot count to prevent infinite resize
+    constexpr size_t MAX_HOST_TLS_SLOTS = 256;
+    if (index >= MAX_HOST_TLS_SLOTS)
+    {
+        static thread_local uint32_t s_dummy = 0;
+        LOGF_WARNING("[KeTlsGetValueRef_Host] Index {} exceeds max {}, returning dummy", index, MAX_HOST_TLS_SLOTS);
+        return s_dummy;
+    }
+    
     if (s_tlsValues.size() <= index)
     {
         s_tlsValues.resize(index + 1, 0);
