@@ -1,4 +1,6 @@
 #include "mod_overlay.h"
+#include "io/img_loader.h"
+#include "io/texture_convert.h"
 #include <os/logger.h>
 #include <fmt/format.h>
 #include <algorithm>
@@ -214,6 +216,8 @@ namespace ModOverlay
             }
         }
         
+        ScanForImgFolders();
+        
         LOGF_UTILITY("[ModOverlay] Index rebuilt: {} override files from {} overlays",
             g_stats.totalOverrideFiles, g_stats.enabledOverlays);
     }
@@ -415,6 +419,115 @@ namespace ModOverlay
             result = result.substr(7);
         }
         
+        return result;
+    }
+}
+
+// ============================================================================
+// IMG Folder Detection for FusionFix-style IMG loading
+// ============================================================================
+
+namespace ModOverlay
+{
+    // Track IMG folders that have replacements
+    static std::unordered_map<std::string, std::filesystem::path> g_imgFolders;
+
+    /**
+     * Scan overlays for .img folders (FusionFix-style IMG loading).
+     * FusionFix allows placing replacement files in folders named like the IMG archive:
+     *   update/pc/models/cdimages/vehicles.img/replacement.xtd
+     * This overrides files inside the vehicles.img archive.
+     */
+    void ScanForImgFolders()
+    {
+        g_imgFolders.clear();
+
+        for (const auto& overlay : g_overlays)
+        {
+            if (!overlay.enabled)
+                continue;
+
+            std::error_code ec;
+            if (!std::filesystem::exists(overlay.path, ec))
+                continue;
+
+            // Recursively find directories ending with .img
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(overlay.path, ec))
+            {
+                if (ec)
+                    continue;
+
+                if (entry.is_directory(ec))
+                {
+                    std::string dirName = entry.path().filename().string();
+                    std::string lowerName = dirName;
+                    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+
+                    // Check if directory ends with .img
+                    if (lowerName.size() > 4 && lowerName.substr(lowerName.size() - 4) == ".img")
+                    {
+                        // Get relative path from overlay
+                        std::filesystem::path relativePath = entry.path().lexically_relative(overlay.path);
+                        std::string normalizedKey = NormalizePath(relativePath.string());
+
+                        // Only add if not already found (higher priority overlay wins)
+                        if (g_imgFolders.find(normalizedKey) == g_imgFolders.end())
+                        {
+                            g_imgFolders[normalizedKey] = entry.path();
+                            LOGF_UTILITY("[ModOverlay] Found IMG folder: {} -> {}",
+                                normalizedKey, entry.path().string());
+                        }
+                    }
+                }
+            }
+        }
+
+        LOGF_UTILITY("[ModOverlay] Scanned {} IMG replacement folders", g_imgFolders.size());
+    }
+
+    /**
+     * Check if an IMG file has a replacement folder.
+     * 
+     * @param imgPath Normalized path to IMG (e.g., "pc/models/cdimages/vehicles.img")
+     * @return Path to replacement folder, or empty if none
+     */
+    std::filesystem::path GetImgReplacementFolder(const std::string& imgPath)
+    {
+        std::string key = NormalizePath(imgPath);
+        
+        auto it = g_imgFolders.find(key);
+        if (it != g_imgFolders.end())
+        {
+            return it->second;
+        }
+
+        // Also try with FusionFix path mapping
+        std::string mappedKey = MapFusionFixPath(key);
+        if (mappedKey != key)
+        {
+            it = g_imgFolders.find(mappedKey);
+            if (it != g_imgFolders.end())
+            {
+                return it->second;
+            }
+        }
+
+        return {};
+    }
+
+    /**
+     * Get all IMG folders with replacements.
+     */
+    std::vector<std::pair<std::string, std::filesystem::path>> GetAllImgFolders()
+    {
+        std::vector<std::pair<std::string, std::filesystem::path>> result;
+        result.reserve(g_imgFolders.size());
+
+        for (const auto& [key, path] : g_imgFolders)
+        {
+            result.emplace_back(key, path);
+        }
+
         return result;
     }
 }

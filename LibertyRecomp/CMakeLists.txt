@@ -89,6 +89,8 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/net_session.cpp"
     "kernel/io/p2p_manager.cpp"
     "kernel/io/signaling_client.cpp"
+    "kernel/io/img_loader.cpp"
+    "kernel/io/texture_convert.cpp"
     "kernel/game_init.cpp"
     # "kernel/sync_table.cpp"  # REMOVED - using Sonic approach
 )
