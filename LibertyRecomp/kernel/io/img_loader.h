@@ -205,3 +205,33 @@ namespace ImgLoader
      */
     void DumpStatus();
 }
+
+    // ============================================================================
+    // Resource Types (from GTA IV wiki)
+    // ============================================================================
+    namespace ResourceType
+    {
+        static constexpr uint32_t Generic = 0x01;
+        static constexpr uint32_t Texture = 0x08;   // .wtd/.xtd files
+        static constexpr uint32_t Bounds = 0x20;    // .wbd/.xbd files
+        static constexpr uint32_t Model = 0x6E;     // .wdr/.xdr files
+        static constexpr uint32_t Xpfl = 0x24;      // .xpfl files
+    }
+
+    /**
+     * Set AES key for encrypted IMG archives.
+     * Same key and algorithm as RPF encryption (AES-256 ECB, 16 rounds).
+     */
+    void SetAesKey(const std::vector<uint8_t>& key);
+
+    /**
+     * Check if an IMG archive is encrypted.
+     * Encrypted archives have invalid magic number.
+     */
+    bool IsEncrypted(const std::filesystem::path& imgPath);
+
+    /**
+     * Decrypt IMG header and table.
+     * Uses AES-256 ECB with 16 rounds.
+     */
+    bool DecryptImgHeader(std::vector<uint8_t>& data);

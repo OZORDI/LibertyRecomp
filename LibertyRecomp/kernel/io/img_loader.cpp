@@ -4,6 +4,13 @@
 #include <algorithm>
 #include <cstring>
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
+#else
+#include <CommonCrypto/CommonCrypto.h>
+#endif
+
 namespace ImgLoader
 {
     static bool g_initialized = false;
@@ -458,5 +465,229 @@ namespace ImgLoader
         LOGF_UTILITY("[ImgLoader] Stats: loaded={} merged={} replaced={} added={} hits={} misses={}",
             g_stats.imgsLoaded, g_stats.imgsMerged, g_stats.filesReplaced,
             g_stats.filesAdded, g_stats.cacheHits, g_stats.cacheMisses);
+    }
+}
+
+// ============================================================================
+// IMG V3 Encryption Support (AES-256 ECB, 16 rounds)
+// ============================================================================
+
+namespace ImgLoader
+{
+    static std::vector<uint8_t> g_aesKey;
+
+    // AES-256 ECB decryption (16 rounds) - same as RPF
+    static bool DecryptAES256_16Rounds(std::vector<uint8_t>& data)
+    {
+        if (g_aesKey.size() != 32 || data.empty())
+            return false;
+
+        size_t dataLen = data.size() & ~0x0F;  // Align to 16 bytes
+        if (dataLen == 0)
+            return true;
+
+#if defined(_WIN32)
+        BCRYPT_ALG_HANDLE hAlg = nullptr;
+        BCRYPT_KEY_HANDLE hKey = nullptr;
+        
+        if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, nullptr, 0) != 0)
+            return false;
+        
+        if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, 
+            (PUCHAR)BCRYPT_CHAIN_MODE_ECB, sizeof(BCRYPT_CHAIN_MODE_ECB), 0) != 0)
+        {
+            BCryptCloseAlgorithmProvider(hAlg, 0);
+            return false;
+        }
+        
+        if (BCryptGenerateSymmetricKey(hAlg, &hKey, nullptr, 0, 
+            (PUCHAR)g_aesKey.data(), (ULONG)g_aesKey.size(), 0) != 0)
+        {
+            BCryptCloseAlgorithmProvider(hAlg, 0);
+            return false;
+        }
+        
+        ULONG cbResult = 0;
+        for (int round = 0; round < 16; round++)
+        {
+            if (BCryptDecrypt(hKey, data.data(), (ULONG)dataLen, nullptr, 
+                nullptr, 0, data.data(), (ULONG)dataLen, &cbResult, 0) != 0)
+            {
+                BCryptDestroyKey(hKey);
+                BCryptCloseAlgorithmProvider(hAlg, 0);
+                return false;
+            }
+        }
+        
+        BCryptDestroyKey(hKey);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return true;
+#else
+        // macOS implementation using CommonCrypto
+        for (int round = 0; round < 16; round++)
+        {
+            size_t outLength = 0;
+            CCCryptorStatus status = CCCrypt(
+                kCCDecrypt, kCCAlgorithmAES, kCCOptionECBMode,
+                g_aesKey.data(), kCCKeySizeAES256,
+                nullptr, data.data(), dataLen,
+                data.data(), dataLen, &outLength);
+            
+            if (status != kCCSuccess)
+                return false;
+        }
+        return true;
+#endif
+    }
+
+    void SetAesKey(const std::vector<uint8_t>& key)
+    {
+        g_aesKey = key;
+    }
+
+    bool IsEncrypted(const std::filesystem::path& imgPath)
+    {
+        std::ifstream file(imgPath, std::ios::binary);
+        if (!file)
+            return false;
+
+        uint32_t magic;
+        file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+        
+        // If magic is not valid GTAIV_MAGIC, it's likely encrypted
+        return magic != GTAIV_MAGIC;
+    }
+
+    bool DecryptImgHeader(std::vector<uint8_t>& data)
+    {
+        if (g_aesKey.empty())
+        {
+            LOGF_WARNING("[ImgLoader] Cannot decrypt IMG: no AES key set");
+            return false;
+        }
+
+        return DecryptAES256_16Rounds(data);
+    }
+
+    /**
+     * Extract IMG with encryption support.
+     */
+    std::optional<std::vector<FileEntry>> ExtractImgEncrypted(const std::filesystem::path& imgPath)
+    {
+        std::error_code ec;
+        if (!std::filesystem::exists(imgPath, ec))
+            return std::nullopt;
+
+        std::ifstream file(imgPath, std::ios::binary | std::ios::ate);
+        if (!file)
+            return std::nullopt;
+
+        size_t fileSize = static_cast<size_t>(file.tellg());
+        file.seekg(0);
+
+        // Read first 20 bytes for header
+        std::vector<uint8_t> headerData(sizeof(ImgHeaderV3));
+        file.read(reinterpret_cast<char*>(headerData.data()), sizeof(ImgHeaderV3));
+
+        // Check if encrypted
+        const ImgHeaderV3* header = reinterpret_cast<const ImgHeaderV3*>(headerData.data());
+        bool encrypted = (header->magic != GTAIV_MAGIC);
+
+        if (encrypted)
+        {
+            LOGF_UTILITY("[ImgLoader] IMG is encrypted, attempting decryption: {}", 
+                imgPath.filename().string());
+
+            // Need to decrypt header + table together
+            // Read enough data for header + potential table
+            file.seekg(0);
+            size_t headerAndTableSize = std::min(fileSize, size_t(0x10000)); // Read up to 64KB
+            std::vector<uint8_t> encryptedData(headerAndTableSize);
+            file.read(reinterpret_cast<char*>(encryptedData.data()), headerAndTableSize);
+
+            if (!DecryptImgHeader(encryptedData))
+            {
+                LOGF_WARNING("[ImgLoader] Failed to decrypt IMG: {}", imgPath.string());
+                return std::nullopt;
+            }
+
+            // Re-parse header after decryption
+            header = reinterpret_cast<const ImgHeaderV3*>(encryptedData.data());
+            if (header->magic != GTAIV_MAGIC || header->version != 3)
+            {
+                LOGF_WARNING("[ImgLoader] Invalid decrypted IMG header: {}", imgPath.string());
+                return std::nullopt;
+            }
+
+            // Parse entries from decrypted data
+            size_t entriesOffset = sizeof(ImgHeaderV3);
+            size_t entriesSize = header->numItems * sizeof(ImgEntryV3);
+            
+            if (encryptedData.size() < entriesOffset + entriesSize)
+            {
+                return std::nullopt;
+            }
+
+            const ImgEntryV3* entries = reinterpret_cast<const ImgEntryV3*>(
+                encryptedData.data() + entriesOffset);
+
+            // Parse filenames
+            size_t filenameTableOffset = entriesOffset + entriesSize;
+            std::vector<std::string> filenames;
+            size_t currentOffset = filenameTableOffset;
+            
+            for (uint32_t i = 0; i < header->numItems; ++i)
+            {
+                if (currentOffset >= encryptedData.size())
+                    break;
+                const char* nameStart = reinterpret_cast<const char*>(
+                    encryptedData.data() + currentOffset);
+                size_t maxLen = encryptedData.size() - currentOffset;
+                size_t nameLen = strnlen(nameStart, maxLen);
+                filenames.emplace_back(nameStart, nameLen);
+                currentOffset += nameLen + 1;
+            }
+
+            // Extract files (file data is NOT encrypted, only header/table)
+            std::vector<FileEntry> files;
+            for (uint32_t i = 0; i < header->numItems && i < filenames.size(); ++i)
+            {
+                const ImgEntryV3& entry = entries[i];
+                uint32_t dataOffset = entry.offsetBlock * IMG_BLOCK_SIZE;
+                
+                // Calculate actual size
+                bool isResource = ((entry.sizeOrFlags & 0xC0000000) != 0);
+                uint32_t actualSize;
+                if (!isResource)
+                {
+                    actualSize = entry.sizeOrFlags;
+                }
+                else
+                {
+                    int paddingCount = entry.flags & 0x7FF;
+                    actualSize = entry.usedBlocks * IMG_BLOCK_SIZE - paddingCount;
+                }
+
+                if (dataOffset + actualSize > fileSize)
+                    continue;
+
+                // Read file data from original file (not encrypted)
+                file.seekg(dataOffset);
+                FileEntry fileEntry;
+                fileEntry.name = filenames[i];
+                fileEntry.data.resize(actualSize);
+                file.read(reinterpret_cast<char*>(fileEntry.data.data()), actualSize);
+                fileEntry.resourceType = entry.resourceType;
+                files.push_back(std::move(fileEntry));
+            }
+
+            g_stats.imgsLoaded++;
+            LOGF_UTILITY("[ImgLoader] Extracted {} files from encrypted IMG: {}", 
+                files.size(), imgPath.filename().string());
+            return files;
+        }
+
+        // Not encrypted - use standard extraction
+        return ExtractImg(imgPath);
     }
 }
