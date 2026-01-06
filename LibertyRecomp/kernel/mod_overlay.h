@@ -162,3 +162,27 @@ namespace ModOverlay
      */
     std::string MapFusionFixPath(const std::string& fusionFixPath);
 }
+
+    // ============================================================================
+    // IMG Folder Support (FusionFix-style IMG loading)
+    // ============================================================================
+
+    /**
+     * Scan overlays for .img folders containing replacement files.
+     * Called automatically during RebuildIndex().
+     */
+    void ScanForImgFolders();
+
+    /**
+     * Check if an IMG file has a replacement folder in overlays.
+     * 
+     * @param imgPath Normalized path to IMG (e.g., "pc/models/cdimages/vehicles.img")
+     * @return Path to replacement folder, or empty if none exists
+     */
+    std::filesystem::path GetImgReplacementFolder(const std::string& imgPath);
+
+    /**
+     * Get all IMG folders with replacements.
+     * @return Vector of (normalized IMG path, folder path) pairs
+     */
+    std::vector<std::pair<std::string, std::filesystem::path>> GetAllImgFolders();
