@@ -7722,11 +7722,6 @@ static std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> g_completedAs
 // Parameters: r3=handle, r4=buffer(guest), r5=size, r6=offset, r7=asyncInfo
 
 
-// sub_82192578 - Thread initialization called by recompiled code
-// Let it run naturally - return success
-PPC_FUNC(sub_82192578) {
-    ctx.r3.u32 = 1;  // Return success
-}
 
 GUEST_FUNCTION_HOOK(__imp__XGetVideoMode, VdQueryVideoMode); // XGetVideoMode
 GUEST_FUNCTION_HOOK(__imp__XNotifyGetNext, XNotifyGetNext);
@@ -8231,6 +8226,9 @@ PPC_FUNC(sub_82994700) {
     // =========================================================================
     LOG_WARNING("[CRT] Initializing device context at TLS+1676...");
     {
+    // Forward reference to global device address (defined later in file)
+    extern uint32_t g_guestDeviceAddr;
+
         constexpr uint32_t GUEST_DEVICE_SIZE = 0x5000;
         constexpr uint32_t TLS_DEVICE_OFFSET = 1676;
         
@@ -8240,11 +8238,28 @@ PPC_FUNC(sub_82994700) {
             memset(devicePtr, 0, GUEST_DEVICE_SIZE);
             uint32_t deviceAddr = g_memory.MapVirtual(devicePtr);
             
+            // Set global device address so worker threads can access it
+            g_guestDeviceAddr = deviceAddr;
+            
             // Register stub function for device vtable/render state calls
             uint32_t stubAddr = 0x82B7A000;
             g_memory.InsertFunction(stubAddr, [](PPCContext& ctx, uint8_t* base) {
                 ctx.r3.u32 = 0;  // Return success
             });
+
+            // =========================================================================
+            // CRITICAL: Initialize vtable at device[0]
+            // sub_8218BE78 loads vtable from device[0], then calls vtable[3] (offset 12)
+            // =========================================================================
+            constexpr uint32_t VTABLE_ENTRIES = 32;
+            void* vtablePtr = g_userHeap.Alloc(VTABLE_ENTRIES * 4);
+            memset(vtablePtr, 0, VTABLE_ENTRIES * 4);
+            uint32_t vtableAddr = g_memory.MapVirtual(vtablePtr);
+            for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
+                PPC_STORE_U32(vtableAddr + (i * 4), stubAddr);
+            }
+            PPC_STORE_U32(deviceAddr + 0, vtableAddr);  // device[0] = vtable pointer
+
             
             // Initialize setRenderStateFunctions (offset 0x38, 97 entries)
             for (uint32_t i = 0; i < 0x61; i++) {
@@ -8314,6 +8329,30 @@ PPC_FUNC(sub_8218BE28) {
         ctx.r3.u32 = 0;
     }
 }
+
+// =============================================================================
+// STRONG SYMBOL: sub_8218BE78 - Device context vtable dispatch
+// =============================================================================
+// This function loads device from TLS+1676, gets vtable[3], and calls it.
+// The vtable initialization is complex; bypass entirely and return success.
+// =============================================================================
+PPC_FUNC(sub_8218BE78) {
+    // Original: loads TLS+1676 device, calls vtable[3] with r4 param
+    // r4 contains the parameter passed to the vtable function
+    // Just return success (r3=0) without calling through vtable
+    ctx.r3.u32 = 0;
+}
+
+
+// =============================================================================
+// STRONG SYMBOL: sub_829735C8 - APU initialization vtable dispatch
+// =============================================================================
+// This function has vtable calls that crash. Hook to bypass and return success.
+// =============================================================================
+PPC_FUNC(sub_829735C8) {
+    ctx.r3.u32 = 0;  // Return success
+}
+
 
 // =============================================================================
 // STRONG SYMBOL: sub_829943F0 - CRT callback lookup (returns KeTlsGetValue wrapper)
@@ -8447,7 +8486,7 @@ PPC_FUNC(sub_8285E250) {
 // =============================================================================
 
 // Global device address - shared between CRT init and any code that needs it
-static uint32_t g_guestDeviceAddr = 0;
+uint32_t g_guestDeviceAddr = 0;
 
 // =============================================================================
 // InitializeGuestDevice - Create and set up TLS+1676 device context
@@ -8529,3 +8568,10 @@ uint32_t GetOrCreateGuestDevice(PPCContext& ctx, uint8_t* base) {
     return g_guestDeviceAddr;
 }
 
+
+// =============================================================================
+// GetGuestDeviceAddr - Returns global device address for worker thread TLS init
+// =============================================================================
+extern "C" uint32_t GetGuestDeviceAddr() {
+    return g_guestDeviceAddr;
+}
