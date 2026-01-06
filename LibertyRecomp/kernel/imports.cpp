@@ -8288,19 +8288,86 @@ PPC_FUNC(sub_829A7960) {
 }
 
 // =============================================================================
-// STRONG SYMBOL: sub_82850028 - Device context vtable call via TLS+1676
+// STRONG SYMBOL: sub_82850028 - Texture creation via TLS+1676 device context
 // =============================================================================
-// Calls vtable[15] on device context from TLS+1676. Device context not initialized.
+// OPTION A: Guard TLS+1676 access - check if device context is valid before use
+// If device context is NULL or invalid, skip texture creation gracefully.
 // =============================================================================
 PPC_FUNC(sub_82850028) {
-    // Original loads device context from TLS+1676 and calls vtable[15]
-    // Device context isn't properly initialized, so stub with success
-    ctx.r3.u32 = 1;  // Return success/true
+    // Get TLS base from r13+0
+    uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
+    
+    if (tlsBase == 0) {
+        ctx.r3.u32 = 0;  // Return NULL (no texture created)
+        return;
+    }
+    
+    // Load device context from TLS+1676
+    uint32_t deviceCtx = PPC_LOAD_U32(tlsBase + 1676);
+    
+    if (deviceCtx == 0) {
+        // Device context not yet initialized - skip texture creation
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load vtable pointer from device context
+    uint32_t vtable = PPC_LOAD_U32(deviceCtx + 0);
+    if (vtable == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load vtable[15] (offset 60)
+    uint32_t vtable15 = PPC_LOAD_U32(vtable + 60);
+    if (vtable15 == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Device context and vtable are valid - return success
+    // Note: Full original call would proceed with texture creation
+    ctx.r3.u32 = 1;
 }
 
 // =============================================================================
-// STRONG SYMBOL: sub_8285E250 - Device context vtable call via TLS+1676
+// STRONG SYMBOL: sub_8285E250 - Object destructor
+// =============================================================================
+// OPTION A: Guard NULL object access
 // =============================================================================
 PPC_FUNC(sub_8285E250) {
-    ctx.r3.u32 = 1;  // Return success
+    if (ctx.r3.u32 == 0) {
+        return;  // NULL object - nothing to destruct
+    }
+    
+    // Call the sub-functions directly
+    uint32_t obj = ctx.r3.u32;
+    
+    // Load offset 28 and check if non-zero, call sub_821C2CC0
+    uint32_t field28 = PPC_LOAD_U32(obj + 28);
+    if (field28 != 0) {
+        ctx.r3.u32 = field28;
+        sub_821C2CC0(ctx, base);
+    }
+    
+    // Load offset 16 and call sub_8218BE78 (free function)
+    uint32_t field16 = PPC_LOAD_U32(obj + 16);
+    ctx.r3.u32 = field16;
+    sub_8218BE78(ctx, base);
+    
+    // Check offsets 24 and 28 - if both zero, also free offset 20
+    uint32_t field24 = PPC_LOAD_U32(obj + 24);
+    field28 = PPC_LOAD_U32(obj + 28);
+    if (field24 == 0 && field28 == 0) {
+        uint32_t field20 = PPC_LOAD_U32(obj + 20);
+        ctx.r3.u32 = field20;
+        sub_8218BE78(ctx, base);
+    }
+    
+    // Load offset 24 and if non-zero, call sub_821C2CC0
+    field24 = PPC_LOAD_U32(obj + 24);
+    if (field24 != 0) {
+        ctx.r3.u32 = field24;
+        sub_821C2CC0(ctx, base);
+    }
 }

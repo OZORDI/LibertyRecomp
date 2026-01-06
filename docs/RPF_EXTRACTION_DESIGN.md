@@ -198,9 +198,107 @@ cd /Users/Ozordi/Downloads/MarathonRecomp
 cmake --build out/build/macos-debug --target LibertyRecomp -j8
 ```
 
+## Mod Overlay Integration
+
+The VFS now includes a **FusionFix-compatible mod overlay system** that allows mods to override extracted game files.
+
+### How It Works
+
+```
+File Request Flow:
+┌─────────────────────────────────────────────────────────────────┐
+│  Game requests file (e.g., "common/data/handling.dat")          │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  1. ModOverlay::Resolve() - Check mod overlays FIRST        ││
+│  │     Priority order: mods/update/ > update/ > base files     ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                              │                                   │
+│              ┌───────────────┴───────────────┐                   │
+│              │                               │                   │
+│         [Override Found]              [No Override]              │
+│              │                               │                   │
+│              ▼                               ▼                   │
+│    Return mod file path        2. VFS::Resolve() - Base files   │
+│                                              │                   │
+│                                              ▼                   │
+│                                   Return extracted file path     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Files Added
+
+| File | Purpose |
+|------|---------|
+| `kernel/mod_overlay.h` | Mod overlay API - overlay management, file resolution |
+| `kernel/mod_overlay.cpp` | Implementation - FusionFix folder scanning, priority resolution |
+
+### VFS Integration
+
+The `VFS::Resolve()` function now checks mod overlays before base files:
+
+```cpp
+std::filesystem::path Resolve(const std::string& guestPath) {
+    // 1. Check mod overlays FIRST (FusionFix-compatible)
+    if (ModOverlay::IsInitialized()) {
+        auto overridePath = ModOverlay::Resolve(stripped);
+        if (!overridePath.empty() && std::filesystem::exists(overridePath)) {
+            return overridePath;  // Mod file takes priority
+        }
+    }
+    
+    // 2. Fall back to base extracted files
+    // ... existing VFS resolution logic ...
+}
+```
+
+### Supported Overlay Locations
+
+| Priority | Path | Description |
+|----------|------|-------------|
+| 100 | `mods/update/` | Highest priority - custom mod folder |
+| 50 | `update/` | Standard FusionFix location |
+| 40 | `GTAIV.EFLC.FusionFix/update/` | Alternative FusionFix location |
+| 30 | `plugins/update/` | Plugins folder |
+| 20 | `mods/` | Generic mods folder |
+
+### FusionFix Path Mapping
+
+Mod overlay paths are automatically mapped to match game paths:
+
+| Overlay Path | Maps To |
+|--------------|---------|
+| `update/common/` | `common/` |
+| `update/TLAD/` | `dlc/TLAD/` |
+| `update/TBoGT/` | `dlc/TBoGT/` |
+| `update/GTAIV.EFLC.FusionFix/shaders/` | `common/shaders/` |
+
+### Example: Mod File Override
+
+```
+LibertyRecomp/
+├── game/                           # Base extracted files
+│   └── common/
+│       └── data/
+│           └── handling.dat        # Original file
+└── update/                         # Mod overlay
+    └── common/
+        └── data/
+            └── handling.dat        # MOD FILE - takes priority!
+```
+
+When the game requests `common/data/handling.dat`, the VFS returns the mod version.
+
+For complete mod documentation, see [MOD_SUPPORT.md](MOD_SUPPORT.md).
+
+---
+
 ## Future Improvements
 
 1. **Lazy extraction**: Extract files on first access instead of upfront
-2. **Memory-mapped files**: Use mmap for large files
+2. **Memory-mapped files**: Use mmap for large files ✅ (Implemented)
 3. **Parallel extraction**: Multi-threaded RPF unpacking
 4. **Compression support**: Keep files compressed, decompress on read
+5. **IMG/RPF Loader**: Load modified archive files from mods (like FusionFix)
+6. **Hot reload**: Detect mod file changes and reload without restart

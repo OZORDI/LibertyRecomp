@@ -1,0 +1,206 @@
+﻿[Skip Intro]
+Salta intro
+
+[Skip Menu]
+Salta menu
+
+[Windowed]
+In finestra
+
+[Borderless]
+In finestra senza bordi
+
+[Focus Loss]
+Gioco in pausa quando la finestra non è attiva
+
+[LightSyncRGB]
+Logitech LightSync RGB
+
+[FPS Counter]
+Contatore degli FPS
+
+[Letterbox]
+Barre orizzontali nelle cinematiche
+
+[Pillarbox]
+Barre verticali nelle cinematiche
+
+[Alt. Dialogues]
+Dialoghi alternativi
+
+[Check Updates]
+Controlla aggiornamenti per Fusion Fix
+
+[Raw Input]
+Raw Input
+
+[Always Run]
+Corri sempre
+
+[Cover Centering]
+Centra camera al riparo
+
+[CenterDelayFoot]
+Ritardo centramento camera a piedi
+
+[CenterDelayVeh]
+Ritardo centramento camera veicolo
+
+[CamTurnSpeedVeh]
+Velocità rotazione camera veicolo
+
+[Gamepad Icons]
+Icone del gamepad
+
+[Motion Blur]
+Motion blur
+
+[Bloom]
+Bloom
+
+[Console Gamma]
+Gamma delle console
+
+[Auto Exposure]
+Esposizione automatica delle console
+
+[Screen Filter]
+Filtro dello schermo
+
+[Depth of Field]
+Profondità di campo
+
+[TreeFX]
+Illuminazione degli alberi
+
+[Sun Shafts]
+Raggi solari
+
+[Antialiasing]
+Antialiasing
+
+[FPS Limiter]
+Limitatore degli FPS
+
+[ExtraNightShad]
+Ombre notturne extra
+
+[Lampposts]
+Lampioni
+
+[LampostsHeadl]
+Lampioni e fari
+
+[LampHeadlVNS]
+Lampioni e fari + ombre notturne dei veicoli
+
+[Tree Alpha]
+Trasparenza degli alberi
+
+[UnclampLighting]
+Estensione della portata della luce solare
+
+[Shadow Filter]
+Filtro delle ombre
+
+[HeadlightShadow]
+Ombre dei fari
+
+[Timed Events]
+Eventi stagionali
+
+[Tone Mapping]
+Mappatura dei toni
+
+[Volumetric Fog]
+Nebbia volumetrica
+
+[Zoomed Movement]
+Consenti movimento con lo zoom
+
+[Distant Lights]
+Luci distanti
+
+[CenteredVehCam]
+Telecamera veicolo centrata
+
+[CenteredFootCam]
+Telecamera a piedi centrata
+
+[Camera Shake]
+Vibrazione della camera
+
+[CutscAudioSync]
+Sincronizzazione audio cinematiche
+
+[CutscAudioSync0]
+Sincronizzazione audio cinematiche disattivata
+
+[CutscAudioSync1]
+Sincronizzazione audio cinematiche attivata
+
+[Turn Indicators]
+Indicatori di direzione
+
+[WinterEvent0]
+Evento invernale disattivato
+
+[WinterEvent1]
+Evento invernale attivato
+
+[HalloweenEvent0]
+Evento di Halloween disattivato
+
+[HalloweenEvent1]
+Evento di Halloween attivato
+
+[TranspMapMenu]
+Menu della mappa trasparente
+
+[Extra Streaming]
+Memoria di streaming aggiuntiva
+
+[FF_SM]
+Budget di streaming
+
+[Graphics API]
+API grafica
+
+[FF_RESTART]
+GTA IV deve essere riavviato per applicare le impostazioni.
+
+[Extended Sniper]
+Controlli estesi del fucile di precisione
+
+[Bullet Traces]
+Mostra sempre le tracce dei proiettili
+
+[POLICE3]
+Buffalo polizia
+
+[FF_WARN0]
+~p~Archivi IMG:
+
+[FF_WARN1]
+; ~r~ATTENZIONE: È stato superato il limite di 255 archivi IMG, potrebbero verificarsi problemi di streaming.
+
+[FF_WARN2]
+~r~ATTENZIONE: Ombre notturne extra è un'impostazione PC originale di Rockstar. Molto difettosa, non raccomandata.
+
+[FF_WARN3]
+~r~ATTENZIONE: Un valore della distanza visuale superiore a 25 e un valore della distanza dettagli superiore a 31 potrebbero causare il pop-in degli oggetti.
+
+[FF_WARN4]
+~r~ATTENZIONE: Un valore della distanza visuale superiore a 25 potrebbe causare il pop-in degli oggetti.
+
+[FF_WARN5]
+~r~ATTENZIONE: Un valore della distanza dettagli superiore a 31 potrebbe causare il pop-in degli oggetti.
+
+[FF_WARN6]
+~r~ATTENZIONE: CHSS ha effetto solo se la qualità delle ombre è impostata su Molto Alta.
+
+[FF_WARN7]
+~r~ATTENZIONE: Attiva la sincronizzazione audio cinematiche se riscontri desincronizzazione audio, disattivala per la fluidità delle animazioni. Può essere attivata/disattivata in una cinematica tramite ~PAD_UP~.
+
+[DUMMY_l11]
+Dummy label.

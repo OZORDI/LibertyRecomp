@@ -1,4 +1,5 @@
 #include "vfs.h"
+#include "mod_overlay.h"
 #include <os/logger.h>
 #include <algorithm>
 #include <cctype>
@@ -47,9 +48,22 @@ namespace VFS
         RebuildIndex();
         printf("[VFS] RebuildIndex done\n"); fflush(stdout);
         
+        // Initialize mod overlay system (FusionFix-compatible)
+        // The mod overlay scans for update/ folders relative to the game root
+        // Game root is typically the parent of extractedRoot (e.g., game/ -> LibertyRecomp/)
+        printf("[VFS] Initializing ModOverlay...\n"); fflush(stdout);
+        std::filesystem::path gameRoot = extractedRoot.parent_path();
+        ModOverlay::Initialize(gameRoot);
+        
+        auto modStats = ModOverlay::GetStats();
+        printf("[VFS] ModOverlay initialized: %llu overlays, %llu override files\n",
+            modStats.totalOverlays, modStats.totalOverrideFiles); fflush(stdout);
+        
         LOGF_UTILITY("[VFS] Initialized with root: {}", extractedRoot.string());
         LOGF_UTILITY("[VFS] Indexed {} files, {} directories, {} bytes total",
             g_stats.totalFiles, g_stats.totalDirectories, g_stats.totalBytes);
+        LOGF_UTILITY("[VFS] Mod overlays: {} ({} override files)",
+            modStats.totalOverlays, modStats.totalOverrideFiles);
     }
     
     bool IsInitialized()
@@ -122,6 +136,24 @@ namespace VFS
         printf("[VFS] Resolve #%d: '%s' -> normalized='%s' stripped='%s'\n", 
                s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
         fflush(stdout);
+        
+        // === MOD OVERLAY CHECK (FIRST PRIORITY) ===
+        // FusionFix-compatible: check mod overlays before base files
+        if (ModOverlay::IsInitialized())
+        {
+            auto overridePath = ModOverlay::Resolve(stripped);
+            if (!overridePath.empty())
+            {
+                std::error_code ec;
+                if (std::filesystem::exists(overridePath, ec))
+                {
+                    g_stats.cacheHits++;
+                    printf("[VFS] MOD OVERRIDE: '%s' -> '%s'\n", guestPath.c_str(), overridePath.string().c_str());
+                    fflush(stdout);
+                    return overridePath;
+                }
+            }
+        }
         
         // Check path mappings first
         for (const auto& mapping : g_pathMappings)
