@@ -4,6 +4,7 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
+#include "rsc_types.h"
 
 /**
  * Texture Format Conversion for LibertyRecomp
