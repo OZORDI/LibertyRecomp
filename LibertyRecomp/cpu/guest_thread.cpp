@@ -10,6 +10,13 @@
 // Forward declaration from imports.cpp
 extern void PumpSdlEventsIfNeeded();
 
+// Forward declaration for shared device context (from imports.cpp)
+extern "C" uint32_t GetGuestDeviceAddr();
+
+// TLS offset for device context
+constexpr uint32_t TLS_DEVICE_OFFSET = 1676;
+
+
 // Legacy constants for backward compatibility (now defined in guest_thread.h as X360_*)
 constexpr size_t PCR_SIZE = X360_PCR_SIZE;
 constexpr size_t TLS_SIZE = X360_TLS_SIZE;
@@ -54,6 +61,17 @@ GuestThreadContext::GuestThreadContext(uint32_t cpuNumber)
     // Initialize TLS (Thread Local Storage)
     // -------------------------------------------------------------------------
     tls->quirky_slot = 0xFFFFFFFF;                   // 0x10 - Special TLS slot
+
+    // -------------------------------------------------------------------------
+    // Initialize TLS+1676 with shared device context (for worker threads)
+    // -------------------------------------------------------------------------
+    uint32_t deviceAddr = GetGuestDeviceAddr();
+    if (deviceAddr != 0) {
+        // Store device context pointer at TLS+1676 so worker threads can access it
+        uint8_t* tlsMem = reinterpret_cast<uint8_t*>(tls);
+        *reinterpret_cast<uint32_t*>(tlsMem + TLS_DEVICE_OFFSET) = __builtin_bswap32(deviceAddr);
+    }
+
 
     // -------------------------------------------------------------------------
     // Initialize TEB (Thread Environment Block)
