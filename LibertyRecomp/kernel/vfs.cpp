@@ -1,8 +1,4 @@
 #include "vfs.h"
-#include "mod_overlay.h"
-#include "io/rpf_loader.h"
-#include "io/img_loader.h"
-#include "io/texture_convert.h"
 #include <os/logger.h>
 #include <algorithm>
 #include <cctype>
@@ -51,31 +47,9 @@ namespace VFS
         RebuildIndex();
         printf("[VFS] RebuildIndex done\n"); fflush(stdout);
         
-        // Initialize mod overlay system (FusionFix-compatible)
-        // The mod overlay scans for update/ folders relative to the game root
-        // Game root is typically the parent of extractedRoot (e.g., game/ -> LibertyRecomp/)
-        printf("[VFS] Initializing ModOverlay...\n"); fflush(stdout);
-        std::filesystem::path gameRoot = extractedRoot.parent_path();
-        ModOverlay::Initialize(gameRoot);
-        
-        auto modStats = ModOverlay::GetStats();
-        
-        // Initialize RPF loader for runtime RPF extraction
-        printf("[VFS] Initializing RpfLoader...\n"); fflush(stdout);
-        RpfLoader::Initialize();
-        RpfLoader::ScanForRpfFiles(gameRoot);
-        
-        // Initialize IMG loader
-        printf("[VFS] Initializing ImgLoader...\n"); fflush(stdout);
-        ImgLoader::Initialize();
-        printf("[VFS] ModOverlay initialized: %llu overlays, %llu override files\n",
-            modStats.totalOverlays, modStats.totalOverrideFiles); fflush(stdout);
-        
         LOGF_UTILITY("[VFS] Initialized with root: {}", extractedRoot.string());
         LOGF_UTILITY("[VFS] Indexed {} files, {} directories, {} bytes total",
             g_stats.totalFiles, g_stats.totalDirectories, g_stats.totalBytes);
-        LOGF_UTILITY("[VFS] Mod overlays: {} ({} override files)",
-            modStats.totalOverlays, modStats.totalOverrideFiles);
     }
     
     bool IsInitialized()
@@ -149,38 +123,6 @@ namespace VFS
                s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
         fflush(stdout);
         
-        // === MOD OVERLAY CHECK (FIRST PRIORITY) ===
-        // FusionFix-compatible: check mod overlays before base files
-        if (ModOverlay::IsInitialized())
-        {
-            auto overridePath = ModOverlay::Resolve(stripped);
-            if (!overridePath.empty())
-            {
-                std::error_code ec;
-                if (std::filesystem::exists(overridePath, ec))
-                {
-                    g_stats.cacheHits++;
-                    printf("[VFS] MOD OVERRIDE: '%s' -> '%s'\n", guestPath.c_str(), overridePath.string().c_str());
-                    fflush(stdout);
-                    return overridePath;
-                }
-            }
-        }
-        
-        // === RPF LOADER CHECK (SECOND PRIORITY) ===
-        // Check if file exists in any loaded RPF from mods
-        if (RpfLoader::IsInitialized() && RpfLoader::HasFile(stripped))
-        {
-            auto tempPath = RpfLoader::ExtractToTemp(stripped);
-            if (!tempPath.empty())
-            {
-                g_stats.cacheHits++;
-                printf("[VFS] RPF EXTRACT: '%s' -> '%s'\n", guestPath.c_str(), tempPath.string().c_str());
-                fflush(stdout);
-                return tempPath;
-            }
-        }
-        
         // Check path mappings first
         for (const auto& mapping : g_pathMappings)
         {
@@ -196,18 +138,6 @@ namespace VFS
                     {
                         remainder.erase(0, 1);
                     }
-                }
-                
-                // FIX: For RPF mappings (e.g., common.rpf -> common/), only apply when
-                // there's a subpath. Opening "common.rpf" directly should NOT map to
-                // the "common/" directory - that breaks archive mounting.
-                // RPF mappings are for paths INSIDE the archive like "common.rpf/data/file.dat"
-                bool isRpfMapping = mappingNorm.find(".rpf") != std::string::npos;
-                if (isRpfMapping && remainder.empty())
-                {
-                    // Skip this mapping - let the game fail to open the RPF file
-                    // so it uses the fallback file resolution path
-                    continue;
                 }
                 
                 std::filesystem::path resolved = g_extractedRoot / mapping.hostPrefix;

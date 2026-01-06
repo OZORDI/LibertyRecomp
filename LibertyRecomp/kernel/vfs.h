@@ -16,11 +16,6 @@
  * This eliminates the need for complex RPF offset-based reading
  * by serving files directly from the extracted directory.
  * 
- * Mod Support:
- *   - FusionFix-compatible update folder overlay
- *   - Mod files in update/ or mods/update/ override base game files
- *   - Priority: mod overlays → base extracted files
- * 
  * Path Mapping:
  *   game:\                    → <extracted_root>/
  *   game:\common.rpf          → <extracted_root>/common/
