@@ -186,3 +186,20 @@ namespace ModOverlay
      * @return Vector of (normalized IMG path, folder path) pairs
      */
     std::vector<std::pair<std::string, std::filesystem::path>> GetAllImgFolders();
+
+    // ============================================================================
+    // Texture Auto-Conversion
+    // ============================================================================
+
+    /**
+     * Convert a PC texture to Xbox 360 format and cache it.
+     * Called automatically when Xbox texture requested but PC version found.
+     */
+    std::filesystem::path ConvertAndCacheTexture(
+        const std::filesystem::path& pcTexturePath,
+        const std::string& targetExt);
+
+    /**
+     * Clear the texture conversion cache.
+     */
+    void ClearTextureCache();

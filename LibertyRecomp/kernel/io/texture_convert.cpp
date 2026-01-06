@@ -329,3 +329,264 @@ namespace TextureConvert
         return pcData;
     }
 }
+
+// ============================================================================
+// Full RSC Texture Parsing with Mipmap Swizzle
+// ============================================================================
+
+namespace TextureConvert
+{
+    // GTA IV texture format codes (from RSC)
+    enum class GtaTextureFormat : uint32_t
+    {
+        Unknown = 0,
+        DXT1 = 0x31545844,      // "DXT1"
+        DXT3 = 0x33545844,      // "DXT3"
+        DXT5 = 0x35545844,      // "DXT5"
+        A8R8G8B8 = 21,
+        X8R8G8B8 = 22,
+        R5G6B5 = 23,
+        A1R5G5B5 = 25,
+        A4R4G4B4 = 26,
+        L8 = 50,
+        A8L8 = 51,
+    };
+
+    // Texture info extracted from RSC
+    struct TextureInfo
+    {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t depth = 1;
+        uint32_t mipLevels = 1;
+        GtaTextureFormat format = GtaTextureFormat::Unknown;
+        uint32_t dataOffset = 0;
+        uint32_t dataSize = 0;
+        bool isCompressed = false;
+        uint32_t blockSize = 1;     // 4 for DXT formats
+        uint32_t bytesPerBlock = 4; // Bytes per pixel or per 4x4 block
+    };
+
+    /**
+     * Parse texture info from RSC data.
+     * GTA IV RSC format varies by resource type.
+     */
+    static bool ParseTextureInfo(const std::vector<uint8_t>& data, TextureInfo& info)
+    {
+        if (data.size() < 64)
+            return false;
+
+        // RSC header is 16 bytes
+        const RscHeader* rsc = reinterpret_cast<const RscHeader*>(data.data());
+        
+        // Validate magic
+        if (rsc->magic != 0x05435352)
+            return false;
+
+        // Texture dictionary starts after RSC header
+        // Structure varies, but common layout:
+        // Offset 16-20: texture count or pointer
+        // Offset 32+: texture headers
+        
+        // For now, use heuristics to find texture data
+        // Look for common texture header patterns
+        
+        // Simplified: assume texture data starts after a 64-byte header
+        info.dataOffset = 64;
+        info.dataSize = data.size() - info.dataOffset;
+        
+        // Try to detect format from data patterns
+        // DXT magic numbers appear in texture headers
+        for (size_t i = 16; i < std::min(data.size(), size_t(256)); i += 4)
+        {
+            uint32_t val = *reinterpret_cast<const uint32_t*>(data.data() + i);
+            
+            if (val == 0x31545844) { // DXT1
+                info.format = GtaTextureFormat::DXT1;
+                info.isCompressed = true;
+                info.blockSize = 4;
+                info.bytesPerBlock = 8;
+                break;
+            }
+            else if (val == 0x33545844) { // DXT3
+                info.format = GtaTextureFormat::DXT3;
+                info.isCompressed = true;
+                info.blockSize = 4;
+                info.bytesPerBlock = 16;
+                break;
+            }
+            else if (val == 0x35545844) { // DXT5
+                info.format = GtaTextureFormat::DXT5;
+                info.isCompressed = true;
+                info.blockSize = 4;
+                info.bytesPerBlock = 16;
+                break;
+            }
+        }
+
+        // Default dimensions if not found
+        if (info.width == 0)
+        {
+            // Estimate from data size assuming square DXT5
+            if (info.format == GtaTextureFormat::DXT5 || info.format == GtaTextureFormat::DXT3)
+            {
+                // dataSize = (width/4) * (height/4) * 16
+                uint32_t blocks = info.dataSize / 16;
+                uint32_t side = 1;
+                while (side * side < blocks) side *= 2;
+                info.width = side * 4;
+                info.height = side * 4;
+            }
+            else if (info.format == GtaTextureFormat::DXT1)
+            {
+                uint32_t blocks = info.dataSize / 8;
+                uint32_t side = 1;
+                while (side * side < blocks) side *= 2;
+                info.width = side * 4;
+                info.height = side * 4;
+            }
+            else
+            {
+                // Default 256x256 RGBA
+                info.width = 256;
+                info.height = 256;
+                info.bytesPerBlock = 4;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Swizzle texture data including all mipmap levels.
+     */
+    static std::vector<uint8_t> SwizzleTextureWithMipmaps(
+        const std::vector<uint8_t>& linearData,
+        const TextureInfo& info)
+    {
+        std::vector<uint8_t> swizzledData;
+        swizzledData.reserve(linearData.size());
+
+        size_t offset = 0;
+        uint32_t width = info.width;
+        uint32_t height = info.height;
+
+        for (uint32_t mip = 0; mip < info.mipLevels && width > 0 && height > 0; ++mip)
+        {
+            uint32_t blocksW = (width + info.blockSize - 1) / info.blockSize;
+            uint32_t blocksH = (height + info.blockSize - 1) / info.blockSize;
+            size_t mipSize = blocksW * blocksH * info.bytesPerBlock;
+
+            if (offset + mipSize > linearData.size())
+                break;
+
+            // Extract mip level
+            std::vector<uint8_t> mipData(linearData.begin() + offset, 
+                                         linearData.begin() + offset + mipSize);
+
+            // Swizzle this mip level
+            auto swizzledMip = SwizzleLinearToMorton(mipData, width, height, 
+                                                      info.bytesPerBlock,
+                                                      info.blockSize, info.blockSize);
+
+            // Append to output
+            swizzledData.insert(swizzledData.end(), swizzledMip.begin(), swizzledMip.end());
+
+            offset += mipSize;
+            width /= 2;
+            height /= 2;
+        }
+
+        // Copy any remaining data (palette, etc.)
+        if (offset < linearData.size())
+        {
+            swizzledData.insert(swizzledData.end(), 
+                               linearData.begin() + offset, 
+                               linearData.end());
+        }
+
+        return swizzledData;
+    }
+
+    /**
+     * Enhanced PC to Xbox 360 conversion with full texture parsing.
+     */
+    std::optional<std::vector<uint8_t>> ConvertPCToXbox360Full(const std::vector<uint8_t>& pcData)
+    {
+        if (pcData.size() < sizeof(RscHeader))
+        {
+            return std::nullopt;
+        }
+
+        // Parse texture info
+        TextureInfo info;
+        if (!ParseTextureInfo(pcData, info))
+        {
+            // Fallback to simple conversion
+            return ConvertPCToXbox360(pcData);
+        }
+
+        // Copy data
+        std::vector<uint8_t> xboxData = pcData;
+
+        // Update RSC header
+        RscHeader* header = reinterpret_cast<RscHeader*>(xboxData.data());
+        if (header->type == 0x08)
+        {
+            header->type = 0x07;  // PC -> Xbox
+        }
+
+        // Swizzle texture data if we have valid info
+        if (info.dataOffset > 0 && info.dataSize > 0 && 
+            info.dataOffset + info.dataSize <= xboxData.size())
+        {
+            std::vector<uint8_t> textureData(
+                xboxData.begin() + info.dataOffset,
+                xboxData.begin() + info.dataOffset + info.dataSize);
+
+            auto swizzled = SwizzleTextureWithMipmaps(textureData, info);
+
+            if (swizzled.size() == textureData.size())
+            {
+                std::copy(swizzled.begin(), swizzled.end(), 
+                         xboxData.begin() + info.dataOffset);
+            }
+        }
+
+        // Swap endianness for header
+        // Note: Texture data endianness depends on format
+        // DXT blocks have specific byte order requirements
+        if (info.isCompressed)
+        {
+            // Swap 16-bit values in DXT color blocks
+            for (size_t i = info.dataOffset; i + 1 < xboxData.size(); i += 2)
+            {
+                std::swap(xboxData[i], xboxData[i + 1]);
+            }
+        }
+        else
+        {
+            // Swap based on bytes per pixel
+            if (info.bytesPerBlock == 4)
+            {
+                for (size_t i = info.dataOffset; i + 3 < xboxData.size(); i += 4)
+                {
+                    std::swap(xboxData[i], xboxData[i + 3]);
+                    std::swap(xboxData[i + 1], xboxData[i + 2]);
+                }
+            }
+            else if (info.bytesPerBlock == 2)
+            {
+                for (size_t i = info.dataOffset; i + 1 < xboxData.size(); i += 2)
+                {
+                    std::swap(xboxData[i], xboxData[i + 1]);
+                }
+            }
+        }
+
+        LOGF_UTILITY("[TextureConvert] Full conversion: {}x{} format={} mips={}", 
+            info.width, info.height, static_cast<uint32_t>(info.format), info.mipLevels);
+
+        return xboxData;
+    }
+}

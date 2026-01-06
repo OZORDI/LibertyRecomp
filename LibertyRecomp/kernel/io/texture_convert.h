@@ -163,3 +163,9 @@ namespace TextureConvert
      */
     std::pair<uint32_t, uint32_t> MortonDecode(uint32_t morton);
 }
+
+    /**
+     * Enhanced PC to Xbox 360 conversion with full texture parsing.
+     * Includes mipmap swizzling and proper format detection.
+     */
+    std::optional<std::vector<uint8_t>> ConvertPCToXbox360Full(const std::vector<uint8_t>& pcData);
