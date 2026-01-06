@@ -81,6 +81,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/save_system.cpp"
     "kernel/save_hooks.cpp"
     "kernel/vfs.cpp"
+    "kernel/mod_overlay.cpp"
     "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
     "kernel/io/gta_file_system.cpp"

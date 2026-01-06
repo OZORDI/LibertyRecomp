@@ -1,0 +1,16 @@
+[submodule "external/injector"]
+	path = external/injector
+	url = https://github.com/ThirteenAG/injector
+[submodule "external/hooking"]
+	path = external/hooking
+	url = https://github.com/ThirteenAG/Hooking.Patterns
+[submodule "external/inireader"]
+	path = external/inireader
+	url = https://github.com/ThirteenAG/IniReader
+[submodule "shaders/GTAIV.EFLC.FusionShaders"]
+	path = shaders/GTAIV.EFLC.FusionShaders
+	url = https://github.com/Parallellines0451/GTAIV.EFLC.FusionShaders
+	ignore = dirty
+[submodule "external/modupdater"]
+	path = external/modupdater
+	url = https://github.com/ThirteenAG/modupdater

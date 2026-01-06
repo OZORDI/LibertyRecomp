@@ -511,10 +511,35 @@ LibertyRecomp/kernel/io/
 
 ---
 
+---
+
+## Mod Support
+
+Liberty Recompiled includes built-in support for mods through a **FusionFix-compatible file overlay system**.
+
+### Quick Setup
+
+1. Create an `update/` folder next to the LibertyRecomp executable
+2. Place mod files inside, mirroring the game's folder structure
+3. Launch the game - mod files automatically override base files
+
+### Supported Locations
+
+| Priority | Location | Description |
+|----------|----------|-------------|
+| 100 | `mods/update/` | Highest priority |
+| 50 | `update/` | Standard FusionFix location |
+| 40 | `GTAIV.EFLC.FusionFix/update/` | Alternative location |
+
+For detailed mod support documentation, see [MOD_SUPPORT.md](MOD_SUPPORT.md).
+
+---
+
 ## References
 
 - [ISOFileSystem](../LibertyRecomp/install/iso_file_system.h) - Native Xbox 360 ISO parsing (based on Xenia)
 - [XContentFileSystem](../LibertyRecomp/install/xcontent_file_system.h) - Native STFS/SVOD parsing (based on Xenia)
 - [RpfExtractor](../LibertyRecomp/install/rpf_extractor.h) - Native RPF2 extraction
+- [MOD_SUPPORT.md](MOD_SUPPORT.md) - FusionFix-compatible mod loading
 - [GTAMods RPF Wiki](https://gtamods.com/wiki/RPF_archive)
 - [XenosRecomp README](../tools/XenosRecomp/README.md)

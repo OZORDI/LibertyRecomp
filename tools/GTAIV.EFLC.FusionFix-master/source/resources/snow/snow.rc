@@ -1,0 +1,11 @@
+#define IDR_SNOWTX 200
+#define IDR_BLITPS 201
+#define IDR_BLITVS 202
+#define IDR_SNOWPS 203
+#define IDR_SNOWVS 204
+
+IDR_SNOWTX RCDATA "snow.dds"
+IDR_BLITPS RCDATA "blitps.pso"
+IDR_BLITVS RCDATA "blitvs.vso"
+IDR_SNOWPS RCDATA "snowps.pso"
+IDR_SNOWVS RCDATA "snowvs.vso"
