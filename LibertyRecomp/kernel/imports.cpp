@@ -8181,7 +8181,7 @@ PPC_FUNC(sub_82994700) {
     // The game accesses TLS+1676 for device context, so we need at least 1680 bytes
     LOG_WARNING("[CRT] Allocating TLS base structure...");
     constexpr uint32_t TLS_BASE_SIZE = 0x2000;  // 8KB to be safe
-    void* tlsBasePtr = g_userHeap.Alloc(TLS_BASE_SIZE);
+    void* tlsBasePtr = g_userHeap.AllocPhysical(TLS_BASE_SIZE, 16);
     if (!tlsBasePtr) {
         LOG_WARNING("[CRT] ERROR: TLS base allocation failed!");
         ctx.r3.u32 = 0;
@@ -8233,7 +8233,7 @@ PPC_FUNC(sub_82994700) {
         constexpr uint32_t TLS_DEVICE_OFFSET = 1676;
         
         // Allocate device context (GuestDevice structure)
-        void* devicePtr = g_userHeap.Alloc(GUEST_DEVICE_SIZE);
+        void* devicePtr = g_userHeap.AllocPhysical(GUEST_DEVICE_SIZE, 16);
         if (devicePtr) {
             memset(devicePtr, 0, GUEST_DEVICE_SIZE);
             uint32_t deviceAddr = g_memory.MapVirtual(devicePtr);
@@ -8252,7 +8252,7 @@ PPC_FUNC(sub_82994700) {
             // sub_8218BE78 loads vtable from device[0], then calls vtable[3] (offset 12)
             // =========================================================================
             constexpr uint32_t VTABLE_ENTRIES = 32;
-            void* vtablePtr = g_userHeap.Alloc(VTABLE_ENTRIES * 4);
+            void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
             memset(vtablePtr, 0, VTABLE_ENTRIES * 4);
             uint32_t vtableAddr = g_memory.MapVirtual(vtablePtr);
             for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
@@ -8609,7 +8609,7 @@ void InitializeGuestDevice(PPCContext& ctx, uint8_t* base) {
     constexpr uint32_t GUEST_DEVICE_SIZE = 0x5000;
     
     // Allocate device structure
-    void* devicePtr = g_userHeap.Alloc(GUEST_DEVICE_SIZE);
+    void* devicePtr = g_userHeap.AllocPhysical(GUEST_DEVICE_SIZE, 16);
     if (!devicePtr) {
         LOG_WARNING("[DeviceContext] ERROR: Failed to allocate GuestDevice!");
         return;
