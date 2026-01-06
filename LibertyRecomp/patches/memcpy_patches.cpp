@@ -21,7 +21,7 @@ PPC_FUNC(sub_82990830) {
     size_t size = ctx.r5.u32;
     
     // Perform the actual memcpy using native code
-    if (size > 0 && dst != nullptr && src != nullptr) {
+    if (size > 0 && size < 0x10000000 && dst != nullptr && src != nullptr) { // Guard against garbage sizes
         std::memcpy(dst, src, size);
     }
     
@@ -41,7 +41,7 @@ PPC_FUNC(sub_82990880) {
     uint8_t* src = base + ctx.r4.u32;
     size_t size = ctx.r5.u32 - ctx.r6.u32; // r5 - r6 (remaining size after alignment)
     
-    if (size > 0 && dst != nullptr && src != nullptr) {
+    if (size > 0 && size < 0x10000000 && dst != nullptr && src != nullptr) { // Guard against garbage sizes
         std::memcpy(dst, src, size);
     }
 }
