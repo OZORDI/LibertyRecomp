@@ -8,6 +8,10 @@
 
 namespace ModOverlay
 {
+    // Forward declarations for functions defined later in this file
+    void ScanForImgFolders();
+    std::filesystem::path ConvertAndCacheTexture(const std::filesystem::path& pcTexturePath, const std::string& targetExt);
+
     static std::filesystem::path g_gameRoot;
     static bool g_initialized = false;
     static std::mutex g_mutex;
@@ -310,14 +314,14 @@ namespace ModOverlay
 
     void DumpStatus()
     {
-        LOGF_UTILITY("=== MOD OVERLAY STATUS ===");
+        LOG_UTILITY("=== MOD OVERLAY STATUS ===");
         LOGF_UTILITY("Game Root: {}", g_gameRoot.string());
         LOGF_UTILITY("Initialized: {}", g_initialized ? "YES" : "NO");
         LOGF_UTILITY("Total Overlays: {} ({} enabled)", g_stats.totalOverlays, g_stats.enabledOverlays);
         LOGF_UTILITY("Override Files: {}", g_stats.totalOverrideFiles);
         LOGF_UTILITY("Hits: {}, Misses: {}", g_stats.overrideHits, g_stats.overrideMisses);
         
-        LOGF_UTILITY("Registered Overlays:");
+        LOG_UTILITY("Registered Overlays:");
         for (const auto& overlay : g_overlays)
         {
             LOGF_UTILITY("  [{}] {} (priority={}, path={})",
@@ -329,7 +333,7 @@ namespace ModOverlay
         
         if (g_stats.totalOverrideFiles <= 50)
         {
-            LOGF_UTILITY("Override Files:");
+            LOG_UTILITY("Override Files:");
             for (const auto& [key, value] : g_fileIndex)
             {
                 LOGF_UTILITY("  {} -> {}", key, value.hostPath.string());

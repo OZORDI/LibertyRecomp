@@ -70,7 +70,7 @@ namespace ImgLoader
         g_imgCache.clear();
         g_stats = Stats{};
         
-        LOGF_UTILITY("[ImgLoader] Initialized");
+        LOG_UTILITY("[ImgLoader] Initialized");
     }
 
     bool IsInitialized()
@@ -562,7 +562,7 @@ namespace ImgLoader
     {
         if (g_aesKey.empty())
         {
-            LOGF_WARNING("[ImgLoader] Cannot decrypt IMG: no AES key set");
+            LOG_WARNING("[ImgLoader] Cannot decrypt IMG: no AES key set");
             return false;
         }
 

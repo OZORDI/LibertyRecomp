@@ -156,7 +156,7 @@ namespace GxtLoader
         g_customEntries.clear();
         g_stats = Stats{};
 
-        LOGF_UTILITY("[GxtLoader] Initialized");
+        LOG_UTILITY("[GxtLoader] Initialized");
     }
 
     bool IsInitialized()

@@ -276,7 +276,7 @@ namespace TextureConvert
     {
         if (pcData.size() < sizeof(RscHeader))
         {
-            LOGF_WARNING("[TextureConvert] Data too small for RSC header");
+            LOG_WARNING("[TextureConvert] Data too small for RSC header");
             return std::nullopt;
         }
 
