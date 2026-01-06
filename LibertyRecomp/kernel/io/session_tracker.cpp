@@ -113,19 +113,19 @@ std::unique_ptr<ISessionTracker> CreateSessionTracker() {
     
     switch (backend) {
         case EMultiplayerBackend::Community:
-            LOGF_INFO("[SessionTracker] Creating Community backend");
+            LOG_INFO("[SessionTracker] Creating Community backend");
             return CreateCommunitySessionTracker();
             
         case EMultiplayerBackend::Firebase:
-            LOGF_INFO("[SessionTracker] Creating Firebase backend");
+            LOG_INFO("[SessionTracker] Creating Firebase backend");
             return CreateFirebaseSessionTracker();
             
         case EMultiplayerBackend::LAN:
-            LOGF_INFO("[SessionTracker] Creating LAN backend");
+            LOG_INFO("[SessionTracker] Creating LAN backend");
             return CreateLANSessionTracker();
             
         default:
-            LOGF_WARNING("[SessionTracker] Unknown backend, falling back to Community");
+            LOG_WARNING("[SessionTracker] Unknown backend, falling back to Community");
             return CreateCommunitySessionTracker();
     }
 }

@@ -16,6 +16,8 @@ namespace RpfLoader
 {
     // RPF2 constants
     static constexpr uint32_t RPF2_MAGIC = 0x32465052;  // "RPF2" little-endian
+    static constexpr uint32_t RPF0_MAGIC = 0x30465052;  // "RPF0" - Table Tennis
+    static constexpr uint32_t RPF3_MAGIC = 0x33465052;  // "RPF3" - GTA IV Audio
     static constexpr uint32_t TOC_OFFSET = 0x800;
     static constexpr uint32_t BLOCK_SIZE = 0x800;
 
@@ -309,7 +311,7 @@ namespace RpfLoader
             }
         }
 
-        LOGF_UTILITY("[RpfLoader] Initialized");
+        LOG_UTILITY("[RpfLoader] Initialized");
     }
 
     bool IsInitialized()
@@ -544,9 +546,6 @@ namespace RpfLoader
 namespace RpfLoader
 {
     // RPF Version magic numbers
-    static constexpr uint32_t RPF0_MAGIC = 0x30465052;  // "RPF0" - Table Tennis
-    static constexpr uint32_t RPF2_MAGIC = 0x32465052;  // "RPF2" - GTA IV
-    static constexpr uint32_t RPF3_MAGIC = 0x33465052;  // "RPF3" - GTA IV Audio, Midnight Club LA
 
     enum class RpfVersion
     {
