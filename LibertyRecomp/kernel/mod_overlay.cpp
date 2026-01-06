@@ -657,3 +657,127 @@ namespace ModOverlay
         std::filesystem::remove_all(cacheDir, ec);
     }
 }
+
+// ============================================================================
+// Episodic Content Support (TLAD/TBoGT)
+// ============================================================================
+
+namespace ModOverlay
+{
+    // Current episode detection
+    enum class Episode
+    {
+        IV = 0,      // Base GTA IV
+        TLAD = 1,    // The Lost and Damned
+        TBoGT = 2    // The Ballad of Gay Tony
+    };
+
+    static Episode g_currentEpisode = Episode::IV;
+
+    // Episodic content paths that need special handling
+    static const std::vector<std::string> g_episodicPaths = {
+        "tlad",
+        "tbogt"
+    };
+
+    /**
+     * Set the current episode for path filtering.
+     * Some mods should only load for specific episodes.
+     */
+    void SetCurrentEpisode(int episode)
+    {
+        if (episode >= 0 && episode <= 2)
+        {
+            g_currentEpisode = static_cast<Episode>(episode);
+            LOGF_UTILITY("[ModOverlay] Set current episode: {}", 
+                episode == 0 ? "IV" : (episode == 1 ? "TLAD" : "TBoGT"));
+        }
+    }
+
+    int GetCurrentEpisode()
+    {
+        return static_cast<int>(g_currentEpisode);
+    }
+
+    /**
+     * Check if a path is episode-specific and matches current episode.
+     */
+    bool IsPathForCurrentEpisode(const std::string& normalizedPath)
+    {
+        // Check if path starts with an episode folder
+        if (normalizedPath.find("tlad/") == 0 || normalizedPath.find("dlc/tlad/") == 0)
+        {
+            return g_currentEpisode == Episode::TLAD;
+        }
+        if (normalizedPath.find("tbogt/") == 0 || normalizedPath.find("dlc/tbogt/") == 0)
+        {
+            return g_currentEpisode == Episode::TBoGT;
+        }
+        
+        // Non-episode-specific paths are always valid
+        return true;
+    }
+
+    /**
+     * Map episodic update paths to their actual game locations.
+     * 
+     * FusionFix structure:
+     *   update/TLAD/...  -> dlc/TLAD/...
+     *   update/TBoGT/... -> dlc/TBoGT/...
+     *   update/common/... -> common/...
+     *   update/pc/... -> pc/... (or xbox360/ for us)
+     */
+    std::string MapEpisodicPath(const std::string& path)
+    {
+        std::string normalized = NormalizePath(path);
+        
+        // Episode-specific content
+        if (normalized.find("tlad/") == 0)
+        {
+            return "dlc/" + normalized;
+        }
+        if (normalized.find("tbogt/") == 0)
+        {
+            return "dlc/" + normalized;
+        }
+        
+        // PC assets - map to xbox360 for our recomp
+        if (normalized.find("pc/") == 0)
+        {
+            // Keep pc/ path but also register as xbox360/ equivalent
+            // Some textures/models might work cross-platform
+            return normalized;
+        }
+        
+        return normalized;
+    }
+
+    /**
+     * Get all episode-specific paths for current episode.
+     * Used when scanning for IMG folders.
+     */
+    std::vector<std::string> GetCurrentEpisodePaths()
+    {
+        std::vector<std::string> paths;
+        
+        switch (g_currentEpisode)
+        {
+            case Episode::TLAD:
+                paths.push_back("tlad");
+                paths.push_back("dlc/tlad");
+                break;
+            case Episode::TBoGT:
+                paths.push_back("tbogt");
+                paths.push_back("dlc/tbogt");
+                break;
+            case Episode::IV:
+            default:
+                // Base game uses common/ and xbox360/
+                paths.push_back("common");
+                paths.push_back("xbox360");
+                break;
+        }
+        
+        return paths;
+    }
+}

@@ -203,3 +203,33 @@ namespace ModOverlay
      * Clear the texture conversion cache.
      */
     void ClearTextureCache();
+
+    // ============================================================================
+    // Episodic Content Support
+    // ============================================================================
+
+    /**
+     * Set the current episode (0=IV, 1=TLAD, 2=TBoGT).
+     * Affects which episode-specific mod files are loaded.
+     */
+    void SetCurrentEpisode(int episode);
+
+    /**
+     * Get the current episode.
+     */
+    int GetCurrentEpisode();
+
+    /**
+     * Check if a path is for the current episode.
+     */
+    bool IsPathForCurrentEpisode(const std::string& normalizedPath);
+
+    /**
+     * Map episodic update paths to game locations.
+     */
+    std::string MapEpisodicPath(const std::string& path);
+
+    /**
+     * Get episode-specific paths for current episode.
+     */
+    std::vector<std::string> GetCurrentEpisodePaths();

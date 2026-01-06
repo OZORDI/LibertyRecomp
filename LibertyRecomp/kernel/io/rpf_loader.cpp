@@ -537,3 +537,357 @@ namespace RpfLoader
         }
     }
 }
+// ============================================================================
+// Multi-Version RPF Support (RPF0, RPF2, RPF3)
+// ============================================================================
+
+namespace RpfLoader
+{
+    // RPF Version magic numbers
+    static constexpr uint32_t RPF0_MAGIC = 0x30465052;  // "RPF0" - Table Tennis
+    static constexpr uint32_t RPF2_MAGIC = 0x32465052;  // "RPF2" - GTA IV
+    static constexpr uint32_t RPF3_MAGIC = 0x33465052;  // "RPF3" - GTA IV Audio, Midnight Club LA
+
+    enum class RpfVersion
+    {
+        Unknown = -1,
+        V0 = 0,  // Table Tennis
+        V2 = 2,  // GTA IV
+        V3 = 3   // GTA IV Audio
+    };
+
+    // RPF0 Header (12 bytes)
+    #pragma pack(push, 1)
+    struct RpfHeaderV0
+    {
+        uint32_t magic;       // RPF0
+        uint32_t tocSize;     // TOC size in bytes
+        uint32_t entryCount;  // Number of entries
+    };
+
+    // RPF2/3 Header (20 bytes)
+    struct RpfHeaderV23
+    {
+        uint32_t magic;       // RPF2 or RPF3
+        uint32_t tocSize;     // TOC size in bytes
+        int32_t entryCount;   // Number of entries
+        int32_t unknown;      // Unknown field
+        uint32_t encrypted;   // Encryption flag (0 = unencrypted)
+    };
+
+    // RPF0 Directory Entry (16 bytes)
+    struct RpfDirEntryV0
+    {
+        uint32_t nameOffsetAndType;  // 3 bytes name offset, 1 byte type (0x80 = dir)
+        uint32_t contentIndex;       // First entry index in directory
+        uint32_t contentCount;       // Count of entries
+        uint32_t contentCount2;      // Same as contentCount (padding)
+    };
+
+    // RPF0 File Entry (16 bytes)
+    struct RpfFileEntryV0
+    {
+        uint32_t nameOffsetAndType;  // 3 bytes name offset, 1 byte type (0 = file)
+        uint32_t offset;             // File data offset
+        uint32_t size;               // Compressed size
+        uint32_t uncompressedSize;   // Uncompressed size
+    };
+
+    // RPF2/3 Entry (16 bytes) - unified structure
+    struct RpfEntryV23
+    {
+        uint32_t field1;  // nameOffset (V2) or nameHash (V3)
+        uint32_t field2;  // size for files, flags for directories
+        uint32_t field3;  // offset for files, contentIndex for directories
+        uint32_t field4;  // flags/sizeInArchive for files, contentCount for directories
+    };
+    #pragma pack(pop)
+
+    /**
+     * Detect RPF version from magic number.
+     */
+    static RpfVersion DetectRpfVersion(uint32_t magic)
+    {
+        switch (magic)
+        {
+            case RPF0_MAGIC: return RpfVersion::V0;
+            case RPF2_MAGIC: return RpfVersion::V2;
+            case RPF3_MAGIC: return RpfVersion::V3;
+            default: return RpfVersion::Unknown;
+        }
+    }
+
+    /**
+     * Parse RPF0 format (Table Tennis style).
+     * Simpler format without encryption.
+     */
+    static bool ParseRpfV0(std::ifstream& file, RpfCache& cache)
+    {
+        file.seekg(0);
+        RpfHeaderV0 header;
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+        if (header.magic != RPF0_MAGIC)
+            return false;
+
+        cache.isEncrypted = false;
+
+        // Read TOC (starts at offset 2048)
+        file.seekg(TOC_OFFSET);
+        std::vector<uint8_t> tocData(header.tocSize);
+        file.read(reinterpret_cast<char*>(tocData.data()), header.tocSize);
+
+        // Parse entries
+        const uint8_t* ptr = tocData.data();
+        size_t entryDataSize = header.entryCount * 16;
+        
+        // Name table starts after entries
+        const char* nameTable = reinterpret_cast<const char*>(tocData.data() + entryDataSize);
+        size_t nameTableSize = header.tocSize - entryDataSize;
+
+        cache.entries.clear();
+        cache.entries.reserve(header.entryCount);
+
+        for (uint32_t i = 0; i < header.entryCount; i++)
+        {
+            uint32_t nameOffsetAndType = *reinterpret_cast<const uint32_t*>(ptr);
+            uint32_t nameOffset = nameOffsetAndType & 0x00FFFFFF;
+            bool isDirectory = (nameOffsetAndType & 0x80000000) != 0;
+
+            RpfFileEntry entry;
+            entry.isDirectory = isDirectory;
+
+            // Get name
+            if (nameOffset < nameTableSize)
+            {
+                entry.name = std::string(nameTable + nameOffset);
+            }
+
+            if (isDirectory)
+            {
+                const RpfDirEntryV0* dirEntry = reinterpret_cast<const RpfDirEntryV0*>(ptr);
+                // Directory - no file data
+                entry.offset = 0;
+                entry.size = 0;
+            }
+            else
+            {
+                const RpfFileEntryV0* fileEntry = reinterpret_cast<const RpfFileEntryV0*>(ptr);
+                entry.offset = fileEntry->offset;
+                entry.size = fileEntry->uncompressedSize;
+                entry.compressedSize = fileEntry->size;
+                entry.isCompressed = (fileEntry->size != fileEntry->uncompressedSize);
+            }
+
+            cache.entries.push_back(entry);
+            ptr += 16;
+        }
+
+        return true;
+    }
+
+    /**
+     * Parse RPF2 format (GTA IV main format).
+     * Uses name offsets in TOC.
+     */
+    static bool ParseRpfV2(std::ifstream& file, RpfCache& cache, const std::vector<uint8_t>& tocData, uint32_t entryCount)
+    {
+        const uint8_t* ptr = tocData.data();
+        size_t entryDataSize = entryCount * 16;
+        
+        // Name table starts after entries
+        const char* nameTable = reinterpret_cast<const char*>(tocData.data() + entryDataSize);
+        size_t nameTableSize = tocData.size() - entryDataSize;
+
+        cache.entries.clear();
+        cache.entries.reserve(entryCount);
+
+        for (uint32_t i = 0; i < entryCount; i++)
+        {
+            const RpfEntryV23* raw = reinterpret_cast<const RpfEntryV23*>(ptr);
+            RpfFileEntry entry;
+
+            // V2 uses name offset in field1
+            uint32_t nameOffset = raw->field1;
+            if (nameOffset < nameTableSize)
+            {
+                entry.name = std::string(nameTable + nameOffset);
+            }
+
+            // Check if directory (MSB of field3 set)
+            entry.isDirectory = (static_cast<int32_t>(raw->field3) < 0);
+
+            if (!entry.isDirectory)
+            {
+                entry.size = raw->field2;
+                entry.offset = raw->field3;
+                
+                // Resource type in low byte of offset for resources
+                bool isResource = (raw->field4 & 0xC0000000) == 0xC0000000;
+                if (isResource)
+                {
+                    entry.resourceType = static_cast<uint8_t>(entry.offset & 0xFF);
+                    entry.offset = entry.offset & 0x7FFFFF00;
+                    entry.compressedSize = entry.size;
+                    entry.isCompressed = false;
+                }
+                else
+                {
+                    entry.compressedSize = raw->field4 & 0xBFFFFFFF;
+                    entry.isCompressed = (raw->field4 & 0x40000000) != 0;
+                    entry.resourceType = 0;
+                }
+            }
+
+            cache.entries.push_back(entry);
+            ptr += 16;
+        }
+
+        return true;
+    }
+
+    /**
+     * Parse RPF3 format (GTA IV Audio).
+     * Uses name hashes instead of offsets.
+     */
+    static bool ParseRpfV3(std::ifstream& file, RpfCache& cache, const std::vector<uint8_t>& tocData, uint32_t entryCount)
+    {
+        // RPF3 uses Jenkins hash for names - we can't recover original names
+        // But we can still extract files by hash
+        
+        const uint8_t* ptr = tocData.data();
+        
+        cache.entries.clear();
+        cache.entries.reserve(entryCount);
+
+        for (uint32_t i = 0; i < entryCount; i++)
+        {
+            const RpfEntryV23* raw = reinterpret_cast<const RpfEntryV23*>(ptr);
+            RpfFileEntry entry;
+
+            // V3 uses name hash in field1 - generate placeholder name
+            uint32_t nameHash = raw->field1;
+            char hashName[16];
+            snprintf(hashName, sizeof(hashName), "0x%08X", nameHash);
+            entry.name = hashName;
+
+            // Check if directory
+            entry.isDirectory = (static_cast<int32_t>(raw->field3) < 0);
+
+            if (!entry.isDirectory)
+            {
+                entry.size = raw->field2;
+                entry.offset = raw->field3 & 0x7FFFFFFF;
+                entry.compressedSize = raw->field4 & 0x00FFFFFF;
+                entry.isCompressed = (raw->field4 & 0x01000000) != 0;
+                entry.resourceType = static_cast<uint8_t>((raw->field4 >> 24) & 0x7F);
+            }
+
+            cache.entries.push_back(entry);
+            ptr += 16;
+        }
+
+        return true;
+    }
+
+    /**
+     * Load RPF cache with multi-version support.
+     */
+    static bool LoadRpfCacheMultiVersion(const std::filesystem::path& rpfPath, RpfCache& cache)
+    {
+        std::ifstream file(rpfPath, std::ios::binary);
+        if (!file)
+            return false;
+
+        // Read magic to detect version
+        uint32_t magic;
+        file.read(reinterpret_cast<char*>(&magic), 4);
+        
+        RpfVersion version = DetectRpfVersion(magic);
+        if (version == RpfVersion::Unknown)
+        {
+            LOGF_WARNING("[RpfLoader] Unknown RPF version: 0x{:08X}", magic);
+            return false;
+        }
+
+        cache.rpfPath = rpfPath;
+
+        if (version == RpfVersion::V0)
+        {
+            return ParseRpfV0(file, cache);
+        }
+
+        // V2/V3 have same header structure
+        file.seekg(0);
+        RpfHeaderV23 header;
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+        cache.isEncrypted = (header.encrypted != 0);
+
+        // Read TOC
+        file.seekg(TOC_OFFSET);
+        std::vector<uint8_t> tocData(header.tocSize);
+        file.read(reinterpret_cast<char*>(tocData.data()), header.tocSize);
+
+        // Decrypt TOC if needed
+        if (cache.isEncrypted && !g_aesKey.empty())
+        {
+            if (!DecryptAES256(tocData, g_aesKey))
+            {
+                LOGF_WARNING("[RpfLoader] Failed to decrypt TOC for: {}", rpfPath.string());
+                return false;
+            }
+        }
+
+        bool success = false;
+        if (version == RpfVersion::V2)
+        {
+            success = ParseRpfV2(file, cache, tocData, header.entryCount);
+        }
+        else if (version == RpfVersion::V3)
+        {
+            success = ParseRpfV3(file, cache, tocData, header.entryCount);
+        }
+
+        if (!success)
+            return false;
+
+        // Build file paths recursively
+        std::function<void(int, const std::string&)> buildPaths;
+        buildPaths = [&](int idx, const std::string& parent) {
+            if (idx < 0 || static_cast<size_t>(idx) >= cache.entries.size())
+                return;
+
+            auto& entry = cache.entries[idx];
+            entry.fullPath = parent.empty() ? entry.name : parent + "/" + entry.name;
+        };
+
+        // Build simple paths for now
+        for (size_t i = 0; i < cache.entries.size(); i++)
+        {
+            cache.entries[i].fullPath = cache.entries[i].name;
+        }
+
+        // Build file index
+        cache.fileIndex.clear();
+        for (size_t i = 0; i < cache.entries.size(); i++)
+        {
+            if (!cache.entries[i].isDirectory)
+            {
+                std::string key = cache.entries[i].fullPath;
+                std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+                std::replace(key.begin(), key.end(), '\\', '/');
+                
+                while (!key.empty() && key[0] == '/')
+                    key = key.substr(1);
+
+                cache.fileIndex[key] = i;
+            }
+        }
+
+        LOGF_UTILITY("[RpfLoader] Loaded RPF{}: {} ({} entries)", 
+            static_cast<int>(version), rpfPath.filename().string(), cache.entries.size());
+
+        return true;
+    }
+}
