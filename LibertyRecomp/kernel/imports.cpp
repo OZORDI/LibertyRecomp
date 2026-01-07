@@ -8110,781 +8110,96 @@ PPC_FUNC(RenderTriggerStub) {
 // =============================================================================
 
 
-// =============================================================================
-// =============================================================================
-// =============================================================================
 
-// =============================================================================
-// STRONG SYMBOL: sub_82994700 - CRT/TLS initialization
-// OPTION B: Full reimplementation bypassing problematic indirect callbacks
-// =============================================================================
-// The original function's indirect callbacks at 0x831317E4 load as NULL
-// and crash. This implementation does the essential CRT init work directly.
-// =============================================================================
-
-
-PPC_FUNC(sub_82994700) {
-    LOG_WARNING("[CRT] sub_82994700 - Option B: Full reimplementation");
-    
-    // Key addresses (from PPC analysis):
-    constexpr uint32_t TLS_INDEX_ADDR    = 0x82A96E64;  // r30=-32087, offset=28260
-    constexpr uint32_t THREAD_HANDLE_ADDR = 0x82A96E60; // r30=-32087, offset=28256
-    constexpr uint32_t THREAD_CTX_LIST   = 0x82A97300;  // r11=-32087, offset=29440
-    constexpr uint32_t CRT_CONTEXT_ADDR  = 0x83131788;  // r11=-31981, offset=6104
-    
-    // Step 1: Initialize callback table (for any code that reads it)
-    PPC_STORE_U32(0x831317E4, 0x829943E8);
-    PPC_STORE_U32(0x831317E8, 0x82A0270C);
-    PPC_STORE_U32(0x831317EC, 0x82A0271C);
-    PPC_STORE_U32(0x831317F0, 0x82A0272C);
-    
-    // Step 2: Allocate TLS slot
-    LOG_WARNING("[CRT] Allocating TLS slot...");
-    ctx.lr = 0x82994750;
-    __imp__KeTlsAlloc(ctx, base);
-    uint32_t tlsIndex = ctx.r3.u32;
-    
-    if (tlsIndex == 0xFFFFFFFF) {
-        LOG_WARNING("[CRT] ERROR: KeTlsAlloc failed!");
-        ctx.r3.u32 = 0;
-        return;
-    }
-    LOGF_WARNING("[CRT] TLS slot allocated: {}", tlsIndex);
-    PPC_STORE_U32(TLS_INDEX_ADDR, tlsIndex);
-    
-    // Step 3: Set initial TLS value
-    ctx.r3.u32 = tlsIndex;
-    ctx.r4.u32 = 0x82A0270C;  // KeTlsGetValue wrapper address
-    ctx.lr = 0x82994768;
-    __imp__KeTlsSetValue(ctx, base);
-    
-    if (ctx.r3.u32 == 0) {
-        LOG_WARNING("[CRT] ERROR: KeTlsSetValue failed!");
-        ctx.r3.u32 = 0;
-        return;
-    }
-    LOG_WARNING("[CRT] TLS value set");
-    
-    // Step 4: CRT subsystem initialization
-    LOG_WARNING("[CRT] Calling sub_82992680 (CRT subsystem init)...");
-    ctx.lr = 0x82994774;
-    sub_82992680(ctx, base);
-    
-    // Step 5: Thread pool initialization
-    LOG_WARNING("[CRT] Calling sub_82998A48 (thread pool init)...");
-    ctx.lr = 0x82994778;
-    sub_82998A48(ctx, base);
-    
-    // Step 6: Create thread handle (replaces indirect callback 1)
-    LOG_WARNING("[CRT] Creating thread handle via sub_829A2810...");
-    ctx.lr = 0x829947EC;
-    sub_829A2810(ctx, base);
-    uint32_t threadHandle = ctx.r3.u32;
-    
-    if (threadHandle == 0xFFFFFFFF) {
-        LOG_WARNING("[CRT] WARNING: Thread handle creation returned -1, using fallback");
-        threadHandle = 0x12345678;  // Fallback handle
-    }
-    LOGF_WARNING("[CRT] Thread handle: 0x{:08X}", threadHandle);
-    PPC_STORE_U32(THREAD_HANDLE_ADDR, threadHandle);
-    
-    
-    // Step 7: Allocate TLS BASE structure (large enough for TLS+1676)
-    // The game accesses TLS+1676 for device context, so we need at least 1680 bytes
-    LOG_WARNING("[CRT] Allocating TLS base structure...");
-    constexpr uint32_t TLS_BASE_SIZE = 0x2000;  // 8KB to be safe
-    void* tlsBasePtr = g_userHeap.AllocPhysical(TLS_BASE_SIZE, 16);
-    if (!tlsBasePtr) {
-        LOG_WARNING("[CRT] ERROR: TLS base allocation failed!");
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(tlsBasePtr, 0, TLS_BASE_SIZE);
-    uint32_t tlsBase = g_memory.MapVirtual(tlsBasePtr);
-    LOGF_WARNING("[CRT] TLS base at: 0x{:08X}", tlsBase);
-    
-    // Store TLS base at r13+0 (where game code expects it)
-    PPC_STORE_U32(ctx.r13.u32 + 0, tlsBase);
-    
-    // Step 8: Thread context is at TLS base (first 196 bytes)
-    uint32_t threadCtx = tlsBase;
-    
-    // Step 9: Set TLS value to thread context
-    ctx.r3.u32 = tlsIndex;
-    ctx.r4.u32 = threadCtx;
-    ctx.lr = 0x829947CC;
-    __imp__KeTlsSetValue(ctx, base);
-    
-    // Step 10: Initialize thread context structure
-    PPC_STORE_U32(threadCtx + 0, threadHandle);
-    PPC_STORE_U32(threadCtx + 4, 0xFFFFFFFF);
-    PPC_STORE_U32(threadCtx + 20, 1);
-    PPC_STORE_U32(threadCtx + 92, THREAD_CTX_LIST);
-    
-    // Step 11: Store CRT exit handler
-    PPC_STORE_U32(CRT_CONTEXT_ADDR + 8, 0x829FBE38);
-    
-    // Step 12: Register runtime callback
-    LOG_WARNING("[CRT] Calling sub_829A79C0 (runtime callback)...");
-    ctx.r3.u32 = CRT_CONTEXT_ADDR;
-    ctx.r4.u32 = 1;
-    ctx.lr = 0x82994818;
-    sub_829A79C0(ctx, base);
-    
-    // =========================================================================
-    // Step 13: DEVICE CONTEXT INITIALIZATION - TLS+1676
-    // =========================================================================
-    // Game expects valid GuestDevice at TLS+1676. We provide compatible structure.
-    // =========================================================================
-    LOG_WARNING("[CRT] Initializing device context at TLS+1676...");
-    {
-    // Forward reference to global device address (defined later in file)
-    extern uint32_t g_guestDeviceAddr;
-
-        constexpr uint32_t GUEST_DEVICE_SIZE = 0x5000;
-        constexpr uint32_t TLS_DEVICE_OFFSET = 1676;
-        
-        // Allocate device context (GuestDevice structure)
-        void* devicePtr = g_userHeap.AllocPhysical(GUEST_DEVICE_SIZE, 16);
-        if (devicePtr) {
-            memset(devicePtr, 0, GUEST_DEVICE_SIZE);
-            uint32_t deviceAddr = g_memory.MapVirtual(devicePtr);
-            
-            // Set global device address so worker threads can access it
-            g_guestDeviceAddr = deviceAddr;
-            
-            // Register stub function for device vtable/render state calls
-            uint32_t stubAddr = 0x82B7A000;
-            g_memory.InsertFunction(stubAddr, [](PPCContext& ctx, uint8_t* base) {
-                ctx.r3.u32 = 1;  // Return non-zero to break loop
-            });
-
-            // =========================================================================
-            // CRITICAL: Initialize vtable at device[0]
-            // sub_8218BE78 loads vtable from device[0], then calls vtable[3] (offset 12)
-            // =========================================================================
-            constexpr uint32_t VTABLE_ENTRIES = 32;
-            void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-            memset(vtablePtr, 0, VTABLE_ENTRIES * 4);
-            uint32_t vtableAddr = g_memory.MapVirtual(vtablePtr);
-            for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
-                PPC_STORE_U32(vtableAddr + (i * 4), stubAddr);
-            }
-            PPC_STORE_U32(deviceAddr + 0, vtableAddr);  // device[0] = vtable pointer
-
-            
-            // Initialize setRenderStateFunctions (offset 0x38, 97 entries)
-            for (uint32_t i = 0; i < 0x61; i++) {
-                PPC_STORE_U32(deviceAddr + 0x38 + (i * 4), stubAddr);
-            }
-            
-            // Initialize setSamplerStateFunctions (offset 0x1BC, 20 entries)
-            for (uint32_t i = 0; i < 0x14; i++) {
-                PPC_STORE_U32(deviceAddr + 0x1BC + (i * 4), stubAddr);
-            }
-            
-            // Initialize viewport (offset 0x3058)
-            float width = 1280.0f, height = 720.0f, maxZ = 1.0f;
-            PPC_STORE_U32(deviceAddr + 0x3058 + 8, 0x44A00000);
-            PPC_STORE_U32(deviceAddr + 0x3058 + 12, 0x44340000);
-            PPC_STORE_U32(deviceAddr + 0x3058 + 20, 0x3F800000);
-            
-            // Store device pointer at TLS+1676
-            PPC_STORE_U32(tlsBase + TLS_DEVICE_OFFSET, deviceAddr);
-            
-            LOGF_WARNING("[CRT] Device 0x{:08X} stored at TLS(0x{:08X})+1676", deviceAddr, tlsBase);
-        } else {
-            LOG_WARNING("[CRT] ERROR: Failed to allocate device context!");
-        }
-    }
-    
-
-    // =========================================================================
-    // Step 14: STATIC CONSTRUCTORS
-    // =========================================================================
-    // C++ static constructors in 0x82A00xxx range have NO CALLERS in recompiled
-    // code because the constructor table was not captured. Call them explicitly
-    // to initialize vtables before game code needs them.
-    // Per guide: "Provide the expected environment" - not stubbing game functions.
-    // =========================================================================
-    LOG_WARNING("[CRT] Running C++ static constructors...");
-    
-    // sub_82A00CB0 - Initializes vtable at 0x82A80A28 (required by sub_827E8180)
-    LOG_WARNING("[CRT] Calling sub_82A00CB0 (vtable initializer)...");
-    sub_82A00CB0(ctx, base);
-
-    // Other static constructors in the same region
-    sub_82A00C30(ctx, base);
-    sub_82A00C90(ctx, base);
-    sub_82A00C98(ctx, base);
-    sub_82A00CC8(ctx, base);
-    sub_82A00CE8(ctx, base);
-    
-    LOG_WARNING("[CRT] Static constructors complete");
-
-    LOG_WARNING("[CRT] CRT initialization complete!");
-    ctx.r3.u32 = 1;
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_82998CA0 - CRT lock acquisition
-// =============================================================================
-PPC_FUNC(sub_82998CA0) {
-    ctx.r3.u32 = 1;  // Return success
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_829A7DC8 - CRT atexit/finalization callback runner
-// =============================================================================
-// This function iterates through callback tables and calls registered functions.
-// Our Option B CRT init doesn't properly populate these tables, so stub it.
-// =============================================================================
-PPC_FUNC(sub_829A7DC8) {
-    LOG_WARNING("[CRT] sub_829A7DC8 - Stubbed (atexit callbacks not populated)");
-    ctx.r3.u32 = 1;  // Return non-zero to break loop
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8218BE28 - Device context allocator via TLS+1676 vtable
-// =============================================================================
-// This calls vtable[2] on device context from TLS. Our CRT init doesn't set up
-// the device context properly, so stub to use existing heap system.
-// =============================================================================
-PPC_FUNC(sub_8218BE28) {
-    // r3 = size parameter
-    uint32_t size = ctx.r3.u32;  // Size comes in r3
-    if (size == 0) size = 16;
-    
-    // Use the existing heap allocation system
-    void* ptr = g_userHeap.Alloc(size);
-    if (ptr) {
-        memset(ptr, 0, size);
-        // Convert host pointer to guest address
-        ctx.r3.u32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(g_memory.base));
-    } else {
-        ctx.r3.u32 = 0;
-    }
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8218BE78 - Device context vtable dispatch
-// =============================================================================
-// This function loads device from TLS+1676, gets vtable[3], and calls it.
-// The vtable initialization is complex; bypass entirely and return success.
-// =============================================================================
-PPC_FUNC(sub_8218BE78) {
-    // Original: loads TLS+1676 device, calls vtable[3] with r4 param
-    // r4 contains the parameter passed to the vtable function
-    // Just return success (r3=0) without calling through vtable
-    ctx.r3.u32 = 0;
-}
-
-
-// =============================================================================
-// STRONG SYMBOL: sub_829735C8 - APU initialization vtable dispatch
-// =============================================================================
-// This function has vtable calls that crash. Hook to bypass and return success.
-// =============================================================================
-PPC_FUNC(sub_829735C8) {
-    ctx.r3.u32 = 1;  // Return non-zero to break loop
-}
-
-
-// =============================================================================
-// STRONG SYMBOL: sub_829943F0 - CRT callback lookup (returns KeTlsGetValue wrapper)
-// =============================================================================
-// This function looks up callback from table at 0x831317E8, but table is zeroed.
-// Return the expected callback address directly.
-// =============================================================================
-PPC_FUNC(sub_829943F0) {
-    // Original: returns callback from 0x831317E8 which should be 0x82A0270C
-    // The callback table is zeroed despite our Option B initialization
-    // Return the expected callback address directly
-    ctx.r3.u32 = 0x82A0270C;  // KeTlsGetValue wrapper
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_829A7960 - Xbox runtime callback notification
-// =============================================================================
-// This iterates a callback list at 0x82A97FD0 and calls each registered callback.
-// Worker threads call this during startup. Stub since callbacks aren't populated.
-// =============================================================================
-PPC_FUNC(sub_829A7960) {
-    // Original: enters critical section, iterates callback list, calls each
-    // Stub to avoid NULL callback crashes
-    ctx.r3.u32 = 1;  // Return non-zero to break loop
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8285ACE8 - Texture/resource array access with vtable call
-// =============================================================================
-// Guards against NULL vtable and invalid pointers during early initialization.
-// Pattern from UnleashedRecomp - augment behavior at crash points.
-// =============================================================================
-PPC_FUNC(sub_8285ACE8) {
-    uint32_t idx = ctx.r5.u32;
-    if (idx == 0) {
-        // Original would crash - just return success
-    ctx.r3.u32 = 0;
-        return;
-    }
-    
-    uint32_t arr = ctx.r4.u32;
-    if (arr == 0 || arr < 0x82000000 || arr > 0x90000000) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    uint32_t arrayBase = PPC_LOAD_U32(arr);
-    if (arrayBase == 0 || arrayBase < 0x82000000 || arrayBase > 0x90000000) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    uint32_t offset = (idx - 1) * 4;
-    uint32_t elementPtr = PPC_LOAD_U32(arrayBase + offset);
-    
-    if (elementPtr != 0 && elementPtr >= 0x82000000 && elementPtr <= 0x90000000) {
-        uint32_t vtablePtr = PPC_LOAD_U32(elementPtr);
-        if (vtablePtr == 0 || vtablePtr < 0x82000000 || vtablePtr > 0x90000000) {
-            uint32_t newVal = ctx.r6.u32;
-            if (newVal != 0) PPC_STORE_U32(arrayBase + offset, newVal);
-            ctx.r3.u32 = 0;
-            return;
-        }
-        uint32_t vtable13 = PPC_LOAD_U32(vtablePtr + 52);
-        if (vtable13 == 0) {
-            uint32_t newVal = ctx.r6.u32;
-            if (newVal != 0) PPC_STORE_U32(arrayBase + offset, newVal);
-            ctx.r3.u32 = 0;
-            return;
-        }
-    }
-
-    // Original would crash - just return success
-    ctx.r3.u32 = 0;
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8297B260 - Audio init helper (crashes on invalid memory)
-// =============================================================================
-PPC_FUNC(sub_8297B260) {
-    ctx.r3.u32 = 1;  // Return non-zero to break loop
-}
-
-
-
-// =============================================================================
-// STREAM INFRASTRUCTURE - Following Guide: "Provide Expected Environment"
-// =============================================================================
-// sub_827E8420 is a stream reader that:
-//   1. Loads object from stream[0]
-//   2. Loads vtable from object[0]
-//   3. Calls vtable[5] (offset 20) for read operation
+// #############################################################################
+// #############################################################################
+// ##                                                                         ##
+// ##   ██╗    ██╗ █████╗ ██████╗ ███╗   ██╗██╗███╗   ██╗ ██████╗            ##
+// ##   ██║    ██║██╔══██╗██╔══██╗████╗  ██║██║████╗  ██║██╔════╝            ##
+// ##   ██║ █╗ ██║███████║██████╔╝██╔██╗ ██║██║██╔██╗ ██║██║  ███╗           ##
+// ##   ██║███╗██║██╔══██║██╔══██╗██║╚██╗██║██║██║╚██╗██║██║   ██║           ##
+// ##   ╚███╔███╔╝██║  ██║██║  ██║██║ ╚████║██║██║ ╚████║╚██████╔╝           ##
+// ##    ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝            ##
+// ##                                                                         ##
+// ##   DO NOT STUB GAME FUNCTIONS!                                          ##
+// ##                                                                         ##
+// #############################################################################
+// #############################################################################
 //
-// Crash occurs when vtable pointer is uninitialized/garbage.
-// Solution: Provide properly initialized stream vtables in writable memory.
-// =============================================================================
+// READ THIS BEFORE ADDING ANY PPC_FUNC(sub_*) OVERRIDES:
+//
+// ============================================================================
+//                    THE UNLEASHEDRECOMP PATTERN
+// ============================================================================
+//
+//  UnleashedRecomp (Sonic) stubs ZERO game functions.
+//  They ONLY replace PLATFORM APIs (kernel imports, D3D layer).
+//
+//  CORRECT:
+//    - GUEST_FUNCTION_HOOK(sub_*, CreateFileA)  -> File I/O layer
+//    - GUEST_FUNCTION_HOOK(sub_*, DrawPrimitive) -> D3D API layer
+//    - GUEST_FUNCTION_HOOK(__imp__*, KernelAPI)  -> Kernel imports
+//
+//  WRONG (breaks init flow, signal/wait chains):
+//    - PPC_FUNC(sub_82994700) { return 1; }  -> Stubs CRT init
+//    - PPC_FUNC(sub_829A7DC8) { return 1; }  -> Stubs C++ constructors
+//    - PPC_FUNC(sub_821EC3E8) { return 1; }  -> Stubs render context
+//
+// ============================================================================
+//                         THE GUIDE PRINCIPLE
+// ============================================================================
+//
+//  "Instead of stubbing game functions, we provide the expected environment."
+//
+//  If a game function crashes:
+//    1. Find what KERNEL API it's calling that fails
+//    2. Fix that kernel API to provide the expected behavior
+//    3. Let the game function run naturally
+//
+//  DO NOT stub the game function itself!
+//
+// ============================================================================
+//                         WHAT WENT WRONG
+// ============================================================================
+//
+//  Previous versions stubbed 15+ game functions:
+//    - sub_829A7DC8: C++ static constructors -> Objects never initialized
+//    - sub_829DD978: GPU command processing -> Nothing renders
+//    - sub_821EC3E8: Render context init -> No D3D state setup
+//    - sub_829A7960: Runtime callbacks -> Signal chains broken
+//
+//  Result: Game init never completed, workers blocked forever.
+//
+// ============================================================================
+//                    ALLOWED PPC_FUNC OVERRIDES
+// ============================================================================
+//
+//  ONLY these patterns are acceptable:
+//
+//  1. Render loop driver (Xbox runtime doesn't exist):
+//     PPC_FUNC(sub_8218BEA8) {
+//         __imp__sub_8218BEA8(ctx, base);  // Run init
+//         while(true) { __imp__sub_82856F08(ctx, base); }  // Drive loop
+//     }
+//
+//  2. Wrappers that CALL ORIGINAL after validation:
+//     PPC_FUNC(sub_827E8420) {
+//         ValidateStream(ctx.r3.u32);      // Pre-check
+//         __imp__sub_827E8420(ctx, base);  // MUST call original!
+//     }
+//
+//  3. NEVER just return success without calling original:
+//     PPC_FUNC(sub_XXXXXXXX) { ctx.r3.u32 = 1; }  // WRONG! BREAKS FLOW!
+//
+// #############################################################################
 
-static bool s_streamInfraInitialized = false;
-static uint32_t s_streamVtableAddr = 0;
-static uint32_t s_streamObjectAddr = 0;
-
-// Stream read stub - returns bytes read (size parameter in r5)
-static void StreamReadStub(PPCContext& ctx, uint8_t* base) {
-    // r3 = this (object), r4 = context/param, r5 = buffer, r6 = size
-    // Return size to indicate all bytes "read" successfully
-    ctx.r3.u32 = ctx.r6.u32;
-}
-
-// Stream seek stub - returns success
-static void StreamSeekStub(PPCContext& ctx, uint8_t* base) {
-    ctx.r3.u32 = 0;  // Success
-}
-
-// Generic vtable stub - returns 0/success
-static void StreamVtableStub(PPCContext& ctx, uint8_t* base) {
-    ctx.r3.u32 = 0;
-}
-
-static void InitializeStreamInfrastructure(uint8_t* base) {
-    if (s_streamInfraInitialized) return;
-    
-    LOG_WARNING("[STREAM] Initializing stream infrastructure with writable vtables...");
-    
-    // Insert stub functions for vtable entries
-    constexpr uint32_t STREAM_READ_FUNC = 0x82B7C000;
-    constexpr uint32_t STREAM_SEEK_FUNC = 0x82B7C010;
-    constexpr uint32_t STREAM_STUB_FUNC = 0x82B7C020;
-    
-    g_memory.InsertFunction(STREAM_READ_FUNC, StreamReadStub);
-    g_memory.InsertFunction(STREAM_SEEK_FUNC, StreamSeekStub);
-    g_memory.InsertFunction(STREAM_STUB_FUNC, StreamVtableStub);
-    
-    // Allocate vtable in writable memory (32 entries)
-    constexpr uint32_t VTABLE_ENTRIES = 32;
-    void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-    if (!vtablePtr) {
-        LOG_WARNING("[STREAM] ERROR: Failed to allocate stream vtable!");
-        return;
-    }
-    s_streamVtableAddr = g_memory.MapVirtual(vtablePtr);
-    
-    // Initialize all vtable entries to generic stub
-    for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
-        PPC_STORE_U32(s_streamVtableAddr + (i * 4), STREAM_STUB_FUNC);
-    }
-    
-    // Set specific vtable entries:
-    // vtable[5] (offset 20) = read function - THIS IS WHAT sub_827E8420 CALLS
-    PPC_STORE_U32(s_streamVtableAddr + 20, STREAM_READ_FUNC);
-    // vtable[9] (offset 36) = seek function
-    PPC_STORE_U32(s_streamVtableAddr + 36, STREAM_SEEK_FUNC);
-    // vtable[13] (offset 52) = another dispatch
-    PPC_STORE_U32(s_streamVtableAddr + 52, STREAM_STUB_FUNC);
-    
-    // Allocate a default stream object (64 bytes)
-    constexpr uint32_t STREAM_OBJ_SIZE = 64;
-    void* objPtr = g_userHeap.AllocPhysical(STREAM_OBJ_SIZE, 16);
-    if (!objPtr) {
-        LOG_WARNING("[STREAM] ERROR: Failed to allocate stream object!");
-        return;
-    }
-    memset(objPtr, 0, STREAM_OBJ_SIZE);
-    s_streamObjectAddr = g_memory.MapVirtual(objPtr);
-    
-    // Set vtable pointer at object offset 0
-    PPC_STORE_U32(s_streamObjectAddr + 0, s_streamVtableAddr);
-    
-    s_streamInfraInitialized = true;
-    
-    LOGF_WARNING("[STREAM] Infrastructure initialized: vtable=0x{:08X} object=0x{:08X}",
-                 s_streamVtableAddr, s_streamObjectAddr);
-}
-
-// Validates and repairs stream object if needed
-// Stream layout: [0]=object ptr, [4]=ctx, [8]=buffer, [12]=pos, [16]=cursor, [20]=end, [24]=capacity
-static bool ValidateAndRepairStream(uint32_t streamPtr, uint8_t* base) {
-    if (streamPtr == 0 || streamPtr < 0x82000000 || streamPtr > 0x90000000) {
-        return false;
-    }
-    
-    // Load object pointer from stream[0]
-    uint32_t objectPtr = PPC_LOAD_U32(streamPtr + 0);
-    
-    // Check if object pointer is valid
-    if (objectPtr == 0 || objectPtr < 0x82000000 || objectPtr > 0x90000000) {
-        // Object pointer invalid - set to our initialized stream object
-        PPC_STORE_U32(streamPtr + 0, s_streamObjectAddr);
-        return true;
-    }
-    
-    // Check if vtable pointer (at object[0]) is valid
-    uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
-    if (vtablePtr == 0 || vtablePtr < 0x82000000 || vtablePtr > 0x90000000) {
-        // Vtable pointer invalid - set to our stream vtable
-        PPC_STORE_U32(objectPtr + 0, s_streamVtableAddr);
-        return true;
-    }
-    
-    // Check if vtable[5] (offset 20) is a valid function pointer
-    uint32_t readFunc = PPC_LOAD_U32(vtablePtr + 20);
-    if (readFunc == 0 || readFunc < 0x82000000 || readFunc > 0x90000000) {
-        // Read function invalid - repair entire vtable pointer
-        PPC_STORE_U32(objectPtr + 0, s_streamVtableAddr);
-        return true;
-    }
-    
-    return false;  // No repair needed
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_827E8420 - Stream reader with vtable dispatch
-// =============================================================================
-extern "C" void __imp__sub_827E8420(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_827E8420) {
-    // Ensure stream infrastructure is initialized
-    InitializeStreamInfrastructure(base);
-    
-    // r3 = stream pointer (r31 in the function)
-    uint32_t streamPtr = ctx.r3.u32;
-    
-    // Validate and repair stream if needed
-    static int s_repairCount = 0;
-    if (ValidateAndRepairStream(streamPtr, base)) {
-        if (++s_repairCount <= 10) {
-            LOGF_WARNING("[STREAM] Repaired stream at 0x{:08X} (repair #{})", streamPtr, s_repairCount);
-        }
-    }
-    
-    // Now call original with repaired stream
-    __imp__sub_827E8420(ctx, base);
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_827DAE40 - Worker thread entry dispatcher
-// =============================================================================
-// This function receives startup context from ExCreateThread and calls task functions.
-// Startup context structure:
-//   [0] = task function pointer (e.g., 0x8298E700)
-//   [1] = REAL worker context (with semaphores at +36, +40)
-// 
-// CRITICAL: Must pass ctxData[1] to task function, NOT the startup context!
-// Without this fix, workers receive wrong semaphore handles and block forever.
-// =============================================================================
-extern "C" void __imp__sub_827DAE40(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_827DAE40) {
-    uint32_t startupContext = ctx.r3.u32;  // r3 = startup context passed to worker entry
-    
-    if (startupContext >= 0x82000000 && startupContext < 0x90000000) {
-        uint32_t* ctxData = (uint32_t*)g_memory.Translate(startupContext);
-        uint32_t taskFunc = ByteSwap(ctxData[0]);
-        uint32_t realContext = ByteSwap(ctxData[1]);
-        
-        static int s_dispatchCount = 0;
-        if (++s_dispatchCount <= 20) {
-            LOGF_WARNING("[sub_827DAE40] #{} startupCtx=0x{:08X} taskFunc=0x{:08X} realCtx=0x{:08X}",
-                         s_dispatchCount, startupContext, taskFunc, realContext);
-        }
-        
-        // FIX: The original code copies context and passes it, but we need to ensure
-        // the real context (with semaphores) is what gets passed to task functions.
-        // Store the real context in a known location so sub_8298E700 can use it.
-        // Actually, let's just modify r3 before calling original - the original
-        // copies from r3 to stack, so if r3 has realContext, it will be used.
-        // NO - looking at PPC code, r3 is saved to r30, then stack copies from r30.
-        // The task function receives r3 = stack[84] which is ctxData[1].
-        // So the original should work IF ctxData is valid.
-    }
-    
-    // Call original - it handles the dispatch correctly if context is valid
-    __imp__sub_827DAE40(ctx, base);
-}
-
-
-
-
-
-
-
-// =============================================================================
-// STRONG SYMBOL: sub_829DD978 - GPU command processing (worker thread)
-// =============================================================================
-PPC_FUNC(sub_829DD978) {
-    ctx.r3.u32 = 0;
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_829DDC90 - GPU command dispatch (worker thread)
-// =============================================================================
-PPC_FUNC(sub_829DDC90) {
-    ctx.r3.u32 = 0;
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_82850028 - Texture creation via TLS+1676 device context
-// =============================================================================
-// OPTION A: Guard TLS+1676 access - check if device context is valid before use
-// If device context is NULL or invalid, skip texture creation gracefully.
-// =============================================================================
-PPC_FUNC(sub_82850028) {
-    // Get TLS base from r13+0
-    uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
-    
-    if (tlsBase == 0) {
-        ctx.r3.u32 = 0;  // Return NULL (no texture created)
-        return;
-    }
-    
-    // Load device context from TLS+1676
-    uint32_t deviceCtx = PPC_LOAD_U32(tlsBase + 1676);
-    
-    if (deviceCtx == 0) {
-        // Device context not yet initialized - skip texture creation
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    // Load vtable pointer from device context
-    uint32_t vtable = PPC_LOAD_U32(deviceCtx + 0);
-    if (vtable == 0) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    // Load vtable[15] (offset 60)
-    uint32_t vtable15 = PPC_LOAD_U32(vtable + 60);
-    if (vtable15 == 0) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    // Device context and vtable are valid - return success
-    // Note: Full original call would proceed with texture creation
-    ctx.r3.u32 = 1;
-}
-
-// =============================================================================
-// STRONG SYMBOL: sub_8285E250 - Object destructor
-// =============================================================================
-// OPTION A: Guard with field validation - check addresses look valid
-// =============================================================================
-static inline bool IsValidPPCAddress(uint32_t addr) {
-    // Valid PPC addresses are typically in 0x82000000-0x90000000 range
-    return addr >= 0x82000000 && addr < 0x90000000;
-}
-
-PPC_FUNC(sub_8285E250) {
-    if (ctx.r3.u32 == 0) {
-        return;  // NULL object - nothing to destruct
-    }
-    
-    uint32_t obj = ctx.r3.u32;
-    
-    // Validate object address itself
-    if (!IsValidPPCAddress(obj)) {
-        return;  // Object pointer is garbage
-    }
-    
-    // Load offset 28 and check if valid, call sub_821C2CC0
-    uint32_t field28 = PPC_LOAD_U32(obj + 28);
-    if (field28 != 0 && IsValidPPCAddress(field28)) {
-        ctx.r3.u32 = field28;
-        sub_821C2CC0(ctx, base);
-    }
-    
-    // Load offset 16 - only call if valid
-    uint32_t field16 = PPC_LOAD_U32(obj + 16);
-    if (IsValidPPCAddress(field16)) {
-        ctx.r3.u32 = field16;
-        sub_8218BE78(ctx, base);
-    }
-    
-    // Check offsets 24 and 28 - if both zero, also free offset 20
-    uint32_t field24 = PPC_LOAD_U32(obj + 24);
-    field28 = PPC_LOAD_U32(obj + 28);
-    if (field24 == 0 && field28 == 0) {
-        uint32_t field20 = PPC_LOAD_U32(obj + 20);
-        if (IsValidPPCAddress(field20)) {
-            ctx.r3.u32 = field20;
-            sub_8218BE78(ctx, base);
-        }
-    }
-    
-    // Load offset 24 and if valid, call sub_821C2CC0
-    field24 = PPC_LOAD_U32(obj + 24);
-    if (field24 != 0 && IsValidPPCAddress(field24)) {
-        ctx.r3.u32 = field24;
-        sub_821C2CC0(ctx, base);
-    }
-}
-
-// =============================================================================
-// TLS+1676 DEVICE CONTEXT - PROPER RUNTIME INITIALIZATION
-// =============================================================================
-// The game expects a valid GuestDevice (0x5000 bytes) at TLS+1676.
-// Instead of stubbing game functions, we provide this expected runtime.
-// This is initialized ONCE during CRT init (sub_82994700) and stored at TLS+1676.
-// =============================================================================
-
-// Global device address - shared between CRT init and any code that needs it
-uint32_t g_guestDeviceAddr = 0;
-
-// =============================================================================
-// InitializeGuestDevice - Create and set up TLS+1676 device context
-// =============================================================================
-// Call this during CRT init (sub_82994700) after TLS is allocated.
-// Creates a GuestDevice structure compatible with video.cpp's expectations.
-// =============================================================================
-void InitializeGuestDevice(PPCContext& ctx, uint8_t* base) {
-    LOG_WARNING("[DeviceContext] Creating GuestDevice for TLS+1676...");
-    
-    // GuestDevice is 0x5000 bytes (from video.h)
-    constexpr uint32_t GUEST_DEVICE_SIZE = 0x5000;
-    
-    // Allocate device structure
-    void* devicePtr = g_userHeap.AllocPhysical(GUEST_DEVICE_SIZE, 16);
-    if (!devicePtr) {
-        LOG_WARNING("[DeviceContext] ERROR: Failed to allocate GuestDevice!");
-        return;
-    }
-    memset(devicePtr, 0, GUEST_DEVICE_SIZE);
-    g_guestDeviceAddr = g_memory.MapVirtual(devicePtr);
-    LOGF_WARNING("[DeviceContext] GuestDevice allocated at 0x{:08X}", g_guestDeviceAddr);
-    
-    // Initialize setRenderStateFunctions with stub that returns 0
-    // These are at offset 0x38, size 0x184 (97 entries × 4 bytes)
-    uint32_t stubAddr = 0x82B7A000;
-    g_memory.InsertFunction(stubAddr, [](PPCContext& ctx, uint8_t* base) {
-        ctx.r3.u32 = 1;  // Return non-zero to break loop
-    });
-    
-    // Fill setRenderStateFunctions (offset 0x38 to 0x1BC)
-    for (uint32_t i = 0; i < 0x61; i++) {
-        PPC_STORE_U32(g_guestDeviceAddr + 0x38 + (i * 4), stubAddr);
-    }
-    
-    // Fill setSamplerStateFunctions (offset 0x1BC to 0x20C)
-    for (uint32_t i = 0; i < 0x14; i++) {
-        PPC_STORE_U32(g_guestDeviceAddr + 0x1BC + (i * 4), stubAddr);
-    }
-    
-    // Initialize viewport defaults (offset 0x3058)
-    // These are big-endian floats
-    uint32_t width_be = 0x44A00000;
-    uint32_t height_be = 0x44340000;
-    uint32_t maxZ_be = 0x3F800000;
-    
-    PPC_STORE_U32(g_guestDeviceAddr + 0x3058 + 8, width_be);   // viewport.width
-    PPC_STORE_U32(g_guestDeviceAddr + 0x3058 + 12, height_be); // viewport.height
-    PPC_STORE_U32(g_guestDeviceAddr + 0x3058 + 20, maxZ_be);   // viewport.maxZ
-    
-    // Get TLS base and store device at TLS+1676
-    uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
-    if (tlsBase != 0) {
-        PPC_STORE_U32(tlsBase + 1676, g_guestDeviceAddr);
-        LOGF_WARNING("[DeviceContext] Stored device 0x{:08X} at TLS+1676 (TLS base=0x{:08X})", 
-            g_guestDeviceAddr, tlsBase);
-    } else {
-        LOG_WARNING("[DeviceContext] WARNING: TLS base is 0, storing device at global location");
-        // Store at a known global location as fallback
-        PPC_STORE_U32(0x83040000 + 1676, g_guestDeviceAddr);
-    }
-    
-    LOG_WARNING("[DeviceContext] GuestDevice initialization complete!");
-}
-
-// =============================================================================
-// GetOrCreateGuestDevice - Ensure TLS+1676 has valid device
-// =============================================================================
-// Called by any function that needs to access the device context.
-// Creates device on-demand if not already initialized.
-// =============================================================================
-uint32_t GetOrCreateGuestDevice(PPCContext& ctx, uint8_t* base) {
-    if (g_guestDeviceAddr != 0) {
-        return g_guestDeviceAddr;
-    }
-    
-    // Device not initialized yet - create it now
-    InitializeGuestDevice(ctx, base);
-    return g_guestDeviceAddr;
-}
-
-
-// =============================================================================
-// GetGuestDeviceAddr - Returns global device address for worker thread TLS init
-// =============================================================================
-extern "C" uint32_t GetGuestDeviceAddr() {
-    return g_guestDeviceAddr;
-}
 
 // =============================================================================
 // RENDER LOOP DRIVER - sub_8218BEA8 hook
 // =============================================================================
-// Root Cause: sub_82856F08 has NO CALLERS in PPC code - Xbox runtime calls it.
-// SIMPLE FIX: Run render loop on MAIN THREAD after init (has proper context).
+// This is the ONE ALLOWED game function override.
+// Reason: sub_82856F08 has NO CALLERS in PPC code - Xbox runtime calls it.
+// We must drive the render loop after init completes.
 // =============================================================================
 extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);
@@ -8892,13 +8207,15 @@ extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);
 PPC_FUNC(sub_8218BEA8) {
     LOG_WARNING("[BOOT] sub_8218BEA8 - Game main entry");
     
-    // Call original game main - does init
+    // Call original game main - this does ALL init (63 subsystems, etc.)
+    // DO NOT skip or stub any part of init!
     __imp__sub_8218BEA8(ctx, base);
     
     LOG_WARNING("[BOOT] Game init completed! Entering render loop...");
     KernelPhase_EnterRuntime();
     
     // Drive render loop on MAIN THREAD (proper PPC context)
+    // Xbox 360 runtime would call sub_82856F08 repeatedly - we replicate that.
     uint64_t frameCount = 0;
     while (true) {
         frameCount++;
@@ -8912,101 +8229,39 @@ PPC_FUNC(sub_8218BEA8) {
 
 
 // =============================================================================
-// STRONG SYMBOL: sub_827E1EC0 - Resource type resolver
+// TLS+1676 DEVICE CONTEXT - Runtime Infrastructure
 // =============================================================================
-// This function does string comparisons and returns global objects based on
-// resource type strings. The objects it returns have vtable pointers at offset 0
-// that point to 0x82001124 (XEX header region - READ-ONLY).
-//
-// Problem: We cannot modify vtables in read-only XEX header region.
-// Solution: Return our own objects in writable memory with proper vtables.
-//
-// Per guide: "Provide the expected environment" - not stubbing callers.
+// This provides the GuestDevice structure that game code expects at TLS+1676.
+// This is "providing the expected environment" - NOT stubbing game functions.
+// The CRT init (sub_82994700) should set this up naturally when it runs.
 // =============================================================================
 
-// Global resource objects with vtables in writable memory
-static bool s_resourceObjectsInitialized = false;
-static uint32_t s_resourceVtableAddr = 0;
-static uint32_t s_resourceObject1Addr = 0;  // Replaces 0x82A80A28
-static uint32_t s_resourceObject2Addr = 0;  // Replaces 0x82A80A24
-static uint32_t s_resourceObject3Addr = 0;  // Replaces 0x82A81D98
+uint32_t g_guestDeviceAddr = 0;
 
-static void InitializeResourceObjects(uint8_t* base) {
-    if (s_resourceObjectsInitialized) return;
-    
-    LOG_WARNING("[RESOURCE] Initializing resource objects with writable vtables...");
-    
-    // Create stub function for vtable entries
-    constexpr uint32_t STUB_FUNC_ADDR = 0x82B7B000;
-    g_memory.InsertFunction(STUB_FUNC_ADDR, [](PPCContext& ctx, uint8_t* base) {
-        ctx.r3.u32 = 0;  // Return success/null
-    });
-    
-    // Allocate vtable in writable memory (32 entries)
-    constexpr uint32_t VTABLE_ENTRIES = 32;
-    void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-    if (!vtablePtr) {
-        LOG_WARNING("[RESOURCE] ERROR: Failed to allocate vtable!");
-        return;
-    }
-    s_resourceVtableAddr = g_memory.MapVirtual(vtablePtr);
-    
-    // Initialize all vtable entries to point to stub
-    for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
-        PPC_STORE_U32(s_resourceVtableAddr + (i * 4), STUB_FUNC_ADDR);
-    }
-    
-    // Allocate resource objects (16 bytes each - vtable ptr + some data)
-    constexpr uint32_t OBJ_SIZE = 64;
-    
-    void* obj1Ptr = g_userHeap.AllocPhysical(OBJ_SIZE, 16);
-    void* obj2Ptr = g_userHeap.AllocPhysical(OBJ_SIZE, 16);
-    void* obj3Ptr = g_userHeap.AllocPhysical(OBJ_SIZE, 16);
-    
-    if (!obj1Ptr || !obj2Ptr || !obj3Ptr) {
-        LOG_WARNING("[RESOURCE] ERROR: Failed to allocate resource objects!");
-        return;
-    }
-    
-    memset(obj1Ptr, 0, OBJ_SIZE);
-    memset(obj2Ptr, 0, OBJ_SIZE);
-    memset(obj3Ptr, 0, OBJ_SIZE);
-    
-    s_resourceObject1Addr = g_memory.MapVirtual(obj1Ptr);
-    s_resourceObject2Addr = g_memory.MapVirtual(obj2Ptr);
-    s_resourceObject3Addr = g_memory.MapVirtual(obj3Ptr);
-    
-    // Set vtable pointer at offset 0 of each object
-    PPC_STORE_U32(s_resourceObject1Addr + 0, s_resourceVtableAddr);
-    PPC_STORE_U32(s_resourceObject2Addr + 0, s_resourceVtableAddr);
-    PPC_STORE_U32(s_resourceObject3Addr + 0, s_resourceVtableAddr);
-    
-    s_resourceObjectsInitialized = true;
-    
-    LOGF_WARNING("[RESOURCE] Objects initialized: vtable=0x{:08X} obj1=0x{:08X} obj2=0x{:08X} obj3=0x{:08X}",
-                 s_resourceVtableAddr, s_resourceObject1Addr, s_resourceObject2Addr, s_resourceObject3Addr);
+extern "C" uint32_t GetGuestDeviceAddr() {
+    return g_guestDeviceAddr;
 }
 
-PPC_FUNC(sub_827E1EC0) {
-    // Initialize on first call
-    InitializeResourceObjects(base);
-    
-    // Return our resource object instead of the read-only XEX header objects
-    // The original function does string matching, but all paths return similar objects
-    // We return a single working object for simplicity
-    ctx.r3.u32 = s_resourceObject1Addr;
-}
 
-// =============================================================================
-// STRONG SYMBOL: sub_821EC3E8 - Render context initialization
-// =============================================================================
-// This function creates the Xbox 360 render context at 0x83120000.
-// The initialization has complex dependencies that crash before completing.
-// Since we have our own GPU implementation in video.cpp, bypass this
-// Xbox-specific setup and return success.
-// Per guide: "Provide the expected environment" - our video.cpp IS the environment.
-// =============================================================================
-PPC_FUNC(sub_821EC3E8) {
-    LOG_WARNING("[RENDER] sub_821EC3E8 - Bypassing Xbox render context init (using host GPU)");
-    ctx.r3.u32 = 1;  // Return non-zero to break loop
-}
+// #############################################################################
+// #############################################################################
+// ##                                                                         ##
+// ##   REMOVED STUBS - These were WRONG and broke the init flow             ##
+// ##                                                                         ##
+// ##   The following functions were previously stubbed here:                 ##
+// ##     - sub_82994700 (CRT init)                                          ##
+// ##     - sub_829A7DC8 (C++ constructors)                                  ##
+// ##     - sub_829DD978 (GPU command processing)                            ##
+// ##     - sub_829DDC90 (GPU command dispatch)                              ##
+// ##     - sub_821EC3E8 (Render context init)                               ##
+// ##     - sub_82998CA0, sub_8218BE28, sub_8218BE78, sub_829735C8          ##
+// ##     - sub_829943F0, sub_829A7960, sub_8285ACE8, sub_8297B260          ##
+// ##     - sub_82850028, sub_8285E250, sub_827E1EC0                         ##
+// ##                                                                         ##
+// ##   ALL OF THESE WERE REMOVED. Game code must run naturally.             ##
+// ##                                                                         ##
+// ##   If crashes occur, fix the KERNEL API that's failing, not the game    ##
+// ##   function that calls it. See /review/lesson.txt for guidance.         ##
+// ##                                                                         ##
+// #############################################################################
+// #############################################################################
