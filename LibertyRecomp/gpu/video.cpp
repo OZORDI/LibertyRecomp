@@ -8652,25 +8652,6 @@ PPC_FUNC(sub_829D1758)
 // 2. Host rendering functions (to draw on screen)
 // This is necessary because the game expects its state to be updated.
 // =============================================================================
-extern "C" void __imp__sub_829D8860(PPCContext& ctx, uint8_t* base);
-
-static int s_gtaDrawPrimitiveCount = 0;
-
-// Hook sub_829D8860 - GTA IV DrawPrimitive (HYBRID: original + host)
-PPC_FUNC(sub_829D8860)
-{
-    ++s_gtaDrawPrimitiveCount;
-    
-    // First: Call original PPC to update guest state
-    __imp__sub_829D8860(ctx, base);
-    
-    // Then: Also call host DrawPrimitive for actual rendering
-    GuestDevice* guestDevice = static_cast<GuestDevice*>(g_memory.Translate(ctx.r3.u32));
-    if (guestDevice && s_gtaDrawPrimitiveCount <= 50) {
-        LOGF_WARNING("[GTA4 DRAW] sub_829D8860 #{} device={:#x} type={} start={} count={}",
-            s_gtaDrawPrimitiveCount, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
-    }
-}
 
 // =============================================================================
 // GTA IV GPU Memory Allocation Stubs
@@ -8832,9 +8813,11 @@ GUEST_FUNCTION_HOOK(sub_829D6830, LockVertexBuffer);
 GUEST_FUNCTION_HOOK(sub_829D69D8, UnlockVertexBuffer);
 #endif
 
-// NOTE(GTAIV): Do NOT hook the game's Present wrapper directly to Video::Present.
-// GTA IV's Present wrapper (sub_829D5388) calls the VdSwap import; we already hook
-// VdSwap in kernel/imports.cpp, which is the correct point to drive the host present.
+// NOTE(GTAIV): Hook the game's D3D Present wrapper directly to Video::Present.
+// This follows the UnleashedRecomp pattern where game Present → host Present.
+// VdSwap is a stub since actual presentation happens in Video::Present().
+// Render path: sub_82856F08 → sub_828529B0 → sub_828507F8 → sub_829D5388 → Video::Present
+GUEST_FUNCTION_HOOK(sub_829D5388, Video::Present);
 
 // =============================================================================
 // Sonic 06 D3D hooks - DISABLED for GTA IV
@@ -8842,6 +8825,7 @@ GUEST_FUNCTION_HOOK(sub_829D69D8, UnlockVertexBuffer);
 // Keeping them here for reference but they should not be active.
 // =============================================================================
 #if 0 // Disabled Sonic 06 hooks
+
 GUEST_FUNCTION_HOOK(sub_8253AE98, DestructResource);
 
 GUEST_FUNCTION_HOOK(sub_8253A740, LockTextureRect);
@@ -8894,6 +8878,7 @@ GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 // GTA IV D3D Function Hooks (AGGRESSIVE - Force rendering pipeline)
 // Based on renderer_analysis_claude.md and Xenia trace analysis
 // =============================================================================
+GUEST_FUNCTION_HOOK(sub_829D8860, DrawPrimitive);         // GTA IV DrawPrimitive
 GUEST_FUNCTION_HOOK(sub_829D4EE0, DrawIndexedPrimitive); // GTA IV UnifiedDraw (handles both)
 GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);           // GTA IV SetIndices (device+13580)
 GUEST_FUNCTION_HOOK(sub_829C9070, SetStreamSource);      // GTA IV SetStreamSource0 (device+12020)
