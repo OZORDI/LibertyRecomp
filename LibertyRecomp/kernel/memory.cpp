@@ -64,6 +64,57 @@ Memory::Memory()
     // Pre-populate vtables with function pointers extracted from XEX
     // This ensures vtables have valid entries before game code runs
     PrePopulateVtables(base);
+    
+    // Additional vtables not in the pre-generated file (0x8207xxxx range)
+    // These vtables are in XEX zero-fill blocks and need manual initialization
+    // Extracted from default.bin - used by sub_8280D9B8 and related cleanup functions
+    // off_8207C4A0 - 3 entry vtable (sub_8280D9B8 calls vtable[2] at offset +8)
+    PPC_STORE_U32(0x8207C4A0, 0x8280DC38);  // vtable[0] sub_8280DC38 - destructor/cleanup
+    PPC_STORE_U32(0x8207C4A4, 0x826F26B8);  // vtable[1] sub_826F26B8 - stub
+    PPC_STORE_U32(0x8207C4A8, 0x826F26B8);  // vtable[2] sub_826F26B8 - called by sub_8280D9B8
+    PPC_STORE_U32(0x8207C3C8, 0x8280D8A8);  // sub_8280D8A8 - cleanup method
+    PPC_STORE_U32(0x8207C3B4, 0x8280D5E8);  // sub_8280D5E8
+    // off_8207C3BC[2] = { sub_8280D6A8, sub_8280D648 }
+    PPC_STORE_U32(0x8207C3BC, 0x8280D6A8);
+    PPC_STORE_U32(0x8207C3C0, 0x8280D648);
+    // off_8207C2E4[3] = { sub_8280D460, sub_826F26B8, sub_826F26B8 }
+    PPC_STORE_U32(0x8207C2E4, 0x8280D460);
+    PPC_STORE_U32(0x8207C2E8, 0x826F26B8);
+    PPC_STORE_U32(0x8207C2EC, 0x826F26B8);
+    // off_8207C2F4[2] = { sub_8280D6A8, sub_826F26B8 }
+    PPC_STORE_U32(0x8207C2F4, 0x8280D6A8);
+    PPC_STORE_U32(0x8207C2F8, 0x826F26B8);
+    // off_8207C300[3] = { sub_8280D460, sub_8280D4A8, sub_8280D560 }
+    PPC_STORE_U32(0x8207C300, 0x8280D460);
+    PPC_STORE_U32(0x8207C304, 0x8280D4A8);
+    PPC_STORE_U32(0x8207C308, 0x8280D560);
+    // off_8207CB94[3] = { sub_8280F0F0, sub_826F26B8, sub_826F26B8 }
+    PPC_STORE_U32(0x8207CB94, 0x8280F0F0);
+    PPC_STORE_U32(0x8207CB98, 0x826F26B8);
+    PPC_STORE_U32(0x8207CB9C, 0x826F26B8);
+    // off_8207CC0C[3] = { sub_8280F700, sub_8280F340, sub_8280F418 }
+    PPC_STORE_U32(0x8207CC0C, 0x8280F700);
+    PPC_STORE_U32(0x8207CC10, 0x8280F340);
+    PPC_STORE_U32(0x8207CC14, 0x8280F418);
+    // off_8207C518 = sub_8280DDE8 (single entry used by objects)
+    PPC_STORE_U32(0x8207C518, 0x8280DDE8);
+    
+    // Vtables used by sub_8280BAD8 resource manager initialization
+    // off_8207BBAC (3 entries)
+    PPC_STORE_U32(0x8207BBAC, 0x8280B7F8);
+    PPC_STORE_U32(0x8207BBB0, 0x828E0AB8);
+    PPC_STORE_U32(0x8207BBB4, 0x828E0AB8);
+    // off_8207BB80 (2 entries)
+    PPC_STORE_U32(0x8207BB80, 0x8280B710);
+    PPC_STORE_U32(0x8207BB84, 0x8280B508);
+    // off_8207BB74 (3 entries)
+    PPC_STORE_U32(0x8207BB74, 0x8280B710);
+    PPC_STORE_U32(0x8207BB78, 0x826F26B8);
+    PPC_STORE_U32(0x8207BB7C, 0x820DDB00);
+    // off_8207BB98 (3 entries)
+    PPC_STORE_U32(0x8207BB98, 0x8280B5D0);
+    PPC_STORE_U32(0x8207BB9C, 0x8280D3A8);
+    PPC_STORE_U32(0x8207BBA0, 0x826F26B8);
 
     // Protect the recomp function lookup table from guest writes.
     // If the game overwrites these host function pointers, it can lead to crashes that look like

@@ -24,9 +24,9 @@ uint32_t XEvent::Wait(uint32_t timeout_ms) {
     
     if (timeout_ms == 0) {
         // Immediate check - no wait
-        if (signaled_.load(std::memory_order_acquire)) {
+        if (signaled_) {
             if (!manual_reset_) {
-                signaled_.store(false, std::memory_order_release);
+                signaled_ = false;
             }
             return STATUS_SUCCESS;
         }
@@ -35,12 +35,10 @@ uint32_t XEvent::Wait(uint32_t timeout_ms) {
     
     if (timeout_ms == INFINITE) {
         // Wait forever
-        cv_.wait(lock, [this] { 
-            return signaled_.load(std::memory_order_acquire); 
-        });
+        cv_.wait(lock, [this] { return signaled_; });
         
         if (!manual_reset_) {
-            signaled_.store(false, std::memory_order_release);
+            signaled_ = false;
         }
         return STATUS_SUCCESS;
     }
@@ -49,13 +47,13 @@ uint32_t XEvent::Wait(uint32_t timeout_ms) {
     auto deadline = std::chrono::steady_clock::now() + 
                     std::chrono::milliseconds(timeout_ms);
     
-    bool signaled = cv_.wait_until(lock, deadline, [this] {
-        return signaled_.load(std::memory_order_acquire);
+    bool was_signaled = cv_.wait_until(lock, deadline, [this] {
+        return signaled_;
     });
     
-    if (signaled) {
+    if (was_signaled) {
         if (!manual_reset_) {
-            signaled_.store(false, std::memory_order_release);
+            signaled_ = false;
         }
         return STATUS_SUCCESS;
     }
@@ -66,7 +64,7 @@ uint32_t XEvent::Wait(uint32_t timeout_ms) {
 bool XEvent::Set() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        signaled_.store(true, std::memory_order_release);
+        signaled_ = true;
     }
     
     if (manual_reset_) {
@@ -79,25 +77,37 @@ bool XEvent::Set() {
 }
 
 bool XEvent::Reset() {
-    signaled_.store(false, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(mutex_);
+    signaled_ = false;
     return true;
 }
 
 bool XEvent::Pulse() {
-    // Pulse: Set then immediately reset
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        signaled_.store(true, std::memory_order_release);
-    }
+    // Pulse semantics: Wake all waiting threads, then reset.
+    // This is a proper implementation that ensures all currently waiting
+    // threads are woken before the signal is reset.
     
-    if (manual_reset_) {
-        cv_.notify_all();
-    } else {
-        cv_.notify_one();
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
     
+    // Set the signal
+    signaled_ = true;
+    
+    // Wake ALL waiters (both manual and auto-reset need to wake everyone for Pulse)
+    cv_.notify_all();
+    
+    // For proper Pulse semantics, we need to ensure waiters have a chance to
+    // observe the signaled state. We do this by releasing the lock, yielding,
+    // then re-acquiring and resetting. This isn't perfect but matches Xbox 360
+    // behavior better than the previous implementation.
+    lock.unlock();
+    
+    // Give waiters time to wake up and check the condition
     std::this_thread::yield();
-    signaled_.store(false, std::memory_order_release);
+    
+    // Now reset the signal under lock
+    lock.lock();
+    signaled_ = false;
+    
     return true;
 }
 

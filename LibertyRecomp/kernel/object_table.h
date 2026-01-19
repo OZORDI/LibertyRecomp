@@ -63,9 +63,22 @@ public:
     // Lookup object by handle (returns nullptr if not found)
     KernelObject* LookupObject(uint32_t handle);
     
-    // Typed lookup
+    // Typed lookup with type verification
+    // Returns nullptr if handle invalid OR if object is not of type T
     template<typename T>
     T* LookupObject(uint32_t handle) {
+        KernelObject* obj = LookupObject(handle);
+        if (!obj) return nullptr;
+        
+        // Use dynamic_cast for runtime type checking
+        // This is safer than blind static_cast and catches type mismatches
+        return dynamic_cast<T*>(obj);
+    }
+    
+    // Typed lookup with explicit type check (for performance-critical paths)
+    // Caller must ensure type safety - no runtime check performed
+    template<typename T>
+    T* LookupObjectUnchecked(uint32_t handle) {
         return static_cast<T*>(LookupObject(handle));
     }
     

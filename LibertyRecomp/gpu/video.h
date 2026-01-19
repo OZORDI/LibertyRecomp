@@ -42,6 +42,9 @@ enum class Backend {
     METAL
 };
 
+// Get the current graphics backend
+Backend GetCurrentBackend();
+
 struct GuestSamplerState
 {
     be<uint32_t> data[6];

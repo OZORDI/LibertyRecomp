@@ -44,14 +44,18 @@ public:
     bool Reset();
     bool Pulse();
     
-    // State query
-    bool IsSignaled() const { return signaled_.load(std::memory_order_acquire); }
+    // State query (requires lock for thread safety)
+    bool IsSignaled() const { 
+        std::lock_guard<std::mutex> lock(mutex_);
+        return signaled_; 
+    }
     bool IsManualReset() const { return manual_reset_; }
 
 private:
     bool manual_reset_;
-    std::atomic<bool> signaled_;
-    std::mutex mutex_;
+    // Use plain bool under mutex protection - no atomics needed
+    bool signaled_;
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
 };
 

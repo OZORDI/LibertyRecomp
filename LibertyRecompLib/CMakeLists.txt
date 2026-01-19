@@ -92,6 +92,8 @@ add_library(LibertyRecompLib
     "ppc/ppc_indirect.cpp"
     "shader/shader_cache.h"
     "shader/shader_cache.cpp"
+    "shader/postprocess_cache.h"
+    "shader/postprocess_cache.cpp"
 )
 
 target_include_directories(LibertyRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

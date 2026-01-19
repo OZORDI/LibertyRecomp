@@ -119,11 +119,21 @@ enum class EAntiAliasing : uint32_t
 
 enum class EShadowResolution : int32_t
 {
+    Original = -1,
     x512 = 512,
     x1024 = 1024,
     x2048 = 2048,
     x4096 = 4096,
     x8192 = 8192
+};
+
+enum class EShadowFilter : uint32_t
+{
+    Off,        // Hard shadows (no filtering)
+    PCF3x3,     // 3x3 PCF (9 samples)
+    PCF5x5,     // 5x5 PCF (25 samples)
+    PCF7x7,     // 7x7 Gaussian PCF
+    PCSS        // Contact hardening (soft shadows)
 };
 
 enum class EReflectionResolution : int32_t
@@ -151,6 +161,104 @@ enum class EUIAlignmentMode : uint32_t
 {
     Edge,
     Centre
+};
+
+enum class EHDRMode : uint32_t
+{
+    Off,        // SDR output (B8G8R8A8_UNORM)
+    scRGB,      // scRGB linear (R16G16B16A16_FLOAT) - Windows HDR
+    HDR10       // HDR10 PQ (R10G10B10A2_UNORM) - TV HDR
+};
+
+enum class EModernAA : uint32_t
+{
+    Off,        // No modern AA (use legacy if available)
+    TAA,        // Temporal Anti-Aliasing
+    SMAA,       // Subpixel Morphological Anti-Aliasing
+    FSR1        // AMD FidelityFX Super Resolution 1.0 (used as AA)
+};
+
+enum class EDynamicResolution : uint32_t
+{
+    Off,        // Fixed internal resolution
+    Quality,    // Target 90% GPU utilization
+    Balanced,   // Target 75% GPU utilization  
+    Performance // Target 60% GPU utilization
+};
+
+enum class EMotionBlur : uint32_t
+{
+    Off,        // No motion blur
+    Camera,     // Camera-only motion blur (reprojection-based)
+    Enhanced    // Camera + object motion blur (velocity buffer)
+};
+
+enum class ESSAA : uint32_t
+{
+    Off,        // Native resolution (1.0x)
+    x1_5,       // 1.5x supersampling (2.25x pixels)
+    x2,         // 2x supersampling (4x pixels)
+    x4          // 4x supersampling (16x pixels) - very demanding
+};
+
+enum class EDepthOfField : uint32_t
+{
+    Off,        // No DOF
+    Low,        // 3x3 blur kernel
+    Medium,     // 5x5 blur kernel
+    High,       // 7x7 blur kernel
+    Ultra       // 9x9 blur kernel + bokeh
+};
+
+enum class ESSAO : uint32_t
+{
+    Off,        // No SSAO
+    Low,        // 4 directions, 2 steps (fast)
+    Medium,     // 6 directions, 4 steps (balanced)
+    High,       // 8 directions, 6 steps (quality)
+    Ultra       // 12 directions, 8 steps (max quality)
+};
+
+enum class EFilmGrain : uint32_t
+{
+    Off,        // No film grain
+    Light,      // Subtle grain
+    Medium,     // Moderate grain
+    Heavy       // Strong grain (cinematic)
+};
+
+enum class EChromaticAberration : uint32_t
+{
+    Off,        // No chromatic aberration
+    Subtle,     // Light fringe effect
+    Normal,     // Standard CA
+    Strong      // Heavy lens distortion
+};
+
+enum class EUpscaler : uint32_t
+{
+    Off,        // Native resolution
+    FSR1,       // AMD FidelityFX Super Resolution 1.0
+    FSR3,       // AMD FidelityFX Super Resolution 3.0 (Frame Gen)
+    DLSS,       // NVIDIA Deep Learning Super Sampling
+    XeSS,       // Intel Xe Super Sampling
+    MetalFX     // Apple MetalFX (macOS only)
+};
+
+enum class EUpscaleQuality : uint32_t
+{
+    UltraQuality,   // 77% render scale
+    Quality,        // 67% render scale  
+    Balanced,       // 58% render scale
+    Performance,    // 50% render scale
+    UltraPerformance // 33% render scale
+};
+
+enum class EFrameGeneration : uint32_t
+{
+    Off,        // No frame generation
+    FSR3FG,     // AMD FSR 3 Frame Generation
+    DLSSFG      // NVIDIA DLSS Frame Generation
 };
 
 enum class EPlayerCharacter : uint32_t

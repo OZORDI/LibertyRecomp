@@ -42,14 +42,19 @@ public:
     // Semaphore operations
     int32_t Release(int32_t release_count, int32_t* previous_count = nullptr);
     
-    // State query
-    int32_t GetCount() const { return count_.load(std::memory_order_acquire); }
+    // State query (requires lock for thread safety)
+    int32_t GetCount() const { 
+        std::lock_guard<std::mutex> lock(mutex_);
+        return count_; 
+    }
     int32_t GetMaximumCount() const { return maximum_count_; }
 
 private:
-    std::atomic<int32_t> count_;
+    // Use plain int32_t under mutex protection - no atomics needed
+    // This avoids the race condition from mixing mutex + atomics
+    int32_t count_;
     int32_t maximum_count_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
 };
 

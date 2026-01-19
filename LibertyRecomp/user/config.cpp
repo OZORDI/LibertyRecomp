@@ -350,6 +350,7 @@ CONFIG_DEFINE_ENUM_TEMPLATE(EAntiAliasing)
 
 CONFIG_DEFINE_ENUM_TEMPLATE(EShadowResolution)
 {
+    { "Original", EShadowResolution::Original },
     { "512",      EShadowResolution::x512 },
     { "1024",     EShadowResolution::x1024 },
     { "2048",     EShadowResolution::x2048 },
@@ -383,6 +384,113 @@ CONFIG_DEFINE_ENUM_TEMPLATE(EUIAlignmentMode)
     { "Edge",    EUIAlignmentMode::Edge },
     { "Centre",  EUIAlignmentMode::Centre },
     { "Center",  EUIAlignmentMode::Centre }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EHDRMode)
+{
+    { "Off",    EHDRMode::Off },
+    { "scRGB",  EHDRMode::scRGB },
+    { "HDR10",  EHDRMode::HDR10 }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EModernAA)
+{
+    { "Off",    EModernAA::Off },
+    { "TAA",    EModernAA::TAA },
+    { "SMAA",   EModernAA::SMAA },
+    { "FSR1",   EModernAA::FSR1 }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EDynamicResolution)
+{
+    { "Off",         EDynamicResolution::Off },
+    { "Quality",     EDynamicResolution::Quality },
+    { "Balanced",    EDynamicResolution::Balanced },
+    { "Performance", EDynamicResolution::Performance }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EMotionBlur)
+{
+    { "Off",      EMotionBlur::Off },
+    { "Camera",   EMotionBlur::Camera },
+    { "Enhanced", EMotionBlur::Enhanced }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EShadowFilter)
+{
+    { "Off",     EShadowFilter::Off },
+    { "PCF3x3",  EShadowFilter::PCF3x3 },
+    { "PCF5x5",  EShadowFilter::PCF5x5 },
+    { "PCF7x7",  EShadowFilter::PCF7x7 },
+    { "PCSS",    EShadowFilter::PCSS }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(ESSAA)
+{
+    { "Off",  ESSAA::Off },
+    { "1.5x", ESSAA::x1_5 },
+    { "2x",   ESSAA::x2 },
+    { "4x",   ESSAA::x4 }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EDepthOfField)
+{
+    { "Off",    EDepthOfField::Off },
+    { "Low",    EDepthOfField::Low },
+    { "Medium", EDepthOfField::Medium },
+    { "High",   EDepthOfField::High },
+    { "Ultra",  EDepthOfField::Ultra }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(ESSAO)
+{
+    { "Off",    ESSAO::Off },
+    { "Low",    ESSAO::Low },
+    { "Medium", ESSAO::Medium },
+    { "High",   ESSAO::High },
+    { "Ultra",  ESSAO::Ultra }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EFilmGrain)
+{
+    { "Off",    EFilmGrain::Off },
+    { "Light",  EFilmGrain::Light },
+    { "Medium", EFilmGrain::Medium },
+    { "Heavy",  EFilmGrain::Heavy }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EChromaticAberration)
+{
+    { "Off",    EChromaticAberration::Off },
+    { "Subtle", EChromaticAberration::Subtle },
+    { "Normal", EChromaticAberration::Normal },
+    { "Strong", EChromaticAberration::Strong }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EUpscaler)
+{
+    { "Off",     EUpscaler::Off },
+    { "FSR1",    EUpscaler::FSR1 },
+    { "FSR3",    EUpscaler::FSR3 },
+    { "DLSS",    EUpscaler::DLSS },
+    { "XeSS",    EUpscaler::XeSS },
+    { "MetalFX", EUpscaler::MetalFX }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EUpscaleQuality)
+{
+    { "UltraQuality",     EUpscaleQuality::UltraQuality },
+    { "Quality",          EUpscaleQuality::Quality },
+    { "Balanced",         EUpscaleQuality::Balanced },
+    { "Performance",      EUpscaleQuality::Performance },
+    { "UltraPerformance", EUpscaleQuality::UltraPerformance }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EFrameGeneration)
+{
+    { "Off",    EFrameGeneration::Off },
+    { "FSR3FG", EFrameGeneration::FSR3FG },
+    { "DLSSFG", EFrameGeneration::DLSSFG }
 };
 
 CONFIG_DEFINE_ENUM_TEMPLATE(EMultiplayerBackend)
@@ -827,6 +935,66 @@ void Config::CreateCallbacks()
     Config::ResolutionScale.Callback = [](ConfigDef<float>* def)
     {
         def->Value = std::clamp(def->Value, 0.25f, 2.0f);
+    };
+
+    // Motion blur strength validation (0.0 - 2.0)
+    Config::MotionBlurStrength.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.0f, 2.0f);
+    };
+
+    // Depth of field focus distance validation (0.1 - 1000.0 meters)
+    Config::DOFFocusDistance.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.1f, 1000.0f);
+    };
+
+    // Depth of field aperture size validation (0.001 - 1.0)
+    Config::DOFApertureSize.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.001f, 1.0f);
+    };
+
+    // Film grain intensity validation (0.0 - 1.0)
+    Config::FilmGrainIntensity.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.0f, 1.0f);
+    };
+
+    // Chromatic aberration intensity validation (0.0 - 5.0)
+    Config::ChromaticAberrationIntensity.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.0f, 5.0f);
+    };
+
+    // Upscale sharpness validation (0.0 - 1.0)
+    Config::UpscaleSharpness.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.0f, 1.0f);
+    };
+
+    // Min resolution scale validation (0.25 - 1.0)
+    Config::MinResolutionScale.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 0.25f, 1.0f);
+    };
+
+    // Target frame time validation (4.0 - 100.0 ms, i.e., 10-250 FPS)
+    Config::TargetFrameTime.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 4.0f, 100.0f);
+    };
+
+    // HDR paper white validation (80 - 500 nits)
+    Config::HDRPaperWhite.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 80.0f, 500.0f);
+    };
+
+    // HDR max luminance validation (400 - 10000 nits)
+    Config::HDRMaxLuminance.Callback = [](ConfigDef<float>* def)
+    {
+        def->Value = std::clamp(def->Value, 400.0f, 10000.0f);
     };
 }
 

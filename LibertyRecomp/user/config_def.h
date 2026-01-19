@@ -94,11 +94,57 @@ CONFIG_DEFINE_LOCALISED("Video", float, Brightness, 0.5f, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", EAntiAliasing, AntiAliasing, EAntiAliasing::MSAA4x, false);
 CONFIG_DEFINE_LOCALISED("Video", bool, TransparencyAntiAliasing, true, false);
 CONFIG_DEFINE("Video", uint32_t, AnisotropicFiltering, 16, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EHDRMode, HDRMode, EHDRMode::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, HDRPaperWhite, 200.0f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, HDRMaxLuminance, 1000.0f, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EModernAA, ModernAA, EModernAA::Off, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EDynamicResolution, DynamicResolution, EDynamicResolution::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, MinResolutionScale, 0.5f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, TargetFrameTime, 16.67f, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", EShadowResolution, ShadowResolution, EShadowResolution::x4096, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EShadowFilter, ShadowFilter, EShadowFilter::PCF3x3, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", EReflectionResolution, ReflectionResolution, EReflectionResolution::Half, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", ERadialBlur, RadialBlur, ERadialBlur::Original, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EMotionBlur, MotionBlur, EMotionBlur::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, MotionBlurStrength, 1.0f, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", ESSAA, SSAA, ESSAA::Off, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EDepthOfField, DepthOfField, EDepthOfField::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, DOFFocusDistance, 10.0f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, DOFApertureSize, 0.05f, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EFilmGrain, FilmGrain, EFilmGrain::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, FilmGrainIntensity, 0.1f, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EChromaticAberration, ChromaticAberration, EChromaticAberration::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, ChromaticAberrationIntensity, 1.0f, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EUpscaler, Upscaler, EUpscaler::Off, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EUpscaleQuality, UpscaleQuality, EUpscaleQuality::Quality, false);
+CONFIG_DEFINE_ENUM_LOCALISED("Video", EFrameGeneration, FrameGeneration, EFrameGeneration::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, UpscaleSharpness, 0.5f, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", ECutsceneAspectRatio, CutsceneAspectRatio, ECutsceneAspectRatio::Original, false);
 CONFIG_DEFINE_ENUM_LOCALISED("Video", EUIAlignmentMode, UIAlignmentMode, EUIAlignmentMode::Edge, false);
+
+// Post-Processing Effects
+CONFIG_DEFINE_LOCALISED("Video", bool, VignetteEnabled, false, false);
+CONFIG_DEFINE_LOCALISED("Video", float, VignetteIntensity, 0.3f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, VignetteRadius, 0.4f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, VignetteSoftness, 0.5f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, VignetteRoundness, 0.5f, false);
+
+// TAA Settings
+CONFIG_DEFINE_LOCALISED("Video", float, TAABlendFactor, 0.1f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, TAAMotionScale, 1.0f, false);
+
+// SMAA Settings  
+CONFIG_DEFINE_LOCALISED("Video", float, SMAAEdgeThreshold, 0.1f, false);
+
+// FSR 1.0 Settings
+CONFIG_DEFINE_LOCALISED("Video", float, FSR1Sharpness, 0.5f, false);
+
+// SSAO (Screen-Space Ambient Occlusion) Settings
+CONFIG_DEFINE_ENUM_LOCALISED("Video", ESSAO, SSAO, ESSAO::Off, false);
+CONFIG_DEFINE_LOCALISED("Video", float, SSAORadius, 1.0f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, SSAOIntensity, 1.0f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, SSAOBias, 0.03f, false);
+CONFIG_DEFINE_LOCALISED("Video", float, SSAOFalloffDistance, 100.0f, false);
 
 CONFIG_DEFINE_HIDDEN("Codes", bool, AntigravityRetainsMomentum, false, false);
 CONFIG_DEFINE_HIDDEN("Codes", bool, ControllableBoundAttack, false, false);
@@ -138,6 +184,15 @@ CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, FirebaseProjectId, "", false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, FirebaseApiKey, "", false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", int32_t, LANBroadcastPort, 3074, false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, PlayerName, "Player", false);
+
+// Voice Chat
+CONFIG_DEFINE("VoiceChat", bool, VoiceChatEnabled, true, false);
+CONFIG_DEFINE("VoiceChat", float, MicrophoneVolume, 1.0f, false);
+CONFIG_DEFINE("VoiceChat", float, VoiceOutputVolume, 1.0f, false);
+CONFIG_DEFINE("VoiceChat", bool, PushToTalk, false, false);
+CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_PushToTalk, SDL_SCANCODE_GRAVE, false);
+CONFIG_DEFINE("VoiceChat", float, VoiceActivityThreshold, 0.02f, false);
+CONFIG_DEFINE("VoiceChat", bool, VoiceChatSelfMuted, false, false);
 
 // Legacy Network Settings (Nebula VPN - deprecated)
 CONFIG_DEFINE_HIDDEN("Network", std::string, NetworkName, "", false);

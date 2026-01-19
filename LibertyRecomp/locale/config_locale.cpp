@@ -699,6 +699,404 @@ CONFIG_DEFINE_LOCALE(Brightness)
     { ELanguage::Italian,  { "Luminosità", "Regola il livello di luminosità." } }
 };
 
+CONFIG_DEFINE_LOCALE(HDRMode)
+{
+    { ELanguage::English,  { "HDR Mode", "Enable HDR output for compatible displays. scRGB for Windows HDR, HDR10 for TVs." } },
+    { ELanguage::Japanese, { "HDRモード", "対応ディスプレイでHDR出力を有効にします" } },
+    { ELanguage::German,   { "HDR-Modus", "HDR-Ausgabe für kompatible Displays aktivieren." } },
+    { ELanguage::French,   { "Mode HDR", "Activer la sortie HDR pour les écrans compatibles." } },
+    { ELanguage::Spanish,  { "Modo HDR", "Habilitar salida HDR para pantallas compatibles." } },
+    { ELanguage::Italian,  { "Modalità HDR", "Abilita l'output HDR per display compatibili." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EHDRMode)
+{
+    {
+        ELanguage::English,
+        {
+            { EHDRMode::Off,   { "Off", "" } },
+            { EHDRMode::scRGB, { "scRGB", "" } },
+            { EHDRMode::HDR10, { "HDR10", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(HDRPaperWhite)
+{
+    { ELanguage::English,  { "Paper White", "HDR brightness for standard content (nits). Default: 200." } },
+    { ELanguage::Japanese, { "ペーパーホワイト", "標準コンテンツのHDR輝度（ニト）" } },
+    { ELanguage::German,   { "Papierweiss", "HDR-Helligkeit für Standardinhalte (Nits)." } },
+    { ELanguage::French,   { "Blanc papier", "Luminosité HDR pour le contenu standard (nits)." } },
+    { ELanguage::Spanish,  { "Blanco papel", "Brillo HDR para contenido estándar (nits)." } },
+    { ELanguage::Italian,  { "Bianco carta", "Luminosità HDR per contenuti standard (nits)." } }
+};
+
+CONFIG_DEFINE_LOCALE(HDRMaxLuminance)
+{
+    { ELanguage::English,  { "Max Luminance", "Maximum HDR brightness for highlights (nits). Default: 1000." } },
+    { ELanguage::Japanese, { "最大輝度", "ハイライトの最大HDR輝度（ニト）" } },
+    { ELanguage::German,   { "Max. Helligkeit", "Maximale HDR-Helligkeit für Highlights (Nits)." } },
+    { ELanguage::French,   { "Luminance max", "Luminosité HDR maximale pour les reflets (nits)." } },
+    { ELanguage::Spanish,  { "Luminancia máx", "Brillo HDR máximo para reflejos (nits)." } },
+    { ELanguage::Italian,  { "Luminanza max", "Luminosità HDR massima per highlights (nits)." } }
+};
+
+CONFIG_DEFINE_LOCALE(ModernAA)
+{
+    { ELanguage::English,  { "Modern AA", "Select modern anti-aliasing technique. TAA for temporal, SMAA for morphological, FSR1 for AMD upscaling as AA." } },
+    { ELanguage::Japanese, { "モダンAA", "最新のアンチエイリアス技術を選択します" } },
+    { ELanguage::German,   { "Modernes AA", "Wähle moderne Anti-Aliasing-Technik." } },
+    { ELanguage::French,   { "AA Moderne", "Sélectionner une technique d'anticrénelage moderne." } },
+    { ELanguage::Spanish,  { "AA Moderno", "Seleccionar técnica de anti-aliasing moderna." } },
+    { ELanguage::Italian,  { "AA Moderno", "Seleziona tecnica di anti-aliasing moderna." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EModernAA)
+{
+    {
+        ELanguage::English,
+        {
+            { EModernAA::Off,  { "Off", "" } },
+            { EModernAA::TAA,  { "TAA", "" } },
+            { EModernAA::SMAA, { "SMAA", "" } },
+            { EModernAA::FSR1, { "FSR 1.0", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(DynamicResolution)
+{
+    { ELanguage::English,  { "Dynamic Resolution", "Automatically adjust internal resolution to maintain target framerate." } },
+    { ELanguage::Japanese, { "動的解像度", "目標フレームレートを維持するために内部解像度を自動調整します" } },
+    { ELanguage::German,   { "Dynamische Auflösung", "Interne Auflösung automatisch anpassen." } },
+    { ELanguage::French,   { "Résolution Dynamique", "Ajuster automatiquement la résolution interne." } },
+    { ELanguage::Spanish,  { "Resolución Dinámica", "Ajustar automáticamente la resolución interna." } },
+    { ELanguage::Italian,  { "Risoluzione Dinamica", "Regola automaticamente la risoluzione interna." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EDynamicResolution)
+{
+    {
+        ELanguage::English,
+        {
+            { EDynamicResolution::Off,         { "Off", "" } },
+            { EDynamicResolution::Quality,     { "Quality", "" } },
+            { EDynamicResolution::Balanced,    { "Balanced", "" } },
+            { EDynamicResolution::Performance, { "Performance", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(MinResolutionScale)
+{
+    { ELanguage::English,  { "Min Resolution Scale", "Minimum resolution scale for dynamic resolution (0.5 = 50%)." } },
+    { ELanguage::Japanese, { "最小解像度スケール", "動的解像度の最小スケール" } },
+    { ELanguage::German,   { "Min. Auflösungsskala", "Minimale Auflösungsskalierung für dynamische Auflösung." } },
+    { ELanguage::French,   { "Échelle Min", "Échelle minimale pour la résolution dynamique." } },
+    { ELanguage::Spanish,  { "Escala Mín", "Escala mínima para resolución dinámica." } },
+    { ELanguage::Italian,  { "Scala Min", "Scala minima per risoluzione dinamica." } }
+};
+
+CONFIG_DEFINE_LOCALE(TargetFrameTime)
+{
+    { ELanguage::English,  { "Target Frame Time", "Target frame time in milliseconds for dynamic resolution (16.67ms = 60fps)." } },
+    { ELanguage::Japanese, { "目標フレーム時間", "動的解像度の目標フレーム時間（ミリ秒）" } },
+    { ELanguage::German,   { "Ziel-Framezeit", "Ziel-Framezeit in Millisekunden für dynamische Auflösung." } },
+    { ELanguage::French,   { "Temps Cible", "Temps de frame cible en millisecondes." } },
+    { ELanguage::Spanish,  { "Tiempo Objetivo", "Tiempo de frame objetivo en milisegundos." } },
+    { ELanguage::Italian,  { "Tempo Target", "Tempo di frame target in millisecondi." } }
+};
+
+CONFIG_DEFINE_LOCALE(MotionBlur)
+{
+    { ELanguage::English,  { "Motion Blur", "Modern per-pixel motion blur using velocity buffers." } },
+    { ELanguage::Japanese, { "モーションブラー", "速度バッファを使用したモダンなモーションブラー" } },
+    { ELanguage::German,   { "Bewegungsunschärfe", "Moderne Bewegungsunschärfe mit Geschwindigkeitspuffer." } },
+    { ELanguage::French,   { "Flou de Mouvement", "Flou de mouvement moderne avec buffer de vélocité." } },
+    { ELanguage::Spanish,  { "Desenfoque de Movimiento", "Desenfoque de movimiento moderno con buffer de velocidad." } },
+    { ELanguage::Italian,  { "Motion Blur", "Motion blur moderno con buffer di velocità." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EMotionBlur)
+{
+    {
+        ELanguage::English,
+        {
+            { EMotionBlur::Off,      { "Off", "" } },
+            { EMotionBlur::Camera,   { "Camera Only", "" } },
+            { EMotionBlur::Enhanced, { "Enhanced", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(MotionBlurStrength)
+{
+    { ELanguage::English,  { "Motion Blur Strength", "Intensity of the motion blur effect (0.0-2.0)." } },
+    { ELanguage::Japanese, { "モーションブラー強度", "モーションブラーの強度" } },
+    { ELanguage::German,   { "Bewegungsunschärfe-Stärke", "Intensität der Bewegungsunschärfe." } },
+    { ELanguage::French,   { "Intensité du Flou", "Intensité de l'effet de flou de mouvement." } },
+    { ELanguage::Spanish,  { "Intensidad del Desenfoque", "Intensidad del efecto de desenfoque." } },
+    { ELanguage::Italian,  { "Intensità Motion Blur", "Intensità dell'effetto motion blur." } }
+};
+
+CONFIG_DEFINE_LOCALE(SSAA)
+{
+    { ELanguage::English,  { "Super-Sampling", "Render at higher resolution and downsample for best quality AA. Very demanding." } },
+    { ELanguage::Japanese, { "スーパーサンプリング", "高解像度でレンダリングし、ダウンサンプリングで最高品質のAA。非常に負荷が高い。" } },
+    { ELanguage::German,   { "Super-Sampling", "Rendert in höherer Auflösung für beste AA-Qualität. Sehr anspruchsvoll." } },
+    { ELanguage::French,   { "Super-Échantillonnage", "Rendu en haute résolution pour la meilleure qualité AA. Très exigeant." } },
+    { ELanguage::Spanish,  { "Super-Muestreo", "Renderiza a mayor resolución para la mejor calidad AA. Muy exigente." } },
+    { ELanguage::Italian,  { "Super-Sampling", "Rendering a risoluzione maggiore per la migliore qualità AA. Molto esigente." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(ESSAA)
+{
+    {
+        ELanguage::English,
+        {
+            { ESSAA::Off,  { "Off", "" } },
+            { ESSAA::x1_5, { "1.5x", "" } },
+            { ESSAA::x2,   { "2x", "" } },
+            { ESSAA::x4,   { "4x", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(DepthOfField)
+{
+    { ELanguage::English,  { "Depth of Field", "Blur objects based on distance from focus point." } },
+    { ELanguage::Japanese, { "被写界深度", "フォーカスポイントからの距離に基づいてオブジェクトをぼかします。" } },
+    { ELanguage::German,   { "Tiefenschärfe", "Objekte basierend auf Entfernung zum Fokuspunkt weichzeichnen." } },
+    { ELanguage::French,   { "Profondeur de Champ", "Flouter les objets selon la distance au point focal." } },
+    { ELanguage::Spanish,  { "Profundidad de Campo", "Desenfocar objetos según distancia al punto focal." } },
+    { ELanguage::Italian,  { "Profondità di Campo", "Sfoca gli oggetti in base alla distanza dal punto focale." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EDepthOfField)
+{
+    {
+        ELanguage::English,
+        {
+            { EDepthOfField::Off,    { "Off", "" } },
+            { EDepthOfField::Low,    { "Low", "" } },
+            { EDepthOfField::Medium, { "Medium", "" } },
+            { EDepthOfField::High,   { "High", "" } },
+            { EDepthOfField::Ultra,  { "Ultra", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(DOFFocusDistance)
+{
+    { ELanguage::English,  { "Focus Distance", "Distance to the focus plane in meters." } },
+    { ELanguage::Japanese, { "フォーカス距離", "フォーカス面までの距離（メートル）" } },
+    { ELanguage::German,   { "Fokusabstand", "Abstand zur Fokusebene in Metern." } },
+    { ELanguage::French,   { "Distance Focale", "Distance au plan focal en mètres." } },
+    { ELanguage::Spanish,  { "Distancia Focal", "Distancia al plano de enfoque en metros." } },
+    { ELanguage::Italian,  { "Distanza Focale", "Distanza dal piano focale in metri." } }
+};
+
+CONFIG_DEFINE_LOCALE(DOFApertureSize)
+{
+    { ELanguage::English,  { "Aperture Size", "Size of the lens aperture (smaller = sharper, larger = more blur)." } },
+    { ELanguage::Japanese, { "絞りサイズ", "レンズ絞りのサイズ（小=シャープ、大=ぼかし）" } },
+    { ELanguage::German,   { "Blendengröße", "Größe der Linsenblende (kleiner = schärfer)." } },
+    { ELanguage::French,   { "Ouverture", "Taille de l'ouverture (petit = net, grand = flou)." } },
+    { ELanguage::Spanish,  { "Apertura", "Tamaño de la apertura (pequeño = nítido, grande = borroso)." } },
+    { ELanguage::Italian,  { "Apertura", "Dimensione dell'apertura (piccolo = nitido, grande = sfocato)." } }
+};
+
+CONFIG_DEFINE_LOCALE(SSAO)
+{
+    { ELanguage::English,  { "SSAO", "Screen-Space Ambient Occlusion adds realistic shadows in corners and crevices." } },
+    { ELanguage::Japanese, { "SSAO", "スクリーンスペースアンビエントオクルージョン。角や隙間にリアルな影を追加します。" } },
+    { ELanguage::German,   { "SSAO", "Bildschirmbasierte Umgebungsverdeckung für realistische Schatten." } },
+    { ELanguage::French,   { "SSAO", "Occlusion ambiante en espace écran pour des ombres réalistes." } },
+    { ELanguage::Spanish,  { "SSAO", "Oclusión ambiental en espacio de pantalla para sombras realistas." } },
+    { ELanguage::Italian,  { "SSAO", "Occlusione ambientale nello spazio dello schermo per ombre realistiche." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(ESSAO)
+{
+    {
+        ELanguage::English,
+        {
+            { ESSAO::Off,    { "Off", "" } },
+            { ESSAO::Low,    { "Low", "" } },
+            { ESSAO::Medium, { "Medium", "" } },
+            { ESSAO::High,   { "High", "" } },
+            { ESSAO::Ultra,  { "Ultra", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(SSAORadius)
+{
+    { ELanguage::English,  { "SSAO Radius", "World-space radius for ambient occlusion sampling." } }
+};
+
+CONFIG_DEFINE_LOCALE(SSAOIntensity)
+{
+    { ELanguage::English,  { "SSAO Intensity", "Strength of the ambient occlusion effect." } }
+};
+
+CONFIG_DEFINE_LOCALE(SSAOBias)
+{
+    { ELanguage::English,  { "SSAO Bias", "Depth comparison bias to prevent self-occlusion artifacts." } }
+};
+
+CONFIG_DEFINE_LOCALE(SSAOFalloffDistance)
+{
+    { ELanguage::English,  { "SSAO Falloff", "Distance at which ambient occlusion fades out." } }
+};
+
+CONFIG_DEFINE_LOCALE(FilmGrain)
+{
+    { ELanguage::English,  { "Film Grain", "Add cinematic film grain noise to the image." } },
+    { ELanguage::Japanese, { "フィルムグレイン", "映画風のノイズを追加します。" } },
+    { ELanguage::German,   { "Filmkörnung", "Kinematisches Filmkorn zum Bild hinzufügen." } },
+    { ELanguage::French,   { "Grain de Film", "Ajouter du grain cinématographique à l'image." } },
+    { ELanguage::Spanish,  { "Grano de Película", "Añadir grano cinematográfico a la imagen." } },
+    { ELanguage::Italian,  { "Grana Pellicola", "Aggiungi grana cinematografica all'immagine." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EFilmGrain)
+{
+    {
+        ELanguage::English,
+        {
+            { EFilmGrain::Off,    { "Off", "" } },
+            { EFilmGrain::Light,  { "Light", "" } },
+            { EFilmGrain::Medium, { "Medium", "" } },
+            { EFilmGrain::Heavy,  { "Heavy", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(FilmGrainIntensity)
+{
+    { ELanguage::English,  { "Grain Intensity", "Intensity of the film grain effect (0.0-1.0)." } },
+    { ELanguage::Japanese, { "グレイン強度", "フィルムグレインの強度" } },
+    { ELanguage::German,   { "Körnung Intensität", "Intensität der Filmkörnung." } },
+    { ELanguage::French,   { "Intensité du Grain", "Intensité de l'effet de grain." } },
+    { ELanguage::Spanish,  { "Intensidad del Grano", "Intensidad del efecto de grano." } },
+    { ELanguage::Italian,  { "Intensità Grana", "Intensità dell'effetto grana." } }
+};
+
+CONFIG_DEFINE_LOCALE(ChromaticAberration)
+{
+    { ELanguage::English,  { "Chromatic Aberration", "Simulate lens color fringing effect." } },
+    { ELanguage::Japanese, { "色収差", "レンズの色ずれ効果をシミュレートします。" } },
+    { ELanguage::German,   { "Chromatische Aberration", "Linsen-Farbsaum-Effekt simulieren." } },
+    { ELanguage::French,   { "Aberration Chromatique", "Simuler l'effet de frange colorée." } },
+    { ELanguage::Spanish,  { "Aberración Cromática", "Simular efecto de franja de color." } },
+    { ELanguage::Italian,  { "Aberrazione Cromatica", "Simula l'effetto di frangia colorata." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EChromaticAberration)
+{
+    {
+        ELanguage::English,
+        {
+            { EChromaticAberration::Off,    { "Off", "" } },
+            { EChromaticAberration::Subtle, { "Subtle", "" } },
+            { EChromaticAberration::Normal, { "Normal", "" } },
+            { EChromaticAberration::Strong, { "Strong", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(ChromaticAberrationIntensity)
+{
+    { ELanguage::English,  { "CA Intensity", "Intensity of the chromatic aberration effect." } },
+    { ELanguage::Japanese, { "色収差強度", "色収差効果の強度" } },
+    { ELanguage::German,   { "CA Intensität", "Intensität der chromatischen Aberration." } },
+    { ELanguage::French,   { "Intensité CA", "Intensité de l'aberration chromatique." } },
+    { ELanguage::Spanish,  { "Intensidad CA", "Intensidad de la aberración cromática." } },
+    { ELanguage::Italian,  { "Intensità AC", "Intensità dell'aberrazione cromatica." } }
+};
+
+CONFIG_DEFINE_LOCALE(Upscaler)
+{
+    { ELanguage::English,  { "Upscaler", "AI/algorithmic upscaling technology (FSR 3, DLSS, XeSS)." } },
+    { ELanguage::Japanese, { "アップスケーラー", "AI/アルゴリズムアップスケーリング技術" } },
+    { ELanguage::German,   { "Upscaler", "KI/algorithmische Upscaling-Technologie." } },
+    { ELanguage::French,   { "Upscaler", "Technologie d'upscaling IA/algorithmique." } },
+    { ELanguage::Spanish,  { "Upscaler", "Tecnología de escalado IA/algorítmica." } },
+    { ELanguage::Italian,  { "Upscaler", "Tecnologia di upscaling IA/algoritmica." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EUpscaler)
+{
+    {
+        ELanguage::English,
+        {
+            { EUpscaler::Off,     { "Off", "" } },
+            { EUpscaler::FSR1,    { "FSR 1.0", "" } },
+            { EUpscaler::FSR3,    { "FSR 3.0", "" } },
+            { EUpscaler::DLSS,    { "DLSS", "" } },
+            { EUpscaler::XeSS,    { "XeSS", "" } },
+            { EUpscaler::MetalFX, { "MetalFX", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(UpscaleQuality)
+{
+    { ELanguage::English,  { "Upscale Quality", "Quality preset for upscaling (affects render resolution)." } },
+    { ELanguage::Japanese, { "アップスケール品質", "アップスケーリングの品質プリセット" } },
+    { ELanguage::German,   { "Upscale-Qualität", "Qualitätsvoreinstellung für Upscaling." } },
+    { ELanguage::French,   { "Qualité Upscale", "Préréglage de qualité d'upscaling." } },
+    { ELanguage::Spanish,  { "Calidad Upscale", "Preajuste de calidad de escalado." } },
+    { ELanguage::Italian,  { "Qualità Upscale", "Preimpostazione qualità upscaling." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EUpscaleQuality)
+{
+    {
+        ELanguage::English,
+        {
+            { EUpscaleQuality::UltraQuality,     { "Ultra Quality", "" } },
+            { EUpscaleQuality::Quality,          { "Quality", "" } },
+            { EUpscaleQuality::Balanced,         { "Balanced", "" } },
+            { EUpscaleQuality::Performance,      { "Performance", "" } },
+            { EUpscaleQuality::UltraPerformance, { "Ultra Performance", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(FrameGeneration)
+{
+    { ELanguage::English,  { "Frame Generation", "Generate interpolated frames for higher FPS (requires FSR 3 or DLSS 3)." } },
+    { ELanguage::Japanese, { "フレーム生成", "フレームを補間して高FPSを実現（FSR 3またはDLSS 3が必要）" } },
+    { ELanguage::German,   { "Frame-Generierung", "Generiert interpolierte Frames für höhere FPS." } },
+    { ELanguage::French,   { "Génération de Frames", "Génère des frames interpolées pour un FPS plus élevé." } },
+    { ELanguage::Spanish,  { "Generación de Frames", "Genera frames interpolados para mayor FPS." } },
+    { ELanguage::Italian,  { "Generazione Frame", "Genera frame interpolati per FPS più alti." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EFrameGeneration)
+{
+    {
+        ELanguage::English,
+        {
+            { EFrameGeneration::Off,    { "Off", "" } },
+            { EFrameGeneration::FSR3FG, { "FSR 3 Frame Gen", "" } },
+            { EFrameGeneration::DLSSFG, { "DLSS Frame Gen", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(UpscaleSharpness)
+{
+    { ELanguage::English,  { "Upscale Sharpness", "Sharpening intensity for upscaled image (0.0-1.0)." } },
+    { ELanguage::Japanese, { "アップスケールシャープネス", "アップスケール後のシャープネス強度" } },
+    { ELanguage::German,   { "Upscale-Schärfe", "Schärfungsintensität für hochskaliertes Bild." } },
+    { ELanguage::French,   { "Netteté Upscale", "Intensité de netteté pour l'image mise à l'échelle." } },
+    { ELanguage::Spanish,  { "Nitidez Upscale", "Intensidad de nitidez para imagen escalada." } },
+    { ELanguage::Italian,  { "Nitidezza Upscale", "Intensità nitidezza per immagine upscalata." } }
+};
+
 CONFIG_DEFINE_LOCALE(AntiAliasing)
 {
     { ELanguage::English,  { "Anti-Aliasing", "Adjust the amount of smoothing applied to jagged edges." } },
@@ -769,7 +1167,44 @@ CONFIG_DEFINE_LOCALE(ShadowResolution)
     { ELanguage::Italian,  { "Risoluzione ombre", "Imposta la risoluzioni delle ombre in tempo reale." } }
 };
 
-CONFIG_DEFINE_ENUM_LOCALE(EShadowResolution) {};
+CONFIG_DEFINE_ENUM_LOCALE(EShadowResolution)
+{
+    {
+        ELanguage::English,
+        {
+            { EShadowResolution::Original, { "Original", "" } },
+            { EShadowResolution::x512,     { "512x512", "" } },
+            { EShadowResolution::x1024,    { "1024x1024", "" } },
+            { EShadowResolution::x2048,    { "2048x2048", "" } },
+            { EShadowResolution::x4096,    { "4096x4096", "" } },
+            { EShadowResolution::x8192,    { "8192x8192", "" } }
+        }
+    }
+};
+
+CONFIG_DEFINE_LOCALE(ShadowFilter)
+{
+    { ELanguage::English,  { "Shadow Filter", "Shadow filtering quality (PCF = softer edges, PCSS = contact hardening)." } },
+    { ELanguage::Japanese, { "シャドウフィルター", "影のフィルタリング品質" } },
+    { ELanguage::German,   { "Schatten-Filter", "Schattenfilterqualität." } },
+    { ELanguage::French,   { "Filtre d'ombre", "Qualité de filtrage des ombres." } },
+    { ELanguage::Spanish,  { "Filtro de sombras", "Calidad del filtrado de sombras." } },
+    { ELanguage::Italian,  { "Filtro ombre", "Qualità del filtraggio delle ombre." } }
+};
+
+CONFIG_DEFINE_ENUM_LOCALE(EShadowFilter)
+{
+    {
+        ELanguage::English,
+        {
+            { EShadowFilter::Off,    { "Off (Hard)", "" } },
+            { EShadowFilter::PCF3x3, { "PCF 3x3", "" } },
+            { EShadowFilter::PCF5x5, { "PCF 5x5", "" } },
+            { EShadowFilter::PCF7x7, { "PCF 7x7", "" } },
+            { EShadowFilter::PCSS,   { "PCSS (Soft)", "" } }
+        }
+    }
+};
 
 CONFIG_DEFINE_LOCALE(ReflectionResolution)
 {
@@ -966,4 +1401,95 @@ CONFIG_DEFINE_ENUM_LOCALE(EUIAlignmentMode)
             { EUIAlignmentMode::Centre,  { "Centro", "Centro: l'interfaccia si allineerà con il centro dello schermo." } }
         }
     }
+};
+
+// Post-Processing Effect Locales
+CONFIG_DEFINE_LOCALE(VignetteEnabled)
+{
+    { ELanguage::English,  { "Vignette", "Enable screen edge darkening vignette effect." } },
+    { ELanguage::Japanese, { "ビネット", "画面端を暗くするビネット効果を有効にします" } },
+    { ELanguage::German,   { "Vignette", "Bildschirmrand-Verdunkelungseffekt aktivieren." } },
+    { ELanguage::French,   { "Vignettage", "Activer l'effet d'assombrissement des bords." } },
+    { ELanguage::Spanish,  { "Viñeta", "Habilitar efecto de oscurecimiento de bordes." } },
+    { ELanguage::Italian,  { "Vignettatura", "Abilita effetto di oscuramento dei bordi." } }
+};
+
+CONFIG_DEFINE_LOCALE(VignetteIntensity)
+{
+    { ELanguage::English,  { "Vignette Intensity", "Strength of the vignette darkening effect (0-1)." } },
+    { ELanguage::Japanese, { "ビネット強度", "ビネット効果の強さ（0〜1）" } },
+    { ELanguage::German,   { "Vignette Intensität", "Stärke des Vignetten-Effekts (0-1)." } },
+    { ELanguage::French,   { "Intensité Vignette", "Force de l'effet de vignettage (0-1)." } },
+    { ELanguage::Spanish,  { "Intensidad Viñeta", "Fuerza del efecto de viñeta (0-1)." } },
+    { ELanguage::Italian,  { "Intensità Vignettatura", "Forza dell'effetto vignettatura (0-1)." } }
+};
+
+CONFIG_DEFINE_LOCALE(VignetteRadius)
+{
+    { ELanguage::English,  { "Vignette Radius", "Inner radius where vignette effect begins (0-1)." } },
+    { ELanguage::Japanese, { "ビネット半径", "ビネット効果が始まる内側の半径（0〜1）" } },
+    { ELanguage::German,   { "Vignette Radius", "Innerer Radius wo der Vignetten-Effekt beginnt (0-1)." } },
+    { ELanguage::French,   { "Rayon Vignette", "Rayon intérieur où l'effet commence (0-1)." } },
+    { ELanguage::Spanish,  { "Radio Viñeta", "Radio interior donde comienza el efecto (0-1)." } },
+    { ELanguage::Italian,  { "Raggio Vignettatura", "Raggio interno dove inizia l'effetto (0-1)." } }
+};
+
+CONFIG_DEFINE_LOCALE(VignetteSoftness)
+{
+    { ELanguage::English,  { "Vignette Softness", "Falloff softness of the vignette edge (higher = softer)." } },
+    { ELanguage::Japanese, { "ビネットソフトネス", "ビネットエッジの減衰の柔らかさ" } },
+    { ELanguage::German,   { "Vignette Weichheit", "Weichheit des Vignetten-Rands." } },
+    { ELanguage::French,   { "Douceur Vignette", "Douceur du dégradé du vignettage." } },
+    { ELanguage::Spanish,  { "Suavidad Viñeta", "Suavidad del borde de la viñeta." } },
+    { ELanguage::Italian,  { "Morbidezza Vignettatura", "Morbidezza del bordo della vignettatura." } }
+};
+
+CONFIG_DEFINE_LOCALE(VignetteRoundness)
+{
+    { ELanguage::English,  { "Vignette Roundness", "Shape of vignette (0 = follows aspect ratio, 1 = circular)." } },
+    { ELanguage::Japanese, { "ビネット丸み", "ビネットの形状（0=アスペクト比に従う、1=円形）" } },
+    { ELanguage::German,   { "Vignette Rundheit", "Form der Vignette (0 = Seitenverhältnis, 1 = Kreisförmig)." } },
+    { ELanguage::French,   { "Rondeur Vignette", "Forme du vignettage (0 = ratio, 1 = circulaire)." } },
+    { ELanguage::Spanish,  { "Redondez Viñeta", "Forma de la viñeta (0 = ratio, 1 = circular)." } },
+    { ELanguage::Italian,  { "Rotondità Vignettatura", "Forma della vignettatura (0 = ratio, 1 = circolare)." } }
+};
+
+CONFIG_DEFINE_LOCALE(TAABlendFactor)
+{
+    { ELanguage::English,  { "TAA Blend Factor", "TAA temporal blending strength (0.05-0.2 typical)." } },
+    { ELanguage::Japanese, { "TAAブレンド係数", "TAAの時間的ブレンドの強さ" } },
+    { ELanguage::German,   { "TAA Mischfaktor", "TAA temporale Mischstärke." } },
+    { ELanguage::French,   { "Facteur TAA", "Force du mélange temporel TAA." } },
+    { ELanguage::Spanish,  { "Factor TAA", "Fuerza de mezcla temporal TAA." } },
+    { ELanguage::Italian,  { "Fattore TAA", "Forza miscelazione temporale TAA." } }
+};
+
+CONFIG_DEFINE_LOCALE(TAAMotionScale)
+{
+    { ELanguage::English,  { "TAA Motion Scale", "Scale factor for motion vector influence in TAA." } },
+    { ELanguage::Japanese, { "TAAモーションスケール", "TAAでのモーションベクトルの影響度" } },
+    { ELanguage::German,   { "TAA Bewegungsskala", "Skalierungsfaktor für Bewegungsvektoren." } },
+    { ELanguage::French,   { "Échelle Mouvement TAA", "Facteur d'échelle pour les vecteurs de mouvement." } },
+    { ELanguage::Spanish,  { "Escala Movimiento TAA", "Factor de escala para vectores de movimiento." } },
+    { ELanguage::Italian,  { "Scala Movimento TAA", "Fattore di scala per vettori di movimento." } }
+};
+
+CONFIG_DEFINE_LOCALE(SMAAEdgeThreshold)
+{
+    { ELanguage::English,  { "SMAA Edge Threshold", "Edge detection sensitivity for SMAA (lower = more edges)." } },
+    { ELanguage::Japanese, { "SMAAエッジ閾値", "SMAAのエッジ検出感度" } },
+    { ELanguage::German,   { "SMAA Kantenschwelle", "Kantenerkennungsempfindlichkeit für SMAA." } },
+    { ELanguage::French,   { "Seuil Bords SMAA", "Sensibilité de détection des bords SMAA." } },
+    { ELanguage::Spanish,  { "Umbral Bordes SMAA", "Sensibilidad de detección de bordes SMAA." } },
+    { ELanguage::Italian,  { "Soglia Bordi SMAA", "Sensibilità rilevamento bordi SMAA." } }
+};
+
+CONFIG_DEFINE_LOCALE(FSR1Sharpness)
+{
+    { ELanguage::English,  { "FSR 1.0 Sharpness", "Sharpening strength for FSR 1.0 RCAS pass (0-1)." } },
+    { ELanguage::Japanese, { "FSR 1.0シャープネス", "FSR 1.0 RCASパスのシャープ化の強さ" } },
+    { ELanguage::German,   { "FSR 1.0 Schärfe", "Schärfestärke für FSR 1.0 RCAS." } },
+    { ELanguage::French,   { "Netteté FSR 1.0", "Force de netteté pour FSR 1.0 RCAS." } },
+    { ELanguage::Spanish,  { "Nitidez FSR 1.0", "Fuerza de nitidez para FSR 1.0 RCAS." } },
+    { ELanguage::Italian,  { "Nitidezza FSR 1.0", "Forza nitidezza per FSR 1.0 RCAS." } }
 };

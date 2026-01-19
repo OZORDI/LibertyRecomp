@@ -123,12 +123,25 @@ namespace VFS
                s_resolveCount, guestPath.c_str(), normalized.c_str(), stripped.c_str());
         fflush(stdout);
         
+        // DEBUG: Check if this is sounds.dat and trace every step
+        bool isDebugPath = (guestPath.find("sounds.dat") != std::string::npos);
+        if (isDebugPath) {
+            printf("[VFS] DEBUG sounds.dat: Starting path mapping loop, %zu mappings\n", g_pathMappings.size());
+            fflush(stdout);
+        }
+        
         // Check path mappings first
         for (const auto& mapping : g_pathMappings)
         {
             std::string mappingNorm = NormalizePath(mapping.guestPrefix);
             if (stripped.find(mappingNorm) == 0 || normalized.find(mappingNorm) != std::string::npos)
             {
+                if (isDebugPath) {
+                    printf("[VFS] DEBUG sounds.dat: MATCHED mapping '%s' -> '%s'\n", 
+                           mapping.guestPrefix.c_str(), mapping.hostPrefix.c_str());
+                    fflush(stdout);
+                }
+                
                 // Found a mapping - replace prefix
                 std::string remainder;
                 if (stripped.length() > mappingNorm.length())
@@ -146,6 +159,11 @@ namespace VFS
                     resolved /= remainder;
                 }
                 
+                if (isDebugPath) {
+                    printf("[VFS] DEBUG sounds.dat: Checking exists for '%s'\n", resolved.string().c_str());
+                    fflush(stdout);
+                }
+                
                 // Check if exists
                 std::error_code ec;
                 if (std::filesystem::exists(resolved, ec))
@@ -154,6 +172,11 @@ namespace VFS
                     printf("[VFS] FOUND via mapping: '%s' -> '%s'\n", guestPath.c_str(), resolved.string().c_str());
                     fflush(stdout);
                     return resolved;
+                }
+                
+                if (isDebugPath) {
+                    printf("[VFS] DEBUG sounds.dat: exists returned false, ec=%d\n", ec.value());
+                    fflush(stdout);
                 }
                 
                 // Try with GTA IV extensions
@@ -291,6 +314,15 @@ namespace VFS
         g_pathMappings.push_back({"common/", "common/"});
         g_pathMappings.push_back({"data/", "common/data/"});
         g_pathMappings.push_back({"text/", "common/text/"});
+        
+        // Audio paths - audio config files are stored in audio/config/
+        // Game requests "platform:/GTA/build/config/..." which strips to "gta/build/config/..."
+        // Also requests "platform:/GTA/build/engineSettings.xml" -> "gta/build/enginesettings.xml"
+        // These need to map to audio/config/
+        g_pathMappings.push_back({"gta/build/config/", "audio/config/"});
+        g_pathMappings.push_back({"gta/build/enginesettings.xml", "audio/config/enginesettings.xml"});
+        g_pathMappings.push_back({"config/", "audio/config/"});
+        g_pathMappings.push_back({"audio/", "audio/"});
         
         // Platform-specific paths (platform: → xbox360/)
         // GTA IV uses "platform:/textures/fonts" etc. for Xbox 360 platform assets

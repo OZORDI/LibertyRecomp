@@ -12,6 +12,7 @@ gta4/
 *.xcp
 game/
 game
+gta_iv/
 
 # GTA IV DLC ZIP files - DO NOT COMMIT (Copyrighted)
 GAME DLC/*.zip

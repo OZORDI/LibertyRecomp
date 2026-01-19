@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <queue>
 #include "session_tracker.h"
 
 namespace Net {
@@ -260,6 +261,8 @@ private:
     void ProcessSignalingMessages();
     void HandlePeerConnection(uint32_t peerId);
     void HandlePeerDisconnection(uint32_t peerId);
+    void ProcessIncomingMessages();
+    void QueueGamePacket(uint32_t peerId, const void* data, size_t size);
     
     // State
     std::atomic<bool> initialized_{false};
@@ -287,6 +290,14 @@ private:
     
     // Virtual IP allocation
     std::atomic<uint8_t> nextVirtualIpSuffix_{2};  // Start at 192.168.100.2
+    
+    // Game packet queue (non-voice packets for game socket layer)
+    struct GamePacket {
+        uint32_t peerId;
+        std::vector<uint8_t> data;
+    };
+    mutable std::mutex gamePacketsMutex_;
+    std::queue<GamePacket> gamePackets_;
 };
 
 // Virtual IP helpers

@@ -1,4 +1,40 @@
 #include "video.h"
+#include "gtaiv_device.h"
+#include "gtaiv_render_state.h"
+#include "postprocess_aa.h"
+#include "postprocess_renderer.h"
+#include "upscaler.h"
+#include "camera_extract.h"
+
+// Forward declarations for GTAIV renderer resource registration
+namespace GTAIV {
+    void RegisterShader(uint32_t guestHandle, GuestShader* hostShader);
+    void RegisterBuffer(uint32_t guestHandle, GuestBuffer* hostBuffer);
+    void RegisterTexture(uint32_t guestHandle, GuestTexture* hostTexture);
+    void RegisterSurface(uint32_t guestHandle, GuestSurface* hostSurface);
+    GuestShader* LookupShader(uint32_t guestHandle);
+    GuestBuffer* LookupBuffer(uint32_t guestHandle);
+    GuestTexture* LookupTexture(uint32_t guestHandle);
+    GuestSurface* LookupSurface(uint32_t guestHandle);
+    void EnableHDRPassthrough(bool enable);
+    bool IsHDRPassthroughEnabled();
+    bool IsCurrentRenderTargetHDR(uint8_t* device);
+    GTAIV::XenosSurfaceFormat GetEDRAMFormat(uint8_t* device);
+    
+    // State change detection (from gtaiv_render_state.cpp)
+    uint64_t DetectStateChanges(const RenderState& current);
+    void CommitState(const RenderState& state);
+    
+    // Pipeline cache statistics (from gfx_state.cpp)
+    struct PipelineCacheStats {
+        uint64_t hits;
+        uint64_t misses;
+        size_t entries;
+    };
+    PipelineCacheStats GetPipelineCacheStats();
+    void RecordPipelineCacheHit();
+    void RecordPipelineCacheMiss();
+}
 
 #include "install/platform_paths.h"
 #include "imgui/imgui_common.h"
@@ -57,6 +93,7 @@ extern void KernelPhase_EnterRuntime();
 #include "shader/hlsl/enhanced_burnout_blur_vs.hlsl.dxil.h"
 #include "shader/hlsl/enhanced_burnout_blur_ps.hlsl.dxil.h"
 #include "shader/hlsl/gamma_correction_ps.hlsl.dxil.h"
+#include "shader/hlsl/hdr_tonemap_ps.hlsl.dxil.h"
 #include "shader/hlsl/gaussian_blur_3x3.hlsl.dxil.h"
 #include "shader/hlsl/gaussian_blur_5x5.hlsl.dxil.h"
 #include "shader/hlsl/gaussian_blur_7x7.hlsl.dxil.h"
@@ -82,6 +119,7 @@ extern void KernelPhase_EnterRuntime();
 #include "shader/msl/enhanced_burnout_blur_vs.metal.metallib.h"
 #include "shader/msl/enhanced_burnout_blur_ps.metal.metallib.h"
 #include "shader/msl/gamma_correction_ps.metal.metallib.h"
+#include "shader/msl/hdr_tonemap_ps.metal.metallib.h"
 #include "shader/msl/gaussian_blur_3x3.metal.metallib.h"
 #include "shader/msl/gaussian_blur_5x5.metal.metallib.h"
 #include "shader/msl/gaussian_blur_7x7.metal.metallib.h"
@@ -106,6 +144,7 @@ extern void KernelPhase_EnterRuntime();
 #include "shader/hlsl/enhanced_burnout_blur_vs.hlsl.spirv.h"
 #include "shader/hlsl/enhanced_burnout_blur_ps.hlsl.spirv.h"
 #include "shader/hlsl/gamma_correction_ps.hlsl.spirv.h"
+#include "shader/hlsl/hdr_tonemap_ps.hlsl.spirv.h"
 #include "shader/hlsl/gaussian_blur_3x3.hlsl.spirv.h"
 #include "shader/hlsl/gaussian_blur_5x5.hlsl.spirv.h"
 #include "shader/hlsl/gaussian_blur_7x7.hlsl.spirv.h"
@@ -342,6 +381,10 @@ static constexpr Backend g_backend = Backend::VULKAN;
 static Backend g_backend;
 #endif
 
+Backend GetCurrentBackend() {
+    return g_backend;
+}
+
 static bool g_triangleStripWorkaround = false;
 
 // Forward declarations for GTA IV default shaders (populated by EnsureAllShadersLoaded)
@@ -376,7 +419,23 @@ static std::unique_ptr<RenderCommandFence> g_copyCommandFence;
 static std::unique_ptr<RenderSwapChain> g_swapChain;
 static bool g_swapChainValid;
 
-static constexpr RenderFormat BACKBUFFER_FORMAT = RenderFormat::B8G8R8A8_UNORM;
+// HDR output support - format selection based on Config::HDRMode
+static RenderFormat GetBackbufferFormat() {
+    switch (Config::HDRMode) {
+    case EHDRMode::scRGB:
+    case EHDRMode::HDR10:
+        // Both HDR modes use R16G16B16A16_FLOAT (plume doesn't have R10G10B10A2)
+        // Tone mapping shader handles scRGB vs HDR10 PQ conversion
+        return RenderFormat::R16G16B16A16_FLOAT;
+    default:
+        return RenderFormat::B8G8R8A8_UNORM;      // SDR
+    }
+}
+
+static RenderFormat g_backbufferFormat = RenderFormat::B8G8R8A8_UNORM;
+
+// Legacy compatibility
+#define BACKBUFFER_FORMAT g_backbufferFormat
 
 static std::unique_ptr<RenderCommandSemaphore> g_acquireSemaphores[NUM_FRAMES];
 static std::unique_ptr<RenderCommandSemaphore> g_renderSemaphores[NUM_FRAMES];
@@ -390,6 +449,7 @@ static uint32_t g_intermediaryBackBufferTextureHeight;
 static uint32_t g_intermediaryBackBufferTextureDescriptorIndex;
 
 static std::unique_ptr<RenderPipeline> g_gammaCorrectionPipeline;
+static std::unique_ptr<RenderPipeline> g_hdrTonemapPipeline;
 
 static std::unique_ptr<RenderDescriptorSet> g_textureDescriptorSet;
 static std::unique_ptr<RenderDescriptorSet> g_samplerDescriptorSet;
@@ -2188,7 +2248,21 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
         break;
     }
 
-    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, BACKBUFFER_FORMAT, Config::MaxFrameLatency);
+    // Initialize HDR backbuffer format based on config
+    g_backbufferFormat = GetBackbufferFormat();
+    
+    // Enable HDR passthrough for Xbox 360 10-bit framebuffer when HDR is enabled
+    bool hdrEnabled = (Config::HDRMode != EHDRMode::Off);
+    GTAIV::EnableHDRPassthrough(hdrEnabled);
+    
+    // Initialize post-process AA system (TAA/SMAA/FSR1)
+    PostProcess::InitializeAA();
+    
+    LOGF_INFO("[HDR] Backbuffer format: {} (HDRMode={}) Passthrough={}",
+              static_cast<int>(g_backbufferFormat), static_cast<int>(Config::HDRMode.Value),
+              hdrEnabled ? "enabled" : "disabled");
+    
+    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, g_backbufferFormat, Config::MaxFrameLatency);
     g_swapChain->setVsyncEnabled(Config::VSync);
     g_swapChainValid = !g_swapChain->needsResize();
 
@@ -2380,6 +2454,16 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
     desc.renderTargetCount = 1;
     g_gammaCorrectionPipeline = g_device->createGraphicsPipeline(desc);
 
+    // Create HDR tonemap pipeline for HDR output modes (scRGB, HDR10)
+    auto hdrTonemapShader = CREATE_SHADER(hdr_tonemap_ps);
+    if (hdrTonemapShader) {
+        desc.pixelShader = hdrTonemapShader.get();
+        // HDR output uses R16G16B16A16_FLOAT for scRGB or R10G10B10A2 for HDR10
+        desc.renderTargetFormat[0] = RenderFormat::R16G16B16A16_FLOAT;
+        g_hdrTonemapPipeline = g_device->createGraphicsPipeline(desc);
+        LOG_INFO("[Video] HDR tonemap pipeline created");
+    }
+
     // NOTE: We initially allocate this on host memory to make the installer work, even if the 4 GB memory allocation fails.
     g_backBufferHolder = std::make_unique<GuestSurface>(ResourceType::RenderTarget);
 
@@ -2398,6 +2482,27 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
         blankTextureBarriers[i] = RenderTextureBarrier(g_blankTextures[i].get(), RenderTextureLayout::SHADER_READ);
 
     g_commandLists[g_frame]->barriers(RenderBarrierStage::NONE, blankTextureBarriers, std::size(blankTextureBarriers));
+
+    // Initialize PostProcessRenderer for TAA/SMAA/FSR1
+    PostProcess::InitializePostProcessRenderer(
+        g_device.get(),
+        g_pipelineLayout.get(),
+        g_textureDescriptorSet.get(),
+        Video::s_viewportWidth,
+        Video::s_viewportHeight
+    );
+
+    // Initialize Upscaler system (DLSS, FSR3, XeSS, MetalFX)
+    // Set the graphics device for upscalers that need native API access
+#ifdef _WIN32
+    if (g_backend == Backend::D3D12) {
+        // For D3D12, get the native device
+        Upscaler::SetGraphicsDevice(g_device->getNativeInterface());
+    }
+#endif
+    if (!Upscaler::Initialize()) {
+        LOG_WARNING("[Video] Upscaler initialization failed - upscaling disabled");
+    }
 
     return true;
 }
@@ -3273,6 +3378,9 @@ void Video::Present()
     // This enables proper synchronization (fail-open during init, proper waits after)
     KernelPhase_EnterRuntime();
     
+    // Update post-process AA system (TAA jitter, dynamic resolution)
+    PostProcess::UpdateAA(static_cast<float>(App::s_deltaTime));
+    
     static uint32_t s_presentCount = 0;
     static uint32_t s_droppedFrames = 0;
     ++s_presentCount;
@@ -3395,6 +3503,70 @@ void Video::Present()
     cmd.type = RenderCommandType::ExecutePendingStretchRectCommands;
     g_renderQueue.enqueue(cmd);
 
+    // ==========================================================================
+    // Post-Processing Effects (SSAO, DoF, SSR)
+    // Applied after game rendering but before UI and present
+    // ==========================================================================
+    // Extract camera parameters using traced PPC code addresses
+    // Primary: Direct guest memory access to discovered global addresses
+    // Fallback: Extract from vertex shader constants if guest access fails
+    
+    const float* vsConstants = reinterpret_cast<const float*>(g_vertexShaderConstants);
+    Camera::ExtractCameraFromShaderConstants(vsConstants, Camera::g_cameraData);
+    
+    // Use extracted camera data
+    float cameraNear = Camera::g_cameraData.nearClip;
+    float cameraFar = Camera::g_cameraData.farClip;
+    float cameraFovY = Camera::g_cameraData.fovY;
+    const float* viewMatrix = Camera::g_cameraData.viewMatrix;
+    const float* projMatrix = Camera::g_cameraData.projMatrix;
+    bool projValid = Camera::g_cameraData.isValid;
+    
+    // Apply post-processing effects if enabled and available
+    if (g_depthStencil != nullptr && g_renderTarget != nullptr && 
+        g_depthStencil->texture != nullptr && g_renderTarget->texture != nullptr)
+    {
+        auto& commandList = g_commandLists[g_frame];
+        
+        // Apply SSAO if enabled
+        PostProcess::g_postProcessRenderer.ApplySSAO(
+            commandList.get(),
+            g_depthStencil->texture,
+            g_renderTarget->texture,
+            g_renderTarget->texture,
+            cameraNear,
+            cameraFar,
+            cameraFovY
+        );
+        
+        // Apply DoF if enabled
+        PostProcess::g_postProcessRenderer.ApplyDoF(
+            commandList.get(),
+            g_renderTarget->texture,
+            g_depthStencil->texture,
+            g_renderTarget->texture,
+            Config::DOFFocusDistance,
+            Config::DOFApertureSize,
+            cameraNear,
+            cameraFar
+        );
+        
+        // Apply SSR if enabled (requires view and projection matrices)
+        if (projValid) {
+            PostProcess::g_postProcessRenderer.ApplySSR(
+                commandList.get(),
+                g_renderTarget->texture,
+                g_depthStencil->texture,
+                g_renderTarget->texture,
+                cameraNear,
+                cameraFar,
+                cameraFovY,
+                viewMatrix,
+                projMatrix
+            );
+        }
+    }
+
     // ImGui has threading issues during gameplay - crashes with iterator assertions
     // But the installer runs single-threaded, so enable ImGui for installer UI
     if (InstallerWizard::s_isVisible)
@@ -3505,28 +3677,51 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
         auto swapChainTexture = g_swapChain->getTexture(g_backBufferIndex);
         if (g_backBuffer->texture == g_intermediaryBackBufferTexture.get())
         {
+            // HDR Tone Mapping / Gamma Correction constants
+            // When HDR is enabled, we use the HDR tonemap shader with extended constants
+            // When SDR, we use the simpler gamma correction shader
             struct
             {
+                // Common fields (must match gamma_correction_ps.hlsl layout)
                 float gamma;
                 uint32_t textureDescriptorIndex;
-
                 int32_t viewportOffsetX;
                 int32_t viewportOffsetY;
                 int32_t viewportWidth;
                 int32_t viewportHeight;
             } constants;
 
+            // HDR-specific constants structure (for hdr_tonemap_ps.hlsl)
+            struct HDRConstants
+            {
+                uint32_t hdrMode;              // 0 = SDR, 1 = scRGB, 2 = HDR10
+                float paperWhiteNits;
+                float maxLuminanceNits;
+                uint32_t textureDescriptorIndex;
+                int32_t viewportOffsetX;
+                int32_t viewportOffsetY;
+                int32_t viewportWidth;
+                int32_t viewportHeight;
+            } hdrConstants;
+
             constants.gamma = 0.85f;
-
             float offset = (Config::Brightness - 0.5f) * 1.2f;
-
             constants.gamma = 1.0f / std::clamp(constants.gamma + offset, 0.1f, 4.0f);
             constants.textureDescriptorIndex = g_intermediaryBackBufferTextureDescriptorIndex;
-
             constants.viewportOffsetX = (int32_t(g_swapChain->getWidth()) - int32_t(Video::s_viewportWidth)) / 2;
             constants.viewportOffsetY = (int32_t(g_swapChain->getHeight()) - int32_t(Video::s_viewportHeight)) / 2;
             constants.viewportWidth = Video::s_viewportWidth;
             constants.viewportHeight = Video::s_viewportHeight;
+
+            // Populate HDR constants from config
+            hdrConstants.hdrMode = static_cast<uint32_t>(Config::HDRMode.Value);
+            hdrConstants.paperWhiteNits = Config::HDRPaperWhite;
+            hdrConstants.maxLuminanceNits = Config::HDRMaxLuminance;
+            hdrConstants.textureDescriptorIndex = g_intermediaryBackBufferTextureDescriptorIndex;
+            hdrConstants.viewportOffsetX = constants.viewportOffsetX;
+            hdrConstants.viewportOffsetY = constants.viewportOffsetY;
+            hdrConstants.viewportWidth = constants.viewportWidth;
+            hdrConstants.viewportHeight = constants.viewportHeight;
 
             auto &framebuffer = g_backBuffer->framebuffers[swapChainTexture];
             if (!framebuffer)
@@ -3546,9 +3741,18 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
             auto &commandList = g_commandLists[g_frame];
             commandList->barriers(RenderBarrierStage::GRAPHICS, srcBarriers, std::size(srcBarriers));
             commandList->setGraphicsPipelineLayout(g_pipelineLayout.get());
-            commandList->setPipeline(g_gammaCorrectionPipeline.get());
+            
+            // Use HDR tonemap pipeline when HDR is enabled and pipeline is available
+            bool useHDRPipeline = (Config::HDRMode != EHDRMode::Off) && g_hdrTonemapPipeline;
+            if (useHDRPipeline) {
+                commandList->setPipeline(g_hdrTonemapPipeline.get());
+                SetRootDescriptor(g_uploadAllocators[g_frame].allocate<false>(&hdrConstants, sizeof(hdrConstants), 0x100), 2);
+            } else {
+                commandList->setPipeline(g_gammaCorrectionPipeline.get());
+                SetRootDescriptor(g_uploadAllocators[g_frame].allocate<false>(&constants, sizeof(constants), 0x100), 2);
+            }
+            
             commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
-            SetRootDescriptor(g_uploadAllocators[g_frame].allocate<false>(&constants, sizeof(constants), 0x100), 2);
             commandList->setFramebuffer(framebuffer.get());
             commandList->setViewports(RenderViewport(0.0f, 0.0f, g_swapChain->getWidth(), g_swapChain->getHeight()));
             commandList->setScissors(RenderRect(0, 0, g_swapChain->getWidth(), g_swapChain->getHeight()));
@@ -3593,6 +3797,9 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 {
     DestructTempResources();
     BeginCommandList();
+    
+    // Notify upscaler of new frame for jitter calculation
+    Upscaler::BeginFrame();
 }
 
 static GuestSurface* GetBackBuffer() 
@@ -3760,7 +3967,8 @@ static GuestTexture* CreateTexture(uint32_t width, uint32_t height, uint32_t dep
 #ifdef _DEBUG 
     texture->texture->setName(fmt::format("Texture {:X}", g_memory.MapVirtual(texture)));
 #endif
-    // printf("CreateTexture: w: %d, h: %d, depth: %d, levels: %d, usage: %d, format: %d, pool: %d, type: %d - %x\n", width, height, depth, levels, usage, format, pool, type, texture);
+    // Register with GTAIV renderer for handle translation
+    GTAIV::RegisterTexture(g_memory.MapVirtual(texture), texture);
     return texture;
 }
 
@@ -3777,6 +3985,8 @@ static GuestBuffer* CreateVertexBuffer(uint32_t length)
 #ifdef _DEBUG 
     buffer->buffer->setName(fmt::format("Vertex Buffer {:X}", g_memory.MapVirtual(buffer)));
 #endif
+    // Register with GTAIV renderer for handle translation
+    GTAIV::RegisterBuffer(g_memory.MapVirtual(buffer), buffer);
     return buffer;
 }
 
@@ -3790,6 +4000,8 @@ static GuestBuffer* CreateIndexBuffer(uint32_t length, uint32_t, uint32_t format
 #ifdef _DEBUG 
     buffer->buffer->setName(fmt::format("Index Buffer {:X}", g_memory.MapVirtual(buffer)));
 #endif
+    // Register with GTAIV renderer for handle translation
+    GTAIV::RegisterBuffer(g_memory.MapVirtual(buffer), buffer);
     return buffer;
 }
 
@@ -3855,6 +4067,9 @@ static GuestSurface* CreateSurface(uint32_t width, uint32_t height, uint32_t for
     #ifdef _DEBUG 
         surface->texture->setName(fmt::format("{} {:X}", desc.flags & RenderTextureFlag::RENDER_TARGET ? "Render Target" : "Depth Stencil", g_memory.MapVirtual(surface)));
     #endif
+        // Register with GTAIV renderer for handle translation
+        GTAIV::RegisterSurface(g_memory.MapVirtual(surface), surface);
+        
         if (params) {
             surface->wasCached = true;
             g_surfaceCache.emplace_back(surface, baseValue);
@@ -4911,6 +5126,9 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
     auto& pipeline = g_pipelines[hash];
     if (pipeline == nullptr)
     {
+        // Track pipeline cache miss for GTAIV statistics
+        GTAIV::RecordPipelineCacheMiss();
+        
         pipeline = CreateGraphicsPipeline(pipelineState);
 
 #ifdef ASYNC_PSO_DEBUG
@@ -5020,6 +5238,11 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
         std::lock_guard lock(g_pipelineCacheMutex);
         g_pipelineStatesToCache.emplace(hash, pipelineState);
 #endif
+    }
+    else
+    {
+        // Track pipeline cache hit for GTAIV statistics
+        GTAIV::RecordPipelineCacheHit();
     }
     
     return pipeline.get();
@@ -5375,13 +5598,93 @@ static void SetPrimitiveType(uint32_t primitiveType)
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.primitiveTopology, ConvertPrimitiveType(primitiveType));
 }
 
+// =============================================================================
+// GTAIV Render State Helper
+// Extracts render state from device context and binds shaders/buffers
+// Returns the extracted state for logging/debugging purposes
+// =============================================================================
+static GTAIV::RenderState ApplyGTAIVRenderState(GuestDevice* device) {
+    uint8_t* devicePtr = reinterpret_cast<uint8_t*>(device);
+    GTAIV::RenderState gtaState = GTAIV::RenderState::Extract(devicePtr);
+    
+    // Bind shaders from device context if valid
+    if (gtaState.shaderValid) {
+        GuestShader* vs = GTAIV::LookupShader(gtaState.vertexShaderHandle);
+        GuestShader* ps = GTAIV::LookupShader(gtaState.pixelShaderHandle);
+        if (vs) {
+            SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexShader, vs);
+        }
+        if (ps) {
+            SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.pixelShader, ps);
+        }
+    }
+    
+    // Bind vertex buffers from device context
+    for (int i = 0; i < 4; i++) {
+        if (gtaState.streamSource[i] != 0) {
+            GuestBuffer* vb = GTAIV::LookupBuffer(gtaState.streamSource[i]);
+            if (vb && vb->buffer) {
+                bool dirty = false;
+                SetDirtyValue(dirty, g_vertexBufferViews[i].buffer, vb->buffer->at(0));
+                SetDirtyValue(dirty, g_vertexBufferViews[i].size, vb->dataSize);
+                // Stride is set separately by SetStreamSource, use existing value
+                if (dirty) {
+                    g_dirtyStates.vertexStreamFirst = std::min<uint8_t>(g_dirtyStates.vertexStreamFirst, i);
+                    g_dirtyStates.vertexStreamLast = std::max<uint8_t>(g_dirtyStates.vertexStreamLast, i);
+                }
+            }
+        }
+    }
+    
+    // Bind index buffer from device context if present
+    if (gtaState.indexBuffer != 0) {
+        GuestBuffer* ib = GTAIV::LookupBuffer(gtaState.indexBuffer);
+        if (ib && ib->buffer) {
+            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.buffer, ib->buffer->at(0));
+            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.format, ib->format);
+            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.size, ib->dataSize);
+        }
+    }
+    
+    // Bind textures from device context
+    for (int i = 0; i < 19; i++) {
+        if (gtaState.textureSlots[i] != 0) {
+            GuestTexture* tex = GTAIV::LookupTexture(gtaState.textureSlots[i]);
+            if (tex && tex->texture) {
+                // Mark texture as bound - the texture descriptor is already set during creation
+                // The descriptor index is used in the draw call
+            }
+        }
+    }
+    
+    // Track state changes for optimization
+    uint64_t changes = GTAIV::DetectStateChanges(gtaState);
+    if (changes != 0) {
+        // State changed - log significant changes for debugging
+        if (changes & GTAIV::DirtyBit::VertexShader) g_dirtyStates.pipelineState = true;
+        if (changes & GTAIV::DirtyBit::PixelShader) g_dirtyStates.pipelineState = true;
+        if (changes & GTAIV::DirtyBit::RenderTarget) g_dirtyStates.renderTargetAndDepthStencil = true;
+        if (changes & GTAIV::DirtyBit::DepthStencil) g_dirtyStates.renderTargetAndDepthStencil = true;
+        if (changes & GTAIV::DirtyBit::BlendState) g_dirtyStates.pipelineState = true;
+    }
+    GTAIV::CommitState(gtaState);
+    
+    return gtaState;
+}
+
 static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t startVertex, uint32_t primitiveCount) 
 {
     static uint32_t s_drawPrimitiveCount = 0;
     ++s_drawPrimitiveCount;
+    
+    // Extract and apply GTA IV render state from device context
+    GTAIV::RenderState gtaState = ApplyGTAIVRenderState(device);
+    
     if (s_drawPrimitiveCount <= 10 || (s_drawPrimitiveCount % 5000) == 0)
     {
-        LOGF_WARNING("DrawPrimitive #{} type={} startVertex={} primCount={}", s_drawPrimitiveCount, primitiveType, startVertex, primitiveCount);
+        LOGF_WARNING("DrawPrimitive #{} type={} startVertex={} primCount={} HDR={}",
+            s_drawPrimitiveCount, primitiveType, startVertex, primitiveCount,
+            gtaState.IsHDR10Bit() ? "10bit" : (gtaState.IsHDR16Bit() ? "16bit" : "SDR"));
     }
 
     LocalRenderCommandQueue queue;
@@ -5423,10 +5726,16 @@ static void DrawIndexedPrimitive(GuestDevice* device, uint32_t primitiveType, in
 {
     static uint32_t s_drawIndexedPrimitiveCount = 0;
     ++s_drawIndexedPrimitiveCount;
+    
+    // Extract and apply GTA IV render state from device context
+    GTAIV::RenderState gtaState = ApplyGTAIVRenderState(device);
+    
     if (s_drawIndexedPrimitiveCount <= 10 || (s_drawIndexedPrimitiveCount % 5000) == 0)
     {
-        LOGF_WARNING("DrawIndexedPrimitive #{} type={} baseVtx={} minVtx={} numVtx={} startIdx={} primCount={}",
-            s_drawIndexedPrimitiveCount, primitiveType, baseVertexIndex, minVertexIndex, numVertices, startIndex, primitiveCount);
+        LOGF_WARNING("DrawIndexedPrimitive #{} type={} baseVtx={} startIdx={} primCount={} VS=0x{:08X} PS=0x{:08X} HDR={}",
+            s_drawIndexedPrimitiveCount, primitiveType, baseVertexIndex, startIndex, primitiveCount,
+            gtaState.vertexShaderHandle, gtaState.pixelShaderHandle,
+            gtaState.IsHDR10Bit() ? "10bit" : (gtaState.IsHDR16Bit() ? "16bit" : "SDR"));
     }
 
     LocalRenderCommandQueue queue;
@@ -5952,6 +6261,11 @@ static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType reso
     if (hash == 0x31173204A896098A)
         g_csdShader = shader;
 
+    // Register shader with GTAIV renderer for handle translation
+    // The guest address of the shader is used as the handle
+    uint32_t guestHandle = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(function));
+    GTAIV::RegisterShader(guestHandle, shader);
+
     return shader;
 }
 
@@ -6012,6 +6326,27 @@ static void SetStreamSource(GuestDevice* device, uint32_t index, GuestBuffer* bu
     cmd.setStreamSource.offset = offset;
     cmd.setStreamSource.stride = stride;
     g_renderQueue.enqueue(cmd);
+}
+
+// =============================================================================
+// GTA IV Slot-Specific SetStreamSource Wrappers
+// GTA IV has separate D3D functions for each vertex buffer slot (sub_829C9070-sub_829C9280)
+// Each function handles a specific slot, so we create wrappers that pass the correct index
+// =============================================================================
+static void SetStreamSource0(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
+    SetStreamSource(device, 0, buffer, offset, stride);
+}
+
+static void SetStreamSource1(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
+    SetStreamSource(device, 1, buffer, offset, stride);
+}
+
+static void SetStreamSource2(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
+    SetStreamSource(device, 2, buffer, offset, stride);
+}
+
+static void SetStreamSource3(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
+    SetStreamSource(device, 3, buffer, offset, stride);
 }
 
 static void ProcSetStreamSource(const RenderCommand& cmd)
@@ -8876,41 +9211,93 @@ GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 
 // =============================================================================
 // GTA IV D3D Function Hooks (AGGRESSIVE - Force rendering pipeline)
-// Based on renderer_analysis_claude.md and Xenia trace analysis
+// Based on RENDERING_RESEARCH.md and Xenia trace analysis
 // =============================================================================
-GUEST_FUNCTION_HOOK(sub_829D8860, DrawPrimitive);         // GTA IV DrawPrimitive
-GUEST_FUNCTION_HOOK(sub_829D4EE0, DrawIndexedPrimitive); // GTA IV UnifiedDraw (handles both)
-GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);           // GTA IV SetIndices (device+13580)
-GUEST_FUNCTION_HOOK(sub_829C9070, SetStreamSource);      // GTA IV SetStreamSource0 (device+12020)
-GUEST_FUNCTION_HOOK(sub_829D3728, SetTexture);           // GTA IV SetTexture (called 20x/frame)
-GUEST_FUNCTION_HOOK(sub_829C9440, SetVertexDeclaration); // GTA IV SetVertexDeclaration (device+10456)
 
+// =============================================================================
+// PM4 Command Buffer Bypass (CRITICAL - from RENDERING_RESEARCH.md Section 8.3)
+// The game builds PM4 command packets for the Xenos GPU. These must be bypassed
+// to prevent Xbox 360-specific GPU commands from being executed.
+// =============================================================================
+
+// PM4 Packet Builder - Return cmdPtr unchanged to skip packet building
+// sub_829D7E58(device, cmdPtr, flags, param1, param2) -> returns new cmdPtr
+PPC_FUNC(sub_829D7E58)
+{
+    // Return cmdPtr (r4) unchanged - skip all PM4 packet building
+    ctx.r3.u64 = ctx.r4.u64;
+}
+
+// PM4 Buffer Flush - No-op to skip GPU ring buffer submission  
+// sub_829D8568(device) -> returns buffer position
+PPC_FUNC(sub_829D8568)
+{
+    // Return current command buffer position from device[48]
+    uint32_t device = ctx.r3.u32;
+    if (device != 0) {
+        uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(device));
+        ctx.r3.u32 = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr);
+    }
+}
+
+// =============================================================================
+// GTA IV D3D Wrapper Function Hooks (from RENDERING_RESEARCH.md Section 4.1)
+// Priority: P1 = Critical draw/present, P2 = Shaders, P3 = State, P4 = Low priority
+// =============================================================================
+
+// --- Priority 1: Draw and Present Functions ---
+GUEST_FUNCTION_HOOK(sub_829D8860, DrawPrimitive);         // DrawPrimitive (ppc_recomp.135.cpp:35060)
+GUEST_FUNCTION_HOOK(sub_829D4EE0, DrawIndexedPrimitive);  // UnifiedDraw/DrawIndexedPrimitive
+
+// --- Priority 2: Shader Functions ---
+GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);       // SetVertexShader (also clears PS, device+10932)
+GUEST_FUNCTION_HOOK(sub_829D6690, SetPixelShader);        // SetPixelShader (sets both VS+PS, device+10936)
+
+// --- Priority 3: Resource Binding ---
+// GTA IV has separate functions for each vertex buffer slot - use slot-specific wrappers
+GUEST_FUNCTION_HOOK(sub_829C9070, SetStreamSource0);      // SetStreamSource slot 0 (device+12020)
+GUEST_FUNCTION_HOOK(sub_829C9120, SetStreamSource1);      // SetStreamSource slot 1 (device+12024)
+GUEST_FUNCTION_HOOK(sub_829C91D0, SetStreamSource2);      // SetStreamSource slot 2 (device+12028)
+GUEST_FUNCTION_HOOK(sub_829C9280, SetStreamSource3);      // SetStreamSource slot 3 (device+12032)
+GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);            // SetIndices (device+13580)
+GUEST_FUNCTION_HOOK(sub_829D3728, SetTexture);            // SetTexture (device+12536)
+
+// --- Priority 3: Render Target and Viewport ---
+GUEST_FUNCTION_HOOK(sub_829CA240, SetRenderTarget);       // SetRenderTarget (device+1780)
+GUEST_FUNCTION_HOOK(sub_829CA360, SetDepthStencilSurface);// SetDepthStencilSurface (device+12428)
+GUEST_FUNCTION_HOOK(sub_829D1310, SetViewport);           // SetViewport
+GUEST_FUNCTION_HOOK(sub_829D1058, SetScissorRect);        // SetScissorRect
+
+// --- Priority 4: Vertex Declaration and Sampler ---
+GUEST_FUNCTION_HOOK(sub_829C9440, SetVertexDeclaration);  // SetVertexDeclaration (device+10456)
+// NOTE: SetSamplerState (sub_829D14E0) is handled via dirty flags in FlushRenderState
+// The game sets sampler descriptors directly in device+1152, then we read them during flush
+
+// =============================================================================
+// Shared Graphics Layer Hooks (0x825xxxxx - used by abstraction layer)
+// These may be called by RAGE engine above the D3D wrapper
+// =============================================================================
 GUEST_FUNCTION_HOOK(sub_82547118, CreateVertexDeclaration);
 GUEST_FUNCTION_HOOK(sub_825470F8, SetVertexDeclaration);
-
 GUEST_FUNCTION_HOOK(sub_82548700, CreateVertexShader);
 GUEST_FUNCTION_HOOK(sub_82546EE0, SetVertexShader);
-
+GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader);
+GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
 GUEST_FUNCTION_HOOK(sub_82543918, SetStreamSource);
 GUEST_FUNCTION_HOOK(sub_82543AC8, SetIndices);
 
-GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader);
-GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
-
-// GTA IV Shader binding hooks
-// NOTE: sub_829CD350 sets BOTH vertex shader (device+10932) AND pixel shader (device+10936)
-// sub_829D6690 is UnlockTextureRect, NOT SetPixelShader (see line 8782)
-GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);      // GTA IV SetVertexShader (also sets PS)
-
+// Conditional rendering
 GUEST_FUNCTION_HOOK(sub_82636BF8, BeginConditionalSurvey);
 GUEST_FUNCTION_HOOK(sub_82636C08, EndConditionalSurvey);
 GUEST_FUNCTION_HOOK(sub_82636C10, BeginConditionalRendering);
 GUEST_FUNCTION_HOOK(sub_82636C18, EndConditionalRendering);
 
 GUEST_FUNCTION_HOOK(sub_8253B760, IsSet);
-
 GUEST_FUNCTION_HOOK(sub_82543CF0, SetClipPlane);
 
+// =============================================================================
+// Render State Hooks (shared layer addresses)
+// =============================================================================
 GUEST_FUNCTION_HOOK(sub_82541A78, SetRenderState<D3DRS_ZENABLE>);
 GUEST_FUNCTION_HOOK(sub_82541AC0, SetRenderState<D3DRS_ZWRITEENABLE>);
 GUEST_FUNCTION_HOOK(sub_82541460, SetRenderState<D3DRS_ALPHATESTENABLE>);

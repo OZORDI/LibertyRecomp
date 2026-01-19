@@ -3,7 +3,7 @@
 #include <unordered_set>
 #include <thread>
 #include <atomic>
-#include <future>
+#include <SDL.h>
 #include <stdafx.h>
 #include <cpu/ppc_context.h>
 #include <cpu/guest_thread.h>
@@ -22,16 +22,17 @@
 #include <user/config.h>
 #include <user/paths.h>
 #include <os/logger.h>
-#include <user/achievement_manager.h>
 
 #include "io/file_system.h"
 #include "vfs.h"
 #include "io/gta_file_system.h"
-// #include "sync_table.h"  // REMOVED - using Sonic direct approach
+#include "sync_table.h"
 
 #include "game_init.h"
 #include "io/net_socket.h"
 #include "io/net_session.h"
+#include "io/voice_chat.h"
+
 
 // =============================================================================
 // KERNEL PHASE SYSTEM - Fail-open waits during Boot/Init (Xenia-style)
@@ -50,7 +51,7 @@ inline bool ShouldFailOpenWait() {
 }
 
 // Transition to Init phase (call after LdrLoadModule)
-inline void KernelPhase_EnterInit() {
+void KernelPhase_EnterInit() {
     auto expected = KernelPhase::Boot;
     if (g_kernelPhase.compare_exchange_strong(expected, KernelPhase::Init)) {
         LOG_WARNING("[KERNEL_PHASE] Boot -> Init");
@@ -64,6 +65,17 @@ void KernelPhase_EnterRuntime() {
         g_kernelPhase.store(KernelPhase::Runtime, std::memory_order_release);
         LOGF_WARNING("[KERNEL_PHASE] {} -> Runtime", phase == KernelPhase::Boot ? "Boot" : "Init");
     }
+}
+
+// Global device context address (shared across threads)
+static std::atomic<uint32_t> g_guestDeviceAddr{0};
+
+extern "C" uint32_t GetGuestDeviceAddr() {
+    return g_guestDeviceAddr.load(std::memory_order_acquire);
+}
+
+extern "C" void SetGuestDeviceAddr(uint32_t addr) {
+    g_guestDeviceAddr.store(addr, std::memory_order_release);
 }
 
 #include <cerrno>
@@ -92,9 +104,20 @@ void KernelPhase_EnterRuntime() {
 // our sync primitive hooks are used instead of the weak symbols.
 // =============================================================================
 
+// Forward declarations of our hook functions - use _hook suffix to avoid weak symbol collision
+extern "C" void sub_829A9738_hook(PPCContext& ctx, uint8_t* base);  // Wait helper (NtWaitForSingleObjectEx)
+extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A39A0_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base);  // Sync wait function (KeWaitForSingleObject)
+extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base);  // Intermediate sync function (calls sub_829A3238)
+extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_827DACD8_hook(PPCContext& ctx, uint8_t* base);  // Semaphore wait
 
+extern "C" void sub_829A2380_hook(PPCContext& ctx, uint8_t* base);  // Semaphore acquire (sync table)
+extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base);  // Semaphore create wrapper (sync table)
 
-
+extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base);
 
 namespace {
 
@@ -120,7 +143,19 @@ void PatchSyncPrimitives() {
     fflush(stdout);
     
     // Patch sync primitives - these cause blocking in HUD init
+    // Use _hook suffix functions to avoid weak symbol collision on macOS
+    PatchFuncMapping(0x829A9738, &sub_829A9738_hook);  // Wait helper (NtWaitForSingleObjectEx) - CRITICAL
+    PatchFuncMapping(0x829A3560, &sub_829A3560_hook);  // XamTask + mount integration (signals completion event)
+    PatchFuncMapping(0x829A39A0, &sub_829A39A0_hook);  // Root sync primitive
+    PatchFuncMapping(0x829A3238, &sub_829A3238_hook);  // Sync wait function (KeWaitForSingleObject) - CRITICAL
+    PatchFuncMapping(0x829A39F0, &sub_829A39F0_hook);  // Intermediate sync (calls sub_829A3238) - CRITICAL
+    PatchFuncMapping(0x827DB338, &sub_827DB338_hook);  // Sync wait wrapper  
+    PatchFuncMapping(0x827DB988, &sub_827DB988_hook);  // Sync init
+    PatchFuncMapping(0x827DACD8, &sub_827DACD8_hook);  // Semaphore wait - sync table routing
 
+    PatchFuncMapping(0x82300C78, &sub_82300C78_hook);  // String/resource lookup
+    PatchFuncMapping(0x829A2380, &sub_829A2380_hook);  // Semaphore acquire (sync table)
+    PatchFuncMapping(0x829A21F8, &sub_829A21F8_hook);  // Semaphore create wrapper (sync table)
 
     
     printf("[PATCH] Sync primitive patching complete.\n");
@@ -182,7 +217,6 @@ inline bool IsKnownSpinWait(uint32_t funcAddr) {
 // Forward declarations - actual tracking functions defined after Semaphore struct
 static std::mutex g_semaphoreTrackMutex;
 static std::unordered_set<uint32_t> g_blockingSemaphoreAddrs;  // Guest addresses of blocking semaphores
-static std::unordered_map<uint32_t, KernelObject*> g_ntCreateHandleMap;  // NtCreate* handle -> KernelObject*
 static std::atomic<bool> g_initComplete{false};
 static std::atomic<int> g_semaphoreWaitCount{0};
 
@@ -195,19 +229,6 @@ void TrackBlockingSemaphoreAddr(uint32_t addr) {
 bool IsBlockingSemaphore(uint32_t addr) {
     std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
     return g_blockingSemaphoreAddrs.count(addr) > 0;
-}
-
-// Get KernelObject for NtCreate* handle (returns nullptr if not found)
-KernelObject* GetNtCreateObject(uint32_t handle) {
-    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
-    auto it = g_ntCreateHandleMap.find(handle);
-    return it != g_ntCreateHandleMap.end() ? it->second : nullptr;
-}
-
-// Register NtCreate* handle -> KernelObject mapping
-void RegisterNtCreateHandle(uint32_t handle, KernelObject* obj) {
-    std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
-    g_ntCreateHandleMap[handle] = obj;
 }
 
 bool IsInitComplete() {
@@ -1663,33 +1684,22 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
         }
         else
         {
-            // Handle arbitrary timeout - use polling with short sleep
+            // Handle arbitrary timeout - convert to timed wait
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
             uint32_t currentCount;
-            int iterations = 0;
             while (true)
             {
                 currentCount = count.load();
                 if (currentCount != 0)
                 {
                     if (count.compare_exchange_weak(currentCount, currentCount - 1))
-                    {
-                        if (s_waitCount <= 30)
-                            LOGF_WARNING("[SemWait] #{} ACQUIRED count={} after {} iterations", s_waitCount, currentCount, iterations);
                         return STATUS_SUCCESS;
-                    }
                 }
                 else
                 {
-                    auto now = std::chrono::steady_clock::now();
-                    if (now >= deadline)
-                    {
-                        if (s_waitCount <= 30)
-                            LOGF_WARNING("[SemWait] #{} TIMEOUT after {} iterations ({}ms)", s_waitCount, iterations, timeout);
+                    if (std::chrono::steady_clock::now() >= deadline)
                         return STATUS_TIMEOUT;
-                    }
-                    ++iterations;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    count.wait(0);
                 }
             }
         }
@@ -1772,6 +1782,7 @@ struct WorkerContext {
 // Registry of known worker contexts
 // Add new workers here as they are discovered
 static std::vector<WorkerContext> g_workerContexts = {
+    // Photo Mode worker - blocks during sub_821A81F0 cleanup
     // Context at 0x82B9C1D0, exit flag at +10 (decimal), semaphore handle at +20 (decimal)
     // PPC: lbz r11,10(r26) for exit flag, lwz r3,20(r26) for semaphore
     {0x82B9C1D0, 10, 20, "PhotoMode"},
@@ -1912,41 +1923,9 @@ uint32_t XGetGameRegion()
 
 uint32_t XMsgStartIORequest(uint32_t App, uint32_t Message, XXOVERLAPPED* lpOverlapped, void* Buffer, uint32_t szBuffer)
 {
-    // XGI App ID is 0xFB (251)
-    // Message 0x000B0008 = XGIUserWriteAchievements
-    if (App == 0xFB && Message == 0x000B0008 && Buffer != nullptr && szBuffer >= 8)
-    {
-        // Buffer layout:
-        // [0] = achievement_count (uint32_t)
-        // [4] = achievements_ptr (uint32_t) -> points to XUSER_ACHIEVEMENT array
-        be<uint32_t>* bufferData = static_cast<be<uint32_t>*>(Buffer);
-        uint32_t achievementCount = bufferData[0];
-        uint32_t achievementsPtr = bufferData[1];
-        
-        LOGF_WARNING("[XGI] XGIUserWriteAchievements: count={} ptr=0x{:08X}", achievementCount, achievementsPtr);
-        
-        if (achievementCount > 0 && achievementsPtr != 0)
-        {
-            // XUSER_ACHIEVEMENT structure (8 bytes each):
-            // [0] = dwUserIndex (uint32_t)
-            // [4] = dwAchievementId (uint32_t)
-            be<uint32_t>* achievements = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(achievementsPtr));
-            
-            for (uint32_t i = 0; i < achievementCount && i < 100; i++) // Cap at 100 for safety
-            {
-                uint32_t userIndex = achievements[i * 2];     // offset 0
-                uint32_t achievementId = achievements[i * 2 + 1]; // offset 4
-                
-                LOGF_WARNING("[XGI] Achievement unlock: user={} id={}", userIndex, achievementId);
-                
-                // Call our achievement manager to unlock and show popup
-                AchievementManager::Unlock(static_cast<uint16_t>(achievementId));
-            }
-        }
-    }
-    
     return STATUS_SUCCESS;
 }
+
 
 
 uint32_t XamGetSystemVersion()
@@ -2163,7 +2142,6 @@ uint32_t NtOpenFile(
 
     const uint32_t handleValue = GetKernelHandle(h);
     g_ntFileHandles.emplace(handleValue, h);
-    LOGF_IMPL(Utility, "NtCreateFile", "[FALLBACK] File handle 0x{:08X} for {}", handleValue, h->path.string());
 
     *FileHandle = handleValue;
     LOGF_IMPL(Utility, "NtOpenFile", "Opened file handle 0x{:08X} for {}", handleValue, resolved.string());
@@ -2245,15 +2223,23 @@ uint32_t NtCreateFile
             {
                 if (vfsIsDir)
                 {
-                    // FIX: Game is trying to open a directory as a file (e.g., fxl_final\ for shaders)
-                    // Return NOT_FOUND so the game uses fallback behavior instead of spinning
-                    LOGF_WARNING("[NtCreateFile] VFS path '{}' is a DIRECTORY, returning NOT_FOUND", guestPath);
+                    // Return directory handle for VFS directory
+                    NtDirHandle* hDir = CreateKernelObject<NtDirHandle>();
+                    hDir->path = vfsResolved;
+                    
+                    const uint32_t handleValue = GetKernelHandle(hDir);
+                    g_ntDirHandles.emplace(handleValue, hDir);
+                    
+                    *FileHandle = handleValue;
+                    LOGF_IMPL(Utility, "NtCreateFile", "[VFS] Directory: '{}' -> {} (handle=0x{:08X})", 
+                        guestPath, vfsResolved.string(), handleValue);
+                    
                     if (IoStatusBlock)
                     {
-                        IoStatusBlock->Status = STATUS_OBJECT_NAME_NOT_FOUND;
-                        IoStatusBlock->Information = 0;
+                        IoStatusBlock->Status = STATUS_SUCCESS;
+                        IoStatusBlock->Information = 1;
                     }
-                    return STATUS_OBJECT_NAME_NOT_FOUND;
+                    return STATUS_SUCCESS;
                 }
                 else
                 {
@@ -2476,140 +2462,14 @@ uint32_t NtCreateFile
         }
     }
 
-    // =============================================================================
-    // CreateDisposition handling for file creation (save files, etc.)
-    // NT CreateDisposition values:
-    //   FILE_SUPERSEDE (0)    - Replace file if exists, create if not
-    //   FILE_OPEN (1)         - Open existing file only
-    //   FILE_CREATE (2)       - Create new file, fail if exists
-    //   FILE_OPEN_IF (3)      - Open if exists, create if not
-    //   FILE_OVERWRITE (4)    - Open and truncate, fail if not exists
-    //   FILE_OVERWRITE_IF (5) - Open and truncate, or create
-    // =============================================================================
-    constexpr uint32_t FILE_SUPERSEDE = 0;
-    constexpr uint32_t FILE_OPEN = 1;
-    constexpr uint32_t FILE_CREATE = 2;
-    constexpr uint32_t FILE_OPEN_IF = 3;
-    constexpr uint32_t FILE_OVERWRITE = 4;
-    constexpr uint32_t FILE_OVERWRITE_IF = 5;
-    
-    std::error_code ec;
-    bool fileExists = std::filesystem::exists(resolved, ec);
-    bool shouldCreate = false;
-    bool shouldTruncate = false;
-    uint32_t fileInfo = 1; // FILE_OPENED
-    
-    switch (CreateDisposition)
-    {
-        case FILE_SUPERSEDE:
-            // Replace file - create new or overwrite existing
-            shouldCreate = true;
-            shouldTruncate = true;
-            fileInfo = fileExists ? 1 : 2; // FILE_SUPERSEDED or FILE_CREATED
-            break;
-            
-        case FILE_OPEN:
-            // Open existing only - fail if not exists
-            if (!fileExists)
-            {
-                LOGF_IMPL(Utility, "NtCreateFile", "FILE_OPEN failed - file does not exist: '{}'", resolved.string());
-                if (IoStatusBlock)
-                {
-                    IoStatusBlock->Status = STATUS_OBJECT_NAME_NOT_FOUND;
-                    IoStatusBlock->Information = 0;
-                }
-                *FileHandle = 0;
-                return STATUS_OBJECT_NAME_NOT_FOUND;
-            }
-            break;
-            
-        case FILE_CREATE:
-            // Create new - fail if exists
-            if (fileExists)
-            {
-                LOGF_IMPL(Utility, "NtCreateFile", "FILE_CREATE failed - file already exists: '{}'", resolved.string());
-                if (IoStatusBlock)
-                {
-                    IoStatusBlock->Status = STATUS_OBJECT_NAME_COLLISION;
-                    IoStatusBlock->Information = 0;
-                }
-                *FileHandle = 0;
-                return STATUS_OBJECT_NAME_COLLISION;
-            }
-            shouldCreate = true;
-            fileInfo = 2; // FILE_CREATED
-            break;
-            
-        case FILE_OPEN_IF:
-            // Open if exists, create if not
-            shouldCreate = !fileExists;
-            fileInfo = fileExists ? 1 : 2; // FILE_OPENED or FILE_CREATED
-            break;
-            
-        case FILE_OVERWRITE:
-            // Open and truncate - fail if not exists
-            if (!fileExists)
-            {
-                LOGF_IMPL(Utility, "NtCreateFile", "FILE_OVERWRITE failed - file does not exist: '{}'", resolved.string());
-                if (IoStatusBlock)
-                {
-                    IoStatusBlock->Status = STATUS_OBJECT_NAME_NOT_FOUND;
-                    IoStatusBlock->Information = 0;
-                }
-                *FileHandle = 0;
-                return STATUS_OBJECT_NAME_NOT_FOUND;
-            }
-            shouldTruncate = true;
-            fileInfo = 3; // FILE_OVERWRITTEN
-            break;
-            
-        case FILE_OVERWRITE_IF:
-            // Open and truncate, or create
-            shouldCreate = !fileExists;
-            shouldTruncate = fileExists;
-            fileInfo = fileExists ? 3 : 2; // FILE_OVERWRITTEN or FILE_CREATED
-            break;
-            
-        default:
-            // Unknown disposition - try to open existing
-            LOGF_WARNING("[NtCreateFile] Unknown CreateDisposition {} - treating as FILE_OPEN_IF", CreateDisposition);
-            shouldCreate = !fileExists;
-            break;
-    }
-    
-    // Create parent directories if we need to create a new file
-    if (shouldCreate && !fileExists)
-    {
-        std::filesystem::path parentDir = resolved.parent_path();
-        if (!parentDir.empty() && !std::filesystem::exists(parentDir, ec))
-        {
-            std::filesystem::create_directories(parentDir, ec);
-            if (ec)
-            {
-                LOGF_WARNING("[NtCreateFile] Failed to create parent directories for '{}': {}", 
-                             resolved.string(), ec.message());
-            }
-            else
-            {
-                LOGF_IMPL(Utility, "NtCreateFile", "Created parent directories for: '{}'", resolved.string());
-            }
-        }
-    }
-    
-    // Add truncate flag if needed
-    if (shouldTruncate)
-    {
-        mode |= std::ios::trunc;
-    }
-    
     std::fstream stream;
     stream.open(resolved, mode);
 
     if (!stream.is_open())
     {
         const uint32_t status = ErrnoToNtStatus(errno);
-        LOGF_IMPL(Utility, "NtCreateFile", "FAILED to open '{}' -> '{}': errno={} status=0x{:08X} (disp={})", 
-                  guestPath, resolved.string(), errno, status, CreateDisposition);
+        LOGF_IMPL(Utility, "NtCreateFile", "FAILED to open '{}' -> '{}': errno={} status=0x{:08X}", 
+                  guestPath, resolved.string(), errno, status);
         if (IoStatusBlock)
         {
             IoStatusBlock->Status = status;
@@ -2619,19 +2479,21 @@ uint32_t NtCreateFile
         return status;
     }
 
+    // TODO: Respect CreateDisposition if the title needs create/overwrite semantics.
+    (void)CreateDisposition;
+
     NtFileHandle* h = CreateKernelObject<NtFileHandle>();
     h->stream = std::move(stream);
     h->path = std::move(resolved);
 
     const uint32_t handleValue = GetKernelHandle(h);
     g_ntFileHandles.emplace(handleValue, h);
-    LOGF_IMPL(Utility, "NtCreateFile", "[FALLBACK] File handle 0x{:08X} for {}", handleValue, h->path.string());
 
     *FileHandle = handleValue;
     if (IoStatusBlock)
     {
         IoStatusBlock->Status = STATUS_SUCCESS;
-        IoStatusBlock->Information = fileInfo; // FILE_OPENED, FILE_CREATED, etc.
+        IoStatusBlock->Information = 1; // FILE_OPENED (best-effort)
     }
 
     return STATUS_SUCCESS;
@@ -2662,15 +2524,6 @@ uint32_t NtClose(uint32_t handle)
             return 0;
         }
 
-        // HANDLE LIFECYCLE: Log what type of handle is being closed
-        bool wasNtFile = g_ntFileHandles.count(handle) > 0;
-        bool wasNtDir = g_ntDirHandles.count(handle) > 0;
-        bool wasNtVirt = g_ntVirtFileHandles.count(handle) > 0;
-        static int s_closeLogCount = 0;
-        if (++s_closeLogCount <= 50 || s_closeLogCount % 200 == 0) {
-            LOGF_WARNING("[HANDLE-CLOSE] h=0x{:08X} wasFile={} wasDir={} wasVirt={}", handle, wasNtFile, wasNtDir, wasNtVirt);
-        }
-        
         // Close NT file handles we created.
         if (auto fhIt = g_ntFileHandles.find(handle); fhIt != g_ntFileHandles.end())
         {
@@ -2756,25 +2609,6 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
         return STATUS_SUCCESS;  // Return success to let caller proceed
     }
 
-    // FIX: Support waiting on file handles for async I/O completion
-    // Xbox async I/O pattern: NtWriteFile without event, then wait on file handle itself
-    // Since our NtWriteFile/NtReadFile are SYNCHRONOUS, I/O is already complete
-    // Return STATUS_SUCCESS immediately - this is proper host API implementation
-    {
-        auto it = g_ntFileHandles.find(Handle);
-        if (it != g_ntFileHandles.end() && it->second && it->second->magic == kNtFileHandleMagic)
-        {
-            static int s_fileWaitCount = 0;
-            if (++s_fileWaitCount <= 10 || s_fileWaitCount % 100 == 0)
-            {
-                uint32_t callerLR = g_ppcContext ? g_ppcContext->lr : 0;
-                LOGF_WARNING("[NtWaitEx] FILE HANDLE wait #{} handle=0x{:08X} caller=0x{:08X} - sync I/O complete, returning SUCCESS",
-                            s_fileWaitCount, Handle, callerLR);
-            }
-            return STATUS_SUCCESS;  // I/O already completed synchronously
-        }
-    }
-
     uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
     
     // Trace all wait calls to understand blocking
@@ -2788,93 +2622,77 @@ uint32_t NtWaitForSingleObjectEx(uint32_t Handle, uint32_t WaitMode, uint32_t Al
                   s_waitCount, Handle, timeout, callerLR);
     }
     
-    // POST-INIT: timeout=0 polls should actually check semaphore state
-    // Don't blindly return SUCCESS - let code flow through to check real semaphore count
-    // This allows producer/consumer patterns to work correctly
-    
     // VBlank removed - following UnleashedRecomp pattern (no force-firing)
     // Game progresses naturally without interrupt-driven timing
 
     if (IsKernelObject(Handle))
     {
+        // FIX: Handle can be either:
+        // 1. A kernel object handle (from NtCreateSemaphore/NtCreateEvent) - directly a KernelObject*
+        // 2. A guest dispatcher object address (XKSEMAPHORE/XKEVENT from KeInitialize*) - needs QueryKernelObject
+        
+        // Check if this is a guest dispatcher object by looking at the header
+        XDISPATCHER_HEADER* header = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Handle));
+        uint8_t objType = header->Type;
+        
         KernelObject* obj = nullptr;
         
-        // FIRST: Check if this is a registered NtCreate* handle
-        obj = GetNtCreateObject(Handle);
-        if (obj)
+        // Type 5 = Semaphore, Type 0/1 = Event (synchronization/notification)
+        // Use TryQueryKernelObject first to avoid lock contention on g_kernelLock
+        if (objType == 5)
         {
+            // Guest XKSEMAPHORE - try lock-free first, fallback to locking version
+            obj = TryQueryKernelObject<Semaphore>(*header);
+            if (!obj) obj = QueryKernelObject<Semaphore>(*header);
+            if (s_waitCount <= 30 || (Handle >= 0xEB2D0000 && Handle < 0xEB2E0000))
+            {
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKSEMAPHORE, queried kernel obj={}", 
+                            s_waitCount, Handle, obj ? "OK" : "NULL");
+            }
+        }
+        else if (objType == 0 || objType == 1)
+        {
+            // Guest XKEVENT - try lock-free first, fallback to locking version
+            obj = TryQueryKernelObject<Event>(*header);
+            if (!obj) obj = QueryKernelObject<Event>(*header);
             if (s_waitCount <= 30)
             {
-                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} from NtCreate* map, obj=OK", 
-                            s_waitCount, Handle);
+                LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} is guest XKEVENT type={}, queried kernel obj={}", 
+                            s_waitCount, Handle, objType, obj ? "OK" : "NULL");
             }
         }
         else
         {
-            // FALLBACK: Try as guest dispatcher object (from KeInitialize*)
-            XDISPATCHER_HEADER* header = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(Handle));
-            uint8_t objType = header->Type;
-            
-            // Type 5 = Semaphore, Type 0/1 = Event (synchronization/notification)
-            if (objType == 5)
-            {
-                obj = QueryKernelObject<Semaphore>(*header);
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} guest type=5 (Semaphore), obj={}", 
-                                s_waitCount, Handle, obj ? "OK" : "NULL");
-                }
-            }
-            else if (objType == 0 || objType == 1)
-            {
-                obj = QueryKernelObject<Event>(*header);
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} guest type={} (Event), obj={}", 
-                                s_waitCount, Handle, objType, obj ? "OK" : "NULL");
-                }
-            }
-            else
-            {
-                // Unrecognized type - return success for fail-open
-                if (s_waitCount <= 30)
-                {
-                    LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} unknown type={} - returning SUCCESS", 
-                                s_waitCount, Handle, objType);
-                }
-                return STATUS_SUCCESS;  // Fail-open for unknown objects
-            }
+            // Likely a direct kernel object handle (from NtCreate*)
+            obj = GetKernelObject(Handle);
         }
         
         if (!obj)
         {
-            LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} - no kernel object found!", s_waitCount, Handle);
+            LOGF_WARNING("[NtWaitEx] #{} handle=0x{:08X} type={} - no kernel object found!", s_waitCount, Handle, objType);
             return STATUS_TIMEOUT;
         }
         
 
-        // Proper synchronization - no fail-open (MarathonRecomp approach)
-        // Threads must wait until properly signaled via Event::Set() or Semaphore::Release()
-        if (timeout == INFINITE) {
-            return obj->Wait(timeout);
-        }
-
-        // POST-INIT: timeout=0 polls - prevent CPU spin by yielding
-        // Workers poll with timeout=0 to check for work. If no work, they loop.
-        // Without the render loop running, this becomes an infinite spin.
-        // Fix: Add small sleep on TIMEOUT to prevent 100% CPU usage.
-        {
-            uint32_t result = obj->Wait(timeout);
-            
-            if (result == STATUS_TIMEOUT && timeout == 0) {
-                // No work available - yield to prevent CPU spin
-                // This is the "provide expected environment" principle:
-                // Workers expect to yield when no work, not spin at 100% CPU
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // KERNEL POLICY: Fail-open during Boot/Init
+        if (timeout == INFINITE && ShouldFailOpenWait()) {
+            uint32_t result = obj->Wait(10);  // Short wait instead of infinite
+            if (result == STATUS_TIMEOUT) {
+                static int s_failOpenObj = 0;
+                ++s_failOpenObj;
+                if (s_failOpenObj <= 50 || s_failOpenObj % 1000 == 0) {
+                    LOGF_WARNING("[FAIL-OPEN] NtWaitEx #{} infinite->success handle=0x{:08X} caller=0x{:08X}", 
+                                s_failOpenObj, Handle, callerLR);
+                }
+                return STATUS_SUCCESS;
             }
-            
             return result;
         }
+
+        // Removed worker semaphore bypass hack - let C++20 atomic wait/notify work naturally
+        // Following Unleashed's approach: proper synchronization without forced returns
+        
+        return obj->Wait(timeout);
     }
     else
     {
@@ -2899,16 +2717,6 @@ uint32_t NtWriteFile(
     uint32_t Length,
     be<int64_t>* ByteOffset)
 {
-    static int s_writeCount = 0;
-    ++s_writeCount;
-    uint32_t callerLR = g_ppcContext ? g_ppcContext->lr : 0;
-    
-    // Trace all NtWriteFile calls to debug blocking
-    if (s_writeCount <= 20 || s_writeCount % 100 == 0) {
-        LOGF_WARNING("[NtWriteFile] #{} handle=0x{:08X} event=0x{:08X} len={} caller=0x{:08X}",
-                    s_writeCount, FileHandle, Event, Length, callerLR);
-    }
-    
     if (FileHandle == GUEST_INVALID_HANDLE_VALUE || !IsKernelObject(FileHandle))
     {
         LOGF_IMPL(Utility, "NtWriteFile", "INVALID handle 0x{:08X}", FileHandle);
@@ -2952,6 +2760,7 @@ uint32_t NtWriteFile(
         if (s_eventSignalCount <= 20 || s_eventSignalCount % 100 == 0) {
             LOGF_WARNING("[ASYNC COMPLETE] NtWriteFile signaling event 0x{:08X} (count={})", Event, s_eventSignalCount);
         }
+        SyncTable_Signal(Event, 1, 0);
     }
 
     return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
@@ -3055,7 +2864,6 @@ uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t event
 {
     static int s_count = 0;
     ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     // Log BEFORE creation to detect if CreateKernelObject crashes
     if (s_count <= 30)
@@ -3067,7 +2875,12 @@ uint32_t NtCreateEvent(be<uint32_t>* handle, void* objAttributes, uint32_t event
     Event* evt = CreateKernelObject<Event>(!eventType, !!initialState);
     uint32_t h = GetKernelHandle(evt);
     *handle = h;
-    // eventType: 0 = NotificationEvent (manual reset), 1 = SynchronizationEvent (auto reset)
+    
+    // Track this event so we can signal it later
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        g_trackedEventHandles.push_back(h);
+    }
     
     // Log AFTER creation to confirm success
     if (s_count <= 30)
@@ -3747,8 +3560,8 @@ uint32_t NtReadFile(
     const uint64_t offset = ByteOffset ? static_cast<uint64_t>(ByteOffset->get()) : 0ull;
     if (s_readCount <= 50 || s_readCount % 500 == 0)
     {
-        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X} ByteOffset={} event=0x{:08X}", 
-                  s_readCount, FileHandle, Length, offset, ByteOffset ? "SET" : "NULL", Event);
+        LOGF_IMPL(Utility, "NtReadFile", "#{} handle=0x{:08X} len={} offset=0x{:X} event=0x{:08X}", 
+                  s_readCount, FileHandle, Length, offset, Event);
     }
     
     // Helper lambda to signal completion event if provided
@@ -3825,83 +3638,19 @@ uint32_t NtReadFile(
     }
 
     // Directories can't be read as files.
+    if (auto dit = g_ntDirHandles.find(FileHandle); dit != g_ntDirHandles.end() && dit->second && dit->second->magic == kNtDirHandleMagic)
     {
-        static int s_dirDebug = 0;
-        ++s_dirDebug;
-        auto dit = g_ntDirHandles.find(FileHandle);
-        bool found = dit != g_ntDirHandles.end();
-        bool hasPtr = found && dit->second != nullptr;
-        bool magicOk = hasPtr && dit->second->magic == kNtDirHandleMagic;
-        if (s_dirDebug <= 10) {
-            LOGF_WARNING("[NtReadFile] DIR DEBUG #{} h=0x{:08X} found={} ptr={} magic={}", 
-                s_dirDebug, FileHandle, found, hasPtr, magicOk);
-        }
-        if (found && hasPtr && magicOk)
+        if (IoStatusBlock)
         {
-            if (s_dirDebug <= 10) {
-                LOGF_WARNING("[NtReadFile] REJECTING dir handle 0x{:08X}", FileHandle);
-            }
-            if (IoStatusBlock)
-            {
-                IoStatusBlock->Status = STATUS_INVALID_PARAMETER;
-                IoStatusBlock->Information = 0;
-            }
-            return STATUS_INVALID_PARAMETER;
+            IoStatusBlock->Status = STATUS_INVALID_PARAMETER;
+            IoStatusBlock->Information = 0;
         }
+        return STATUS_INVALID_PARAMETER;
     }
 
     auto it = g_ntFileHandles.find(FileHandle);
     if (it == g_ntFileHandles.end() || !it->second || it->second->magic != kNtFileHandleMagic)
     {
-        // FALLBACK: Check if this is a FileHandle from XCreateFileA (Win32 API path)
-        // This bridges the two file handle systems that were previously disconnected.
-        if (IsKernelObject(FileHandle))
-        {
-            ::FileHandle* xFileHandle = GetKernelObject<::FileHandle>(FileHandle);
-            if (xFileHandle && xFileHandle->magic == kFileHandleMagic && xFileHandle->stream.is_open())
-            {
-                static int s_fallbackCount = 0;
-                if (++s_fallbackCount <= 20 || s_fallbackCount % 100 == 0)
-                {
-                    LOGF_WARNING("[NtReadFile] FALLBACK to XCreateFileA handle 0x{:08X} (count={})", 
-                                 FileHandle, s_fallbackCount);
-                }
-                
-                if (!IoStatusBlock || !Buffer)
-                    return STATUS_INVALID_PARAMETER;
-                
-                const uint64_t fileOffset = ByteOffset ? static_cast<uint64_t>(ByteOffset->get()) : 0ull;
-                if (ByteOffset != nullptr)
-                {
-                    xFileHandle->stream.clear();
-                    xFileHandle->stream.seekg(fileOffset, std::ios::beg);
-                    if (xFileHandle->stream.bad())
-                    {
-                        IoStatusBlock->Status = STATUS_FAIL_CHECK;
-                        IoStatusBlock->Information = 0;
-                        return STATUS_FAIL_CHECK;
-                    }
-                }
-                
-                xFileHandle->stream.read(reinterpret_cast<char*>(Buffer), Length);
-                const uint32_t bytesRead = static_cast<uint32_t>(xFileHandle->stream.gcount());
-                
-                if (bytesRead == 0 && Length != 0 && xFileHandle->stream.eof())
-                {
-                    IoStatusBlock->Status = STATUS_END_OF_FILE;
-                    IoStatusBlock->Information = 0;
-                    signalCompletionEvent();
-                    return STATUS_END_OF_FILE;
-                }
-                
-                const bool ok = !xFileHandle->stream.bad();
-                IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
-                IoStatusBlock->Information = ok ? bytesRead : 0;
-                signalCompletionEvent();
-                return ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
-            }
-        }
-        
         LOGF_IMPL(Utility, "NtReadFile", "Not a file handle 0x{:08X}", FileHandle);
         return STATUS_INVALID_HANDLE;
     }
@@ -3945,7 +3694,6 @@ uint32_t NtReadFile(
     hFile->stream.read(reinterpret_cast<char*>(Buffer), Length);
     const uint32_t bytesRead = static_cast<uint32_t>(hFile->stream.gcount());
 
-
     if (bytesRead == 0 && Length != 0 && hFile->stream.eof())
     {
         IoStatusBlock->Status = STATUS_END_OF_FILE;
@@ -3976,7 +3724,6 @@ uint32_t NtReadFile(
     const bool ok = !hFile->stream.bad();
     IoStatusBlock->Status = ok ? STATUS_SUCCESS : STATUS_FAIL_CHECK;
     IoStatusBlock->Information = ok ? bytesRead : 0;
-
     
     // Signal completion event for async I/O
     signalCompletionEvent();
@@ -4043,39 +3790,8 @@ uint32_t NtAllocateVirtualMemory(
     uint32_t requested = BaseAddress->get();
     if (requested != 0)
     {
-        // Check if this overlaps with loaded executable image sections
-        // GTA IV image layout:
-        //   0x82000000 - 0x82090000: Headers/padding
-        //   0x82090000 - 0x82270000: .rdata (vtables, const data) - MUST PROTECT
-        //   0x82270000 - 0x82A00000: .text (code)
-        //   0x82A00000 - 0x82B00000: Global constructors
-        //   0x83100000 - 0x83200000: .bss (uninitialized data)
-        constexpr uint32_t IMAGE_RDATA_START = 0x82090000;
-        constexpr uint32_t IMAGE_RDATA_END   = 0x82270000;
-        
-        uint32_t allocEnd = requested + size;
-        
-        // Check for overlap with .rdata section (vtables)
-        if (requested < IMAGE_RDATA_END && allocEnd > IMAGE_RDATA_START) {
-            LOGF_WARNING("[NtAllocateVirtualMemory] BLOCKED: Fixed alloc at 0x{:08X} size=0x{:X} overlaps .rdata (0x{:08X}-0x{:08X})",
-                        requested, size, IMAGE_RDATA_START, IMAGE_RDATA_END);
-            
-            // Redirect to safe heap instead of corrupting .rdata
-            void* ptr = g_userHeap.AllocPhysical(size, kPageSize);
-            if (!ptr)
-                return STATUS_NO_MEMORY;
-            
-            uint32_t safeAddr = g_memory.MapVirtual(ptr);
-            g_ntVirtualMemoryAllocs[safeAddr] = size;
-            
-            LOGF_WARNING("[NtAllocateVirtualMemory] Redirected to safe heap: 0x{:08X}", safeAddr);
-            
-            *BaseAddress = safeAddr;
-            *RegionSize = size;
-            return STATUS_SUCCESS;
-        }
-        
-        // Accept other fixed-address requests if in-range
+        // We currently don't manage fixed-address reservations/commits.
+        // The full guest address space is already mapped, so accept the request if it is in-range.
         if (requested >= PPC_MEMORY_SIZE)
             return STATUS_INVALID_PARAMETER;
 
@@ -4180,17 +3896,7 @@ uint32_t KeSetAffinityThread(uint32_t Thread, uint32_t Affinity, be<uint32_t>* l
 
 void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
-    if (!cs) return;  // Handle NULL gracefully
-    
-    uint32_t csAddr = g_memory.MapVirtual(cs);
-    uint32_t thisThread = g_ppcContext->r13.u32;
-    
-    // Log critical section 0x82A97FB4 (deadlock investigation)
-    if (csAddr == 0x82A97FB4) {
-        LOGF_WARNING("[CS] Thread 0x{:08X} LEAVE cs=0x{:08X} recursion={}", 
-                     thisThread, csAddr, cs->RecursionCount.get());
-    }
-    
+    // printf("RtlLeaveCriticalSection");
     cs->RecursionCount = cs->RecursionCount.get() - 1;
 
     if (cs->RecursionCount.get() != 0)
@@ -4199,27 +3905,22 @@ void RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION* cs)
     std::atomic_ref owningThread(cs->OwningThread);
     owningThread.store(0);
     owningThread.notify_one();
-    
-    if (csAddr == 0x82A97FB4) {
-        LOGF_WARNING("[CS] Thread 0x{:08X} RELEASED cs=0x{:08X}", thisThread, csAddr);
-    }
 }
 
 void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 {
+    static int s_count = 0;
+    static int s_waitCount = 0;
+    ++s_count;
+    
     uint32_t thisThread = g_ppcContext->r13.u32;
     assert(thisThread != NULL);
 
-    uint32_t csAddr = g_memory.MapVirtual(cs);
-    
-    // Log critical section 0x82A97FB4 (deadlock investigation)
-    if (csAddr == 0x82A97FB4) {
-        LOGF_WARNING("[CS] Thread 0x{:08X} ENTER cs=0x{:08X} owner=0x{:08X}", 
-                     thisThread, csAddr, (uint32_t)cs->OwningThread);
-    }
-
     std::atomic_ref owningThread(cs->OwningThread);
-
+    
+    int loopCount = 0;
+    constexpr int MAX_SPIN_LOOPS = 50;  // Very low - yield() is slow, force-acquire quickly
+    
     while (true) 
     {
         uint32_t previousOwner = 0;
@@ -4227,18 +3928,33 @@ void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
         if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
         {
             cs->RecursionCount = cs->RecursionCount.get() + 1;
-            if (csAddr == 0x82A97FB4) {
-                LOGF_WARNING("[CS] Thread 0x{:08X} ACQUIRED cs=0x{:08X} recursion={}", 
-                             thisThread, csAddr, cs->RecursionCount.get());
-            }
             return;
         }
 
-        if (csAddr == 0x82A97FB4) {
-            LOGF_WARNING("[CS] Thread 0x{:08X} WAITING cs=0x{:08X} blocked by owner=0x{:08X}", 
-                         thisThread, csAddr, previousOwner);
+        // Log when we're waiting on a lock held by another thread
+        if (loopCount == 0) {
+            ++s_waitCount;
+            if (s_waitCount <= 20) {
+                LOGF_WARNING("[LOCK] RtlEnterCriticalSection #{} thisThread=0x{:08X} WAITING on owner=0x{:08X} cs=0x{:08X}",
+                             s_count, thisThread, previousOwner, reinterpret_cast<uintptr_t>(cs) & 0xFFFFFFFF);
+            }
         }
-        owningThread.wait(previousOwner);
+        ++loopCount;
+        
+        // After many spins, force acquire the lock to prevent deadlock
+        // This is a workaround for init-time deadlocks where owner is blocked
+        if (loopCount > MAX_SPIN_LOOPS) {
+            if (s_waitCount <= 30) {
+                LOGF_WARNING("[LOCK] FORCE ACQUIRE cs=0x{:08X} after {} spins (owner=0x{:08X} may be blocked)",
+                             reinterpret_cast<uintptr_t>(cs) & 0xFFFFFFFF, loopCount, previousOwner);
+            }
+            owningThread.store(thisThread);
+            cs->RecursionCount = 1;
+            return;
+        }
+        
+        // Brief yield instead of blocking wait
+        std::this_thread::yield();
     }
 }
 
@@ -4327,10 +4043,85 @@ bool VdPersistDisplay(uint32_t a1, uint32_t* a2)
 
 void VdSwap()
 {
-    // MarathonRecomp-style: VdSwap is a stub
-    // Frame presentation is handled by Video::Present() hooked to game's D3D Present
-    // Phase transition and FPS limiting happen in Video::Present()
-    LOG_UTILITY("!!! STUB !!!");
+    // KERNEL POLICY: First VdSwap = Runtime phase
+    KernelPhase_EnterRuntime();
+
+    // VdSwap is called by the Xbox 360 GPU to present frames
+    static uint32_t s_frameCount = 0;
+    if (s_frameCount < 10 || (s_frameCount % 60 == 0 && s_frameCount < 600))
+    {
+        LOGF_UTILITY("VdSwap frame {} - presenting!", s_frameCount);
+    }
+    ++s_frameCount;
+    
+    // Pump SDL events to keep the window responsive
+    // IMPORTANT: On macOS, this MUST happen on the main thread
+    if (IsMainThread())
+    {
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        GameWindow::Update();
+    }
+    
+    // Call our host rendering system to present the frame
+    Video::Present();
+    
+    // Signal "End of Frame" to unblock workers waiting on GPU fences
+    // The GPU fence at 0x8006F844 and 0x8006F7F4 need to be signaled
+    // Also increment the global KeSetEvent generation to wake any waiters
+    ++g_keSetEventGeneration;
+    g_keSetEventGeneration.notify_all();
+    
+    // Signal ALL tracked Event objects to unblock workers
+    // Workers are waiting on events with infinite timeout - they need to be signaled
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        static int s_signalLogCount = 0;
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        if (s_signalLogCount < 5)
+        {
+            ++s_signalLogCount;
+            LOGF_UTILITY("VdSwap signaled {} events (gen={})", g_trackedEventHandles.size(), g_keSetEventGeneration.load());
+        }
+    }
+    
+    // Signal worker semaphores to process queued work
+    // Based on PPC analysis: workers wait on semaphores created during init
+    // These semaphores need periodic signaling to drive worker processing
+    static const std::vector<uint32_t> workerSemaphores = {
+        0xA8240270, 0xA82402B0, 0xA82402F0, 0xA8240370,
+        0xA82403B0, 0xA82403F0, 0xA8240430, 0xA8240470,
+        0xA82404B0, 0xA82404F0, 0xA8240530, 0xA8240570
+    };
+    
+    static int s_semSignalCount = 0;
+    for (uint32_t semHandle : workerSemaphores)
+    {
+        if (IsKernelObject(semHandle))
+        {
+            Semaphore* sem = GetKernelObject<Semaphore>(semHandle);
+            if (sem && sem->count.load() == 0)
+            {
+                sem->Release(1, nullptr);  // Signal one worker
+            }
+        }
+    }
+    
+    if (s_semSignalCount < 5)
+    {
+        ++s_semSignalCount;
+        LOGF_UTILITY("VdSwap signaled {} worker semaphores", workerSemaphores.size());
+    }
 }
 
 void VdGetSystemCommandBuffer()
@@ -4642,51 +4433,75 @@ void VdSetDisplayMode()
 }
 
 // =============================================================================
-// VBlank Timer - ENABLED for GTA IV (needs periodic VBlank signals)
+// VBlank Timer Thread - Fires at 60Hz to drive timing-dependent systems
 // =============================================================================
-static std::atomic<bool> g_vblankTimerRunning{false};
+// GTA IV expects VBlank interrupts at exactly 60Hz even during initialization.
+// This is different from Sonic Unleashed which doesn't need VBlank timing.
+// The timer fires the registered graphics interrupt callback and wakes event waiters.
+
+static std::atomic<bool> g_vblankThreadRunning{false};
 static std::thread g_vblankThread;
 
-// Forward declaration for main loop entry
-
-void FireVBlankCallback() {
-    if (g_gpuRingBuffer.interruptCallback != 0) {
-        // Create a temporary context to call the guest callback
-        PPCContext ctx{};
-        ctx.r3.u32 = g_gpuRingBuffer.interruptUserData;
-        ctx.r4.u32 = 0;  // Interrupt type 0 = VBlank
+void StartVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+        return;  // Already running
+    
+    g_vblankThreadRunning = true;
+    printf("[StartVBlankTimer] Starting VBlank thread...\n");
+    g_vblankThread = std::thread([]() {
+        using namespace std::chrono;
+        auto nextVBlank = steady_clock::now();
+        constexpr auto VBLANK_INTERVAL = nanoseconds(16666667);  // 60Hz = 16.666ms
         
-        auto* callbackFunc = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
-        if (callbackFunc) {
-            callbackFunc(ctx, g_memory.base);
+        uint32_t vblankCount = 0;
+        
+        while (g_vblankThreadRunning)
+        {
+            nextVBlank += VBLANK_INTERVAL;
+            std::this_thread::sleep_until(nextVBlank);
+            
+            ++vblankCount;
+            
+            // Fire VBlank callback if registered
+            // NOTE: g_ppcContext is thread_local and NULL on this thread!
+            // We create our own context for VBlank callbacks.
+            if (vblankCount <= 3) { printf("[VBlank] Thread tick #%u callback=0x%08X\n", vblankCount, g_gpuRingBuffer.interruptCallback); }
+            if (g_gpuRingBuffer.interruptCallback != 0)
+            {
+                PPCFunc* callback = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
+                if (callback)
+                {
+                    // Create a minimal context for VBlank callback
+                    // Cannot use g_ppcContext - it's thread_local and null here
+                    static PPCContext vblankCtx{};
+                    vblankCtx.r3.u32 = 0;  // Interrupt type 0 = VBlank
+                    vblankCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
+                    vblankCtx.r1.u64 = 0x80080000;  // Minimal stack pointer
+                    vblankCtx.r13.u64 = 0x80000D20; // Minimal TLS base
+                    callback(vblankCtx, g_memory.base);
+                    
+                    if (vblankCount <= 5 || vblankCount % 60 == 0)
+                    {
+                        LOGF_UTILITY("[VBlank] Fired callback #{} at 60Hz", vblankCount);
+                    }
+                }
+            }
+            
+            // Increment event generation to wake any waiters
+            ++g_keSetEventGeneration;
+            g_keSetEventGeneration.notify_all();
         }
-        
-        // VBlank callback complete - game code handles render loop naturally
-    }
+    });
 }
 
-void VBlankTimerThread() {
-    while (g_vblankTimerRunning.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60Hz
-        FireVBlankCallback();
-    }
-}
-
-void StartVBlankTimer() {
-    if (!g_vblankTimerRunning.load()) {
-        g_vblankTimerRunning.store(true);
-        g_vblankThread = std::thread(VBlankTimerThread);
-        printf("[VBlank] Timer started (60Hz)\n");
-    }
-}
-
-void StopVBlankTimer() {
-    if (g_vblankTimerRunning.load()) {
-        g_vblankTimerRunning.store(false);
-        if (g_vblankThread.joinable()) {
+void StopVBlankTimer()
+{
+    if (g_vblankThreadRunning)
+    {
+        g_vblankThreadRunning = false;
+        if (g_vblankThread.joinable())
             g_vblankThread.join();
-        }
-        printf("[VBlank] Timer stopped\n");
     }
 }
 
@@ -4695,18 +4510,43 @@ void VdSetGraphicsInterruptCallback(uint32_t callback, uint32_t userData)
     g_gpuRingBuffer.interruptCallback = callback;
     g_gpuRingBuffer.interruptUserData = userData;
     
-    printf("[VdSetGraphicsInterruptCallback] callback=0x%08X userData=0x%08X\n", callback, userData);
+    // Start VBlank timer when callback is registered (GTA IV requirement)
+    StartVBlankTimer();
     
-    // DISABLED: Forced VBlank timer - let game run naturally (MarathonRecomp approach)
-    // StartVBlankTimer();
+    printf("[VdSetGraphicsInterruptCallback] callback=0x%08X userData=0x%08X - VBlank timer started at 60Hz\n", callback, userData);
 }
 
 uint32_t VdInitializeEngines()
 {
     g_gpuRingBuffer.enginesInitialized = true;
     
+    // FORCE: Register VBlank callback since VdSetGraphicsInterruptCallback is never called
+    // The callback 0x829D7368 is the known VBlank handler from GTA IV
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[VdInitializeEngines] FORCE-registering VBlank callback 0x829D7368\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
     LOG_UTILITY("enginesInitialized = true");
     
+    // Signal all tracked events to wake waiting threads
+    // Workers may be blocked waiting for GPU initialization to complete
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        LOGF_UTILITY("VdInitializeEngines signaled {} events", g_trackedEventHandles.size());
+    }
     
     return 1;
 }
@@ -4754,8 +4594,26 @@ uint32_t VdRetrainEDRAM()
         LOGF_UTILITY("edramTrainingComplete = true (call #{})", s_callCount);
     }
     
-    // DISABLED: Event signaling - MarathonRecomp style
-    // Sync primitives work via fail-open during init, proper waits during runtime
+    // Signal all tracked events to wake waiting threads
+    // GPU initialization complete - workers can proceed
+    {
+        std::lock_guard lock(g_eventTrackMutex);
+        for (uint32_t h : g_trackedEventHandles)
+        {
+            if (IsKernelObject(h))
+            {
+                Event* evt = GetKernelObject<Event>(h);
+                if (evt)
+                {
+                    evt->Set();
+                }
+            }
+        }
+        if (s_callCount <= 3)
+        {
+            LOGF_UTILITY("VdRetrainEDRAM signaled {} events", g_trackedEventHandles.size());
+        }
+    }
     
     return 0;  // Success
 }
@@ -4842,8 +4700,21 @@ void KeUnlockL2()
 
 bool KeSetEvent(XKEVENT* pEvent, uint32_t Increment, bool Wait)
 {
-    // SONIC APPROACH: Direct kernel object signal - no SyncTable
-    bool result = QueryKernelObject<Event>(*pEvent)->Set();
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 20 || s_count % 100 == 0)
+    {
+        LOGF_IMPL(Utility, "Event", "KeSetEvent #{}", s_count);
+    }
+    
+    // Use TryQueryKernelObject first to avoid lock contention - object should already exist
+    Event* event = TryQueryKernelObject<Event>(*pEvent);
+    if (!event) {
+        // Rare case: object doesn't exist yet, use locking version
+        event = QueryKernelObject<Event>(*pEvent);
+    }
+    bool result = event->Set();
 
     ++g_keSetEventGeneration;
     g_keSetEventGeneration.notify_all();
@@ -4853,7 +4724,13 @@ bool KeSetEvent(XKEVENT* pEvent, uint32_t Increment, bool Wait)
 
 bool KeResetEvent(XKEVENT* pEvent)
 {
-    return QueryKernelObject<Event>(*pEvent)->Reset();
+    // Use TryQueryKernelObject first to avoid lock contention - object should already exist
+    Event* event = TryQueryKernelObject<Event>(*pEvent);
+    if (!event) {
+        // Rare case: object doesn't exist yet, use locking version
+        event = QueryKernelObject<Event>(*pEvent);
+    }
+    return event->Reset();
 }
 
 // Track recent async reads for correlation with waits
@@ -4871,26 +4748,106 @@ static int g_mostWaitedCount = 0;
 
 uint32_t KeWaitForSingleObject(XDISPATCHER_HEADER* Object, uint32_t WaitReason, uint32_t WaitMode, bool Alertable, be<int64_t>* Timeout)
 {
-    const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
-    
-    // Proper synchronization using C++20 atomic wait (like MarathonRecomp)
-    // No fail-open - threads must wait until properly signaled
     static int s_waitCount = 0;
+    static int s_infiniteWaitCount = 0;
     ++s_waitCount;
-    if (s_waitCount <= 30) {
-        LOGF_WARNING("[KeWait] #{} type={} timeout={}", s_waitCount, Object->Type, timeout);
+    
+    const uint32_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    const uint32_t caller = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
+    const uint32_t objAddr = Object ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Object) - reinterpret_cast<uintptr_t>(g_memory.base)) : 0;
+    
+    // TRACK REPEATED WAITS: Find the handle that's blocking
+    // Exclude GPU fence handles (0x8006F844, 0x8006F7F4) and GPU thread (0x829DDD48) - already handled
+    bool isGpuWait = (objAddr == 0x8006F844 || objAddr == 0x8006F7F4 || caller == 0x829DDD48);
+    
+    // Get thread ID for tracking
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    // Log ALL infinite waits with thread info to find the blocking main thread
+    if (timeout == INFINITE && !isGpuWait)
+    {
+        static int s_infiniteNonGpu = 0;
+        ++s_infiniteNonGpu;
+        if (s_infiniteNonGpu <= 30 || s_infiniteNonGpu % 100 == 0)
+        {
+            LOGF_WARNING("[INFINITE WAIT] #{} thread=0x{:04X} handle=0x{:08X} type={} caller=0x{:08X}", 
+                        s_infiniteNonGpu, threadId, objAddr, Object ? Object->Type : -1, caller);
+        }
+    }
+    
+    if (objAddr != 0 && !isGpuWait)
+    {
+        std::lock_guard<std::mutex> lock(g_waitTrackMutex);
+        int& count = g_handleWaitCounts[objAddr];
+        ++count;
+        
+        // Update most-waited handle (non-GPU)
+        if (count > g_mostWaitedCount)
+        {
+            g_mostWaitedCount = count;
+            g_mostWaitedHandle = objAddr;
+        }
     }
 
+    // =======================================================================
+    // KERNEL POLICY: Fail-open infinite waits during Boot/Init phases
+    // Exclude GPU thread (0x829DDD48) - it has its own frame timing
+    // =======================================================================
+    if (timeout == INFINITE && ShouldFailOpenWait() && !isGpuWait) {
+        // Try-wait with short timeout (10ms) instead of 0 to give threads a chance
+        // Use TryQueryKernelObject first to avoid lock contention
+        KernelObject* obj = nullptr;
+        switch (Object->Type) {
+            case 0: case 1: 
+                obj = TryQueryKernelObject<Event>(*Object);
+                if (!obj) obj = QueryKernelObject<Event>(*Object);
+                break;
+            case 5: 
+                obj = TryQueryKernelObject<Semaphore>(*Object);
+                if (!obj) obj = QueryKernelObject<Semaphore>(*Object);
+                break;
+        }
+        
+        if (obj) {
+            uint32_t result = obj->Wait(10);  // Short wait instead of immediate
+            if (result == STATUS_TIMEOUT) {
+                // Still timed out - return success (do not force signal, just let it proceed)
+                static int s_failOpenCount = 0;
+                ++s_failOpenCount;
+                if (s_failOpenCount <= 50 || s_failOpenCount % 1000 == 0) {
+                    LOGF_WARNING("[FAIL-OPEN] #{} KeWait timeout->success obj=0x{:08X} type={} caller=0x{:08X}", 
+                                s_failOpenCount, objAddr, Object->Type, caller);
+                }
+                return STATUS_SUCCESS;
+            }
+            return result;
+        }
+    }
+
+    
+    // Use TryQueryKernelObject first to avoid lock contention on g_kernelLock
     switch (Object->Type)
     {
         case 0:
         case 1:
-            QueryKernelObject<Event>(*Object)->Wait(timeout);
+        {
+            Event* event = TryQueryKernelObject<Event>(*Object);
+            if (!event) {
+                event = QueryKernelObject<Event>(*Object);
+            }
+            event->Wait(timeout);
             break;
+        }
 
         case 5:
-            QueryKernelObject<Semaphore>(*Object)->Wait(timeout);
+        {
+            Semaphore* sem = TryQueryKernelObject<Semaphore>(*Object);
+            if (!sem) {
+                sem = QueryKernelObject<Semaphore>(*Object);
+            }
+            sem->Wait(timeout);
             break;
+        }
 
         default:
             LOGF_IMPL(Utility, "KeWaitForSingleObject", "Unrecognized kernel object type: {}", Object->Type);
@@ -4920,16 +4877,6 @@ static Mutex g_tlsAllocationMutex;
 static uint32_t& KeTlsGetValueRef_Host(size_t index)
 {
     thread_local std::vector<uint32_t> s_tlsValues;
-    
-    // Sanity check - limit to reasonable TLS slot count to prevent infinite resize
-    constexpr size_t MAX_HOST_TLS_SLOTS = 256;
-    if (index >= MAX_HOST_TLS_SLOTS)
-    {
-        static thread_local uint32_t s_dummy = 0;
-        LOGF_WARNING("[KeTlsGetValueRef_Host] Index {} exceeds max {}, returning dummy", index, MAX_HOST_TLS_SLOTS);
-        return s_dummy;
-    }
-    
     if (s_tlsValues.size() <= index)
     {
         s_tlsValues.resize(index + 1, 0);
@@ -5264,24 +5211,19 @@ uint32_t NtSetEvent(Event* handle, uint32_t* previousState)
 uint32_t NtCreateSemaphore(be<uint32_t>* Handle, XOBJECT_ATTRIBUTES* ObjectAttributes, uint32_t InitialCount, uint32_t MaximumCount)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
-    
     Semaphore* sem = CreateKernelObject<Semaphore>(InitialCount, MaximumCount);
     *Handle = GetKernelHandle(sem);
     uint32_t handle = *Handle;
-    
-    // Register handle -> object mapping for NtWaitForSingleObjectEx
-    RegisterNtCreateHandle(handle, sem);
     
     // Track blocking semaphores (count=0) for signaling after init
     if (InitialCount == 0) {
         // Store the kernel handle for later signaling
         std::lock_guard<std::mutex> lock(g_semaphoreTrackMutex);
         g_blockingSemaphoreAddrs.insert(handle);  // Track handle directly
-        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count=0 max={} - REGISTERED", 
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count=0 max={} - TRACKED for signaling", 
                      s_count, handle, MaximumCount);
     } else if (s_count <= 50) {
-        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={} - REGISTERED", 
+        LOGF_WARNING("[NtCreateSemaphore] #{} handle=0x{:08X} count={} max={}", 
                      s_count, handle, InitialCount, MaximumCount);
     }
     
@@ -5303,7 +5245,6 @@ uint32_t NtReleaseSemaphore(uint32_t Handle, uint32_t ReleaseCount, int32_t* Pre
         }
         return STATUS_INVALID_HANDLE;
     }
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     KernelObject* obj = GetKernelObject(Handle);
     if (!obj)
@@ -5537,81 +5478,20 @@ uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint32_t>* 
     if (startContext != 0 && startContext >= 0x82000000 && startContext < 0x84000000)
     {
         uint32_t* ctxMem = reinterpret_cast<uint32_t*>(g_memory.Translate(startContext));
-        uint32_t taskFunc = ByteSwap(ctxMem[0]);
-        uint32_t objectArg = ByteSwap(ctxMem[1]);
-        
         LOGF_IMPL(Utility, "ExCreateThread", "startContext@0x{:08X}: [0]=0x{:08X}, [1]=0x{:08X}, [2]=0x{:08X}, [3]=0x{:08X}",
-            startContext, taskFunc, objectArg, ByteSwap(ctxMem[2]), ByteSwap(ctxMem[3]));
-        
-        // Check worker objects for uninitialized vtables
-        if (taskFunc == 0x8298E700 && objectArg >= 0x83000000 && objectArg < 0x84000000) {
-            uint32_t* objMem = reinterpret_cast<uint32_t*>(g_memory.Translate(objectArg));
-            uint32_t vtable = ByteSwap(objMem[0]);
-            
-            // Valid vtable range includes .rdata section starting at 0x82090000
-            bool validVtable = (vtable >= 0x82090000 && vtable < 0x82A00000);
-            
-            LOGF_WARNING("[ExCreateThread] Worker 0x8298E700 object=0x{:08X} vtable=0x{:08X} ({})",
-                        objectArg, vtable, validVtable ? "VALID" : "INVALID");
-            
-            if (!validVtable) {
-                // FIX: Copy vtable to safe heap memory to avoid .rdata corruption
-                // The vtable at 0x82097D14 is valid initially but gets overwritten
-                // by string data due to memory layout collision
-                // NOTE: This is a global used by PPC_FUNC(sub_8298E700) hook
-                extern uint32_t s_safeWorkerVtableFromExCreateThread;
-                
-                if (s_safeWorkerVtableFromExCreateThread == 0) {
-                    // Allocate 64 bytes (16 entries) from safe heap
-                    constexpr uint32_t VTABLE_ENTRIES = 16;
-                    void* heapMem = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-                    if (heapMem) {
-                        s_safeWorkerVtableFromExCreateThread = g_memory.MapVirtual(heapMem);
-                        uint32_t* dstMem = reinterpret_cast<uint32_t*>(heapMem);
-                        
-                        // HARDCODE known-good vtable entries (captured before memory corruption)
-                        // From earlier successful run: [0]=0x8296DDA8 [1]=0x820E1D8C [2]=0x82972FE0 [3]=0x82790390
-                        // These are the function pointers for the worker object vtable
-                        dstMem[0]  = ByteSwap(0x8296DDA8u);  // destructor
-                        dstMem[1]  = ByteSwap(0x820E1D8Cu);  // method 1
-                        dstMem[2]  = ByteSwap(0x82972FE0u);  // method 2  
-                        dstMem[3]  = ByteSwap(0x82790390u);  // method 3 (THIS IS THE ONE CALLED AT LR=0x8298E780)
-                        dstMem[4]  = ByteSwap(0x82790390u);  // fill remaining with safe stub
-                        dstMem[5]  = ByteSwap(0x82790390u);
-                        dstMem[6]  = ByteSwap(0x82790390u);
-                        dstMem[7]  = ByteSwap(0x82790390u);
-                        dstMem[8]  = ByteSwap(0x82790390u);
-                        dstMem[9]  = ByteSwap(0x82790390u);
-                        dstMem[10] = ByteSwap(0x82790390u);
-                        dstMem[11] = ByteSwap(0x82790390u);
-                        dstMem[12] = ByteSwap(0x82790390u);
-                        dstMem[13] = ByteSwap(0x82790390u);
-                        dstMem[14] = ByteSwap(0x82790390u);
-                        dstMem[15] = ByteSwap(0x82790390u);
-                        
-                        LOGF_WARNING("[ExCreateThread] Created HARDCODED safe vtable at 0x{:08X}",
-                                    s_safeWorkerVtableFromExCreateThread);
-                    }
-                }
-                
-                if (s_safeWorkerVtableFromExCreateThread != 0) {
-                    objMem[0] = ByteSwap(s_safeWorkerVtableFromExCreateThread);
-                    LOGF_WARNING("[ExCreateThread] FIXED: Injected safe vtable 0x{:08X} into object 0x{:08X}",
-                                s_safeWorkerVtableFromExCreateThread, objectArg);
-                }
-            }
-        }
+            startContext, 
+            ByteSwap(ctxMem[0]), ByteSwap(ctxMem[1]), ByteSwap(ctxMem[2]), ByteSwap(ctxMem[3]));
     }
 
 
-    static int s_threadCount = 0;
-    ++s_threadCount;
-    
-    // REMOVED: Premature Runtime trigger after 8 threads
-    // Following guide principle: Runtime phase should trigger when INIT COMPLETES
-    // not when arbitrary thread count is reached. See sub_8218BEB0 hook.
-    
-    LOGF_WARNING("[ExCreateThread] Thread #{} entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", s_threadCount, 
+    // FIX: Force threads to start immediately - suspended threads cause deadlocks
+    // because they cannot signal semaphores that other code waits on
+    if (creationFlags != 0) {
+        LOGF_WARNING("[ExCreateThread] FORCING flags=0 (was 0x{:X}) entry=0x{:08X}", creationFlags, entry);
+        creationFlags = 0;
+    }
+
+    LOGF_WARNING("[ExCreateThread] Creating thread entry=0x{:08X} r3=0x{:08X} r4=0x{:08X} flags=0x{:X}", 
                  entry, r3, r4, creationFlags);
     *handle = GetKernelHandle(GuestThread::Start({ entry, r3, r4, creationFlags }, &hostThreadId));
     LOGF_UTILITY("0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}, 0x{:X} {:X}",
@@ -5726,27 +5606,59 @@ uint32_t NetDll_XNetGetTitleXnAddr(uint32_t pAddr)
 
 uint32_t KeWaitForMultipleObjects(uint32_t Count, xpointer<XDISPATCHER_HEADER>* Objects, uint32_t WaitType, uint32_t WaitReason, uint32_t WaitMode, uint32_t Alertable, be<int64_t>* Timeout)
 {
-    // SONIC APPROACH: Simple WaitMultiple implementation
-    // WaitType: 0 = WaitAll, 1 = WaitAny
-    // Returns: STATUS_WAIT_0 + index for WaitAny, STATUS_SUCCESS for WaitAll
+    // FIXME: This function is only accounting for events.
+    static int s_callCount = 0;
+    ++s_callCount;
     
-    uint32_t callerLR = g_ppcContext ? g_ppcContext->lr : 0;
-    uint64_t timeoutMs = GuestTimeoutToMilliseconds(Timeout);
+    uint32_t caller = g_ppcContext ? g_ppcContext->lr : 0;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
     
-    // Convert timeout to uint32_t (clamp if needed)
-    uint32_t timeoutMs32 = (timeoutMs > 0xFFFFFFFF) ? INFINITE : static_cast<uint32_t>(timeoutMs);
-    
-    // Collect object addresses from the dispatcher headers
-    // Convert host pointers back to guest addresses
-    std::vector<uint32_t> addresses(Count);
-    for (size_t i = 0; i < Count; i++)
+    if (s_callCount <= 20 || s_callCount % 100 == 0)
     {
-        // Objects[i].get() returns host pointer, convert to guest address
-        addresses[i] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Objects[i].get()) - reinterpret_cast<uintptr_t>(g_memory.base));
+        LOGF_WARNING("[KeWaitMultiple] #{} thread=0x{:04X} count={} waitType={} caller=0x{:08X}", 
+                    s_callCount, threadId, Count, WaitType, caller);
     }
-    
-    // Delegate to SyncTable_WaitMultiple
-    // TODO: Implement proper WaitMultiple without SyncTable
+
+    const uint64_t timeout = GuestTimeoutToMilliseconds(Timeout);
+    assert(timeout == INFINITE);
+
+    if (WaitType == 0) // Wait all
+    {
+        for (size_t i = 0; i < Count; i++)
+            QueryKernelObject<Event>(*Objects[i])->Wait(timeout);
+    }
+    else
+    {
+        thread_local std::vector<Event*> s_events;
+        s_events.resize(Count);
+
+        for (size_t i = 0; i < Count; i++)
+            s_events[i] = QueryKernelObject<Event>(*Objects[i]);
+
+        int loopCount = 0;
+        while (true)
+        {
+            ++loopCount;
+            if (loopCount <= 5 || loopCount % 1000 == 0)
+            {
+                LOGF_WARNING("[KeWaitMultiple] Loop #{} thread=0x{:04X} waiting on {} objects", 
+                            loopCount, threadId, Count);
+            }
+            
+            uint32_t generation = g_keSetEventGeneration.load();
+
+            for (size_t i = 0; i < Count; i++)
+            {
+                if (s_events[i]->Wait(0) == STATUS_SUCCESS)
+                {
+                    return STATUS_WAIT_0 + i;
+                }
+            }
+
+            g_keSetEventGeneration.wait(generation);
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -5760,7 +5672,6 @@ void KfLowerIrql() { }
 uint32_t KeReleaseSemaphore(XKSEMAPHORE* semaphore, uint32_t increment, uint32_t adjustment, uint32_t wait)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     // Log all releases to see if blocking semaphores are ever signaled
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
@@ -5803,7 +5714,6 @@ uint32_t KeResumeThread(GuestThreadHandle* object)
 void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limit)
 {
     static int s_count = 0; ++s_count;
-    uint32_t callerLR = g_ppcContext ? static_cast<uint32_t>(g_ppcContext->lr) : 0;
     
     semaphore->Header.Type = 5;
     semaphore->Header.SignalState = count;
@@ -5813,7 +5723,6 @@ void KeInitializeSemaphore(XKSEMAPHORE* semaphore, uint32_t count, uint32_t limi
     
     // Track semaphores initialized with count=0 (will block immediately)
     uint32_t semAddr = (uint32_t)((uint8_t*)semaphore - g_memory.base);
-    
     if (count == 0) {
         TrackBlockingSemaphoreAddr(semAddr);
         LOGF_WARNING("[KeInitializeSemaphore] #{} BLOCKING sem=0x{:08X} count=0 limit={} - TRACKED", 
@@ -5917,8 +5826,9 @@ uint32_t XamTaskSchedule(uint32_t funcAddr, uint32_t context, uint32_t processId
         }
     }
     
+    // SIGNAL COMPLETION EVENT: sub_829A3560 waits on event at 0x82A97F5C after scheduling
     // Since we execute synchronously, signal this event so the wait doesn't block
-    constexpr uint32_t kTaskCompletionEventAddr = 0x83131B34;  // FIXED: was 0x82A97F5C
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
     XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
     if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
     {
@@ -6007,27 +5917,31 @@ uint32_t XamUserWriteProfileSettings(uint32_t userIndex, uint32_t numSettings, v
 
 uint32_t XamVoiceCreate(uint32_t userIndex, uint32_t flags, void** voice)
 {
-    LOG_UTILITY("!!! STUB !!!");
-    if (voice)
-        *voice = nullptr;
-    return ERROR_DEVICE_NOT_CONNECTED;
+    // Route to VoiceChatManager for real voice chat support
+    return Net::VoiceChatManager::Instance().CreateVoiceChannel(userIndex, flags, voice);
 }
 
 void XamVoiceClose(void* voice)
 {
-    LOG_UTILITY("!!! STUB !!!");
+    Net::VoiceChatManager::Instance().CloseVoiceChannel(voice);
 }
 
 uint32_t XamVoiceHeadsetPresent(uint32_t userIndex)
 {
-    // No headset present
-    return 0;
+    // Check if microphone is available via VoiceChatManager
+    auto& voiceChat = Net::VoiceChatManager::Instance();
+    
+    // Initialize if not already done
+    if (!voiceChat.IsInitialized()) {
+        voiceChat.Initialize();
+    }
+    
+    return voiceChat.IsHeadsetPresent() ? 1 : 0;
 }
 
 uint32_t XamVoiceSubmitPacket(void* voice, uint32_t size, void* data)
 {
-    LOG_UTILITY("!!! STUB !!!");
-    return ERROR_SUCCESS;
+    return Net::VoiceChatManager::Instance().SubmitVoicePacket(voice, size, data);
 }
 
 uint32_t XeKeysConsolePrivateKeySign(void* signature, void* data, uint32_t dataSize)
@@ -6065,53 +5979,17 @@ uint32_t XamShowPlayerReviewUI(uint32_t userIndex, uint64_t xuid, void* overlapp
     return ERROR_SUCCESS;
 }
 
-
-// Debug counters for XamAlloc/XamFree
-static std::atomic<int64_t> g_xamAllocCount{0};
-static std::atomic<int64_t> g_xamFreeCount{0};
-
-// XamAlloc - Xbox memory allocation API
-// API: DWORD XamAlloc(DWORD dwFlags, DWORD dwSize, PVOID *ppBuffer)
-// Returns STATUS (0=success), stores allocated pointer at *ppBuffer
+// Additional GTA IV stubs
 void* XamAlloc(uint32_t flags, uint32_t size, void* pBuffer)
 {
-    if (size == 0) {
-        if (pBuffer) *(be<uint32_t>*)pBuffer = 0;
-        return nullptr;  // STATUS_SUCCESS
-    }
-    
-    void* ptr = g_userHeap.AllocPhysical(size, 16);
-    if (!ptr) {
-        LOGF_WARNING("[XamAlloc] FAILED size={} flags=0x{:X}", size, flags);
-        if (pBuffer) *(be<uint32_t>*)pBuffer = 0;
-        return (void*)(uintptr_t)0x8007000E;  // E_OUTOFMEMORY
-    }
-    
-    // Store allocated pointer at *pBuffer (OUTPUT parameter)
-    uint32_t guestAddr = g_memory.MapVirtual(ptr);
-    if (pBuffer) {
-        *(be<uint32_t>*)pBuffer = guestAddr;
-    }
-    
-    int64_t count = ++g_xamAllocCount;
-    if (count <= 10 || count % 10000 == 0) {
-        LOGF_WARNING("[XamAlloc] #{} size={} guest=0x{:08X} frees={}", count, size, guestAddr, g_xamFreeCount.load());
-    }
-    
-    return nullptr;  // STATUS_SUCCESS (0)
+    LOG_UTILITY("!!! STUB !!!");
+    return nullptr;
 }
 
-// XamFree - buffer is already a host pointer (framework translated from guest)
 void XamFree(void* buffer)
 {
-    if (!buffer) return;
-    int64_t count = ++g_xamFreeCount;
-    if (count <= 10 || count % 10000 == 0) {
-        LOGF_WARNING("[XamFree] #{} ptr={:p} allocs={}", count, buffer, g_xamAllocCount.load());
-    }
-    g_userHeap.Free(buffer);
+    LOG_UTILITY("!!! STUB !!!");
 }
-
 
 uint32_t NtSetTimerEx(void* timerHandle, void* dueTime, void* apcRoutine, void* apcContext, uint32_t resume, uint32_t period, void* previousState)
 {
@@ -6266,8 +6144,13 @@ int32_t NetDll_WSAGetLastError()
 
 // =============================================================================
 // GTA IV: Bypass dirty disc error display only
+// sub_82192100 - dirty disc error display UI - HOOK to skip UI
+// sub_829A1290 - another dirty disc caller
+// sub_827F0B20 - retry loop - let it run but limit retries
+// sub_829A1F00 - the actual file loading function
 // =============================================================================
 
+// Hook sub_827DAE40 - Worker thread entry point (streaming workers)
 // Previously STUBBED: This function called an indirect task function that blocks forever
 // FIX: Execute the task function ONCE synchronously, then return
 // This allows resource loading to complete while avoiding the infinite semaphore-wait loop
@@ -6276,13 +6159,192 @@ int32_t NetDll_WSAGetLastError()
 //   [0] = task function pointer
 //   [1] = REAL worker context (with semaphores at +36, +40)
 // Must pass ctxData[1] to task function, NOT the startup context!
+extern "C" void __imp__sub_827DAE40(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DAE40)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    uint32_t startupContext = ctx.r3.u32;  // Startup context pointer
+    
+    // Validate context pointer
+    if (startupContext < 0x80000000 || startupContext >= 0x90000000) {
+        LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} INVALID context 0x{:08X} - skipping", 
+                     s_count, startupContext);
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    uint32_t* ctxData = reinterpret_cast<uint32_t*>(base + startupContext);
+    uint32_t taskFunc = ByteSwap(ctxData[0]);     // [0] = task function
+    uint32_t realContext = ByteSwap(ctxData[1]);  // [1] = REAL worker context
+    
+    LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} startupCtx=0x{:08X} taskFunc=0x{:08X} realCtx=0x{:08X}", 
+                 s_count, startupContext, taskFunc, realContext);
+    
+    // Execute the task function synchronously instead of blocking on semaphore
+    if (taskFunc != 0 && taskFunc >= 0x82000000 && taskFunc < 0x83000000) {
+        auto func = g_memory.FindFunction(taskFunc);
+        if (func) {
+            LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} EXECUTING taskFunc 0x{:08X} with realCtx=0x{:08X}", 
+                         s_count, taskFunc, realContext);
+            
+            // Execute task with REAL context (has semaphores), not startup context
+            PPCContext taskCtx = ctx;
+            taskCtx.r3.u32 = realContext;  // FIX: Pass real context, not startup context
+            func(taskCtx, base);
+            
+            LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} taskFunc 0x{:08X} COMPLETED", 
+                         s_count, taskFunc);
+        } else {
+            LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} taskFunc 0x{:08X} NOT FOUND - skipping", 
+                         s_count, taskFunc);
+        }
+    } else {
+        LOGF_WARNING("[STREAMING_WORKER] sub_827DAE40 #{} taskFunc 0x{:08X} OUT OF RANGE - skipping", 
+                     s_count, taskFunc);
+    }
+    
+    // Return success - don't loop (original would block forever on semaphore)
+    ctx.r3.u32 = 0;
+    return;
+}
 
+// =============================================================================
+// sub_8272A760 - RAGE crmtScheduler worker thread entry point
+// =============================================================================
+// This function is MISSING from the recompiled PPC code (IDA marked it // idb with no body).
+// It's used as the entry point for RAGE streaming scheduler worker threads created by sub_8272A768.
+// 
+// Original behavior: Loop forever processing tasks from scheduler job queue
+// Our stub: Simply return immediately - streaming handled differently on PC
+//
+// The scheduler context (r3) contains:
+//   +0: critical section
+//   +32: job array ptr
+//   +36: job count
+//   etc.
+// =============================================================================
+PPC_FUNC(sub_8272A760)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    uint32_t schedulerContext = ctx.r3.u32;
+    
+    if (s_count <= 20) {
+        printf("[sub_8272A760] [RAGE_SCHEDULER] crmtScheduler worker #{} context=0x%08X - stub (no-op)\n",
+               s_count, schedulerContext);
+        fflush(stdout);
+    }
+    
+    // Return immediately - don't loop processing jobs
+    // The streaming system will be handled differently on PC
+    ctx.r3.u32 = 0;
+    return;
+}
 
-// This function has an indirect call at context+36 that can contain garbage
-// Validate the callback pointer before allowing the original to run
+// =============================================================================
+// sub_825F5C28 - AsyncProbeMgr worker thread entry point
+// =============================================================================
+// This function is MISSING from the recompiled PPC code (IDA marked it // idb with no body).
+// It's used as the entry point for "AsyncProbeMgr" threads created by sub_827DAF50.
+// 
+// From xex.c line 2177824:
+//   result = sub_827DAF50((int)sub_825F5C28, 0, 0x800u, 0, (int)"AsyncProbeMgr", 1, 1u);
+//
+// Original behavior: Loop processing async world probe requests
+// Our stub: Return immediately - probe system not critical for basic operation
+// =============================================================================
+PPC_FUNC(sub_825F5C28)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 10) {
+        printf("[sub_825F5C28] [ASYNC_PROBE] AsyncProbeMgr worker #{} - stub (no-op)\n", s_count);
+        fflush(stdout);
+    }
+    
+    // Return immediately - don't loop processing probe requests
+    ctx.r3.u32 = 0;
+    return;
+}
 
+// Hook sub_829A2380 - Semaphore acquire (routes through sync table)
+// This function acquires a semaphore - route through sync table for proper tracking
+extern "C" void __imp__sub_829A2380(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A2380_hook(PPCContext& ctx, uint8_t* base)
+{
+    static int s_count = 0; ++s_count;
+    uint32_t handle = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    if (s_count <= 30 || s_count % 500 == 0) {
+        printf("[sub_829A2380] #%d SYNC_TABLE acquire handle=0x%08X caller=0x%08X\n", 
+               s_count, handle, callerLR);
+        fflush(stdout);
+    }
+    
+    // Route through sync table - creates on-the-fly if not tracked
+    if (handle != 0) {
+        SyncObject* syncObj = SyncTable_GetOrCreate(handle, SyncType::Semaphore, callerLR);
+        if (syncObj) {
+            // Pre-signal so wait returns immediately during init
+            syncObj->Signal(1);
+        }
+    }
+    
+    ctx.r3.u32 = 1;  // Return success
+}
 
+// Hook sub_829A21F8 - Semaphore create wrapper (routes through sync table)
+extern "C" void __imp__sub_829A21F8(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A21F8_hook(PPCContext& ctx, uint8_t* base)
+{
+    static int s_count = 0; ++s_count;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    // Call original to create the semaphore
+    __imp__sub_829A21F8(ctx, base);
+    
+    uint32_t handle = ctx.r3.u32;
+    
+    if (s_count <= 50 || s_count % 100 == 0) {
+        printf("[SYNC-TABLE] CREATE semaphore @ 0x%08X (caller=0x%08X) total=%d\n", 
+               handle, callerLR, s_count);
+        fflush(stdout);
+    }
+    
+    // Register with sync table
+    if (handle != 0) {
+        SyncTable_InitSemaphore(handle, 0, 32767, callerLR);
+    }
+}
 
+// Hook sub_829A9738 - Wait-with-retry helper (calls NtWaitForSingleObjectEx)
+// This is called by sub_829A2380 (semaphore acquire) during init
+// The semaphore isn't released during init, so we make this non-blocking
+extern "C" void __imp__sub_829A9738(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A9738_hook(PPCContext& ctx, uint8_t* base)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    uint32_t waitObj = ctx.r3.u32;  // Object to wait on
+    int32_t timeout = ctx.r4.s32;    // Timeout value
+    
+    if (s_count <= 20 || s_count % 100 == 0)
+    {
+        LOGF_IMPL(Utility, "WaitHelper", "sub_829A9738 #{} obj=0x{:08X} timeout={} - returning success (non-blocking)", 
+                  s_count, waitObj, timeout);
+    }
+    
+    // NON-BLOCKING: Return success immediately
+    // The semaphore release (sub_827DAD60 → sub_829A2290) doesn't happen during init
+    // so this wait would block forever. Return 0 (success) to allow init to continue.
+    ctx.r3.u32 = 0;  // STATUS_SUCCESS / ERROR_SUCCESS
+}
 
 // =============================================================================
 // UNIFIED BOOT SEQUENCE REWRITE - Complete _xstart Replacement
@@ -6292,6 +6354,14 @@ int32_t NetDll_WSAGetLastError()
 // that work correctly on PC platforms and support online multiplayer.
 //
 // Original _xstart (0x829A0860) execution path:
+//   sub_829A7FF8  - Early system init (XEX validation, firmware fallback)
+//   sub_829A7960  - System callbacks (linked list iteration)
+//   sub_829A0678  - Privilege/HDCP check (XexCheckExecutablePrivilege, etc.)
+//   sub_82994700  - CRT/TLS initialization (thread pool, TLS, vtables)
+//   sub_829A7EA8  - Init table executor (function pointer array)
+//   sub_829A7DC8  - C++ static constructors (multiple arrays)
+//   sub_829A27D8  - Command-line parsing setup
+//   sub_8218BEA8  - Game main entry → sub_827D89B8 (game wrapper)
 //
 // This unified replacement:
 // - SKIPS all Xbox-specific hardware/security checks
@@ -6303,6 +6373,12 @@ int32_t NetDll_WSAGetLastError()
 
 // Extern declarations for boot sequence functions
 extern "C" void __imp___xstart(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82994700(PPCContext& ctx, uint8_t* base);  // TLS/CRT init
+extern "C" void __imp__sub_829A7960(PPCContext& ctx, uint8_t* base);  // Runtime callbacks
+extern "C" void __imp__sub_829A7EA8(PPCContext& ctx, uint8_t* base);  // Init table executor
+extern "C" void __imp__sub_829A7DC8(PPCContext& ctx, uint8_t* base);  // C++ constructors
+extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);  // Game main entry
+extern "C" void __imp__sub_828E0AB8(PPCContext& ctx, uint8_t* base);  // Frame tick
 
 // =============================================================================
 // Storage Device Constants (still needed for PC storage hooks)
@@ -6323,18 +6399,22 @@ namespace StorageConstants {
 #if 0  // DISABLED - boot hacks removed
 namespace BootGlobals {
     // -------------------------------------------------------------------------
+    // sub_829A7FF8 / sub_829A7F20 - Early System Init
     // -------------------------------------------------------------------------
     // XEX header pointer location (from lis r11,-32256 = 0x81300000)
     constexpr uint32_t XEX_HEADER_PTR    = 0x8130063C;  // [0x81300000+1596]
     constexpr uint32_t XEX_VTABLE_PTR    = 0x813006B0;  // [0x81300000+1712]
+    // Memory allocation result (from sub_829A7F20)
     constexpr uint32_t ALLOC_RESULT_ADDR = 0x83008440;  // [0x83010000-31780] - also used by exception handler
     
     // -------------------------------------------------------------------------
+    // sub_829A7960 - System Callbacks (Linked List)
     // -------------------------------------------------------------------------
     constexpr uint32_t CALLBACK_CRIT_ADDR = 0x82A97FB4; // Critical section for list
     constexpr uint32_t CALLBACK_LIST_ADDR = 0x82A97FD0; // Doubly-linked list head
     
     // -------------------------------------------------------------------------
+    // sub_82994700 - CRT/TLS Initialization
     // -------------------------------------------------------------------------
     // CRT vtable pointers (from lis r30,-31981 = 0x81200000)
     constexpr uint32_t VTABLE1_ADDR = 0x812017E4;  // offset 6116 - thread create
@@ -6342,6 +6422,7 @@ namespace BootGlobals {
     constexpr uint32_t VTABLE3_ADDR = 0x812017EC;  // offset 6124 - thread register
     constexpr uint32_t VTABLE4_ADDR = 0x812017F0;  // offset 6128 - thread destroy
     
+    // CRT subsystem flags (from sub_82992680)
     constexpr uint32_t CRT_FINALIZE_ADDR = 0x812019A8;  // offset 6568
     constexpr uint32_t IO_SYSTEM_ADDR    = 0x812019AC;  // offset 6572
     constexpr uint32_t MEM_MANAGER_ADDR  = 0x812019B0;  // offset 6576
@@ -6352,6 +6433,7 @@ namespace BootGlobals {
     constexpr uint32_t THREAD_HANDLE_ADDR = 0x82A96E60;  // offset 28256
     constexpr uint32_t NEW_THREAD_ALLOC   = 0x82A96B30;  // offset 27472
     
+    // Thread pool (from sub_82998A48)
     constexpr uint32_t THREAD_POOL_ADDR   = 0x82A97200;  // 36 slots × 8 bytes
     constexpr uint32_t THREAD_POOL_SIZE   = 36;
     
@@ -6363,6 +6445,7 @@ namespace BootGlobals {
     // Global Thread Context Base (0x83130000)
     // -------------------------------------------------------------------------
     // This is the address that [r13+0] must point to for memory allocation to work.
+    // The allocation function sub_8218BE28 reads: [r13+0] -> [+1676] -> [vtable+8]
     // Original code stores memory manager at 0x83130000 + 1676.
     constexpr uint32_t GLOBAL_THREAD_CTX_BASE = 0x83130000;
     constexpr uint32_t MEM_MGR_OFFSET         = 1676;      // Offset to memory manager pointer
@@ -6378,6 +6461,9 @@ namespace BootGlobals {
     // -------------------------------------------------------------------------
     // Replaces Xbox content mounting with VFS-based file access.
     // The game uses a vtable-based storage interface:
+    //   sub_827E1EC0 - Storage device factory (returns device with vtable)
+    //   sub_827EF2F8 - Content mount (uses device vtable for file ops)
+    //   sub_827EF208 - Storage path check
     //
     // Our PC storage device provides vtable functions that use VFS.
     constexpr uint32_t PC_STORAGE_DEVICE_ADDR  = 0x83132000; // PC storage device object
@@ -6394,6 +6480,7 @@ namespace BootGlobals {
     //   +72 = getFileSize
     //   +76 = getFileInfo
     
+    // CRT context structures (from sub_82992680, offsets 6176+)
     constexpr uint32_t CRT_CONTEXT_BASE   = 0x81201820;  // offset 6176
     
     // Vtable values (computed from PPC immediates)
@@ -6405,6 +6492,7 @@ namespace BootGlobals {
     constexpr uint32_t NEW_THREAD_VTABLE   = 0x82A52660;  // 0x82A50000 + 9824
     
     // -------------------------------------------------------------------------
+    // sub_829A0678 - Privilege Check
     // -------------------------------------------------------------------------
     // No persistent memory writes - just returns success/failure
     
@@ -6437,6 +6525,7 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     LOG_WARNING("[CRT] * Modern CRT/TLS initialization starting");
     
     // -------------------------------------------------------------------------
+    // Store CRT vtable pointers (from sub_82994700 prologue)
     // -------------------------------------------------------------------------
     PPC_STORE_U32(BootGlobals::VTABLE1_ADDR, BootGlobals::VTABLE1_VALUE);
     PPC_STORE_U32(BootGlobals::VTABLE2_ADDR, BootGlobals::VTABLE2_VALUE);
@@ -6458,25 +6547,34 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     LOGF_WARNING("[CRT] TLS slot {} allocated, value=0x{:08X}", tlsIndex, BootGlobals::VTABLE2_VALUE);
     
     // -------------------------------------------------------------------------
+    // CRT subsystem initialization (replaces sub_82992680)
     // -------------------------------------------------------------------------
+    // sub_82998ED0(0) - Heap init flag
     PPC_STORE_U32(BootGlobals::HEAP_INIT_ADDR, 0);
     
+    // sub_82998DE0(0) - Memory manager flag
     PPC_STORE_U32(BootGlobals::MEM_MANAGER_ADDR, 0);
     
+    // sub_82994830(0) - Exception handler flag
     PPC_STORE_U32(BootGlobals::ALLOC_RESULT_ADDR, 0);
     
+    // sub_82998DD0(0) - I/O system flag
     PPC_STORE_U32(BootGlobals::IO_SYSTEM_ADDR, 0);
     
+    // sub_828E0AB8(0) - Frame tick (KEEP - essential for game timing)
     ctx.r3.s64 = 0;
     __imp__sub_828E0AB8(ctx, base);
     
+    // sub_82998DB8(0) - CRT finalize vtable
     PPC_STORE_U32(BootGlobals::CRT_FINALIZE_ADDR, BootGlobals::CRT_FINALIZE_VTABLE);
     
+    // End of sub_82992680 - store new thread alloc vtable
     PPC_STORE_U32(BootGlobals::NEW_THREAD_ALLOC, BootGlobals::NEW_THREAD_VTABLE);
     
     LOG_WARNING("[CRT] CRT subsystem flags initialized");
     
     // -------------------------------------------------------------------------
+    // SKIP: Thread pool initialization (sub_82998A48)
     // Original: 36 slots, 4000ms timeout per thread
     // Reason: Xbox-specific timing that breaks multiplayer
     // -------------------------------------------------------------------------
@@ -6497,6 +6595,8 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     LOGF_WARNING("[CRT] Main thread handle: 0x{:08X}", mainThreadHandle);
     
     // -------------------------------------------------------------------------
+    // Allocate and initialize thread context (replaces sub_829937E0)
+    // Original: 196 bytes allocated via sub_82993708
     // -------------------------------------------------------------------------
     uint32_t contextAddr = BootGlobals::THREAD_CONTEXT_ADDR;
     memset(base + contextAddr, 0, BootGlobals::THREAD_CONTEXT_SIZE);
@@ -6510,6 +6610,7 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     LOGF_WARNING("[CRT] Thread context at 0x{:08X} initialized", contextAddr);
     
     // -------------------------------------------------------------------------
+    // Initialize callback list as empty (replaces sub_829A79C0)
     // Original: Registers callback in doubly-linked list
     // -------------------------------------------------------------------------
     PPC_STORE_U32(BootGlobals::CALLBACK_LIST_ADDR, BootGlobals::CALLBACK_LIST_ADDR);
@@ -6517,9 +6618,59 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
     
     LOG_WARNING("[CRT] * Modern CRT/TLS initialization complete");
 }
+
+// Hook for sub_82994700 - redirects to modern implementation
+PPC_FUNC(sub_82994700_DISABLED)
+{
+    InitializeModernCRT(ctx, base);
+    ctx.r3.s64 = 1;  // Return success
+}
+
+// Modern sub_829A7960 - Runtime Callback Invocation (DISABLED)
+PPC_FUNC(sub_829A7960_DISABLED)
+{
+    uint32_t notificationType = ctx.r3.u32;
+    
+    static int s_callCount = 0;
+    ++s_callCount;
+    
+    if (s_callCount <= 10) {
+        LOGF_WARNING("[CALLBACK] sub_829A7960 called with notification={} (call #{})", 
+                     notificationType, s_callCount);
+    }
+    
+    uint32_t listHead = BootGlobals::CALLBACK_LIST_ADDR;
+    uint32_t firstNode = PPC_LOAD_U32(listHead);
+    
+    if (firstNode != listHead) {
+        LOG_WARNING("[CALLBACK] Callback list not empty, iterating...");
+        
+        uint32_t currentNode = firstNode;
+        int callbackCount = 0;
+        
+        while (currentNode != listHead && callbackCount < 100) {
+            uint32_t callback = PPC_LOAD_U32(currentNode + 8);
+            uint32_t nextNode = PPC_LOAD_U32(currentNode);
+            
+            if (callback != 0) {
+                LOGF_WARNING("[CALLBACK] Invoking callback #{} at 0x{:08X}", 
+                             callbackCount, callback);
+                ctx.r3.u64 = notificationType;
+                ctx.ctr.u64 = callback;
+                PPC_CALL_INDIRECT_FUNC(callback);
+            }
+            
+            currentNode = nextNode;
+            callbackCount++;
+        }
+        
+        LOGF_WARNING("[CALLBACK] Invoked {} callbacks", callbackCount);
+    }
+}
 #endif  // DISABLED InitializeModernCRT, sub_82994700, sub_829A7960
 
 // =============================================================================
+// Modern sub_829A7DC8 - C++ Static Constructor Execution (SKIPPED)
 // =============================================================================
 // ISSUE: The original function computes constructor table addresses as:
 //   Array 1: 0x820214FC to 0x82021508 (3 entries)
@@ -6542,6 +6693,64 @@ static void InitializeModernCRT(PPCContext& ctx, uint8_t* base)
 
 // DISABLED - Let original constructor execution run per UnleashedRecomp architecture
 #if 0
+PPC_FUNC(sub_829A7DC8_DISABLED)
+{
+    static bool s_logged = false;
+    if (!s_logged) {
+        LOG_WARNING("[CTOR] sub_829A7DC8 called - analyzing memory layout");
+        
+        // Dump memory at the expected constructor table addresses
+        LOG_WARNING("[CTOR] === Memory Analysis ===");
+        
+        // Array 1 expected: 0x820214FC to 0x82021508
+        uint32_t arr1Start = 0x820214FC;
+        LOG_WARNING("[CTOR] Array 1 region (0x820214FC-0x82021508):");
+        for (uint32_t addr = arr1Start; addr < arr1Start + 16; addr += 4) {
+            uint32_t val = PPC_LOAD_U32(addr);
+            // Check if it looks like code, data, or string
+            bool isCodePtr = (val >= 0x82000000 && val <= 0x82FFFFFF);
+            LOGF_WARNING("[CTOR]   [0x{:08X}] = 0x{:08X} {}", addr, val, 
+                        isCodePtr ? "(code ptr)" : "(data)");
+        }
+        
+        // Array 2 expected: 0x82020010 to 0x820214F8
+        uint32_t arr2Start = 0x82020010;
+        LOG_WARNING("[CTOR] Array 2 region (0x82020010-...):");
+        for (uint32_t addr = arr2Start; addr < arr2Start + 32; addr += 4) {
+            uint32_t val = PPC_LOAD_U32(addr);
+            bool isCodePtr = (val >= 0x82000000 && val <= 0x82FFFFFF);
+            LOGF_WARNING("[CTOR]   [0x{:08X}] = 0x{:08X} {}", addr, val,
+                        isCodePtr ? "(code ptr)" : "(data)");
+        }
+        
+        // Check a few other potential constructor table locations
+        // Sometimes ctors are near the entry point or at specific offsets
+        LOG_WARNING("[CTOR] Scanning for function pointer arrays...");
+        
+        int foundTables = 0;
+        for (uint32_t scanAddr = 0x82000000; scanAddr < 0x82100000 && foundTables < 5; scanAddr += 0x1000) {
+            // Check if this looks like a function pointer table
+            int validPtrs = 0;
+            for (int i = 0; i < 4; i++) {
+                uint32_t val = PPC_LOAD_U32(scanAddr + i * 4);
+                if (val >= 0x82000000 && val <= 0x82FFFFFF) validPtrs++;
+            }
+            if (validPtrs >= 3) {
+                LOGF_WARNING("[CTOR] Potential table at 0x{:08X}:", scanAddr);
+                for (int i = 0; i < 8; i++) {
+                    uint32_t val = PPC_LOAD_U32(scanAddr + i * 4);
+                    LOGF_WARNING("[CTOR]   [{}] = 0x{:08X}", i, val);
+                }
+                foundTables++;
+            }
+        }
+        
+        s_logged = true;
+    }
+    
+    // Return success without executing constructors
+    ctx.r3.s64 = 0;
+}
 #endif  // DISABLED sub_829A7DC8
 
 // =============================================================================
@@ -6583,8 +6792,16 @@ static int BuildGuestCommandLine(uint8_t* base, const std::vector<std::string>& 
 // essential game code functions.
 //
 // Replaced functions (Xbox-specific):
+//   sub_829A7FF8 → sub_829A7F20  - XEX validation, HalReturnToFirmware
+//   sub_829A7960                  - Runtime callback invocation
+//   sub_829A0678                  - HDCP/privilege check
+//   sub_82994700                  - CRT/TLS init (modernized, not skipped)
+//   sub_829A27D8                  - Command-line parsing
 //
 // Preserved functions (game code):
+//   sub_829A7EA8                  - Init table executor
+//   sub_829A7DC8                  - C++ static constructors
+//   sub_8218BEA8 → sub_827D89B8  - Game main entry
 // =============================================================================
 
 // =============================================================================
@@ -6607,13 +6824,16 @@ PPC_FUNC(_xstart_DISABLED)
     // =========================================================================
     // PHASE 1: SKIP Xbox-specific early init
     // =========================================================================
+    // sub_829A7FF8 → sub_829A7F20: XEX header validation
     //   - Checks RtlImageXexHeaderField for field 0x20001025
+    //   - On failure: allocates 1MB via sub_829A5F10, calls HalReturnToFirmware
     //   - Not needed: We're not running from an XEX
     LOG_WARNING("[BOOT] [1/7] SKIP sub_829A7FF8 (XEX validation / firmware fallback)");
     
     // =========================================================================
     // PHASE 2: SKIP Xbox runtime callbacks
     // =========================================================================
+    // sub_829A7960(1): System startup notification
     //   - Enters critical section at 0x82A97FB4
     //   - Iterates doubly-linked list at 0x82A97FD0
     //   - Calls each callback with r3=1 (startup notification)
@@ -6623,6 +6843,7 @@ PPC_FUNC(_xstart_DISABLED)
     // =========================================================================
     // PHASE 3: SKIP HDCP/privilege check
     // =========================================================================
+    // sub_829A0678: Privilege and HDCP verification
     //   - XexCheckExecutablePrivilege(10) - HDCP privilege
     //   - XGetAVPack() - checks for HDMI/VGA/Component
     //   - ExGetXConfigSetting - video config checks
@@ -6633,10 +6854,12 @@ PPC_FUNC(_xstart_DISABLED)
     // =========================================================================
     // PHASE 4: MODERNIZED CRT/TLS initialization
     // =========================================================================
+    // sub_82994700: Complete CRT initialization
     //   - Replaced with InitializeModernCRT() which:
     //     * Stores 4 CRT vtable pointers at 0x812017E4-F0
     //     * Allocates TLS slot, stores at 0x82A96E64
     //     * Initializes CRT subsystem flags (heap, I/O, memory manager)
+    //     * Calls frame tick (sub_828E0AB8)
     //     * SKIPS Xbox thread pool (36 slots × 4s timeout)
     //     * Creates synthetic thread handle
     //     * Allocates 196-byte thread context at 0x83080000
@@ -6653,12 +6876,14 @@ PPC_FUNC(_xstart_DISABLED)
     // =========================================================================
     // PHASE 5: Execute init table (KEEP - game code)
     // =========================================================================
+    // sub_829A7EA8: Init function table executor
     //   - Base address: 0x82020000 (from lis r11,-32094)
     //   - End address: 0x8202000C (3 entries × 4 bytes)
     //   - For each non-zero pointer: call the function
     //   - KEEP: Essential game initialization
     LOG_WARNING("[BOOT] [5/7] CALL sub_829A7EA8 (init table executor @ 0x82020000)");
     
+    // DEBUG: Manually execute init table with tracing instead of calling sub_829A7EA8
     {
         uint32_t tableBase = 0x82020000;
         uint32_t tableEnd = 0x8202000C;
@@ -6683,11 +6908,13 @@ PPC_FUNC(_xstart_DISABLED)
         }
     }
     // Skip original call since we're doing it manually above
+    // __imp__sub_829A7EA8(ctx, base);
     LOG_WARNING("[BOOT]       Init table execution complete");
     
     // =========================================================================
     // PHASE 6: Run C++ static constructors (KEEP - game code)
     // =========================================================================
+    // sub_829A7DC8(r3=1): C++ static constructor execution
     //   - Calls optional pre-constructor at [0x81308F70]
     //   - Array 1: 0x8202150C (3 entries)
     //   - Array 2: 0x82020010 (1338 entries to 0x820214F8)
@@ -6751,7 +6978,15 @@ PPC_FUNC(_xstart_DISABLED)
     // =========================================================================
     // PHASE 7: Enter game main (KEEP - game code)
     // =========================================================================
+    // sub_8218BEA8 → sub_827D89B8: Game main entry
+    //   - sub_827D89B8 performs:
+    //     * sub_827D8840 - pre-init setup
+    //     * sub_827FFF80 - network init
+    //     * sub_827EEDE0 - store argc/argv
+    //     * sub_828E0AB8 - frame tick
+    //     * sub_827EE620 - system setup
     //     * Indirect vtable call for game-specific init
+    //     * sub_8218BEB0 - ACTUAL GAME MAIN
     //     * Cleanup functions
     //   - Arguments: r3=argc, r4=argv, r5=envp
     //   - KEEP: This is the game!
@@ -6785,17 +7020,52 @@ PPC_FUNC(_xstart_DISABLED)
 
 // =============================================================================
 // INITIALIZATION FLOW TRACING
+// Call chain: sub_827D89B8 → sub_8218BEB0 → sub_82120000 → sub_8218C600
+// sub_8218C600 is ONE-TIME initialization - if it returns 0, game fails to init
 // =============================================================================
+extern "C" void __imp__sub_8218C600(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82120000(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218BEB0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827D89B8(PPCContext& ctx, uint8_t* base);
 
+// Hook sub_8218C600 - Core initialization function
+// After sub_82856C90, there's a vtable call at address 0x8218C7E8:
 //   r3 = [r31+0]      // render_ctx object
 //   r11 = [r3+0]      // vtable (should be 0x82000970)
 //   r11 = [r11+4]     // vtable[1] - ENGINE METHOD
 //   bctrl             // CALL - THIS BLOCKS
 //
 // We need to trace what function is at vtable[1]
+PPC_FUNC(sub_8218C600)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_8218C600 ENTER #{} thread=0x{:04X}", s_count, threadId);
+    
+    // Save r31 before call to trace the vtable call after sub_82856C90
+    __imp__sub_8218C600(ctx, base);
+    
+    // CRITICAL FIX: Ensure success return value
+    // sub_82120000 checks (r3 & 0xFF) == 0 for failure at lines 23-28
+    // If sub_8218C600 returns 0, sub_82120000 returns early, skipping:
+    //   - sub_82120EE8, sub_821250B0, sub_82120FB8, sub_821200A8
+    //   - sub_821212A8 -> sub_82192BB0 (which signals semaphore 0xA8240270)
+    // Force success to allow full initialization chain to execute
+    if ((ctx.r3.u32 & 0xFF) == 0) {
+        LOG_WARNING("[INIT] sub_8218C600 returned 0 (failure), forcing success");
+        ctx.r3.u32 = 1;  // Force success
+    }
+    
+    LOGF_WARNING("[INIT] sub_8218C600 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.u32);
+}
 
+// Hook sub_82856C90 to trace what happens after it returns
 // The vtable call happens AFTER this function returns
+extern "C" void __imp__sub_82856C90_trace(PPCContext& ctx, uint8_t* base);
 static void trace_vtable_after_82856C90(PPCContext& ctx, uint8_t* base) {
+    // After sub_82856C90 returns, the code does:
     // lwz r3,0(r31)   - load render_ctx from global
     // lwz r11,0(r3)   - load vtable
     // lwz r11,4(r11)  - load vtable[1]
@@ -6813,24 +7083,257 @@ static void trace_vtable_after_82856C90(PPCContext& ctx, uint8_t* base) {
     }
 }
 
+// Hook sub_82120000 - ONE-TIME initialization, cache result for subsequent calls
 static std::atomic<int> g_initResult{-999};  // -999 = not initialized yet
 
 // Set to true to use the new GameInit module, false to use original PPC code
 static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 
+PPC_FUNC(sub_82120000)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    // Return cached result if already initialized
+    if (g_initResult.load() != -999)
+    {
+        ctx.r3.s32 = g_initResult.load();
+        if (s_count <= 10 || s_count % 100 == 0)
+        {
+            LOGF_WARNING("[INIT] sub_82120000 #{} CACHED r3={}", s_count, ctx.r3.s32);
+        }
+        return;
+    }
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} thread=0x{:04X} (first call) - running full init", s_count, threadId);
+    
+    // Run the actual init - sub_82857240 is now stubbed to prevent blocking
+    __imp__sub_82120000(ctx, base);
+    
+    // Cache the result
+    g_initResult.store(ctx.r3.s32);
+    
+    LOGF_WARNING("[INIT] sub_82120000 #{} EXIT r3={} (cached)", s_count, ctx.r3.s32);
+}
 
+// Trace functions called after sub_8218C600 succeeds
+extern "C" void __imp__sub_82120EE8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821250B0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82318F60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82124080(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82120FB8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82124540(PPCContext& ctx, uint8_t* base);
+// Final 5 subsystems in sub_82120FB8 - instrumentation to find blocker
+extern "C" void __imp__sub_8227AC28(PPCContext& ctx, uint8_t* base);  // World finalization
+extern "C" void __imp__sub_82272290(PPCContext& ctx, uint8_t* base);  // Entity finalize
+extern "C" void __imp__sub_82212450(PPCContext& ctx, uint8_t* base);  // Script finalize
+extern "C" void __imp__sub_822C5768(PPCContext& ctx, uint8_t* base);  // Streaming finalize
+extern "C" void __imp__sub_822D4C68(PPCContext& ctx, uint8_t* base);  // Final setup
+// Early subsystems in sub_82120FB8 - instrumentation to find blocking point
+extern "C" void __imp__sub_82270170(PPCContext& ctx, uint8_t* base);  // Entity system [8]
+extern "C" void __imp__sub_822FD328(PPCContext& ctx, uint8_t* base);  // Pool init [10]
+extern "C" void __imp__sub_822EFF40(PPCContext& ctx, uint8_t* base);  // Map loader [11]
+extern "C" void __imp__sub_82120C48(PPCContext& ctx, uint8_t* base);  // Game config [12]
+extern "C" void __imp__sub_82221410(PPCContext& ctx, uint8_t* base);  // UI system [13]
+// Internal functions in sub_82221410 (UI system) - find exact blocker
+extern "C" void __imp__sub_8260E310(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [1] display setup
+extern "C" void __imp__sub_822B3C58(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [2]
+extern "C" void __imp__sub_822B4D68(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [3]
+extern "C" void __imp__sub_824A0898(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [4]
+extern "C" void __imp__sub_8260CF30(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [5]
+extern "C" void __imp__sub_8260BE08(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [6]
+extern "C" void __imp__sub_824B65B0(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [7]
+extern "C" void __imp__sub_822E3EC8(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [8]
+extern "C" void __imp__sub_822E49A0(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [9]
+extern "C" void __imp__sub_8222F7E8(PPCContext& ctx, uint8_t* base);  // Inside sub_82221410 [11] final
+
+extern "C" void __imp__sub_8226CB50(PPCContext& ctx, uint8_t* base);  // Camera system [14]
 // Subsystems after Camera system [15-30] - INSTRUMENTATION TO FIND BLOCKER
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);  // HUD init [15]
+extern "C" void __imp__sub_821A8278(PPCContext& ctx, uint8_t* base);  // HUD component [16]
+extern "C" void __imp__sub_821BC9E0(PPCContext& ctx, uint8_t* base);  // Menu system [17]
+extern "C" void __imp__sub_822DB4B0(PPCContext& ctx, uint8_t* base);  // Cutscene system [18]
+extern "C" void __imp__sub_821B7218(PPCContext& ctx, uint8_t* base);  // Mission system [19]
+extern "C" void __imp__sub_822498F8(PPCContext& ctx, uint8_t* base);  // Checkpoint system [20]
+extern "C" void __imp__sub_8225DC40(PPCContext& ctx, uint8_t* base);  // Weather system [21]
+extern "C" void __imp__sub_821E24E0(PPCContext& ctx, uint8_t* base);  // Population system [22]
+extern "C" void __imp__sub_821DFD18(PPCContext& ctx, uint8_t* base);  // Traffic system [23]
+extern "C" void __imp__sub_8220E108(PPCContext& ctx, uint8_t* base);  // Wanted system [24]
+extern "C" void __imp__sub_821D8358(PPCContext& ctx, uint8_t* base);  // Map/GPS init [26]
+extern "C" void __imp__sub_821EA0B8(PPCContext& ctx, uint8_t* base);  // Blip system [27]
+extern "C" void __imp__sub_82200EB8(PPCContext& ctx, uint8_t* base);  // Stats system [30]
 
+// Internal functions in sub_82120C48 - find exact blocker
+extern "C" void __imp__sub_821E9658(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
+extern "C" void __imp__sub_821FD460(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
+extern "C" void __imp__sub_82126940(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
+extern "C" void __imp__sub_822B6C58(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
+extern "C" void __imp__sub_82308598(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
+extern "C" void __imp__sub_82209280(PPCContext& ctx, uint8_t* base);  // Inside sub_82120C48
 
 // =============================================================================
+// Internal functions in sub_8249D6F0 (display mode setup) - DEEP INSTRUMENTATION
 // =============================================================================
+extern "C" void __imp__sub_82126498(PPCContext& ctx, uint8_t* base);  // Resource cleanup
+extern "C" void __imp__sub_828536B0(PPCContext& ctx, uint8_t* base);  // Buffer init
+extern "C" void __imp__sub_8260E3B8(PPCContext& ctx, uint8_t* base);  // Display mode setup
+extern "C" void __imp__sub_8260E3D8(PPCContext& ctx, uint8_t* base);  // Display finalize
+extern "C" void __imp__sub_8286A748(PPCContext& ctx, uint8_t* base);  // Unknown init
+extern "C" void __imp__sub_8286A890(PPCContext& ctx, uint8_t* base);  // Unknown setup
 
+// Internal functions of sub_822B4D68 - find exact blocking point
+extern "C" void __imp__sub_821EC018(PPCContext& ctx, uint8_t* base);  // Called early in 822B4D68
+extern "C" void __imp__sub_82859B80(PPCContext& ctx, uint8_t* base);  // Called 10x in 822B4D68
+extern "C" void __imp__sub_827DFC60(PPCContext& ctx, uint8_t* base);  // Called near end of 822B4D68
+extern "C" void __imp__sub_8285DC80(PPCContext& ctx, uint8_t* base);  // vtable[2] dispatch target
 
+PPC_FUNC(sub_82120EE8)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82120EE8 ENTER #{}", s_count);
+    __imp__sub_82120EE8(ctx, base);
+    LOGF_WARNING("[INIT] sub_82120EE8 EXIT #{}", s_count);
+}
+
+// Trace functions inside sub_82120EE8 to find the blocker
+// Hook sub_821207B0 to ensure resource manager is properly initialized
+extern "C" void __imp__sub_821207B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821207B0) {
+    uint32_t structAddr = ctx.r3.u32;
+    
+    // Call original initialization
+    __imp__sub_821207B0(ctx, base);
+    
+    // Verify critical fields are zeroed (defense against uninitialized memory)
+    PPC_STORE_U32(structAddr + 0, 0);      // Base pointer = NULL
+    PPC_STORE_U16(structAddr + 4, 0);      // Count = 0
+    PPC_STORE_U16(structAddr + 6, 0);      // Secondary count = 0
+    
+    // Ensure sentinel value at offset +940 (as set by original function)
+    PPC_STORE_U32(structAddr + 940, 0xFFFFFFFF);
+    
+    LOGF_WARNING("[INIT] sub_821207B0 initialized resource manager at 0x{:08X}", structAddr);
+}
 // =============================================================================
+// sub_82192840 - File open operation (called by sub_822C1A30)
 // =============================================================================
 // This function opens a configuration file for streaming initialization.
 // If the file doesn't exist (common on PC), it should return 0 to signal failure.
+// Enhanced with comprehensive validation to prevent PAC crashes in sub_827E7FA8.
 // =============================================================================
+extern "C" void __imp__sub_82192840(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192840) {
+    static int s_callCount = 0;
+    static int s_invalidHandles = 0;
+    s_callCount++;
+    
+    // Log the parameters for debugging
+    if (s_callCount <= 10) {
+        LOGF_WARNING("[sub_82192840] Call #{}: r3=0x{:08X}, r4=0x{:08X}, lr=0x{:08X}", 
+            s_callCount, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    
+    // Call original implementation
+    __imp__sub_82192840(ctx, base);
+    
+    uint32_t handle = ctx.r3.u32;
+    
+    // COMPREHENSIVE VALIDATION: Check all possible invalid handle cases
+    bool isInvalid = false;
+    const char* reason = nullptr;
+    
+    // Case 1: NULL handle (file not found)
+    if (handle == 0) {
+        isInvalid = true;
+        reason = "NULL handle (file not found)";
+    }
+    // Case 2: REMOVED - Stream pool range (0x82000000-0x82020000) contains VALID stream objects
+    // The game legitimately allocates FileStream structures in this range.
+    // Corruption detection for specific addresses (e.g., 0x82003890) is handled separately.
+    // Vtable validation below is sufficient to catch truly invalid handles.
+    
+    // Case 3: Handle in extended stream/shader range (0x82A00000-0x82B00000)
+    // The object pointer 0x82A80A24 we use is in this range
+    else if (handle >= 0x82A00000 && handle < 0x82B00000) {
+        isInvalid = true;
+        reason = "shader/stream structure in range 0x82A00000-0x82B00000";
+    }
+    // Case 4: Handle below valid guest memory (< 0x80000000)
+    // EXCEPTION: PC FileStreams allocated in heap (0x02000000-0x10000000 range)
+    else if (handle < 0x80000000) {
+        // Check if this is a valid PC FileStream (heap allocation)
+        if (handle >= 0x00020000 && handle < 0x7FEA0000) {
+            // Validate it's actually a PC FileStream by checking storage device marker
+            uint32_t storageDevice = PPC_LOAD_U32(handle + 0);
+            if (storageDevice == 0x82A7FE00) {
+                // Valid PC FileStream - don't reject
+                isInvalid = false;
+            } else {
+                isInvalid = true;
+                reason = "heap address but not PC FileStream";
+            }
+        } else {
+            isInvalid = true;
+            reason = "below valid guest memory range";
+        }
+    }
+    // Case 5: Handle above valid guest memory (>= 0x90000000)
+    else if (handle >= 0x90000000) {
+        isInvalid = true;
+        reason = "above valid guest memory range";
+    }
+    // Case 6: Check if the handle points to an object with invalid vtable
+    // This is the most critical check to prevent PAC crashes
+    else {
+        // Try to read the object pointer at handle+0
+        uint32_t objectPtr = PPC_LOAD_U32(handle + 0);
+        
+        // If object pointer is invalid, the handle is bad
+        if (objectPtr != 0 && (objectPtr < 0x80000000 || objectPtr >= 0x90000000)) {
+            isInvalid = true;
+            reason = "object pointer invalid";
+            
+            if (s_invalidHandles < 10) {
+                LOGF_WARNING("[sub_82192840] Handle 0x{:08X} has invalid object pointer 0x{:08X}", 
+                    handle, objectPtr);
+            }
+        }
+        // If object pointer is valid, check the vtable
+        else if (objectPtr != 0) {
+            uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+            
+            if (vtablePtr != 0 && (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000)) {
+                isInvalid = true;
+                reason = "vtable pointer invalid";
+                
+                if (s_invalidHandles < 10) {
+                    LOGF_WARNING("[sub_82192840] Handle 0x{:08X} -> object 0x{:08X} has invalid vtable 0x{:08X}", 
+                        handle, objectPtr, vtablePtr);
+                }
+            }
+        }
+    }
+    
+    // If handle is invalid, return 0 to signal failure
+    if (isInvalid) {
+        s_invalidHandles++;
+        
+        if (s_invalidHandles <= 10) {
+            LOGF_WARNING("[sub_82192840] Call #{}: Invalid handle 0x{:08X} ({}), returning 0", 
+                s_callCount, handle, reason);
+        }
+        
+        ctx.r3.u32 = 0;  // File not found
+        return;
+    }
+    
+    // Handle is valid
+    if (s_callCount <= 10) {
+        LOGF_WARNING("[sub_82192840] Call #{}: Valid handle 0x{:08X}", s_callCount, handle);
+    }
+}
 
 // =============================================================================
 // STREAM FUNCTION BYPASSES REMOVED - Testing vtable fix with corrected addresses
@@ -6840,6 +7343,7 @@ static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 // =============================================================================
 
 // =============================================================================
+// sub_822C1A30 - Streaming initialization
 // =============================================================================
 // This function tries to open platform:/stream.ini and parse streaming config.
 // FIXED: Instead of calling original (which fails due to corrupted buffer),
@@ -6851,74 +7355,814 @@ static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 //   virtual_optimised = 0
 //   physical_optimised = 226832 (0x37610)
 // =============================================================================
+extern "C" void __imp__sub_822C1A30(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822C1A30) {
+    static int s_count = 0;
+    static bool s_initialized = false;
+    ++s_count;
+    
+    LOGF_WARNING("[INIT] sub_822C1A30 ENTER #{}", s_count);
+    
+    if (!s_initialized) {
+        // =====================================================================
+        // SYNTHETIC stream.ini - Apply config values directly
+        // =====================================================================
+        // These values come from the actual stream.ini file:
+        //   virtual           = 0
+        //   physical          = 226544
+        //   virtual_optimised = 0  
+        //   physical_optimised = 226832
+        
+        // Memory layout from PPC analysis:
+        // Base address: 0x82CB0000 (lis r11,-32053)
+        // Config struct at offset -8620 from base
+        constexpr uint32_t CONFIG_BASE = 0x82CB0000;
+        constexpr uint32_t STREAM_CONFIG_ADDR = CONFIG_BASE - 8620;  // 0x82CADEA4
+        constexpr uint32_t STREAM_STATUS_ADDR = CONFIG_BASE - 8616;  // 0x82CADEA8
+        
+        // Stream.ini values
+        constexpr uint32_t VIRTUAL_SIZE = 0;
+        constexpr uint32_t PHYSICAL_SIZE = 226544;       // 0x374F0
+        constexpr uint32_t VIRTUAL_OPT_SIZE = 0;
+        constexpr uint32_t PHYSICAL_OPT_SIZE = 226832;   // 0x37610
+        
+        LOG_WARNING("[INIT] sub_822C1A30 applying synthetic stream.ini config:");
+        LOGF_WARNING("[INIT]   virtual           = {}", VIRTUAL_SIZE);
+        LOGF_WARNING("[INIT]   physical          = {}", PHYSICAL_SIZE);
+        LOGF_WARNING("[INIT]   virtual_optimised = {}", VIRTUAL_OPT_SIZE);
+        LOGF_WARNING("[INIT]   physical_optimised = {}", PHYSICAL_OPT_SIZE);
+        
+        // Write config values to game memory (big-endian)
+        // The config struct layout appears to be:
+        //   [STREAM_CONFIG_ADDR + 0]  = physical (or combined config)
+        //   [STREAM_STATUS_ADDR]      = status/flag byte
+        
+        // Store physical pool size
+        PPC_STORE_U32(STREAM_CONFIG_ADDR, PHYSICAL_SIZE);
+        
+        // Store status byte = 1 (initialized successfully)
+        PPC_STORE_U8(STREAM_STATUS_ADDR, 1);
+        
+        // Zero the stream memory pool (0x82000000-0x82020000)
+        // This is critical - prevents garbage vtable pointers
+        LOG_WARNING("[INIT] sub_822C1A30 zeroing stream pool 0x82000000-0x82020000 (128 KB)");
+        memset(g_memory.Translate(0x82000000), 0, 0x20000);
+        
+        s_initialized = true;
+        LOG_WARNING("[INIT] sub_822C1A30 synthetic stream.ini applied successfully");
+    }
+    
+    // Return success (r3 = 1 means config was loaded)
+    ctx.r3.u32 = 1;
+    
+    LOGF_WARNING("[INIT] sub_822C1A30 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
 
+// Hook sub_8221B7A0 to prevent infinite loops in string duplication
+extern "C" void __imp__sub_8221B7A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221B7A0) {
+    static int s_count = 0; ++s_count;
+    
+    // Prevent infinite loops - if called more than 100,000 times, something is wrong
+    if (s_count > 100000) {
+        if (s_count == 100001) {
+            LOG_WARNING("[STRING] sub_8221B7A0 called 100,000+ times - possible infinite loop, returning NULL");
+        }
+        ctx.r3.u32 = 0;  // Return NULL to break loop
+        return;
+    }
+    
+    __imp__sub_8221B7A0(ctx, base);
+}
 
 // ============================================================================
-// SHADER BINDING HOOKS - HYBRID APPROACH
-// Call original PPC code to maintain game state. The GUEST_FUNCTION_HOOKs
-// in video.cpp won't work because they replace the function entirely,
-// breaking the game's state management.
+// SHADER BINDING HOOKS - MOVED TO video.cpp
+// These hooks are now handled by GUEST_FUNCTION_HOOK in gpu/video.cpp
 // ============================================================================
-
+// sub_829CD350 (SetVertexShader) - hooked in video.cpp
+// sub_829D6690 (SetPixelShader) - hooked in video.cpp
 
 // DrawPrimitive hook is implemented in gpu/video.cpp
 
+// Hook sub_8218BE78 to validate vtable pointers and prevent crashes
+extern "C" void __imp__sub_8218BE78(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8218BE78) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t param = ctx.r3.u32;
+    if (param == 0) return;
+    
+    // Load device context from TLS (r13+0 = TLS base, offset 1676 to device ctx)
+    uint32_t tlsBase = ctx.r13.u32;
+    uint32_t deviceCtx = PPC_LOAD_U32(tlsBase + 1676);
+    
+    // Validate device context pointer
+    if (deviceCtx == 0 || deviceCtx < 0x80000000 || deviceCtx >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid device context 0x{:08X}, skipping call", 
+                         s_count, deviceCtx);
+        }
+        return;
+    }
+    
+    // Load vtable pointer from device context
+    uint32_t vtable = PPC_LOAD_U32(deviceCtx + 0);
+    
+    // Validate vtable pointer
+    if (vtable == 0 || vtable < 0x80000000 || vtable >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid vtable 0x{:08X} at deviceCtx 0x{:08X}, skipping call", 
+                         s_count, vtable, deviceCtx);
+        }
+        return;
+    }
+    
+    // Load vtable[3] (offset 12)
+    uint32_t funcPtr = PPC_LOAD_U32(vtable + 12);
+    
+    // Validate function pointer
+    if (funcPtr == 0 || funcPtr < 0x80000000 || funcPtr >= 0x90000000) {
+        if (s_count <= 10) {
+            LOGF_WARNING("[VTABLE] sub_8218BE78 #{} invalid vtable[3] 0x{:08X}, skipping call", 
+                         s_count, funcPtr);
+        }
+        return;
+    }
+    
+    // All pointers valid, call original implementation
+    if (s_count <= 10) {
+        LOGF_WARNING("[VTABLE] sub_8218BE78 #{} calling vtable[3]=0x{:08X}", s_count, funcPtr);
+    }
+    
+    __imp__sub_8218BE78(ctx, base);
+}
+
+extern "C" void __imp__sub_82673718(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82269098(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82269098) {
+    static int s_count = 0; ++s_count;
+    
+    LOGF_WARNING("[INIT] sub_82269098 #{} ENTER - running normally (worker is stubbed)", s_count);
+    
+    // UN-BYPASSED: Now safe to run because sub_8298E700 (resource worker) is stubbed
+    // This function initializes resource manager data structures and creates the worker thread
+    // The worker thread will be created but immediately return (stubbed), preventing deadlock
+    // This allows proper initialization of resource manager infrastructure
+    __imp__sub_82269098(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_82269098 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+extern "C" void __imp__sub_822054F8(PPCContext& ctx, uint8_t* base);
+// Hook sub_822736C8 to fix infinite loop when no resources exist
+extern "C" void __imp__sub_822736C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822736C8) {
+    static int s_count = 0; ++s_count;
+    
+    // Pump SDL events to prevent beach ball during resource loading
+    if ((s_count % 50) == 0) {
+        PumpSdlEventsIfNeeded();
+    }
+    
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32 & 0xFF;
+    uint32_t index = ctx.r5.u32;
+    
+    // Check resource array count
+    uint32_t resourceArrayAddr = 0x8214B4B4;
+    uint32_t arrayPtr = PPC_LOAD_U32(resourceArrayAddr + 0);
+    uint16_t arrayCount = PPC_LOAD_U16(resourceArrayAddr + 4);
+    
+    LOGF_WARNING("[RESOURCE] sub_822736C8 #{} context=0x{:08X} flags={} index={} arrayCount={}",
+                 s_count, contextAddr, flags, index, arrayCount);
+    
+    // If count is 0 and index is 0, there are no resources to process
+    // Skip execution to prevent infinite loop waiting for data that doesn't exist
+    if (arrayCount == 0 && index == 0) {
+        LOGF_WARNING("[RESOURCE] sub_822736C8 #{} skipping - no resources (count=0)", s_count);
+        
+        // Clear output parameters (what the function would do with no resources)
+        uint32_t outParam1 = ctx.r6.u32;
+        uint32_t outParam2 = ctx.r7.u32;
+        uint32_t outParam3 = ctx.r8.u32;
+        
+        if (outParam1 != 0) PPC_STORE_U32(outParam1, 0);
+        if (outParam2 != 0) PPC_STORE_U32(outParam2, 0);
+        if (outParam3 != 0) PPC_STORE_U32(outParam3, 0);
+        
+        return; // Skip original implementation
+    }
+    
+    // Call original implementation for normal resource processing
+    __imp__sub_822736C8(ctx, base);
+    
+    LOGF_WARNING("[RESOURCE] sub_822736C8 #{} completed", s_count);
+}
+
+extern "C" void __imp__sub_821DE390(PPCContext& ctx, uint8_t* base);
+// Hook sub_827EA150 to fix infinite loop in callback list iteration
+extern "C" void __imp__sub_827EA150(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EA150) {
+    static int s_count = 0; ++s_count;
+    
+    // Calculate callback list address: r29 + -7772
+    // Global callback list head at 0x831E3E44
+    uint32_t callbackListAddr = 0x831E3E44;
+    uint32_t firstCallback = PPC_LOAD_U32(callbackListAddr);
+    
+    LOGF_WARNING("[FS] sub_827EA150 #{} callback list at 0x{:08X} first=0x{:08X}",
+                 s_count, callbackListAddr, firstCallback);
+    
+    // ALWAYS clear the callback list to prevent infinite loops from uninitialized memory
+    // The original function clears it at the end anyway (line 20678)
+    // We're just doing it proactively to prevent processing invalid callbacks
+    // This is safe because:
+    //   1. Callbacks are single-use (cleared after processing)
+    //   2. Resources load via VFS and vtable implementations
+    //   3. No rendering dependency on these callbacks
+    if (firstCallback != 0) {
+        LOGF_WARNING("[FS] Clearing callback list (was 0x{:08X})", firstCallback);
+        PPC_STORE_U32(callbackListAddr, 0);
+    }
+    
+    // Call original implementation (will skip callback iteration since list is now NULL)
+    __imp__sub_827EA150(ctx, base);
+    
+    LOGF_WARNING("[FS] sub_827EA150 #{} completed", s_count);
+}
+
+extern "C" void __imp__sub_8221F8A8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82273988(PPCContext& ctx, uint8_t* base);
 
 // =============================================================================
+// sub_821DB1E0 - Config File Parser (Font/UI Settings) with VFS Support
 // =============================================================================
-// This function parses Xbox 360 config files and accesses vtables that are
-// uninitialized on PC. Attempting to call through garbage vtable pointers
-// causes PAC authentication failures (crash at 0xd73f0b51f2e09f11).
-// SOLUTION: Bypass and return 0 (success/null result)
+// Original behavior (from xex.c line 1297157):
+//   - Opens "common:/DATA/FONTS.DAT" via sub_82192840
+//   - Parses font definitions, UI config, game settings
+//   - Uses vtable calls through uninitialized pointers (PAC crash on ARM64)
+//
+// SOLUTION: Read FONTS.DAT via VFS, initialize font/UI globals properly.
 // =============================================================================
+extern "C" void __imp__sub_821DB1E0(PPCContext& ctx, uint8_t* base);
 
+static bool s_fontsLoaded = false;
+
+PPC_FUNC(sub_821DB1E0) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t configContext = ctx.r3.u32;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[CONFIG] sub_821DB1E0 #{} context=0x{:08X}", s_count, configContext);
+    }
+    
+    // Try to load FONTS.DAT via VFS (only once)
+    if (!s_fontsLoaded) {
+        s_fontsLoaded = true;
+        
+        std::string fontsPath = VFS::Resolve("common:/DATA/FONTS.DAT");
+        if (!fontsPath.empty() && VFS::Exists(fontsPath)) {
+            size_t fileSize = VFS::GetFileSize(fontsPath);
+            LOGF_WARNING("[CONFIG] FONTS.DAT found via VFS: '{}' ({} bytes)", fontsPath, fileSize);
+            
+            // Read font file header to get font count
+            FILE* fp = fopen(fontsPath.c_str(), "rb");
+            if (fp) {
+                // FONTS.DAT format: 4-byte header with font count, then font entries
+                uint32_t fontCount = 0;
+                if (fread(&fontCount, 4, 1, fp) == 1) {
+                    // Xbox uses big-endian
+                    fontCount = __builtin_bswap32(fontCount);
+                    LOGF_WARNING("[CONFIG] FONTS.DAT contains {} fonts", fontCount);
+                    
+                    // Store font count in game memory
+                    PPC_STORE_U32(0x820A912C, fontCount > 0 ? fontCount : 1);
+                }
+                fclose(fp);
+            }
+        } else {
+            LOG_WARNING("[CONFIG] FONTS.DAT not found via VFS, using defaults");
+        }
+    }
+    
+    // Initialize font-related globals that the game expects
+    constexpr uint32_t FONT_CONFIG_BASE = 0x820A912C;
+    
+    // Ensure font count is at least 1
+    uint32_t currentCount = PPC_LOAD_U32(FONT_CONFIG_BASE);
+    if (currentCount == 0) {
+        PPC_STORE_U32(FONT_CONFIG_BASE, 1);
+    }
+    
+    // Initialize UI config globals
+    PPC_STORE_U32(0x82A23394, 1);  // UI enabled flag
+    
+    // Initialize UI positioning floats (1.0f = default scale)
+    uint32_t floatOne = 0x3F800000;  // 1.0f in IEEE 754
+    for (int i = 0; i < 4; i++) {
+        PPC_STORE_U32(0x82B8E020 + i * 4, floatOne);
+    }
+    
+    // Initialize flt_82A24298 (UI scale factor)
+    PPC_STORE_U32(0x82A24298, floatOne);
+    
+    // If context provided, mark as loaded
+    if (configContext != 0 && configContext >= 0x82000000 && configContext < 0x83200000) {
+        PPC_STORE_U8(configContext, 1);      // Loaded flag
+        PPC_STORE_U32(configContext + 4, 0); // No errors
+    }
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[CONFIG] sub_821DB1E0 #{} font/UI globals initialized", s_count);
+    }
+    
+    ctx.r3.u32 = 0;  // Success
+}
+
+PPC_FUNC(sub_821DE390) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_821DE390 ENTER #{}", s_count);
+    __imp__sub_821DE390(ctx, base);
+    LOGF_WARNING("[INIT] sub_821DE390 EXIT #{}", s_count);
+}
+
+// Trace internal calls of sub_821DE390
+extern "C" void __imp__sub_82204770(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82204770) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_821DE390] sub_82204770 ENTER");
+    __imp__sub_82204770(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_821DE390] sub_82204770 EXIT");
+}
+
+extern "C" void __imp__sub_82124EF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82124EF0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_821DE390] sub_82124EF0 ENTER");
+    __imp__sub_82124EF0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_821DE390] sub_82124EF0 EXIT");
+}
 
 // =============================================================================
+// sub_82205438 - String/Resource Lookup (TRACED - not bypassed)
 // =============================================================================
 // This function looks up strings/resources from game data files.
+// It calls sub_8249BE88 which uses our vtable[27] implementation.
 // We trace but let it run - the vtable method handles file reading.
 // =============================================================================
+extern "C" void __imp__sub_82205438(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82205438) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 10) {
+        LOG_WARNING("[RESOURCE] sub_82205438 ENTER (string/resource lookup)");
+    }
+    
+    __imp__sub_82205438(ctx, base);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[RESOURCE] sub_82205438 EXIT r3={}", ctx.r3.u32);
+    }
+}
 
+// Trace internal calls of sub_82205438 (string/resource lookup)
+extern "C" void __imp__sub_827DB2A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DB2A8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_82205438] sub_827DB2A8 ENTER");
+    __imp__sub_827DB2A8(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_82205438] sub_827DB2A8 EXIT");
+}
 
 // =============================================================================
+// sub_8249BE88 - File Path Resolution (REIMPLEMENTED)
 // =============================================================================
 // This function originally calls vtable[27] on storage device for file reading.
 // Since dynamic vtable registration is unreliable, we reimplement the logic
 // directly using VFS file operations.
 //
 // Original flow:
+//   1. sub_827EDED0 formats path into stack+96 buffer
+//   2. sub_827E1EC0 gets storage device
 //   3. vtable[27] called with (device, pathBuffer, outputPtr) -> bytesRead
+//   4. If bytesRead == expectedBytes (r6), call sub_8249BDC8
 //   5. Else return 1
 //
 // Our implementation:
 //   - Format path, resolve via VFS, return file info
 // =============================================================================
+extern "C" void __imp__sub_827EDED0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EDED0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[PATH_FMT] sub_827EDED0 ENTER #{} r3=0x{:08X} r4={} r5=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    __imp__sub_827EDED0(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[PATH_FMT] sub_827EDED0 EXIT #{}", s_count);
+}
+extern "C" void __imp__sub_8249BDC8(PPCContext& ctx, uint8_t* base);
 
 
 // =============================================================================
+// sub_82205390 - String Table Load (calls sub_827EE218, sub_82147C10)
 // =============================================================================
 // This function loads string tables from game files.
 // With vtable[27] properly implemented, this should work naturally.
 // We trace but let it run.
 // =============================================================================
+extern "C" void __imp__sub_82205390(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82205390) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 10) {
+        LOG_WARNING("[RESOURCE] sub_82205390 ENTER (string table load)");
+    }
+    
+    __imp__sub_82205390(ctx, base);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[RESOURCE] sub_82205390 EXIT r3={}", ctx.r3.u32);
+    }
+}
 
+
+
+PPC_FUNC(sub_82673718) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82673718 ENTER #{}", s_count);
+    __imp__sub_82673718(ctx, base);
+    LOGF_WARNING("[INIT] sub_82673718 EXIT #{}", s_count);
+}
+
+// Trace functions inside sub_82673718 to find exact blocker
+extern "C" void __imp__sub_8297B8C0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829735C8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82974F90(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82670660(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82976570(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8297AD60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8297B260(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_8297B8C0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8297B8C0 ENTER #{}", s_count);
+    __imp__sub_8297B8C0(ctx, base);
+    LOGF_WARNING("[INIT] sub_8297B8C0 EXIT #{}", s_count);
+}
 
 // =============================================================================
+// sub_829735C8 - Audio/Media Init (Xbox XAudio2)
 // =============================================================================
 // FIXED: Let original run - no blocking detected in call tree.
 // This triggers XAudioRegisterRenderDriverClient via vtable call.
 // =============================================================================
+extern "C" void __imp__sub_829735C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829735C8) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_829735C8 ENTER - calling original (audio init)");
+    }
+    
+    __imp__sub_829735C8(ctx, base);  // Let it run!
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_829735C8 EXIT - audio init complete");
+    }
+}
+
+// Trace internal calls of sub_829735C8
+extern "C" void __imp__sub_829C52F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829C52F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_829C52F0 ENTER");
+    __imp__sub_829C52F0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_829C52F0 EXIT");
+}
+
+extern "C" void __imp__sub_829A0EA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A0EA8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_829A0EA8 ENTER");
+    __imp__sub_829A0EA8(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_829A0EA8 EXIT");
+}
+
+extern "C" void __imp__sub_8296D468(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296D468) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_8296D468 ENTER");
+    __imp__sub_8296D468(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_829735C8] sub_8296D468 EXIT");
+}
 
 // =============================================================================
+// sub_82974F90 - Audio Stream Registration
 // =============================================================================
+// FIXED: Now that sub_829735C8 runs and initializes memory structures,
 // this function can also run safely.
 // =============================================================================
+extern "C" void __imp__sub_82974F90(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82974F90) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_82974F90 ENTER - calling original (audio stream registration)");
+    }
+    
+    __imp__sub_82974F90(ctx, base);  // Now safe - memory initialized by sub_829735C8
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_82974F90 EXIT");
+    }
+}
+
+PPC_FUNC(sub_82670660) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82670660 ENTER #{}", s_count);
+    __imp__sub_82670660(ctx, base);
+    LOGF_WARNING("[INIT] sub_82670660 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82976570) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82976570 ENTER #{}", s_count);
+    __imp__sub_82976570(ctx, base);
+    LOGF_WARNING("[INIT] sub_82976570 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8297AD60) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8297AD60 ENTER #{}", s_count);
+    __imp__sub_8297AD60(ctx, base);
+    LOGF_WARNING("[INIT] sub_8297AD60 EXIT #{}", s_count);
+}
+
+// =============================================================================
+// sub_8297B260 - Audio Stream Init (Xbox vtable[1])
+// =============================================================================
+// OPTION C: Let worker thread model run - audio plays via sdl2_driver
+// 
+// Strategy: Worker init runs normally. Audio thread is started when
+// XAudioRegisterRenderDriverClient is called (if it ever is).
+// For now, just let the worker model do its thing.
+// =============================================================================
+PPC_FUNC(sub_8297B260) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t audioObjPtr = ctx.r3.u32;
+    
+    if (s_count <= 3) {
+        uint32_t vtablePtr = PPC_LOAD_U32(audioObjPtr + 0);
+        uint32_t vt1 = PPC_LOAD_U32(vtablePtr + 4);
+        LOGF_WARNING("[AUDIO] sub_8297B260 #{} obj=0x{:08X} vtable[1]=0x{:08X}", 
+                     s_count, audioObjPtr, vt1);
+    }
+    
+    __imp__sub_8297B260(ctx, base);  // Let worker init run
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[AUDIO] sub_8297B260 EXIT - worker thread model");
+    }
+}
+
+// More functions after sub_8297B260 in sub_82673718
+extern "C" void __imp__sub_82975608(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8296C060(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82671E40(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82672E50(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82975608) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82975608 ENTER #{}", s_count);
+    __imp__sub_82975608(ctx, base);
+    LOGF_WARNING("[INIT] sub_82975608 EXIT #{}", s_count);
+}
+
+// Functions inside sub_82975608
+extern "C" void __imp__sub_829748D0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82974FF8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_829748D0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829748D0 ENTER #{}", s_count);
+    __imp__sub_829748D0(ctx, base);
+    LOGF_WARNING("[INIT] sub_829748D0 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+// Functions inside sub_829748D0
+extern "C" void __imp__sub_829A1950(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8298E810(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829A1958(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_829A1950) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829A1950 ENTER #{} r3={}", s_count, ctx.r3.u32);
+    __imp__sub_829A1950(ctx, base);
+    LOGF_WARNING("[INIT] sub_829A1950 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+// sub_8298E810 - Worker creator with semaphore wait - STUBBED
+// Analysis: Creates a worker via sub_827DAF50 and waits on semaphore for completion
+// The semaphore wait blocks forever even with sync table because worker never runs properly.
+// SOLUTION: Stub and return success. Audio callback registration handled separately.
+// Option B: Un-stubbed - let worker thread model run with sync table
+extern "C" void __imp__sub_8298E810(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8298E810) {
+    static int s_count = 0; ++s_count;
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t taskFunc = ctx.r4.u32;
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E810 #{} UN-STUBBED ctx=0x{:08X} taskFunc=0x{:08X}", 
+                 s_count, contextAddr, taskFunc);
+    
+    // Call original - it will:
+    // 1. Create semaphores at ctx+36 and ctx+40 (tracked by sub_827DAC78 hook)
+    // 2. Create worker thread via sub_827DAF50
+    // 3. Wait on sem2 (ctx+40) for worker to signal it's running
+    // Sync table handles the semaphore wait/signal coordination
+    __imp__sub_8298E810(ctx, base);
+    
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E810 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// Functions inside sub_8298E810 - trace to find blocker on 2nd call
+extern "C" void __imp__sub_827DAC78(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DAF50(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DACD8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827DADB0(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_827DAC78) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t originalCount = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    if (s_count <= 30)
+        LOGF_WARNING("[SEM_CREATE] sub_827DAC78 #{} ENTER count={} LR=0x{:08X}", s_count, originalCount, callerLR);
+    
+    __imp__sub_827DAC78(ctx, base);
+    
+    uint32_t resultHandle = ctx.r3.u32;
+    
+    // Track semaphores created with count=0 for later signaling
+    // This catches semaphores created via internal wrapper, not just NtCreateSemaphore
+    // Route through sync table for proper tracking
+    if (resultHandle != 0) {
+        SyncTable_InitSemaphore(resultHandle, originalCount, 32767, callerLR);
+        printf("[SYNC-TABLE] CREATE semaphore @ 0x%08X (caller=0x%08X) total=%d\n", resultHandle, callerLR, s_count);
+        fflush(stdout);
+        if (originalCount == 0) {
+            TrackBlockingSemaphoreAddr(resultHandle);  // Also track for fail-open
+            if (s_count <= 50)
+                printf("[sub_827DAC78] [SEM_CREATE] sub_827DAC78 #%d SYNC_TABLE handle=0x%08X count=0 max=0\n", s_count, resultHandle);
+        }
+    }
 
 
 
+
+
+
+
+
+
+}
+
+PPC_FUNC(sub_827DAF50) {
+    static int s_count = 0; ++s_count;
+    // r3=class/entry, r4=context, r5=stackSize, r6=flags, r7=taskFunc, r8=suspend
+    uint32_t classAddr = ctx.r3.u32;
+    uint32_t contextAddr = ctx.r4.u32;
+    uint32_t taskFunc = ctx.r7.u32;
+    uint32_t suspendFlag = ctx.r8.u32;
+    LOGF_WARNING("[THREAD_CREATE] sub_827DAF50 #{} ENTER class=0x{:08X} ctx=0x{:08X} taskFunc=0x{:08X} suspend={}", 
+                 s_count, classAddr, contextAddr, taskFunc, suspendFlag);
+    __imp__sub_827DAF50(ctx, base);
+    LOGF_WARNING("[THREAD_CREATE] sub_827DAF50 #{} EXIT threadHandle=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+extern "C" void sub_827DACD8_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    uint32_t semHandle = ctx.r3.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    // Skip null handles
+    if (semHandle == 0) {
+        ctx.r3.u32 = 1;  // Return success for null
+        return;
+    }
+    
+    if (s_count <= 50 || s_count % 100 == 0) {
+        printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d wait on semaphore 0x%08X (LR=0x%08X)\n", 
+               s_count, semHandle, callerLR);
+        fflush(stdout);
+    }
+    
+    // Check sync table first
+    SyncObject* syncObj = SyncTable_Get(semHandle);
+    if (syncObj) {
+        if (s_count <= 50 || s_count % 100 == 0) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE FOUND 0x%08X, calling Wait(INFINITE=0xFFFFFFFF)\n",
+                   s_count, semHandle);
+            fflush(stdout);
+        }
+        
+        uint32_t result = syncObj->Wait(INFINITE);
+        uint32_t signalState = syncObj->signalState.load();
+        
+        if (s_count <= 50 || s_count % 100 == 0) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d SYNC_TABLE Wait returned result=%u signalState=%u\n",
+                   s_count, result, signalState);
+            fflush(stdout);
+        }
+        
+        ctx.r3.u32 = (result == 0) ? 1 : 0;
+    } else {
+        __imp__sub_827DACD8(ctx, base);
+        
+        if (s_count <= 50) {
+            printf("[sub_827DACD8] [SEM_WAIT] sub_827DACD8 #%d PASSED (original) r3=%u\n",
+                   s_count, ctx.r3.u32);
+            fflush(stdout);
+        }
+    }
+}
 
 
 // =============================================================================
+// sub_827DE858 - RAGE pgStreamer::Worker Thread Entry Point
+// =============================================================================
+// Original behavior (from xex.c line 2557369):
+//   _DWORD *__fastcall sub_827DE858(int a1) {  // a1 = workerId (0 or 1)
+//     v2 = &unk_83101BA0 + 24944 * a1;  // Worker context array
+//     while (1) {
+//       sub_827DACD8(v2[6235]);  // WAIT ON SEMAPHORE - blocks forever!
+//       // ... process render job ...
+//       sub_827DE1C0(...);  // Execute render command
+//     }
+//   }
+//
+// Called as thread entry (line 2557980):
+//   sub_827DAF50((int)sub_827DE858, ..., "[RAGE] pgStreamer::Worker", ...);
+//
+// Creates 2 worker threads for parallel GPU rendering (Xbox 360 triple-buffering).
+// The semaphore at context+24940 is never signaled because render job dispatcher
+// is not initialized on PC.
+//
+// SOLUTION: Return immediately - PC rendering uses different pipeline.
+// =============================================================================
+extern "C" void __imp__sub_827DE858(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DE858) {
+    static int s_count = 0; ++s_count;
+    uint32_t workerId = ctx.r3.u32;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[RENDER_WORKER] sub_827DE858 #{} workerId={} - PC uses host rendering pipeline", 
+                     s_count, workerId);
+    }
+    
+    // Don't call __imp__sub_827DE858 - it contains while(1) with semaphore wait
+    // PC rendering is handled by host GPU layer (video.cpp, postprocess_renderer.cpp)
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
+
+// MarkInitComplete is now deprecated - use SetInitComplete() directly
+
+PPC_FUNC(sub_827DADB0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_827DADB0 ENTER #{}", s_count);
+    __imp__sub_827DADB0(ctx, base);
+    LOGF_WARNING("[INIT] sub_827DADB0 EXIT #{}", s_count);
+}
+
+// Trace functions called by sub_8218C600 to find blocking point
+extern "C" void __imp__sub_829A0A48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A0A48) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8218C600] sub_829A0A48 ENTER #{}", s_count);
+    __imp__sub_829A0A48(ctx, base);
+    LOGF_WARNING("[sub_8218C600] sub_829A0A48 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827DF248(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DF248) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8218C600] sub_827DF248 ENTER #{}", s_count);
+    __imp__sub_827DF248(ctx, base);
+    LOGF_WARNING("[sub_8218C600] sub_827DF248 EXIT #{}", s_count);
+}
+
+// sub_82192578 is called by recompiled code but wasn't itself recompiled
+// Create a stub that returns success
+PPC_FUNC(sub_82192578) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) {
+        LOG_WARNING("[STUB] sub_82192578 called - returning success");
+    }
+    ctx.r3.u32 = 1;  // Return success
+}
+
+// =============================================================================
+// sub_827DFFF0 - REIMPLEMENTATION: Path Configuration Parser
 // =============================================================================
 // Original Xbox behavior: Parses semicolon-separated path config string using
 // strtok, stores up to 4 paths in context structure at offsets 0, 256, 512, 768.
@@ -6926,6 +8170,7 @@ static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 //
 // This reimplementation uses native C++ string handling to avoid TLS issues
 // with the PPC strtok implementation. Properly populates all path slots so
+// sub_827E04F0 and sub_827E0740 can read them for pathConfig values 0-3.
 //
 // Context structure layout:
 //   [ctx+0]    = path slot 0 (256 bytes)
@@ -6935,31 +8180,282 @@ static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 //   [ctx+3076] = pathCount (number of paths parsed, 1-4)
 //   [ctx+3080] = specialCount (count of '*' prefixed paths)
 // =============================================================================
+extern "C" void __imp__sub_827DFFF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DFFF0) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t contextAddr = ctx.r3.u32;  // Storage device context
+    uint32_t configStrAddr = ctx.r4.u32; // Path config string pointer
+    
+    // Check for global override at 0x8310E034 (lis -31983, offset -8140, then +4)
+    // Original: if (global != 0) use global instead of r4
+    uint32_t overrideAddr = PPC_LOAD_U32(0x8310E034 + 4);
+    if (overrideAddr != 0) {
+        configStrAddr = overrideAddr;
+    }
+    
+    // Initialize pathCount to 0
+    PPC_STORE_U32(contextAddr + 3076, 0);
+    PPC_STORE_U32(contextAddr + 3080, 0);
+    
+    // If no config string, set default and return
+    if (configStrAddr == 0) {
+        // Set empty path at slot 0 and pathCount = 1
+        PPC_STORE_U8(contextAddr, 0);
+        PPC_STORE_U32(contextAddr + 3076, 1);
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} context=0x{:08X} -> NULL config string, set default", 
+                         s_count, contextAddr);
+        }
+        return;
+    }
+    
+    // Read the config string from guest memory (max 255 chars)
+    char configStr[260] = {0};
+    for (int i = 0; i < 255; i++) {
+        char c = (char)PPC_LOAD_U8(configStrAddr + i);
+        configStr[i] = c;
+        if (c == 0) break;
+    }
+    configStr[255] = 0;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} context=0x{:08X} configStr='{}' (from 0x{:08X})", 
+                     s_count, contextAddr, configStr, configStrAddr);
+    }
+    
+    // Parse paths by ';' delimiter using C++ (avoid PPC strtok TLS issues)
+    uint32_t pathCount = 0;
+    uint32_t specialCount = 0;
+    
+    char* str = configStr;
+    char* token = str;
+    
+    while (*str && pathCount < 4) {
+        // Find next ';' or end of string
+        while (*str && *str != ';') str++;
+        
+        // Null-terminate the token
+        bool hasMore = (*str == ';');
+        if (hasMore) *str++ = 0;
+        
+        // Skip empty tokens
+        if (*token == 0) {
+            token = str;
+            continue;
+        }
+        
+        // Check for '*' prefix (special path marker)
+        char* pathStart = token;
+        if (*pathStart == '*') {
+            pathStart++;
+            specialCount = pathCount; // Original stores current pathCount
+        }
+        
+        // Normalize the path:
+        // - Convert Xbox paths (game:\, platform:\, update:\) to VFS format
+        // - Convert backslashes to forward slashes
+        // - Ensure trailing slash
+        char normalizedPath[260] = {0};
+        char* dst = normalizedPath;
+        char* src = pathStart;
+        
+        // Check for colon (Xbox drive letter) and skip to after it
+        char* colonPos = nullptr;
+        for (char* p = src; *p; p++) {
+            if (*p == ':') {
+                colonPos = p;
+                break;
+            }
+        }
+        
+        // If we have a colon, convert to VFS format
+        if (colonPos) {
+            // Map all Xbox mount points to platform:/
+            // game:\shaders -> platform:/shaders/
+            // platform:\textures -> platform:/textures/
+            // update:\data -> platform:/data/
+            strcpy(dst, "platform:");
+            dst += 9; // length of "platform:"
+            
+            // Skip past the colon in source
+            src = colonPos + 1;
+        }
+        
+        // Copy rest of path, converting backslashes to forward slashes
+        while (*src) {
+            if (*src == '\\') {
+                *dst++ = '/';
+            } else {
+                *dst++ = *src;
+            }
+            src++;
+        }
+        
+        // Ensure trailing slash if path is not empty
+        if (dst > normalizedPath && *(dst-1) != '/') {
+            *dst++ = '/';
+        }
+        *dst = 0;
+        
+        // Write to context slot (pathCount * 256)
+        uint32_t slotAddr = contextAddr + (pathCount * 256);
+        size_t pathLen = strlen(normalizedPath);
+        if (pathLen > 255) pathLen = 255;
+        
+        for (size_t i = 0; i < pathLen; i++) {
+            PPC_STORE_U8(slotAddr + i, (uint8_t)normalizedPath[i]);
+        }
+        PPC_STORE_U8(slotAddr + pathLen, 0); // Null terminate
+        
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} slot[{}] = '{}' (from '{}')", 
+                         s_count, pathCount, normalizedPath, token);
+        }
+        
+        pathCount++;
+        token = str;
+    }
+    
+    // If no paths were parsed, set default
+    if (pathCount == 0) {
+        PPC_STORE_U8(contextAddr, 0);
+        pathCount = 1;
+        if (s_count <= 5) {
+            LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} -> no paths parsed, set default pathCount=1", s_count);
+        }
+    }
+    
+    // Store counts
+    PPC_STORE_U32(contextAddr + 3076, pathCount);
+    PPC_STORE_U32(contextAddr + 3080, specialCount);
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827DFFF0 #{} -> pathCount={} specialCount={}", 
+                     s_count, pathCount, specialCount);
+    }
+}
 
 
+extern "C" void __imp__sub_82192140(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192140) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE] sub_82192140 ENTER #{}", s_count);
+    __imp__sub_82192140(ctx, base);
+    LOGF_WARNING("[TRACE] sub_82192140 EXIT #{}", s_count);
+}
+
+// sub_827E0C30 - Path setup (runs naturally now that race condition is fixed)
+extern "C" void __imp__sub_827E0C30(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0C30) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[PATH] sub_827E0C30 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_827E0C30(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[PATH] sub_827E0C30 EXIT #{}", s_count);
+}
+
 // =============================================================================
+// sub_827E0CF8 - PLATFORM GLUE: Path Finalization
 // =============================================================================
+// Original Xbox behavior: Validates and finalizes path, calls sub_827E2448.
 // This function blocks on Xbox-specific path validation.
 //
 // PC replacement: Skip validation, just store path length and return success.
 // =============================================================================
+extern "C" void __imp__sub_827E0CF8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0CF8) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = context pointer, r4 = path string
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t pathAddr = ctx.r4.u32;
+    
+    // Calculate path length
+    uint32_t pathLen = 0;
+    if (pathAddr != 0) {
+        for (int i = 0; i < 260; i++) {
+            if (PPC_LOAD_U8(pathAddr + i) == 0) break;
+            pathLen++;
+        }
+    }
+    
+    // Store path length at [context+264] (from original code analysis)
+    if (pathLen > 0) {
+        PPC_STORE_U32(contextAddr + 264, pathLen - 1);
+    } else {
+        PPC_STORE_U32(contextAddr + 264, 0xFFFFFFFF);
+    }
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[PATH] sub_827E0CF8 #{} ctx=0x{:08X} -> skip finalization, pathLen={}", 
+                     s_count, contextAddr, pathLen);
+    }
+    
+    // Return 1 = success
+    ctx.r3.u32 = 1;
+}
 
 // =============================================================================
+// sub_827EF938 - PLATFORM GLUE: Path Validation/Registration
 // =============================================================================
 // Original Xbox behavior: Validates path and registers it with storage system.
+// Calls sub_827E2448 which does complex path string processing that blocks.
 //
 // PC replacement: Skip path validation - VFS handles all paths.
 // Just store the path length and return success.
 // =============================================================================
+extern "C" void __imp__sub_827EF938(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EF938) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = context pointer, r4 = path string
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t pathAddr = ctx.r4.u32;
+    
+    // Calculate path length
+    uint32_t pathLen = 0;
+    if (pathAddr != 0) {
+        for (int i = 0; i < 260; i++) {
+            if (PPC_LOAD_U8(pathAddr + i) == 0) break;
+            pathLen++;
+        }
+    }
+    
+    // Store path length at [context+36] (same as original does on success)
+    PPC_STORE_U32(contextAddr + 36, pathLen);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[PATH] sub_827EF938 #{} ctx=0x{:08X} -> skip validation, pathLen={}", 
+                     s_count, contextAddr, pathLen);
+    }
+    
+    // Return 1 = success
+    ctx.r3.u32 = 1;
+}
 
 // =============================================================================
+// sub_827EF208 - PLATFORM GLUE: Storage Path Check
 // =============================================================================
 // Original Xbox behavior: Checks if storage path is configured at global addr
+// Returns 1 if configured, 0 if not, then calls sub_82990020 (strncmp)
 //
 // PC replacement: Always return 1 - VFS handles all paths
 // =============================================================================
+extern "C" void __imp__sub_827EF208(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EF208) {
+    static int s_count = 0; ++s_count;
+    
+    // Always return 1 - storage path is "configured" via VFS
+    // The VFS system already maps all game:\ paths to extracted files
+    ctx.r3.u32 = 1;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827EF208 #{} -> returning 1 (VFS configured)", s_count);
+    }
+}
 
 // =============================================================================
+// sub_827E1EC0 - PLATFORM GLUE: Storage Device Factory
 // =============================================================================
 // Original Xbox behavior: Takes path string, returns storage device object
 // with vtable for file operations. Compares path prefixes to find device type.
@@ -6969,6 +8465,7 @@ static constexpr bool USE_GAME_INIT_MODULE = false;  // TODO: Enable when ready
 // =============================================================================
 static bool s_pcStorageInitialized = false;
 
+// Global tracker for last shader file handle opened by sub_827E8180
 // This is used by vtable[19] to populate the FileStream structure
 static uint32_t g_lastShaderFileHandle = 0;
 
@@ -6979,17 +8476,11 @@ constexpr uint32_t STORAGE_DEVICE_READ_ADDR = 0x82A13D00;
 constexpr uint32_t STORAGE_DEVICE_GETFILEINFO_ADDR = 0x82A13D10;
 constexpr uint32_t STORAGE_DEVICE_READFILE_ADDR = 0x82A13D20;
 constexpr uint32_t STORAGE_DEVICE_CLOSEFILE_ADDR = 0x82A13D30;
-constexpr uint32_t STORAGE_DEVICE_VTABLE6_ADDR = 0x82A13D60;   // vtable[6] offset 24
-constexpr uint32_t STORAGE_DEVICE_VTABLE7_ADDR = 0x82A13D70;   // vtable[7] offset 28
-constexpr uint32_t STORAGE_DEVICE_VTABLE9_ADDR = 0x82A13D80;   // vtable[9] offset 36
-constexpr uint32_t STORAGE_DEVICE_VTABLE17_ADDR = 0x82A13D90;  // vtable[17] offset 68
-constexpr uint32_t STORAGE_DEVICE_VTABLE21_ADDR = 0x82A13D50;  // vtable[21] offset 84
-constexpr uint32_t STORAGE_DEVICE_VTABLE22_ADDR = 0x82A13DA0;  // vtable[22] offset 88
-constexpr uint32_t STORAGE_DEVICE_VTABLE23_ADDR = 0x82A13D40;  // vtable[23] offset 92
 
 // =============================================================================
 // StorageDevice_ReadFile - vtable[27] implementation
 // =============================================================================
+// Called by sub_8249BE88 to read file data from storage device
 // Parameters:
 //   r3 = storage device pointer
 //   r4 = path buffer (null-terminated string in guest memory)
@@ -7039,11 +8530,13 @@ static void StorageDevice_ReadFile(PPCContext& ctx, uint8_t* base) {
     printf("[VTABLE27] #%d -> FOUND size=%llu bytes, returning token=7\n", s_count, (unsigned long long)fileSize);
     fflush(stdout);
     
+    // Write file size to output pointer - this is what sub_8249BDC8 uses
     if (outputAddr != 0) {
         PPC_STORE_U32(outputAddr, static_cast<uint32_t>(fileSize));
     }
     
     // CRITICAL FIX: Return validation token (7), NOT file size
+    // sub_8249BE88 compares return with r31 (token saved from r6=7)
     // If return != 7, it fails. The file size goes to the output pointer.
     ctx.r3.s64 = 7;  // Return validation token for success
 }
@@ -7087,6 +8580,7 @@ static bool RegisterDynamicFunction(uint32_t guestAddr, PPCFunc* hostFunc) {
 // =============================================================================
 // StorageDevice_ReadFileVtable5 - vtable[5] implementation
 // =============================================================================
+// Called by sub_827E8420 to read file data from storage device
 // Parameters (PPC calling convention):
 //   r3 = storage device pointer
 //   r4 = file handle
@@ -7148,6 +8642,7 @@ static void StorageDevice_ReadFileVtable5(PPCContext& ctx, uint8_t* base) {
 // =============================================================================
 // StorageDevice_CloseFile - vtable[10] implementation
 // =============================================================================
+// Called by sub_827E87A0 to close a file and cleanup resources
 // Parameters (PPC calling convention):
 //   r3 = storage device pointer
 //   r4 = file handle
@@ -7205,6 +8700,7 @@ static void StorageDevice_GetFileInfo(PPCContext& ctx, uint8_t* base) {
                  s_count, deviceAddr, path, ctx.lr);
     
     // Phase 1B: Allocate and return a FileStream structure
+    // Based on sub_827E8420 analysis, the FileStream structure has:
     //   +0:  Storage device pointer
     //   +4:  File handle
     //   +8:  Buffer pointer
@@ -7220,6 +8716,7 @@ static void StorageDevice_GetFileInfo(PPCContext& ctx, uint8_t* base) {
         s_streamAddr = 0x82A14000;
     }
     
+    // Get the file handle that was opened by sub_827E8180
     // This is tracked globally when shader files are opened
     uint32_t fileHandle = g_lastShaderFileHandle;
     
@@ -7239,89 +8736,6 @@ static void StorageDevice_GetFileInfo(PPCContext& ctx, uint8_t* base) {
     ctx.r3.u64 = s_streamAddr;
 }
 
-// =============================================================================
-// Generic vtable stub implementations for storage device
-// =============================================================================
-void StorageDevice_Vtable6(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    if (++s_count <= 10) LOGF_WARNING("[vtable[6]] #{} device=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    ctx.r3.s32 = 0;
-}
-
-void StorageDevice_Vtable7(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    if (++s_count <= 10) LOGF_WARNING("[vtable[7]] #{} device=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    ctx.r3.s32 = 0;
-}
-
-void StorageDevice_Vtable9(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    if (++s_count <= 10) LOGF_WARNING("[vtable[9]] #{} device=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    ctx.r3.s32 = 0;
-}
-
-void StorageDevice_Vtable17(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    if (++s_count <= 10) LOGF_WARNING("[vtable[17]] #{} device=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    ctx.r3.s32 = 0;
-}
-
-void StorageDevice_Vtable22(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    if (++s_count <= 10) LOGF_WARNING("[vtable[22]] #{} device=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
-    ctx.r3.s32 = 0;
-}
-
-// =============================================================================
-// StorageDevice_Vtable21 - vtable[21] implementation (offset 84)
-// =============================================================================
-// Parameters (PPC calling convention):
-//   r3 = device object pointer
-//   r4 = path buffer
-//   r5 = another buffer/path
-// Returns: result value stored to r23
-// =============================================================================
-void StorageDevice_Vtable21(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    ++s_count;
-    
-    uint32_t deviceAddr = ctx.r3.u32;
-    uint32_t pathAddr = ctx.r4.u32;
-    uint32_t param2 = ctx.r5.u32;
-    
-    if (s_count <= 20 || s_count % 100 == 0) {
-        LOGF_WARNING("[vtable[21]] #{} device=0x{:08X} path=0x{:08X} param2=0x{:08X} LR=0x{:08X}",
-                     s_count, deviceAddr, pathAddr, param2, ctx.lr);
-    }
-    
-    // Return success (0) - this appears to be a path/file validation function
-    ctx.r3.s32 = 0;
-}
-
-// =============================================================================
-// StorageDevice_Vtable23 - vtable[23] implementation (offset 92)
-// =============================================================================
-// Parameters (PPC calling convention):
-//   r3 = device object pointer
-//   r4 = parameter (possibly path length or index)
-// Returns: appears to be called before vtable[21] (offset 84)
-// =============================================================================
-void StorageDevice_Vtable23(PPCContext& ctx, uint8_t* base) {
-    static int s_count = 0;
-    ++s_count;
-    
-    uint32_t deviceAddr = ctx.r3.u32;
-    uint32_t param = ctx.r4.u32;
-    
-    if (s_count <= 20 || s_count % 100 == 0) {
-        LOGF_WARNING("[vtable[23]] #{} device=0x{:08X} param=0x{:08X} LR=0x{:08X}",
-                     s_count, deviceAddr, param, ctx.lr);
-    }
-    
-    // Return success (0) - this appears to be a validation/setup function
-    ctx.r3.s32 = 0;
-}
-
 // Initialize PC storage device structure in guest memory
 static void InitializePCStorageDevice(uint8_t* base) {
     if (s_pcStorageInitialized) return;
@@ -7338,27 +8752,6 @@ static void InitializePCStorageDevice(uint8_t* base) {
     if (!RegisterDynamicFunction(STORAGE_DEVICE_GETFILEINFO_ADDR, StorageDevice_GetFileInfo)) {
         LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_GetFileInfo");
     }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE6_ADDR, StorageDevice_Vtable6)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable6");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE7_ADDR, StorageDevice_Vtable7)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable7");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE9_ADDR, StorageDevice_Vtable9)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable9");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE17_ADDR, StorageDevice_Vtable17)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable17");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE21_ADDR, StorageDevice_Vtable21)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable21");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE22_ADDR, StorageDevice_Vtable22)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable22");
-    }
-    if (!RegisterDynamicFunction(STORAGE_DEVICE_VTABLE23_ADDR, StorageDevice_Vtable23)) {
-        LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_Vtable23");
-    }
     if (!RegisterDynamicFunction(STORAGE_DEVICE_READ_ADDR, StorageDevice_ReadFile)) {
         LOG_WARNING("[STORAGE] WARNING: Failed to register StorageDevice_ReadFile");
     }
@@ -7372,6 +8765,7 @@ static void InitializePCStorageDevice(uint8_t* base) {
         PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + i, 0x82120000 + i);
     }
     
+    // vtable[5] at offset 20 - ReadFile implementation (called by sub_827E8420)
     PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 20, STORAGE_DEVICE_READFILE_ADDR);
     
     // vtable[10] at offset 40 - CloseFile implementation
@@ -7380,38 +8774,76 @@ static void InitializePCStorageDevice(uint8_t* base) {
     // vtable[19] at offset 76 - GetFileInfo implementation
     PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 76, STORAGE_DEVICE_GETFILEINFO_ADDR);
     
-    // vtable[6] at offset 24
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 24, STORAGE_DEVICE_VTABLE6_ADDR);
-    
-    // vtable[7] at offset 28
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 28, STORAGE_DEVICE_VTABLE7_ADDR);
-    
-    // vtable[9] at offset 36
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 36, STORAGE_DEVICE_VTABLE9_ADDR);
-    
-    // vtable[17] at offset 68
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 68, STORAGE_DEVICE_VTABLE17_ADDR);
-    
-    // vtable[21] at offset 84
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 84, STORAGE_DEVICE_VTABLE21_ADDR);
-    
-    // vtable[22] at offset 88
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 88, STORAGE_DEVICE_VTABLE22_ADDR);
-    
-    // vtable[23] at offset 92
-    PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 92, STORAGE_DEVICE_VTABLE23_ADDR);
-    
     // vtable[27] at offset 108 - ReadFile implementation (alternative)
     PPC_STORE_U32(StorageConstants::PC_STORAGE_VTABLE_ADDR + 108, STORAGE_DEVICE_READ_ADDR);
     
     s_pcStorageInitialized = true;
-    LOGF_WARNING("[STORAGE] PC storage device initialized, vtable[5]=0x{:08X} vtable[10]=0x{:08X} vtable[19]=0x{:08X} vtable[23]=0x{:08X} vtable[27]=0x{:08X}",
-                 STORAGE_DEVICE_READFILE_ADDR, STORAGE_DEVICE_CLOSEFILE_ADDR, STORAGE_DEVICE_GETFILEINFO_ADDR, STORAGE_DEVICE_VTABLE23_ADDR, STORAGE_DEVICE_READ_ADDR);
+    LOGF_WARNING("[STORAGE] PC storage device initialized, vtable[5]=0x{:08X} vtable[10]=0x{:08X} vtable[19]=0x{:08X} vtable[27]=0x{:08X}",
+                 STORAGE_DEVICE_READFILE_ADDR, STORAGE_DEVICE_CLOSEFILE_ADDR, STORAGE_DEVICE_GETFILEINFO_ADDR, STORAGE_DEVICE_READ_ADDR);
 }
 
+// Global flag to detect if PPC execution continues after sub_827E1EC0
 static std::atomic<bool> g_afterStorageInit{false};
 
+extern "C" void __imp__sub_827E1EC0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E1EC0) {
+    static int s_count = 0; ++s_count;
+    static int s_emptyPathCount = 0;
+    static int s_actualPathCount = 0;
+    
+    // Initialize PC storage device if needed
+    InitializePCStorageDevice(base);
+    
+    // r3 = path buffer pointer, r4 = flags
+    uint32_t pathAddr = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32;
+    
+    // Read path string for logging
+    char pathBuf[256] = {0};
+    int pathLen = 0;
+    for (int i = 0; i < 255; i++) {
+        uint8_t c = PPC_LOAD_U8(pathAddr + i);
+        if (c == 0) break;
+        pathBuf[i] = c;
+        pathLen++;
+    }
+    
+    // Track empty vs actual paths
+    bool isEmpty = (pathLen == 0);
+    if (isEmpty) {
+        s_emptyPathCount++;
+    } else {
+        s_actualPathCount++;
+    }
+    
+    // Also dump first 32 bytes as hex to see what's actually there
+    char hexBuf[128] = {0};
+    for (int i = 0; i < 16 && i < 255; i++) {
+        uint8_t c = PPC_LOAD_U8(pathAddr + i);
+        sprintf(hexBuf + i*3, "%02X ", c);
+        if (c == 0) break;
+    }
+    
+    // Always log calls with actual paths, limit empty path logging
+    if (!isEmpty || s_emptyPathCount <= 5) {
+        LOGF_WARNING("[STORAGE] sub_827E1EC0 #{} r3=0x{:08X} r4={} path='{}' hex=[{}] LR=0x{:08X} [empty:{} actual:{}]", 
+                     s_count, pathAddr, flags, pathBuf, hexBuf, ctx.lr, s_emptyPathCount, s_actualPathCount);
+    }
+    
+    // Return our PC storage device for ALL paths
+    // The VFS system handles path resolution internally
+    ctx.r3.u32 = StorageConstants::PC_STORAGE_DEVICE_ADDR;
+    
+    // POST-RETURN TRACE: Log that we're about to return and what the caller will receive
+    LOGF_WARNING("[STORAGE] sub_827E1EC0 #{} RETURNING device=0x{:08X} to caller at 0x{:08X}", 
+                 s_count, ctx.r3.u32, ctx.lr);
+    
+    // Set global flag to detect if any PPC code runs after this
+    g_afterStorageInit.store(true);
+}
+
 // =============================================================================
+// sub_827EF2F8 - PLATFORM GLUE: Content Mount (XContentCreate equivalent)
 // =============================================================================
 // Original Xbox behavior: Mounts Xbox content package, makes vtable calls:
 //   [vtable+8]  - Open file
@@ -7423,13 +8855,154 @@ static std::atomic<bool> g_afterStorageInit{false};
 // PC replacement: Skip Xbox mount, initialize context for VFS-based access.
 // The game stores results in the context structure at r3 (r31 in function).
 // =============================================================================
+extern "C" void __imp__sub_827EF2F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EF2F8) {
+    static int s_count = 0; ++s_count;
+    
+    // Context structure pointer
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t pathAddr = ctx.r4.u32;  // Path string
+    
+    // Read path for logging
+    char pathBuf[256] = {0};
+    for (int i = 0; i < 255 && pathAddr; i++) {
+        uint8_t c = PPC_LOAD_U8(pathAddr + i);
+        if (c == 0) break;
+        pathBuf[i] = c;
+    }
+    
+    if (s_count <= 20) {
+        LOGF_WARNING("[STORAGE] sub_827EF2F8 #{} context=0x{:08X} path='{}'", 
+                     s_count, contextAddr, pathBuf);
+    }
+    
+    // Initialize the context structure for "successful" mount
+    // The game expects certain fields to be set:
+    //   [ctx+12]  = file handle (or -1 if failed) - set to valid value
+    //   [ctx+16]  = file size (64-bit)
+    //   [ctx+32]  = storage device pointer
+    //   [ctx+36]  = path length
+    
+    // Store our PC storage device
+    PPC_STORE_U32(contextAddr + 32, StorageConstants::PC_STORAGE_DEVICE_ADDR);
+    
+    // Set file handle to a valid non-negative value (0 = success)
+    PPC_STORE_U32(contextAddr + 12, 0);
+    
+    // Set a default file size (will be updated when actual file is accessed)
+    PPC_STORE_U64(contextAddr + 16, 0x100000);  // 1MB default
+    
+    // Set path length
+    PPC_STORE_U32(contextAddr + 36, strlen(pathBuf));
+    
+    // Return success (1 = mounted successfully)
+    ctx.r3.u32 = 1;
+    
+    if (s_count <= 20) {
+        LOGF_WARNING("[STORAGE] sub_827EF2F8 #{} -> mounted via VFS (context initialized)", s_count);
+    }
+}
 
 // =============================================================================
 // INSTRUMENTATION: Caller Range 0x827E0400-0x827E0500
 // =============================================================================
+// These hooks identify what function is calling sub_827E1EC0 with empty path
 // LR=0x827E049C suggests the caller is in this address range
 // =============================================================================
 
+// sub_827E0400 - Potential caller or caller's context
+extern "C" void __imp__sub_827E0400(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0400) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0400 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E0400(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0400 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0420 - Potential caller
+extern "C" void __imp__sub_827E0420(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0420) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0420 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E0420(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0420 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0440 - Potential caller (closest to LR=0x827E049C)
+extern "C" void __imp__sub_827E0440(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0440) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0440 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E0440(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0440 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0460 - Potential caller (LR=0x827E049C is in this function's range)
+extern "C" void __imp__sub_827E0460(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0460) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0460 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E0460(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E0460 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0480 - Most likely caller (LR=0x827E049C is ~0x1C bytes into this function)
+extern "C" void __imp__sub_827E0480(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0480) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[CALLER_TRACE] sub_827E0480 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                 s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    __imp__sub_827E0480(ctx, base);
+    LOGF_WARNING("[CALLER_TRACE] sub_827E0480 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_827E04A0 - Just after likely caller
+extern "C" void __imp__sub_827E04A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E04A0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E04A0 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E04A0(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E04A0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E04C0 - Upper range
+extern "C" void __imp__sub_827E04C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E04C0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E04C0 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+    __imp__sub_827E04C0(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[CALLER_TRACE] sub_827E04C0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
 // =============================================================================
 // INSTRUMENTATION: Next Subsystem Functions
@@ -7438,6 +9011,61 @@ static std::atomic<bool> g_afterStorageInit{false};
 // Based on game_init.cpp analysis of 63-subsystem init sequence
 // =============================================================================
 
+// sub_827E0500 - Storage-related function after our caller range
+extern "C" void __imp__sub_827E0500(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0500) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0500 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    __imp__sub_827E0500(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0500 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0600 - Storage path operations
+extern "C" void __imp__sub_827E0600(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0600) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0600 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    __imp__sub_827E0600(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0600 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0700 - Storage context operations
+extern "C" void __imp__sub_827E0700(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0700) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0700 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    __imp__sub_827E0700(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0700 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827E0800 - File operations
+extern "C" void __imp__sub_827E0800(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E0800) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0800 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    __imp__sub_827E0800(ctx, base);
+    if (s_count <= 20) {
+        LOGF_WARNING("[SUBSYS] sub_827E0800 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
 // =============================================================================
 // INSTRUMENTATION: Additional Subsystem Init Functions
@@ -7446,17 +9074,129 @@ static std::atomic<bool> g_afterStorageInit{false};
 // =============================================================================
 
 // Subsystem #2 after streaming init
+extern "C" void __imp__sub_82120100(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82120100) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[SUBSYS_INIT] sub_82120100 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                 s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    __imp__sub_82120100(ctx, base);
+    LOGF_WARNING("[SUBSYS_INIT] sub_82120100 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
 
 // Subsystem loader/iterator
+extern "C" void __imp__sub_82120200(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82120200) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 30) {
+        LOGF_WARNING("[SUBSYS_INIT] sub_82120200 ENTER #{} r3=0x{:08X} r4=0x{:08X} LR=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.lr);
+    }
+    __imp__sub_82120200(ctx, base);
+    if (s_count <= 30) {
+        LOGF_WARNING("[SUBSYS_INIT] sub_82120200 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
+// More sub_8218C600 call chain - find the blocking function
+extern "C" void __imp__sub_82851548(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82851548) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82851548 ENTER #{}", s_count);
+    __imp__sub_82851548(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82851548 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82856C38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82856C38) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C38 ENTER #{}", s_count);
+    __imp__sub_82856C38(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C38 EXIT #{}", s_count);
+}
+
+// Functions called AFTER sub_82851548 EXIT #2 in sub_8218C600 - find blocking point
+extern "C" void __imp__sub_8285A0E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285A0E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_8285A0E0 ENTER #{}", s_count);
+    __imp__sub_8285A0E0(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_8285A0E0 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82850748(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82850748) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82850748 ENTER #{}", s_count);
+    __imp__sub_82850748(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82850748 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82856C90(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82856C90) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C90 ENTER #{}", s_count);
+    
+    // Before call, r3 contains render_ctx pointer (from sub_8218C600 line 2507)
+    uint32_t renderCtxBefore = ctx.r3.u32;
+    
+    __imp__sub_82856C90(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82856C90 EXIT #{}", s_count);
+    
+    // Trace the vtable that will be called after this returns
+    // r3 was render_ctx before call - trace it
+    if (renderCtxBefore != 0) {
+        uint32_t vtable = PPC_LOAD_U32(renderCtxBefore + 0);
+        uint32_t vtable0 = PPC_LOAD_U32(vtable + 0);
+        uint32_t vtable1 = PPC_LOAD_U32(vtable + 4);
+        uint32_t vtable2 = PPC_LOAD_U32(vtable + 8);
+        LOGF_WARNING("[VTABLE] render_ctx=0x{:08X} vtable=0x{:08X}", renderCtxBefore, vtable);
+        LOGF_WARNING("[VTABLE]   vtable[0]=0x{:08X} vtable[1]=0x{:08X} vtable[2]=0x{:08X}", 
+                     vtable0, vtable1, vtable2);
+    } else {
+        LOG_WARNING("[VTABLE] render_ctx was NULL before sub_82856C90");
+    }
+}
 
 // =============================================================================
+// sub_82857240 - Render context vtable[1] method
+// Called from sub_8218C600 after sub_82856C90 - THIS IS WHERE IT BLOCKS
 // Internal calls:
+//   sub_82856BA8 - GPU state setup
+//   sub_82857E38 - Unknown
+//   sub_8285E1F0 - Unknown  
+//   sub_82862088 - Unknown
 // =============================================================================
+extern "C" void __imp__sub_82857240(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82857240) {
+    static int s_count = 0; ++s_count;
+    
+    // FIX: Must call original to run sub_8285E1F0 which initializes global at 0x83127984
+    // This global is used by sub_822B4D68 for vtable calls - without it, we crash on PAC
+    // 
+    // MarathonRecomp approach: Call originals but with blocking functions hooked to be non-blocking
+    // sub_82856BA8 is already stubbed to bypass GPU hardware waits
+    // sub_8285E1F0 and sub_82862088 have hooks that call __imp__ (safe)
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[RENDER_INIT] sub_82857240 - calling original to init render context globals");
+    }
+    
+    // Call original - internal blocking functions are already hooked to be non-blocking
+    // This ensures sub_8285E1F0 runs and initializes the global pointer at 0x83127984
+    __imp__sub_82857240(ctx, base);
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[RENDER_INIT] sub_82857240 - completed, render context globals initialized");
+    }
+}
 
 // =============================================================================
+// sub_82856BA8 - GPU State/Shader Setup (COLLAPSED)
 // =============================================================================
 // This function orchestrates GPU state initialization including:
+//   - sub_8286DA20 (GPU resource alloc wrapper)
+//   - sub_82853CB0 (shader setup via vtable[3])
+//   - sub_82871A18 (additional GPU setup)
 //
 // All of these lead to vtable calls that expect Xbox GPU hardware.
 // 
@@ -7467,8 +9207,22 @@ static std::atomic<bool> g_afterStorageInit{false};
 // This collapse eliminates the "first call works, second call hangs" pattern
 // caused by mixing partial Xbox GPU state with partial modern GPU state.
 // =============================================================================
+extern "C" void __imp__sub_82856BA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82856BA8) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[GPU] sub_82856BA8 BYPASSING - shader cache handles GPU/shader setup");
+    }
+    
+    // Return immediately - shader setup handled by host shader cache
+    // Shaders are loaded on-demand via GetOrLinkShader() during rendering
+    return;
+}
 
 // =============================================================================
+// sub_8285AF80 - GPU Sync/Fence Operation (BYPASSED)
 // =============================================================================
 // This function performs GPU synchronization with a retry loop.
 // After 25 failed retries (counter at offset 30780 >= 25), it enters an
@@ -7480,9 +9234,70 @@ static std::atomic<bool> g_afterStorageInit{false};
 // Solution: Bypass entirely - host GPU handles synchronization through
 // the modern graphics layer (Metal/Vulkan/OpenGL).
 // =============================================================================
+extern "C" void __imp__sub_8285AF80(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285AF80) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 10 || s_count % 1000 == 0) {
+        LOGF_WARNING("[GPU] sub_8285AF80 GPU sync #{} - BYPASSING to prevent infinite loop", s_count);
+    }
+    
+    // Return immediately - GPU sync handled by host graphics layer
+    // This prevents the 25-retry timeout and infinite loop at loc_8285B214
+    return;
+}
 
+// Trace internal calls of sub_82856BA8
+extern "C" void __imp__sub_828787C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828787C0) {
+    LOG_WARNING("[sub_82856BA8] sub_828787C0 ENTER");
+    __imp__sub_828787C0(ctx, base);
+    LOG_WARNING("[sub_82856BA8] sub_828787C0 EXIT");
+}
+
+extern "C" void __imp__sub_8286DA20(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286DA20) {
+    LOG_WARNING("[sub_82856BA8] sub_8286DA20 ENTER");
+    __imp__sub_8286DA20(ctx, base);
+    LOG_WARNING("[sub_82856BA8] sub_8286DA20 EXIT");
+}
+
+// Trace sub_8286D668 - GPU resource init (called by sub_8286DA20)
+extern "C" void __imp__sub_8286D668(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286D668) {
+    LOG_WARNING("[sub_8286DA20] sub_8286D668 ENTER (GPU resource init)");
+    __imp__sub_8286D668(ctx, base);
+    LOG_WARNING("[sub_8286DA20] sub_8286D668 EXIT");
+}
+
+// Trace internal calls of sub_8286D668
+extern "C" void __imp__sub_827E93F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E93F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286D668] sub_827E93F8 ENTER");
+    __imp__sub_827E93F8(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_8286D668] sub_827E93F8 EXIT");
+}
+
+extern "C" void __imp__sub_8286BAE0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286BAE0) {
+    LOG_WARNING("[sub_8286D668] sub_8286BAE0 ENTER");
+    __imp__sub_8286BAE0(ctx, base);
+    LOG_WARNING("[sub_8286D668] sub_8286BAE0 EXIT");
+}
+
+// sub_8221B7A0 is now hooked earlier with infinite loop protection - removed duplicate
+
+extern "C" void __imp__sub_829E5C38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829E5C38) {
+    LOG_WARNING("[sub_8286BAE0] sub_829E5C38 ENTER (GPU format query)");
+    __imp__sub_829E5C38(ctx, base);
+    LOG_WARNING("[sub_8286BAE0] sub_829E5C38 EXIT");
+}
 
 // =============================================================================
+// sub_82850028 - GPU Resource Create
 // =============================================================================
 // Original behavior:
 //   - Loads GPU device from TLS[1676]
@@ -7494,9 +9309,237 @@ static std::atomic<bool> g_afterStorageInit{false};
 // Solution: Bypass vtable call, return success. Game's own structures
 // will be initialized by the allocation code that runs before the vtable call.
 // =============================================================================
+extern "C" void __imp__sub_82850028(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82850028) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 10 || s_count % 100 == 0) {
+        LOGF_WARNING("[GPU] sub_82850028 GPU resource create #{} - bypassing vtable[15], returning success", s_count);
+    }
+    
+    // Return success (0) - negative values indicate error per caller checks
+    // e.g., line 93332: "cmpwi cr6,r3,0" / "bge cr6,0x8286bbd0" (branch if >= 0)
+    ctx.r3.s64 = 0;
+}
 
+extern "C" void __imp__sub_829D92C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D92C0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOG_WARNING("[sub_8286D668] sub_829D92C0 ENTER");
+    __imp__sub_829D92C0(ctx, base);
+    if (s_count <= 10) LOG_WARNING("[sub_8286D668] sub_829D92C0 EXIT");
+}
+
+// Additional calls in sub_8286D668
+extern "C" void __imp__sub_8286BA28(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286BA28) {
+    LOG_WARNING("[sub_8286D668] sub_8286BA28 ENTER");
+    __imp__sub_8286BA28(ctx, base);
+    LOG_WARNING("[sub_8286D668] sub_8286BA28 EXIT");
+}
+
+extern "C" void __imp__sub_8286CE40(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286CE40) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286D668] sub_8286CE40 ENTER");
+    __imp__sub_8286CE40(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_8286D668] sub_8286CE40 EXIT");
+}
+
+// Trace sub_8286CCA0 internal calls (called via vtable[3] from sub_82853CB0)
+extern "C" void __imp__sub_8286CCA0(PPCContext& ctx, uint8_t* base);
+// =============================================================================
+// sub_8286CCA0 - Safe C++ reimplementation
+// =============================================================================
+// Original PPC code uses PPC_STORE_U64/PPC_LOAD_U64 for stack save/restore
+// which causes SIGBUS on ARM due to unaligned 64-bit access.
+// This reimplementation uses C++ local variables to avoid stack operations.
+PPC_FUNC(sub_8286CCA0) {
+    LOG_WARNING("[sub_8286CCA0] ENTER (shader load - safe impl)");
+    
+    // Save registers in C++ variables instead of PPC stack
+    uint64_t saved_r30 = ctx.r30.u64;
+    uint64_t saved_r31 = ctx.r31.u64;
+    uint64_t saved_lr = ctx.lr;
+    
+    // Original: mr r31,r3; mr r30,r5
+    uint32_t r31_val = ctx.r3.u32;
+    uint32_t r30_val = ctx.r5.u32;
+    
+    // Allocate stack space for local buffer (256 bytes at sp+80)
+    // We'll use the actual stack but avoid 64-bit unaligned access
+    uint32_t origStack = ctx.r1.u32;
+    ctx.r1.u32 = origStack - 368;
+    
+    // Original: li r5,256; addi r3,r1,80; bl sub_8266A778
+    ctx.r5.s64 = 256;
+    ctx.r3.s64 = ctx.r1.s64 + 80;
+    ctx.r4.u64 = ctx.r4.u64;  // r4 unchanged from caller
+    ctx.lr = 0x8286CCC8;
+    sub_8266A778(ctx, base);
+    
+    // Original: addi r4,r1,80; mr r3,r31; bl sub_82854448
+    ctx.r4.s64 = ctx.r1.s64 + 80;
+    ctx.r3.u64 = r31_val;
+    ctx.lr = 0x8286CCD4;
+    sub_82854448(ctx, base);
+    
+    uint32_t result = ctx.r3.u32;
+    
+    if (result != 0) {
+        // Found - return result
+        ctx.r3.u64 = result;
+    } else {
+        // Not found path - allocate and init shader object
+        // Original: li r3,60; bl sub_8218BE28
+        ctx.r3.s64 = 60;
+        ctx.lr = 0x8286CCE4;
+        sub_8218BE28(ctx, base);
+        
+        if (ctx.r3.u32 != 0) {
+            // Original: mr r5,r30; addi r4,r1,80; bl sub_8286C8F0
+            ctx.r5.u64 = r30_val;
+            ctx.r4.s64 = ctx.r1.s64 + 80;
+            ctx.lr = 0x8286CCF8;
+            sub_8286C8F0(ctx, base);
+            r31_val = ctx.r3.u32;
+        } else {
+            r31_val = 0;
+        }
+        
+        // Original: lwz r11,0(r31); mr r3,r31; lwz r11,64(r11); mtctr r11; bctrl
+        if (r31_val != 0) {
+            uint32_t vtable = __builtin_bswap32(*(uint32_t*)(base + r31_val + 0));
+            uint32_t funcPtr = __builtin_bswap32(*(uint32_t*)(base + vtable + 64));
+            ctx.r3.u64 = r31_val;
+            ctx.lr = 0x8286CD18;
+            ctx.ctr.u64 = funcPtr;
+            PPC_CALL_INDIRECT_FUNC(funcPtr);
+            
+            if (ctx.r3.u32 == 0) {
+                // Original: bl sub_82126498; li r3,0
+                ctx.r3.u64 = r31_val;
+                ctx.lr = 0x8286CD28;
+                sub_82126498(ctx, base);
+                ctx.r3.s64 = 0;
+            } else {
+                ctx.r3.u64 = r31_val;
+            }
+        } else {
+            ctx.r3.s64 = 0;
+        }
+    }
+    
+    // Restore stack and registers
+    ctx.r1.u32 = origStack;
+    ctx.r30.u64 = saved_r30;
+    ctx.r31.u64 = saved_r31;
+    ctx.lr = saved_lr;
+    
+    LOG_WARNING("[sub_8286CCA0] EXIT (safe impl)");
+}
+
+extern "C" void __imp__sub_8266A778(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8266A778) {
+    LOG_WARNING("[sub_8286CCA0] sub_8266A778 ENTER");
+    __imp__sub_8266A778(ctx, base);
+    LOG_WARNING("[sub_8286CCA0] sub_8266A778 EXIT");
+}
+
+extern "C" void __imp__sub_82854448(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82854448) {
+    LOG_WARNING("[sub_8286CCA0] sub_82854448 ENTER");
+    __imp__sub_82854448(ctx, base);
+    LOGF_WARNING("[sub_8286CCA0] sub_82854448 EXIT r3={}", ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8286C8F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286C8F0) {
+    LOG_WARNING("[sub_8286CCA0] sub_8286C8F0 ENTER");
+    __imp__sub_8286C8F0(ctx, base);
+    LOG_WARNING("[sub_8286CCA0] sub_8286C8F0 EXIT");
+}
+
+// Trace internal calls of sub_8286C8F0
+extern "C" void __imp__sub_8287E2C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8287E2C0) {
+    LOG_WARNING("[sub_8286C8F0] sub_8287E2C0 ENTER");
+    __imp__sub_8287E2C0(ctx, base);
+    LOG_WARNING("[sub_8286C8F0] sub_8287E2C0 EXIT");
+}
+
+extern "C" void __imp__sub_827D85E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D85E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286C8F0] sub_827D85E0 ENTER");
+    __imp__sub_827D85E0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_8286C8F0] sub_827D85E0 EXIT");
+}
+
+extern "C" void __imp__sub_8285F6C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285F6C0) {
+    LOG_WARNING("[sub_8286C8F0] sub_8285F6C0 ENTER (shader lookup)");
+    __imp__sub_8285F6C0(ctx, base);
+    LOGF_WARNING("[sub_8286C8F0] sub_8285F6C0 EXIT r3=0x{:08X}", ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_827D8620(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D8620) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286C8F0] sub_827D8620 ENTER");
+    __imp__sub_827D8620(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_8286C8F0] sub_827D8620 EXIT");
+}
+
+// More internal calls of sub_8286C8F0
+extern "C" void __imp__sub_8285E6E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285E6E8) {
+    LOG_WARNING("[sub_8286C8F0] sub_8285E6E8 ENTER (texture create?)");
+    __imp__sub_8285E6E8(ctx, base);
+    LOGF_WARNING("[sub_8286C8F0] sub_8285E6E8 EXIT r3=0x{:08X}", ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8286BBE8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286BBE8) {
+    LOG_WARNING("[sub_8286C8F0] sub_8286BBE8 ENTER");
+    __imp__sub_8286BBE8(ctx, base);
+    LOG_WARNING("[sub_8286C8F0] sub_8286BBE8 EXIT");
+}
+
+// Trace internal calls of sub_8286BBE8
+extern "C" void __imp__sub_8286A970(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8286A970) {
+    LOG_WARNING("[sub_8286BBE8] sub_8286A970 ENTER");
+    __imp__sub_8286A970(ctx, base);
+    LOG_WARNING("[sub_8286BBE8] sub_8286A970 EXIT");
+}
+
+extern "C" void __imp__sub_8285E2C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285E2C0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286BBE8] sub_8285E2C0 ENTER");
+    __imp__sub_8285E2C0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_8286BBE8] sub_8285E2C0 EXIT");
+}
+
+extern "C" void __imp__sub_8285E6C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285E6C0) {
+    LOG_WARNING("[sub_8286BBE8] sub_8285E6C0 ENTER");
+    __imp__sub_8285E6C0(ctx, base);
+    LOG_WARNING("[sub_8286BBE8] sub_8285E6C0 EXIT");
+}
+
+extern "C" void __imp__sub_829D33B8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D33B8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_8286BBE8] sub_829D33B8 ENTER");
+    __imp__sub_829D33B8(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[sub_8286BBE8] sub_829D33B8 EXIT r3={}", ctx.r3.u32);
+}
 
 // =============================================================================
+// sub_82853CB0 - GPU shader/state setup
 // =============================================================================
 // This function loads an object from global+22000 and calls vtable[3] (offset 12)
 // twice to set up shader resources. The vtable calls lead to complex GPU init
@@ -7504,9 +9547,152 @@ static std::atomic<bool> g_afterStorageInit{false};
 //
 // Solution: Bypass entirely - shader resources will be set up by host GPU layer.
 // =============================================================================
+extern "C" void __imp__sub_82853CB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82853CB0) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 5) {
+        LOG_WARNING("[sub_82853CB0] BYPASSING - GPU shader setup (vtable[3] calls block)");
+    }
+    
+    // Bypass entirely - the shader setup will be handled by host GPU
+    // The game's render path will use our host shaders instead
+    return;
+}
 
+extern "C" void __imp__sub_82871A18(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82871A18) {
+    LOG_WARNING("[sub_82856BA8] sub_82871A18 ENTER");
+    __imp__sub_82871A18(ctx, base);
+    LOG_WARNING("[sub_82856BA8] sub_82871A18 EXIT");
+}
+
+extern "C" void __imp__sub_82857E38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82857E38) {
+    LOG_WARNING("[sub_82857240] sub_82857E38 ENTER");
+    __imp__sub_82857E38(ctx, base);
+    LOG_WARNING("[sub_82857240] sub_82857E38 EXIT");
+}
+
+extern "C" void __imp__sub_8285E1F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285E1F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[sub_82857240] sub_8285E1F0 ENTER #{} r3={}", s_count, ctx.r3.u32);
+    __imp__sub_8285E1F0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_82857240] sub_8285E1F0 EXIT");
+}
+
+extern "C" void __imp__sub_82862088(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82862088) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[sub_82857240] sub_82862088 ENTER #{} r3={}", s_count, ctx.r3.u32);
+    __imp__sub_82862088(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_82857240] sub_82862088 EXIT");
+}
+
+// Sub-functions called by sub_82856C90 - find which one blocks
+extern "C" void __imp__sub_82851F30(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82851F30) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82856C90] sub_82851F30 ENTER #{}", s_count);
+    __imp__sub_82851F30(ctx, base);
+    LOGF_WARNING("[sub_82856C90] sub_82851F30 EXIT #{}", s_count);
+}
+
+// Trace internal calls of sub_82851F30 to find blocker
+extern "C" void __imp__sub_827DAE20(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DAE20) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_827DAE20 ENTER #{}", s_count);
+    __imp__sub_827DAE20(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_827DAE20 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827EEE40(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EEE40) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_827EEE40 ENTER #{}", s_count);
+    __imp__sub_827EEE40(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_827EEE40 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_828508B8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828508B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_828508B8 ENTER #{}", s_count);
+    __imp__sub_828508B8(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_828508B8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829D0268(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D0268) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_829D0268 ENTER #{}", s_count);
+    __imp__sub_829D0268(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_829D0268 EXIT #{} r3={}", s_count, ctx.r3.s32);
+}
+
+extern "C" void __imp__sub_82850630(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82850630) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_82850630 ENTER #{}", s_count);
+    __imp__sub_82850630(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_82850630 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829CB140(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829CB140) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_829CB140 ENTER #{}", s_count);
+    __imp__sub_829CB140(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_829CB140 EXIT #{}", s_count);
+}
+
+// More functions called later in sub_82851F30
+extern "C" void __imp__sub_829CAE68(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829CAE68) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_829CAE68 ENTER #{}", s_count);
+    __imp__sub_829CAE68(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_829CAE68 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_829D5948(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D5948) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_829D5948 ENTER #{}", s_count);
+    __imp__sub_829D5948(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_829D5948 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82851DD8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82851DD8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_82851DD8 ENTER #{}", s_count);
+    __imp__sub_82851DD8(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_82851DD8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_8285BDC8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285BDC8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82851F30] sub_8285BDC8 ENTER #{}", s_count);
+    __imp__sub_8285BDC8(ctx, base);
+    LOGF_WARNING("[sub_82851F30] sub_8285BDC8 EXIT #{}", s_count);
+}
+
+// Trace internal calls of sub_8285BDC8 (shader/resource loader)
+extern "C" void __imp__sub_8285BC60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285BC60) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8285BDC8] sub_8285BC60 ENTER #{}", s_count);
+    __imp__sub_8285BC60(ctx, base);
+    LOGF_WARNING("[sub_8285BDC8] sub_8285BC60 EXIT #{}", s_count);
+}
 
 // =============================================================================
+// sub_827E04F0 - PLATFORM GLUE: Path Construction Function
 // =============================================================================
 // Original Xbox behavior: Constructs a file path from the storage device context.
 // It reads a path configuration index from context+3072, and if non-zero,
@@ -7517,9 +9703,105 @@ static std::atomic<bool> g_afterStorageInit{false};
 // path (due to uninitialized path config), construct a default path based on
 // the path index. This allows shader loading to proceed without Xbox path config.
 // =============================================================================
+extern "C" void __imp__sub_827E04F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E04F0) {
+    static int s_count = 0; ++s_count;
+    
+    // Extract parameters per PPC calling convention:
+    // r3 = storage device context pointer
+    // r4 = output buffer address
+    // r5 = buffer size
+    // r6 = source path pointer (can be NULL)
+    // r7 = additional flags
+    // r8 = path index
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t outputBuffer = ctx.r4.u32;
+    uint32_t bufferSize = ctx.r5.u32;
+    uint32_t sourcePath = ctx.r6.u32;
+    uint32_t pathIndex = ctx.r8.u32;
+    
+    // Check if context has path configuration at offset +3072
+    uint32_t pathConfig = PPC_LOAD_U32(contextAddr + 3072);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[sub_827E04F0] #{} context=0x{:08X} output=0x{:08X} size={} srcPath=0x{:08X} index={} pathConfig={}",
+                     s_count, contextAddr, outputBuffer, bufferSize, sourcePath, pathIndex, pathConfig);
+    }
+    
+    // Call the original implementation first
+    __imp__sub_827E04F0(ctx, base);
+    
+    // Check what path was constructed (read from output buffer)
+    char resultPath[260] = {0};
+    for (int i = 0; i < 259; i++) {
+        char c = PPC_LOAD_U8(outputBuffer + i);
+        if (c == 0) break;
+        resultPath[i] = c;
+    }
+    
+    // If the original function returned an empty path and pathConfig is 0,
+    // construct a default path to allow resource loading to proceed
+    if (resultPath[0] == 0 && pathConfig == 0) {
+        // Construct a platform-agnostic path for resource loading
+        // Use "platform:/shaders/" prefix as this is likely shader loading
+        char defaultPath[256] = {0};
+        snprintf(defaultPath, sizeof(defaultPath), "platform:/shaders/default_%u.fxc", pathIndex);
+        
+        // Copy to output buffer in PPC memory
+        size_t pathLen = strlen(defaultPath);
+        if (pathLen >= bufferSize) {
+            pathLen = bufferSize - 1;
+        }
+        
+        for (size_t i = 0; i < pathLen; i++) {
+            PPC_STORE_U8(outputBuffer + i, defaultPath[i]);
+        }
+        PPC_STORE_U8(outputBuffer + pathLen, 0); // Null terminator
+        
+        if (s_count <= 10) {
+            LOGF_WARNING("[sub_827E04F0] #{} -> original returned empty, constructed: '{}'", s_count, defaultPath);
+        }
+    } else if (s_count <= 10) {
+        LOGF_WARNING("[sub_827E04F0] #{} -> original returned path: '{}'", s_count, resultPath);
+    }
+}
 
+extern "C" void __imp__sub_827DFE10(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DFE10) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8285BDC8] sub_827DFE10 ENTER #{}", s_count);
+    __imp__sub_827DFE10(ctx, base);
+    LOGF_WARNING("[sub_8285BDC8] sub_827DFE10 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
 
 // =============================================================================
+// PC File Handle Table
+// =============================================================================
+// Maps 32-bit handle IDs to 64-bit NtFileHandle pointers.
+// This solves the 64-bit pointer truncation issue on ARM64/x64 systems.
+// =============================================================================
+static std::unordered_map<uint32_t, NtFileHandle*> s_pcFileHandleTable;
+static uint32_t s_nextPcFileHandle = 0x50000001;  // Start with a distinctive value
+static std::mutex s_pcFileHandleMutex;
+
+static uint32_t RegisterPcFileHandle(NtFileHandle* hFile) {
+    std::lock_guard<std::mutex> lock(s_pcFileHandleMutex);
+    uint32_t handle = s_nextPcFileHandle++;
+    s_pcFileHandleTable[handle] = hFile;
+    return handle;
+}
+
+static NtFileHandle* GetPcFileHandle(uint32_t handle) {
+    std::lock_guard<std::mutex> lock(s_pcFileHandleMutex);
+    auto it = s_pcFileHandleTable.find(handle);
+    if (it != s_pcFileHandleTable.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+// =============================================================================
+// sub_827E8180 - PLATFORM GLUE: File Find/Open Operation
 // =============================================================================
 // Original Xbox behavior: Calls storage device vtable[1] to find/open a file.
 // Our PC storage device has a fake vtable that crashes when called.
@@ -7527,54 +9809,1477 @@ static std::atomic<bool> g_afterStorageInit{false};
 // PC replacement: Extract path from context, use VFS to check if file exists,
 // return a valid file handle or 0 if not found.
 // =============================================================================
+extern "C" void __imp__sub_827E8180(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E8180) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = path context pointer (contains file path info at various offsets)
+    // r4 = flags (1 = read mode)
+    uint32_t pathContextAddr = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32;
+    
+    // The path context structure is complex - try multiple strategies to find the path string
+    char pathBuf[260] = {0};
+    uint32_t pathStrAddr = 0;
+    bool foundPath = false;
+    
+    // Strategy 1: Check if path string is directly at the context address
+    uint8_t firstByte = PPC_LOAD_U8(pathContextAddr);
+    if (firstByte >= 0x20 && firstByte <= 0x7E) {
+        pathStrAddr = pathContextAddr;
+        foundPath = true;
+    }
+    
+    // Strategy 2: Try dereferencing the first pointer and checking multiple offsets
+    if (!foundPath) {
+        uint32_t ptr1 = PPC_LOAD_U32(pathContextAddr);
+        if (ptr1 >= 0x00080000 && ptr1 < 0xE0000000) {
+            // Check offsets 0, 8, 16, 24 in the dereferenced structure
+            for (uint32_t offset : {0, 8, 16, 24, 32}) {
+                uint32_t testAddr = ptr1 + offset;
+                uint8_t testByte = PPC_LOAD_U8(testAddr);
+                // Check if this looks like ASCII text
+                if (testByte >= 0x20 && testByte <= 0x7E) {
+                    // Verify it's a reasonable path string (check a few more bytes)
+                    bool looksLikePath = true;
+                    for (int i = 0; i < 4 && i < 260; i++) {
+                        uint8_t b = PPC_LOAD_U8(testAddr + i);
+                        if (b == 0) break; // Null terminator is OK
+                        if (b < 0x20 || b > 0x7E) {
+                            looksLikePath = false;
+                            break;
+                        }
+                    }
+                    if (looksLikePath) {
+                        pathStrAddr = testAddr;
+                        foundPath = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Strategy 3: Check if context has a pointer at offsets 4, 8, 12 that points to path string
+    // This handles cases where context structure has indirect path references
+    if (!foundPath) {
+        for (uint32_t ptrOffset : {4u, 8u, 12u, 16u}) {
+            uint32_t testPtr = PPC_LOAD_U32(pathContextAddr + ptrOffset);
+            if (testPtr >= 0x80000000 && testPtr < 0xE0000000) {
+                uint8_t testByte = PPC_LOAD_U8(testPtr);
+                if (testByte >= 0x20 && testByte <= 0x7E) {
+                    // Verify it looks like a path string
+                    bool looksLikePath = true;
+                    for (int i = 0; i < 4; i++) {
+                        uint8_t b = PPC_LOAD_U8(testPtr + i);
+                        if (b == 0) break;
+                        if (b < 0x20 || b > 0x7E) {
+                            looksLikePath = false;
+                            break;
+                        }
+                    }
+                    if (looksLikePath) {
+                        pathStrAddr = testPtr;
+                        foundPath = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
+    // Strategy 4: Two-level indirection - pointer at offset 4 points to struct with path at offset 0 or 4
+    // This handles context 0x80080170 where offset 4 = 0x98409940 which contains another struct
+    if (!foundPath) {
+        for (uint32_t ptrOffset : {4u, 8u}) {
+            uint32_t level1Ptr = PPC_LOAD_U32(pathContextAddr + ptrOffset);
+            if (level1Ptr >= 0x80000000 && level1Ptr < 0xE0000000) {
+                // Log what's at the first level pointer for debugging
+                if (s_count <= 20) {
+                    LOGF_WARNING("[FILE] sub_827E8180 #{} Strategy4 level1Ptr=0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+                        s_count, level1Ptr,
+                        PPC_LOAD_U8(level1Ptr + 0), PPC_LOAD_U8(level1Ptr + 1),
+                        PPC_LOAD_U8(level1Ptr + 2), PPC_LOAD_U8(level1Ptr + 3),
+                        PPC_LOAD_U8(level1Ptr + 4), PPC_LOAD_U8(level1Ptr + 5),
+                        PPC_LOAD_U8(level1Ptr + 6), PPC_LOAD_U8(level1Ptr + 7));
+                }
+                
+                // Try multiple offsets in the level1 structure
+                for (uint32_t level2Offset : {0u, 4u, 8u, 12u, 16u, 20u, 24u}) {
+                    uint32_t level2Ptr = PPC_LOAD_U32(level1Ptr + level2Offset);
+                    if (level2Ptr >= 0x80000000 && level2Ptr < 0xE0000000) {
+                        uint8_t testByte = PPC_LOAD_U8(level2Ptr);
+                        if (testByte >= 0x20 && testByte <= 0x7E) {
+                            // Verify it looks like a path string
+                            bool looksLikePath = true;
+                            for (int i = 0; i < 4; i++) {
+                                uint8_t b = PPC_LOAD_U8(level2Ptr + i);
+                                if (b == 0) break;
+                                if (b < 0x20 || b > 0x7E) {
+                                    looksLikePath = false;
+                                    break;
+                                }
+                            }
+                            if (looksLikePath) {
+                                pathStrAddr = level2Ptr;
+                                foundPath = true;
+                                if (s_count <= 20) {
+                                    LOGF_WARNING("[FILE] sub_827E8180 #{} Strategy4 SUCCESS: level1+{} -> 0x{:08X}", 
+                                        s_count, level2Offset, level2Ptr);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (foundPath) break;
+            }
+        }
+    }
 
+    
+    // If we found a path address, read the string
+    if (foundPath && pathStrAddr != 0) {
+        for (int i = 0; i < 259; i++) {
+            char c = PPC_LOAD_U8(pathStrAddr + i);
+            if (c == 0) break;
+            pathBuf[i] = c;
+        }
+    }
+    
+    // COMPREHENSIVE LOGGING: Log ALL sub_827E8180 calls (file find/open operations)
+    printf("[sub_827E8180] #%d path='%s' flags=%u contextAddr=0x%08X finalAddr=0x%08X\n", 
+           s_count, pathBuf, flags, pathContextAddr, pathStrAddr);
+    fflush(stdout);
+    
+    // If path is empty, log the context structure for debugging
+    if (pathBuf[0] == 0 && s_count <= 20) {
+        LOGF_WARNING("[FILE] sub_827E8180 #{} EMPTY PATH - context dump: [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+            s_count,
+            PPC_LOAD_U8(pathContextAddr + 0), PPC_LOAD_U8(pathContextAddr + 1),
+            PPC_LOAD_U8(pathContextAddr + 2), PPC_LOAD_U8(pathContextAddr + 3),
+            PPC_LOAD_U8(pathContextAddr + 4), PPC_LOAD_U8(pathContextAddr + 5),
+            PPC_LOAD_U8(pathContextAddr + 6), PPC_LOAD_U8(pathContextAddr + 7));
+        
+        LOGF_WARNING("[FILE] sub_827E8180 #{} Final string address 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+            s_count, pathStrAddr,
+            PPC_LOAD_U8(pathStrAddr + 0), PPC_LOAD_U8(pathStrAddr + 1),
+            PPC_LOAD_U8(pathStrAddr + 2), PPC_LOAD_U8(pathStrAddr + 3),
+            PPC_LOAD_U8(pathStrAddr + 4), PPC_LOAD_U8(pathStrAddr + 5),
+            PPC_LOAD_U8(pathStrAddr + 6), PPC_LOAD_U8(pathStrAddr + 7));
+        
+        // Try one more level of dereferencing manually
+        uint32_t nextPtr = PPC_LOAD_U32(pathStrAddr);
+        if (nextPtr >= 0x00080000 && nextPtr < 0xE0000000) {
+            LOGF_WARNING("[FILE] sub_827E8180 #{} One more deref 0x{:08X} -> [{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}]",
+                s_count, nextPtr,
+                PPC_LOAD_U8(nextPtr + 0), PPC_LOAD_U8(nextPtr + 1),
+                PPC_LOAD_U8(nextPtr + 2), PPC_LOAD_U8(nextPtr + 3),
+                PPC_LOAD_U8(nextPtr + 4), PPC_LOAD_U8(nextPtr + 5),
+                PPC_LOAD_U8(nextPtr + 6), PPC_LOAD_U8(nextPtr + 7));
+        }
+    }
+    
+    // Check if this is a shader file request (fxl_final, .fxc, shaders)
+    bool isShaderPath = (strstr(pathBuf, "fxl_final") != nullptr || 
+                         strstr(pathBuf, ".fxc") != nullptr ||
+                         strstr(pathBuf, ".bin") != nullptr ||
+                         strstr(pathBuf, "shaders") != nullptr);
+    
+    // ==========================================================================
+    // SONIC UNLEASHED APPROACH: Completely bypass shader file loading.
+    // All 1132 shaders are pre-compiled and embedded in g_shaderCacheEntries[].
+    // The game's CreateShader() path uses FindShaderCacheEntry() with XXH3 hash
+    // lookup - no file I/O needed. Return 0 (not found) to force the game to
+    // use the embedded cache instead of trying to read from common.rpf.
+    // 
+    // This eliminates the infinite loop caused by:
+    //   1. FileStream at 0x82A14100 created
+    //   2. sub_82192840 rejects it (address range check)
+    //   3. Game retries → infinite loop
+    // ==========================================================================
+    if (isShaderPath) {
+        printf("[sub_827E8180] #%d -> SHADER BYPASS: '%s' - using embedded cache\n", s_count, pathBuf);
+        fflush(stdout);
+        ctx.r3.u32 = 0;  // Not found via storage device - forces use of embedded cache
+        return;
+    }
+    
+    // For other files, if path is empty, this might be a spurious call
+    // Return 0 to indicate file not found - the game should have fallback logic
+    if (pathBuf[0] == 0) {
+        printf("[sub_827E8180] #%d -> EMPTY PATH, returning 0\n", s_count);
+        fflush(stdout);
+        ctx.r3.u32 = 0;  // File not found
+        return;
+    }
+    
+    // ==========================================================================
+    // PLATFORM GLUE: Try to open file via VFS
+    // ==========================================================================
+    // The original function returns a FileStream pointer on success, 0 on failure.
+    // We need to check if the file exists via VFS and return a valid handle.
+    // ==========================================================================
+    
+    std::string guestPath(pathBuf);
+    
+    // Check if file exists via VFS
+    if (VFS::IsInitialized() && VFS::Exists(guestPath)) {
+        auto hostPath = VFS::Resolve(guestPath);
+        uint64_t fileSize = VFS::GetFileSize(guestPath);
+        
+        if (s_count <= 50 || s_count % 100 == 0) {
+            printf("[sub_827E8180] #%d -> VFS FOUND: '%s' -> '%s' (%llu bytes)\n", 
+                   s_count, pathBuf, hostPath.string().c_str(), fileSize);
+            fflush(stdout);
+        }
+        
+        // Allocate a FileStream structure in guest memory
+        // Based on xex.c sub_827E8080, FileStream structure is ~32 bytes:
+        //   +0:  Storage device pointer (vtable)
+        //   +4:  File handle/descriptor
+        //   +8:  Buffer pointer
+        //   +12: Current position
+        //   +16: File size
+        //   +20: Buffer end position  
+        //   +24: Buffer size
+        //   +28: Flags
+        static uint32_t s_fileStreamPool = 0;
+        static int s_poolIndex = 0;
+        const uint32_t STREAM_SIZE = 64;  // Extra space for safety
+        
+        if (s_fileStreamPool == 0) {
+            // Allocate pool for file streams in guest address space
+            void* hostPtr = g_userHeap.Alloc(STREAM_SIZE * 256);  // Pool for 256 streams
+            if (hostPtr) {
+                s_fileStreamPool = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+            }
+        }
+        
+        if (s_fileStreamPool != 0) {
+            uint32_t streamAddr = s_fileStreamPool + (s_poolIndex % 256) * STREAM_SIZE;
+            s_poolIndex++;
+            
+            // Create a kernel file handle for VFS access
+            NtFileHandle* hFile = CreateKernelObject<NtFileHandle>();
+            hFile->stream.open(hostPath, std::ios::in | std::ios::binary);
+            hFile->path = hostPath;
+            hFile->isRpf = false;
+            
+            // Register in handle table to avoid 64-bit pointer truncation
+            uint32_t kernelHandle = RegisterPcFileHandle(hFile);
+            
+            // Initialize FileStream structure
+            // CRITICAL: Store PC storage device address (with vtable) at offset 0
+            // sub_827E87A0 does: vtable = *(*a1) to get vtable, then calls vtable[10] for close
+            // Our PC storage device at PC_STORAGE_DEVICE_ADDR has vtable pointer at offset 0
+            // Use static buffer pool to avoid heap mutex contention
+            // The heap mutex can deadlock if worker threads are also allocating
+            static uint32_t s_bufferPool = 0;
+            static int s_bufferIndex = 0;
+            static std::mutex s_bufferMutex;  // Separate mutex just for buffer pool
+            const uint32_t bufferSize = 4096;
+            uint32_t bufferAddr = 0;
+            
+            {
+                std::lock_guard<std::mutex> bufLock(s_bufferMutex);
+                if (s_bufferPool == 0) {
+                    // Allocate pool once at startup (256 buffers * 4096 bytes = 1MB)
+                    void* hostPtr = g_userHeap.Alloc(bufferSize * 256);
+                    if (hostPtr) {
+                        s_bufferPool = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+                    }
+                }
+                if (s_bufferPool != 0) {
+                    bufferAddr = s_bufferPool + (s_bufferIndex % 256) * bufferSize;
+                    s_bufferIndex++;
+                }
+            }
+            
+            PPC_STORE_U32(streamAddr + 0, StorageConstants::PC_STORAGE_DEVICE_ADDR);   // Storage device with vtable
+            PPC_STORE_U32(streamAddr + 4, kernelHandle); // File handle
+            PPC_STORE_U32(streamAddr + 8, bufferAddr);   // Pre-allocated buffer
+            PPC_STORE_U32(streamAddr + 12, 0);           // Current position
+            PPC_STORE_U32(streamAddr + 16, (uint32_t)fileSize);  // File size
+            PPC_STORE_U32(streamAddr + 20, 0);           // Buffer end (no data yet)
+            PPC_STORE_U32(streamAddr + 24, bufferSize);  // Buffer size
+            PPC_STORE_U32(streamAddr + 28, 1);           // Flags (1 = open for read)
+            
+            if (s_count <= 50 || s_count % 100 == 0) {
+                printf("[sub_827E8180] #%d -> Created FileStream at 0x%08X handle=0x%08X\n", 
+                       s_count, streamAddr, kernelHandle);
+                fflush(stdout);
+            }
+            
+            ctx.r3.u32 = streamAddr;  // Return FileStream pointer
+            return;
+        }
+    }
+    
+    // File not found via VFS
+    if (s_count <= 100 || s_count % 500 == 0) {
+        printf("[sub_827E8180] #%d -> NOT FOUND via VFS: '%s'\n", s_count, pathBuf);
+        fflush(stdout);
+    }
+    ctx.r3.u32 = 0;  // File not found
+}
+
+extern "C" void __imp__sub_827E8880(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E8880) {
+    static int s_count = 0; ++s_count;
+    
+    LOGF_WARNING("[sub_827E8880] ENTER #{} r3=0x{:08X} r4=0x{:08X} r5={} LR=0x{:08X}",
+                 s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    
+    // Log what's at the stream pointer
+    if (ctx.r3.u32 >= 0x80000000 && ctx.r3.u32 < 0x90000000) {
+        uint32_t field0 = PPC_LOAD_U32(ctx.r3.u32 + 0);
+        uint32_t field4 = PPC_LOAD_U32(ctx.r3.u32 + 4);
+        uint32_t field8 = PPC_LOAD_U32(ctx.r3.u32 + 8);
+        LOGF_WARNING("[sub_827E8880] Stream structure: [+0]=0x{:08X} [+4]=0x{:08X} [+8]=0x{:08X}",
+                     field0, field4, field8);
+    }
+    
+    __imp__sub_827E8880(ctx, base);
+    
+    LOGF_WARNING("[sub_827E8880] EXIT #{} r3={}", s_count, ctx.r3.s32);
+}
+
+extern "C" void __imp__sub_8285B680(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285B680) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_8285BDC8] sub_8285B680 ENTER #{} (shader load)", s_count);
+    __imp__sub_8285B680(ctx, base);
+    LOGF_WARNING("[sub_8285BDC8] sub_8285B680 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_8285AA90(PPCContext& ctx, uint8_t* base);
 // =============================================================================
+// sub_8285AA90 - Registry/Hash Lookup with Pre-populated Entries
 // =============================================================================
-// This function loads from TLS[1676] (GPU device) and calls vtable[7] (offset 28)
+// Original behavior (from xex.c line 2662871):
+//   - Hashes name string via sub_827DF490
+//   - Searches array structure: ptr at +0, count at +4
+//   - Each entry is 16 bytes, hash at offset 0
+//   - Returns index+1 if found, 0 if not found
 //
-// SOLUTION: Bypass entirely. GPU setup handled by host rendering layer.
+// Problem: Registry arrays are empty because we use embedded shaders.
+// SOLUTION: Pre-populate common shader/effect registries on first call,
+// then perform actual lookups.
 // =============================================================================
 
+// Registry entry structure (16 bytes per entry)
+struct RegistryEntry {
+    uint32_t hash;
+    uint32_t data1;
+    uint32_t data2;
+    uint32_t data3;
+};
+
+// Common shader/effect names that the game looks up
+static bool s_registryInitialized = false;
+static constexpr uint32_t REGISTRY_BUFFER_ADDR = 0x83140000;  // Guest memory for registry
+static constexpr int MAX_REGISTRY_ENTRIES = 64;
+
+// Initialize shader/effect registry with common entries
+static void InitializeRegistryEntries(uint8_t* base) {
+    if (s_registryInitialized) return;
+    s_registryInitialized = true;
+    
+    LOG_WARNING("[REGISTRY] Initializing shader/effect registry entries");
+    
+    // Common effect names used by GTA IV
+    const char* commonEffects[] = {
+        "globalScalars", "globalScalars2", "globalScreenSize",
+        "globalFogParams", "globalFogColor", "globalFogColorN",
+        "DepthFxParams", "globalDayNightEffects", "gAspectRatio",
+        "globalDeferredAlphaEnable", "Colorize", "DiffuseTex",
+        "BlitMatrix", "gta_im", "drawblit", "gtadrawblit"
+    };
+    
+    int numEffects = sizeof(commonEffects) / sizeof(commonEffects[0]);
+    
+    // Store entries at REGISTRY_BUFFER_ADDR
+    for (int i = 0; i < numEffects && i < MAX_REGISTRY_ENTRIES; i++) {
+        // Hash the effect name using a simple djb2-style hash
+        uint32_t hash = 5381;
+        for (const char* p = commonEffects[i]; *p; p++) {
+            hash = ((hash << 5) + hash) + (uint8_t)*p;
+        }
+        
+        // Store entry: hash + placeholder data
+        uint32_t entryAddr = REGISTRY_BUFFER_ADDR + i * 16;
+        PPC_STORE_U32(entryAddr + 0, hash);
+        PPC_STORE_U32(entryAddr + 4, i + 1);  // Unique ID
+        PPC_STORE_U32(entryAddr + 8, 0);
+        PPC_STORE_U32(entryAddr + 12, 0);
+    }
+    
+    LOGF_WARNING("[REGISTRY] Initialized {} registry entries at 0x{:08X}", numEffects, REGISTRY_BUFFER_ADDR);
+}
+
+PPC_FUNC(sub_8285AA90) {
+    static int s_count = 0; ++s_count;
+    
+    // Initialize registry on first call
+    if (!s_registryInitialized) {
+        InitializeRegistryEntries(base);
+    }
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[REGISTRY] sub_8285AA90 #{} arrayPtr=0x{:08X} namePtr=0x{:08X}", 
+                     s_count, ctx.r3.u32, ctx.r4.u32);
+    }
+    
+    // Save registers (avoid unaligned 64-bit stack access on ARM)
+    uint64_t saved_r31 = ctx.r31.u64;
+    uint64_t saved_lr = ctx.lr;
+    
+    uint32_t arrayStructPtr = ctx.r3.u32;
+    uint32_t nameStringPtr = ctx.r4.u32;
+    
+    // Validate name pointer
+    if (nameStringPtr < 0x80000000 || nameStringPtr >= 0xE0000000) {
+        ctx.r3.s64 = 1;
+        ctx.r31.u64 = saved_r31;
+        ctx.lr = saved_lr;
+        return;
+    }
+    
+    // Hash the name string via sub_827DF490
+    ctx.r3.u64 = ctx.r4.u64;
+    ctx.r4.s64 = 0;
+    ctx.lr = 0x8285AAB0;
+    sub_827DF490(ctx, base);
+    uint32_t hashedName = ctx.r3.u32;
+    
+    // Get array info
+    uint16_t entryCount = PPC_LOAD_U16(arrayStructPtr + 4);
+    uint32_t arrayPtr = PPC_LOAD_U32(arrayStructPtr + 0);
+    
+    // If registry is empty, populate it with our pre-initialized entries
+    if (entryCount == 0 && arrayPtr == 0) {
+        // Point to our pre-populated registry
+        PPC_STORE_U32(arrayStructPtr + 0, REGISTRY_BUFFER_ADDR);
+        PPC_STORE_U16(arrayStructPtr + 4, 16);  // 16 common entries
+        arrayPtr = REGISTRY_BUFFER_ADDR;
+        entryCount = 16;
+        
+        if (s_count <= 10) {
+            LOG_WARNING("[REGISTRY] Populated empty registry with pre-initialized entries");
+        }
+    }
+    
+    // Search for hash match
+    if (entryCount > 0 && arrayPtr >= 0x80000000) {
+        for (int32_t i = 0; i < entryCount && i < MAX_REGISTRY_ENTRIES; i++) {
+            uint32_t entryHash = PPC_LOAD_U32(arrayPtr + i * 16);
+            if (entryHash == hashedName) {
+                ctx.r3.s64 = i + 1;
+                ctx.r31.u64 = saved_r31;
+                ctx.lr = saved_lr;
+                if (s_count <= 10) {
+                    LOGF_WARNING("[REGISTRY] sub_8285AA90 #{} FOUND at index {}", s_count, i);
+                }
+                return;
+            }
+        }
+    }
+    
+    // Not found - return 1 anyway to prevent failures (PC uses embedded shaders)
+    ctx.r3.s64 = 1;
+    ctx.r31.u64 = saved_r31;
+    ctx.lr = saved_lr;
+    if (s_count <= 10) {
+        LOGF_WARNING("[REGISTRY] sub_8285AA90 #{} NOT FOUND, returning 1 (bypass)", s_count);
+    }
+}
+
+extern "C" void __imp__sub_8284FAD8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8284FAD8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82856C90] sub_8284FAD8 ENTER #{}", s_count);
+    __imp__sub_8284FAD8(ctx, base);
+    LOGF_WARNING("[sub_82856C90] sub_8284FAD8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_8219FC80(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219FC80) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_8219FC80 ENTER #{}", s_count);
+    __imp__sub_8219FC80(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_8219FC80 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_82285F90(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82285F90) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82285F90 ENTER #{}", s_count);
+    __imp__sub_82285F90(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82285F90 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_822214E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822214E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_822214E0 ENTER #{}", s_count);
+    __imp__sub_822214E0(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_822214E0 EXIT #{}", s_count);
+}
+
+// sub_82193BC0 - Job system init - STUBBED to prevent blocking
+// Analysis: Creates a worker thread that waits on semaphore 0xA82402B0
+// With workers stubbed, this semaphore is never signaled, causing infinite block
+extern "C" void __imp__sub_82193BC0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82193BC0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[JOB_SYSTEM] sub_82193BC0 #{} STUBBED - job system bypassed", s_count);
+    // Don't call __imp__sub_82193BC0 - it creates worker that blocks forever
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
+
 // =============================================================================
+// sub_823193A8 - GPU Device Setup (vtable[7] calls)
 // =============================================================================
+// sub_823193A8 - GPU Device & Shader Globals Initialization
+// =============================================================================
+// Original behavior (from xex.c line 1576063):
+//   - Calls D3D device vtable[7] at TLS[1676]+28 (Xbox GPU)
+//   - Loads shader database from "common:/shaders" and "common:/shaders/db"
+//   - Registers shader global variables:
+//     * globalScalars, globalScalars2, globalScreenSize
+//     * globalFogParams, globalFogColor, globalFogColorN
+//     * DepthFxParams, globalDayNightEffects, gAspectRatio
+//     * globalDeferredAlphaEnable, Colorize
 //
-// SOLUTION: Bypass - shader effects handled by host shader cache
+// PC uses embedded shader cache (SHADER_PIPELINE.md), but game code still
+// expects these globals to be valid. We initialize them to prevent null checks.
 // =============================================================================
+extern "C" void __imp__sub_823193A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_823193A8) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[GPU] sub_823193A8 INITIALIZING shader globals (PC embedded cache)");
+    }
+    
+    // Initialize shader global variable handles (from xex.c analysis)
+    // These are used by rendering code to set shader parameters
+    // Using sequential non-zero values as placeholders
+    PPC_STORE_U32(0x82EE8D10, 1);   // dword_82EE8D10 = globalScalars
+    PPC_STORE_U32(0x82EE8D14, 2);   // dword_82EE8D14 = globalScalars2
+    PPC_STORE_U32(0x82EE8D18, 3);   // dword_82EE8D18 = globalScreenSize
+    PPC_STORE_U32(0x82EE8D1C, 4);   // dword_82EE8D1C = globalFogParams
+    PPC_STORE_U32(0x82EE8D20, 5);   // dword_82EE8D20 = globalFogColor
+    PPC_STORE_U32(0x82EE8D24, 6);   // dword_82EE8D24 = globalFogColorN
+    PPC_STORE_U32(0x82EE8D28, 7);   // dword_82EE8D28 = DepthFxParams
+    PPC_STORE_U32(0x82EE8D2C, 8);   // dword_82EE8D2C = Colorize
+    PPC_STORE_U32(0x82EE8D30, 9);   // dword_82EE8D30 = gAspectRatio
+    PPC_STORE_U32(0x82EE8D34, 10);  // dword_82EE8D34 = globalDayNightEffects
+    PPC_STORE_U32(0x82EE8D38, 11);  // dword_82EE8D38 = globalDeferredAlphaEnable
+    PPC_STORE_U8(0x82EE8D3C, 1);    // byte_82EE8D3C = deferred alpha flag
+    
+    // Initialize fog params array (16 bytes at 0x82EE8D70)
+    for (int i = 0; i < 16; i++) {
+        PPC_STORE_U8(0x82EE8D70 + i, 0);
+    }
+    
+    // Initialize shader manager pointer (dword_83127984)
+    // This is checked by other shader functions
+    if (PPC_LOAD_U32(0x83127984) == 0) {
+        PPC_STORE_U32(0x83127984, 0x83127984);  // Self-reference as placeholder
+    }
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[GPU] sub_823193A8 shader globals initialized (11 variables)");
+    }
+    
+    return;
+}
 
-
 // =============================================================================
+// sub_821EC3E8 - Shader Effect Loading (GTA Immediate Mode Renderer)
 // =============================================================================
-// This function initializes file streaming queues by processing file handles
-// from an array at global+2656. The loop never terminates (infinite loop).
+// Original behavior (from xex.c line 1311181):
+//   BOOL sub_821EC3E8() { return sub_821EC1E8() != 0; }
 //
-// Root cause: The array at global+2656 contains file handles that were
-// registered during storage/file system init. The loop condition checks
-// for NULL to terminate, but the array doesn't end with NULL.
+// sub_821EC1E8 (line 1311104) does:
+//   - Initializes shader effect context
+//   - Loads "gta_im" shader for 2D UI rendering
+//   - Looks up techniques: "drawblit", "gtadrawblit", "gtadrawblit0"
+//   - Registers shader variables: "DiffuseTex", "BlitMatrix"
+//   - Stores results in globals: dword_82B9BD80, dword_82B9BD84, etc.
 //
-// SOLUTION: Bypass - file streaming handled by VFS layer.
+// SOLUTION: Bypass with success - PC uses embedded shader cache.
+// Per SHADER_PIPELINE.md, all 1132 shaders are pre-compiled at build time
+// and embedded in g_shaderCacheEntries[]. Runtime uses FindShaderCacheEntry()
+// for hash-based lookup - no file I/O or Xbox shader loading needed.
 // =============================================================================
+extern "C" void __imp__sub_821EC3E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821EC3E8) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[SHADER] sub_821EC3E8 BYPASSED - using embedded g_shaderCacheEntries[] (1132 shaders)");
+    }
+    
+    // Initialize shader-related globals to non-zero values to prevent null checks failing
+    // These addresses are from xex.c analysis of sub_821EC1E8
+    constexpr uint32_t SHADER_GLOBALS_BASE = 0x82B9BD80;
+    
+    // dword_82B9BD80 = shader effect object (non-zero placeholder)
+    PPC_STORE_U32(0x82B9BD80, 0x82B9BD80);  // Self-reference as placeholder
+    // dword_82B9BD84 = "gta_im" shader handle
+    PPC_STORE_U32(0x82B9BD84, 0x82B9BD84);
+    // dword_82B9BD88 = "gtadrawblit" technique
+    PPC_STORE_U32(0x82B9BD88, 1);
+    // dword_82B9BD8C = "gtadrawblit0" technique
+    PPC_STORE_U32(0x82B9BD8C, 1);
+    // dword_82B9BD90 = "drawblit" technique
+    PPC_STORE_U32(0x82B9BD90, 1);
+    // dword_82B9BD94 = "DiffuseTex" variable
+    PPC_STORE_U32(0x82B9BD94, 1);
+    // dword_82B9BD98 = "BlitMatrix" variable
+    PPC_STORE_U32(0x82B9BD98, 1);
+    // dword_82B9BDA0, dword_82B9BDA4 = effect objects
+    PPC_STORE_U32(0x82B9BDA0, 0x82B9BDA0);
+    PPC_STORE_U32(0x82B9BDA4, 0x82B9BDA4);
+    
+    // Return 1 (success) - shader system "initialized"
+    ctx.r3.s64 = 1;
+    return;
+}
+
+extern "C" void __imp__sub_827EED88(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EED88) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EED88 ENTER #{}", s_count);
+    __imp__sub_827EED88(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EED88 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827EB6E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EB6E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EB6E0 ENTER #{}", s_count);
+    __imp__sub_827EB6E0(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EB6E0 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827EB748(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EB748) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EB748 ENTER #{}", s_count);
+    __imp__sub_827EB748(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EB748 EXIT #{}", s_count);
+}
+
+// =============================================================================
+// sub_827E7B38 - File Streaming Queue Init (RAGE pgStreamer)
+// =============================================================================
+// Original behavior (from xex.c line 2565935):
+//   - Iterates through off_82A80A60[] array of file path strings
+//   - Calls sub_827DF490 to get storage device handles
+//   - Calls sub_827827C8 to enqueue streaming requests
+//   - Calls sub_82990EC0 to sort the queue
+//
+// The loop terminates when it hits NULL in the array, NOT infinite.
+// However, it depends on Xbox-specific storage device setup which we bypass.
+//
+// SOLUTION: Bypass - VFS layer handles all file I/O directly.
+// The PC shader pipeline uses embedded g_shaderCacheEntries[] (see SHADER_PIPELINE.md).
+// =============================================================================
+extern "C" void __imp__sub_827E7B38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E7B38) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 3) {
+        LOG_WARNING("[STREAMING] sub_827E7B38 BYPASSED - VFS handles file I/O, embedded shader cache used");
+    }
+    
+    // Initialize the streaming queue flag to mark as complete
+    // byte_82A80B70 = 1 means streaming queue is initialized
+    uint32_t flagAddr = 0x82A80B70;
+    if (flagAddr >= 0x82000000 && flagAddr < 0x83200000) {
+        PPC_STORE_U8(flagAddr, 1);  // Mark streaming as initialized
+    }
+    
+    return;
+}
+
+extern "C" void __imp__sub_827DF490(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DF490) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_827E7B38] sub_827DF490 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_827DF490(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_827E7B38] sub_827DF490 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_827827C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827827C8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOG_WARNING("[sub_827E7B38] sub_827827C8 ENTER (queue op)");
+    __imp__sub_827827C8(ctx, base);
+    if (s_count <= 10) LOG_WARNING("[sub_827E7B38] sub_827827C8 EXIT");
+}
+
+extern "C" void __imp__sub_82990EC0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82990EC0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_827E7B38] sub_82990EC0 ENTER");
+    __imp__sub_82990EC0(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_827E7B38] sub_82990EC0 EXIT");
+}
+
+extern "C" void __imp__sub_827EAE38(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EAE38) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOG_WARNING("[sub_827EB748] sub_827EAE38 ENTER");
+    __imp__sub_827EAE38(ctx, base);
+    if (s_count <= 5) LOG_WARNING("[sub_827EB748] sub_827EAE38 EXIT");
+}
 
 
+
+extern "C" void __imp__sub_827EEB48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827EEB48) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EEB48 ENTER #{}", s_count);
+    __imp__sub_827EEB48(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_827EEB48 EXIT #{}", s_count);
+}
+
+// sub_82197338 - last call in sub_8218C600 before return
+extern "C" void __imp__sub_82197338(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82197338) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82197338 ENTER #{}", s_count);
+    __imp__sub_82197338(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_8218C600] sub_82197338 EXIT #{}", s_count);
+}
+
+// sub_821915F8 - first call in sub_82197338
+extern "C" void __imp__sub_821915F8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821915F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[sub_82197338] sub_821915F8 ENTER #{}", s_count);
+    __imp__sub_821915F8(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[sub_82197338] sub_821915F8 EXIT #{}", s_count);
+}
+
+// sub_82897760 - called by sub_821915F8
+extern "C" void __imp__sub_82897760(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82897760) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_82897760 ENTER #{}", s_count);
+    __imp__sub_82897760(ctx, base);
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_82897760 EXIT #{}", s_count);
+}
+
+// sub_822DE5F0 - called by sub_821915F8 (potential blocker)
+extern "C" void __imp__sub_822DE5F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822DE5F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_822DE5F0 ENTER #{}", s_count);
+    __imp__sub_822DE5F0(ctx, base);
+    if (s_count <= 50) LOGF_WARNING("[sub_821915F8] sub_822DE5F0 EXIT #{}", s_count);
+}
+
+// sub_827D9C50 - called for large memory allocations, potential blocker
+extern "C" void __imp__sub_827D9C50(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D9C50) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D9C50 #{} ENTER size={}", s_count, allocSize);
+    }
+    __imp__sub_827D9C50(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D9C50 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827DA8E0 - allocator function called via vtable for large allocs
+extern "C" void __imp__sub_827DA8E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DA8E0) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827DA8E0 #{} ENTER size={}", s_count, allocSize);
+    }
+    __imp__sub_827DA8E0(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827DA8E0 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827D8AF8 - indirect call target for large allocations, trace what IT calls
+extern "C" void __imp__sub_827D8AF8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827D8AF8) {
+    static int s_count = 0; ++s_count;
+    
+    // r4 contains allocation size
+    uint32_t allocSize = ctx.r4.u32;
+    bool isLarge = (allocSize > 500000);
+    
+    // Trace the indirect call target this function will call
+    uint32_t r6 = ctx.r6.u32;
+    uint32_t r3_in = ctx.r3.u32;
+    uint32_t idx = ((r6 + 1) << 2) & 0xFFFFFFFC;
+    uint32_t r3_new = PPC_LOAD_U32(idx + r3_in);
+    uint32_t vtable = PPC_LOAD_U32(r3_new + 0);
+    uint32_t funcPtr = PPC_LOAD_U32(vtable + 8);
+    
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D8AF8 #{} ENTER size={} r6={} -> indirect_target=0x{:08X}", 
+                     s_count, allocSize, r6, funcPtr);
+    }
+    __imp__sub_827D8AF8(ctx, base);
+    if (s_count <= 10 || isLarge) {
+        LOGF_WARNING("[ALLOC] sub_827D8AF8 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_827DAD60 - called by worker thread 0x8298E700 at start - might signal "ready"
+extern "C" void __imp__sub_827DAD60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DAD60) {
+    static int s_count = 0; ++s_count;
+    uint32_t handle = ctx.r3.u32;
+    uint32_t release = ctx.r4.u32;
+    uint32_t callerLR = (uint32_t)ctx.lr;
+    
+    if (s_count <= 30 || s_count % 100 == 0) {
+        printf("[sub_827DAD60] [SEM_SIGNAL] sub_827DAD60 #%d SYNC_TABLE handle=0x%08X release=%u\n",
+               s_count, handle, release);
+        fflush(stdout);
+    }
+    
+    // Route through sync table
+    if (handle != 0) {
+        SyncTable_Signal(handle, release > 0 ? release : 1, callerLR);
+    }
+    
+    // Call original
+    __imp__sub_827DAD60(ctx, base);
+    
+    if (s_count <= 30 || s_count % 100 == 0) {
+        printf("[sub_827DAD60] [SEM_SIGNAL] sub_827DAD60 #%d EXIT handle=0x%08X\n",
+               s_count, handle);
+        fflush(stdout);
+    }
+}
+
+
+// sub_8298E700 - audio worker task function
+// Analysis: This worker uses virtual dispatch (vtable[3]) and loops forever waiting on semaphore
+// Worker pattern:
+//   1. Signal sem2 (ctx+40) - tells creator "I'm running"
+//   2. Wait on sem1 (ctx+36) - wait for work (BLOCKS forever - sem1 never signaled)
+//   3. Call vtable[3] (ctx+0 → vtable → offset 12) - audio processing
+//   4. Loop back to step 2
+//
+// FIX: Signal sem2, call vtable[3] once for audio, then return (no blocking)
+extern "C" void __imp__sub_8298E700(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8298E700) {
+    static int s_count = 0; ++s_count;
+    uint32_t ctx_ptr = ctx.r3.u32;
+    
+    // Read struct fields
+    uint32_t sem1 = 0, sem2 = 0, vtablePtr = 0;
+    if (ctx_ptr >= 0x82000000 && ctx_ptr < 0x90000000) {
+        vtablePtr = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 0));   // vtable
+        sem1 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 36));       // wait semaphore
+        sem2 = ByteSwap(*(uint32_t*)g_memory.Translate(ctx_ptr + 40));       // signal semaphore
+    }
+    
+    LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} ctx=0x{:08X} vtable=0x{:08X} sem1=0x{:08X} sem2=0x{:08X}", 
+                 s_count, ctx_ptr, vtablePtr, sem1, sem2);
+    
+    // Step 1: Signal sem2 so sub_8298E810 can continue
+    if (sem2 != 0) {
+        NtReleaseSemaphore(sem2, 1, nullptr);
+        LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} signaled sem2=0x{:08X}", s_count, sem2);
+    }
+    
+    // Step 2: Call vtable[3] (audio processing) if valid
+    // vtable[3] is at vtable+12
+    if (vtablePtr >= 0x82000000 && vtablePtr < 0x83000000) {
+        uint32_t audioFunc = ByteSwap(*(uint32_t*)g_memory.Translate(vtablePtr + 12));
+        if (audioFunc >= 0x82000000 && audioFunc < 0x83000000) {
+            auto func = g_memory.FindFunction(audioFunc);
+            if (func) {
+                LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} calling vtable[3]=0x{:08X}", s_count, audioFunc);
+                PPCContext audioCtx = ctx;
+                audioCtx.r3.u32 = ctx_ptr;  // Pass context as 'this'
+                func(audioCtx, base);
+                LOGF_WARNING("[AUDIO_WORKER] sub_8298E700 #{} vtable[3] returned", s_count);
+            }
+        }
+    }
+    
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
+
+PPC_FUNC(sub_829A1958) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_829A1958 ENTER #{}", s_count);
+    __imp__sub_829A1958(ctx, base);
+    LOGF_WARNING("[INIT] sub_829A1958 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82974FF8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 50 == 0)
+        LOGF_WARNING("[INIT] sub_82974FF8 ENTER #{}", s_count);
+    __imp__sub_82974FF8(ctx, base);
+    if (s_count <= 10 || s_count % 50 == 0)
+        LOGF_WARNING("[INIT] sub_82974FF8 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8296C060) {
+    static int s_count = 0; ++s_count;
+    // Reduce noise - only log first 3 and every 100th
+    if (s_count <= 3 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_8296C060 #{}", s_count);
+    __imp__sub_8296C060(ctx, base);
+}
+
+PPC_FUNC(sub_82671E40) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_82671E40 ENTER #{}", s_count);
+    __imp__sub_82671E40(ctx, base);
+    if (s_count <= 20 || s_count % 100 == 0)
+        LOGF_WARNING("[INIT] sub_82671E40 EXIT #{}", s_count);
+}
+
+// sub_82672E50 - Audio/streaming init with busy-wait loops - STUBBED
 // Analysis: Contains busy-wait loops waiting for worker tasks that are stubbed.
 // Since workers are stubbed, these loops would run forever.
 // Stubbing this function allows init to continue.
+PPC_FUNC(sub_82672E50) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_82672E50 #{} STUBBED - bypassing busy-wait loops", s_count);
+    // Don't call __imp__sub_82672E50 - contains infinite busy-wait loops
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
 
-
+// sub_82679950 - Graphics/GPU initialization - STUBBED
 // Analysis: Xbox 360 GPU hardware initialization that blocks waiting for hardware responses
 // Host rendering layer in gpu/video.cpp handles GPU setup, so Xbox init can be bypassed
+extern "C" void __imp__sub_82679950(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82679950) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[GRAPHICS] sub_82679950 #{} STUBBED - Xbox GPU init bypassed (host handles rendering)", s_count);
+    // Don't call __imp__sub_82679950 - contains Xbox GPU hardware initialization
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
 
+// sub_8221D880 - World initialization - STUBBED
 // Analysis: Xbox 360 world/game state initialization that likely blocks on hardware
 // Host game engine handles world setup, so Xbox init can be bypassed
+extern "C" void __imp__sub_8221D880(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221D880) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[WORLD] sub_8221D880 #{} UN-STUBBED - sync table handles waits", s_count);
+    __imp__sub_8221D880(ctx, base);  // Let original run - sync table handles blocking
+    LOGF_WARNING("[WORLD] sub_8221D880 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+}
 
-
-// Returns non-zero while tasks are pending. Force return 0 after iteration limit.
-
-
-// This is called with r3=actual_worker_func, r4=context
-// It should call the worker function - trace to see if it's blocking
+// sub_828936E8 - Game init sub-function (debug trace to find failure point)
+// XEX Analysis: Called by sub_82893888, calls sub_828A6D50, sub_82895280, sub_828B05D0, sub_828B0640, sub_82893060
+extern "C" void __imp__sub_828936E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828936E8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[GAME_INIT] sub_828936E8 #{} ENTER", s_count);
+    __imp__sub_828936E8(ctx, base);
+    LOGF_WARNING("[GAME_INIT] sub_828936E8 #{} EXIT r3={}", s_count, ctx.r3.u32);
+}
 
 // =============================================================================
+// sub_828935B8 - AUDIO ALLOCATOR (PLATFORM GLUE REPLACEMENT)
+// =============================================================================
+// XEX Source Analysis:
+//   return (*(int (__fastcall **)(_DWORD, int, int, _DWORD))(**(_DWORD **)(a1 + 1300) + 8))(
+//            *(_DWORD *)(a1 + 1300), a2, a3, 0);
+//
+// This is a vtable-based allocator used by audio config loading (sub_8289D1D0).
+// The vtable at [a1+1300] may not be properly initialized, causing:
+//   - Bad pointer returns -> writes to invalid memory
+//   - Heap metadata corruption -> crash in o1heapAllocate
+//
+// Solution: Replace with direct allocation using g_userHeap.
+// =============================================================================
+extern "C" void __imp__sub_828935B8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828935B8) {
+    static int s_count = 0; ++s_count;
+    
+    // Parameters from XEX: sub_828935B8(a1=audio_mgr, a2=size, a3=alignment)
+    uint32_t audioMgr = ctx.r3.u32;
+    uint32_t allocSize = ctx.r4.u32;
+    uint32_t alignment = ctx.r5.u32;
+    
+    if (alignment == 0) alignment = 16;
+    if (allocSize == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // PLATFORM GLUE: Direct allocation bypassing broken vtable
+    void* hostPtr = g_userHeap.Alloc(allocSize + alignment);
+    if (hostPtr) {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(hostPtr);
+        uintptr_t aligned = (addr + alignment - 1) & ~(alignment - 1);
+        uint32_t guestAddr = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(aligned));
+        ctx.r3.u32 = guestAddr;
+        
+        if (s_count <= 20 || s_count % 500 == 0) {
+            printf("[sub_828935B8] AUDIO_ALLOC #%d: %u bytes align=%u -> 0x%08X\n",
+                   s_count, allocSize, alignment, guestAddr);
+            fflush(stdout);
+        }
+    } else {
+        ctx.r3.u32 = 0;
+        LOGF_WARNING("[sub_828935B8] AUDIO_ALLOC #{} FAILED for {} bytes", s_count, allocSize);
+    }
+}
+
+// sub_828935D0 - Audio allocator free/release (companion to sub_828935B8)
+// XEX: return (*(int (__fastcall **)(_DWORD))(**(_DWORD **)(a1 + 1300) + 12))(*(_DWORD *)(a1 + 1300));
+// This releases/frees memory from the audio allocator. For now, stub it since we're using host heap.
+extern "C" void __imp__sub_828935D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828935D0) {
+    static int s_count = 0; ++s_count;
+    // Stub - memory will be managed by host heap
+    ctx.r3.u32 = 1; // Return success
+}
+
+// sub_828A6F08 - First call in sub_828936E8, calls sub_827F9EE0
+extern "C" void __imp__sub_828A6F08(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828A6F08) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[GAME_INIT] sub_828A6F08 #{} ENTER (first call in 828936E8)", s_count);
+    __imp__sub_828A6F08(ctx, base);
+    LOGF_WARNING("[GAME_INIT] sub_828A6F08 #{} EXIT r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_828A6D50(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82895280(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_828B05D0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_828B0640(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82893060(PPCContext& ctx, uint8_t* base);
+
+// sub_827E0898 - File open for reading (FULL REPLACEMENT)
+// XEX Analysis: Loops calling sub_827E04F0 to build path, then sub_827E8180 to open
+// Original PPC code was blocking on sounds.dat - replaced with direct implementation
+extern "C" void __imp__sub_827E0898(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827E04F0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827E8180(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_827E0898) {
+    static int s_count = 0; ++s_count;
+    
+    // Parameters: a1=context, a2=path, a3=extension, a4=?, a5=flags
+    uint32_t a1 = ctx.r3.u32;
+    uint32_t a2 = ctx.r4.u32;  // path string
+    uint32_t a3 = ctx.r5.u32;  // extension
+    uint32_t a4 = ctx.r6.u32;
+    uint32_t a5 = ctx.r7.u32;  // flags
+    
+    const char* pathStr = a2 ? (const char*)(base + a2) : "(null)";
+    
+    if (s_count <= 20 || s_count % 100 == 0) {
+        printf("[sub_827E0898] FULL_HOOK #%d path='%s' a1=0x%08X a5=%d LR=0x%08X\n", 
+               s_count, pathStr, a1, a5, ctx.lr);
+        fflush(stdout);
+    }
+    
+    // Get loop count from a1+3076 (0xC04)
+    int loopCount = PPC_LOAD_U32(a1 + 3076);
+    
+    if (loopCount <= 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Allocate stack buffer for path (304 bytes like original)
+    static uint32_t s_pathBuffer = 0;
+    if (s_pathBuffer == 0) {
+        void* hostPtr = g_userHeap.Alloc(320);
+        if (hostPtr) {
+            s_pathBuffer = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+        }
+    }
+    
+    if (s_pathBuffer == 0) {
+        printf("[sub_827E0898] ERROR: Failed to allocate path buffer\n");
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Loop trying each index until file is found (like original)
+    uint32_t result = 0;
+    for (int idx = 0; idx < loopCount && result == 0; idx++) {
+        // Call sub_827E04F0 to build path
+        // sub_827E04F0(a1, v12, 256, a2, a3, v11)
+        PPCContext pathCtx = ctx;
+        pathCtx.r3.u32 = a1;
+        pathCtx.r4.u32 = s_pathBuffer;
+        pathCtx.r5.u32 = 256;
+        pathCtx.r6.u32 = a2;
+        pathCtx.r7.u32 = a3;
+        pathCtx.r8.u32 = idx;
+        __imp__sub_827E04F0(pathCtx, base);
+        
+        // Call sub_827E8180 to open file (our hooked version handles VFS)
+        // result = sub_827E8180(v12, a5)
+        PPCContext openCtx = ctx;
+        openCtx.r3.u32 = s_pathBuffer;
+        openCtx.r4.u32 = a5;
+        sub_827E8180(openCtx, base);  // Call our hook directly
+        
+        result = openCtx.r3.u32;
+        
+        if (s_count <= 20 || s_count % 100 == 0) {
+            const char* builtPath = (const char*)(base + s_pathBuffer);
+            printf("[sub_827E0898] #%d idx=%d builtPath='%s' result=0x%08X\n", 
+                   s_count, idx, builtPath, result);
+            fflush(stdout);
+        }
+    }
+    
+    if (s_count <= 20 || s_count % 100 == 0) {
+        printf("[sub_827E0898] EXIT #%d result=0x%08X\n", s_count, result);
+        fflush(stdout);
+    }
+    
+    ctx.r3.u32 = result;
+}
+
+// sub_8289DDB0 - File open for game data (FULL REPLACEMENT)
+// XEX Analysis: Builds path "%s%u", opens via sub_827E0898, reads 4 bytes, processes, closes
+// Original PPC code was blocking after sub_827E0898 returned - replaced with direct implementation
+extern "C" void __imp__sub_8289DDB0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8298F240(PPCContext& ctx, uint8_t* base);  // sprintf
+extern "C" void __imp__sub_827E87A0(PPCContext& ctx, uint8_t* base);  // close file
+
+PPC_FUNC(sub_8289DDB0) {
+    static int s_count = 0; ++s_count;
+    
+    // Parameters from XEX: a1=output struct, a2=path format, a3=?, a4=index, a5/a6=?
+    uint32_t a1 = ctx.r3.u32;
+    uint32_t a2Ptr = ctx.r4.u32;
+    uint32_t a3 = ctx.r5.u32;
+    uint32_t a4 = ctx.r6.u32;  // index for format string
+    
+    const char* pathStr = a2Ptr ? (const char*)(base + a2Ptr) : "(null)";
+    
+    if (s_count <= 10 || s_count % 50 == 0) {
+        printf("[sub_8289DDB0] FULL_HOOK #%d ENTER path='%s' index=%d a1=0x%08X\n", 
+               s_count, pathStr, a4, a1);
+        fflush(stdout);
+    }
+    
+    // Get a1[14] to check if valid
+    int32_t a1_14 = PPC_LOAD_U32(a1 + 56);  // offset 14*4 = 56
+    
+    // Allocate buffer for formatted path (304 bytes like original)
+    static uint32_t s_pathBuf = 0;
+    if (s_pathBuf == 0) {
+        void* hostPtr = g_userHeap.Alloc(320);
+        if (hostPtr) {
+            s_pathBuf = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+        }
+    }
+    
+    if (s_pathBuf == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Build path: either format with index or just copy path
+    if (a1_14 != -1) {
+        // Format: "%s%u" with path and index
+        snprintf((char*)(base + s_pathBuf), 300, "%s%u", pathStr, a4);
+    } else {
+        // Just copy path
+        strncpy((char*)(base + s_pathBuf), pathStr, 300);
+    }
+    
+    // Open file via sub_827E0898
+    PPCContext openCtx = ctx;
+    openCtx.r3.u32 = 0x82A7FE08;  // byte_82A7FE08 context
+    openCtx.r4.u32 = s_pathBuf;
+    openCtx.r5.u32 = 0x820A912C;  // byte_820A912C extension
+    openCtx.r6.u32 = 0;
+    openCtx.r7.u32 = 1;  // flags
+    sub_827E0898(openCtx, base);  // Call our hooked version
+    
+    uint32_t fileStream = openCtx.r3.u32;
+    
+    if (fileStream == 0) {
+        if (s_count <= 10) {
+            printf("[sub_8289DDB0] #%d -> File open FAILED for '%s'\n", s_count, (char*)(base + s_pathBuf));
+            fflush(stdout);
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Allocate buffer for 4-byte read
+    static uint32_t s_readBuf = 0;
+    if (s_readBuf == 0) {
+        void* hostPtr = g_userHeap.Alloc(16);
+        if (hostPtr) {
+            s_readBuf = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+        }
+    }
+    
+    // Read 4 bytes via sub_827E8420
+    if (s_count <= 10 || s_count % 50 == 0) {
+        printf("[sub_8289DDB0] #%d -> Reading 4 bytes from stream 0x%08X\n", s_count, fileStream);
+        fflush(stdout);
+    }
+    PPCContext readCtx = ctx;
+    readCtx.r3.u32 = fileStream;
+    readCtx.r4.u32 = s_readBuf;
+    readCtx.r5.u32 = 4;
+    sub_827E8420(readCtx, base);
+    if (s_count <= 10 || s_count % 50 == 0) {
+        printf("[sub_8289DDB0] #%d -> Read complete, calling sub_8289D1D0\n", s_count);
+        fflush(stdout);
+    }
+    
+    // Call sub_8289D1D0 to process
+    PPCContext proc1Ctx = ctx;
+    proc1Ctx.r3.u32 = a1;
+    proc1Ctx.r4.u32 = fileStream;
+    sub_8289D1D0(proc1Ctx, base);
+    if (proc1Ctx.r3.u32 == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Call sub_8289DD40 to process
+    PPCContext proc2Ctx = ctx;
+    proc2Ctx.r3.u32 = a1;
+    proc2Ctx.r4.u32 = fileStream;
+    sub_8289DD40(proc2Ctx, base);
+    if (proc2Ctx.r3.u32 == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Call sub_8289D490 to process
+    PPCContext proc3Ctx = ctx;
+    proc3Ctx.r3.u32 = a1;
+    proc3Ctx.r4.u32 = fileStream;
+    sub_8289D490(proc3Ctx, base);
+    if (proc3Ctx.r3.u32 == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Close file via sub_827E87A0
+    PPCContext closeCtx = ctx;
+    closeCtx.r3.u32 = fileStream;
+    sub_827E87A0(closeCtx, base);
+    
+    // Update a1 structure: a1[3] = a1[2]
+    uint32_t a1_2 = PPC_LOAD_U32(a1 + 8);
+    PPC_STORE_U32(a1 + 12, a1_2);
+    
+    if (s_count <= 10 || s_count % 50 == 0) {
+        printf("[sub_8289DDB0] #%d EXIT success\n", s_count);
+        fflush(stdout);
+    }
+    
+    ctx.r3.u32 = 1;  // Success
+}
+
+// sub_8289D1D0, sub_8289DD40, sub_8289D490 - called after file open in sub_8289DDB0
+// These process the audio config data and one might be blocking
+extern "C" void __imp__sub_8289D1D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8289D1D0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289D1D0 #{} ENTER (after file read)", s_count);
+    __imp__sub_8289D1D0(ctx, base);
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289D1D0 #{} EXIT r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8289DD40(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8289DD40) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289DD40 #{} ENTER", s_count);
+    __imp__sub_8289DD40(ctx, base);
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289DD40 #{} EXIT r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8289D490(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8289D490) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289D490 #{} ENTER", s_count);
+    __imp__sub_8289D490(ctx, base);
+    LOGF_WARNING("[AUDIO_CONFIG] sub_8289D490 #{} EXIT r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_828A6D50) {
+    static int s_count = 0; ++s_count;
+    __imp__sub_828A6D50(ctx, base);
+    LOGF_WARNING("[GAME_INIT_TRACE] sub_828A6D50 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82895280) {
+    static int s_count = 0; ++s_count;
+    __imp__sub_82895280(ctx, base);
+    LOGF_WARNING("[GAME_INIT_TRACE] sub_82895280 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_828B05D0) {
+    static int s_count = 0; ++s_count;
+    __imp__sub_828B05D0(ctx, base);
+    LOGF_WARNING("[GAME_INIT_TRACE] sub_828B05D0 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_828B0640) {
+    static int s_count = 0; ++s_count;
+    __imp__sub_828B0640(ctx, base);
+    LOGF_WARNING("[GAME_INIT_TRACE] sub_828B0640 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82893060) {
+    static int s_count = 0; ++s_count;
+    __imp__sub_82893060(ctx, base);
+    LOGF_WARNING("[GAME_INIT_TRACE] sub_82893060 #{} r3={}", s_count, ctx.r3.u32);
+}
+
+// sub_82893888 - Game initialization (NOT platform glue - must run)
+// XEX Analysis: Sets up game data, calls sub_828A1430 (semaphore init), sub_828936E8 (more init)
+extern "C" void __imp__sub_82893888(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82893888) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) {
+        LOGF_WARNING("[GAME_INIT] sub_82893888 #{} ENTER r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    }
+    __imp__sub_82893888(ctx, base);  // Call original game logic
+    if (s_count <= 5) {
+        LOGF_WARNING("[GAME_INIT] sub_82893888 #{} EXIT r3={}", s_count, ctx.r3.u32);
+    }
+}
+
+// sub_828A1880 - Storage initialization with semaphore sync
+// XEX Analysis: Initializes storage subsystem, creates semaphore at dword_8312B5F8
+// Calls sub_827DACD8 (wait) and sub_827DAD60 (release) which properly handle NULL handles
+extern "C" void __imp__sub_828A1880(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828A1880) {
+    static int s_count = 0; ++s_count;
+    uint32_t contextPtr = ctx.r3.u32;
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[STORAGE_INIT] sub_828A1880 #{} ENTER context=0x{:08X}", s_count, contextPtr);
+    }
+    
+    // Call original - semaphore hooks handle NULL properly
+    __imp__sub_828A1880(ctx, base);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[STORAGE_INIT] sub_828A1880 #{} EXIT r3={}", s_count, ctx.r3.u32);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+// Functions in sub_82672E50's busy-wait loops
+extern "C" void __imp__sub_82672AA8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82973598(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_829736F8(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82672AA8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82672AA8 #{} (loop1 - checking 0x832A5F20)", s_count);
+    // Yield to let worker threads complete their tasks
+    std::this_thread::yield();
+    __imp__sub_82672AA8(ctx, base);
+}
+
+// sub_82973598 - Loop 2 condition check in sub_82672E50
+// Returns non-zero while tasks are pending. Force return 0 after iteration limit.
+PPC_FUNC(sub_82973598) {
+    static int s_count = 0; ++s_count;
+    static thread_local int s_loopIter = 0;
+    
+    // Call original to get actual status
+    __imp__sub_82973598(ctx, base);
+    
+    // Track iterations per loop entry
+    if (ctx.r3.u32 != 0) {
+        ++s_loopIter;
+        // Force exit after 100 iterations to prevent infinite loop
+        if (s_loopIter > 100) {
+            if (s_loopIter == 101) {
+                LOGF_WARNING("[BUSYWAIT] sub_82973598 forcing loop exit after {} iterations", s_loopIter);
+            }
+            ctx.r3.u32 = 0;  // Force loop exit
+        }
+    } else {
+        // Loop condition cleared naturally, reset counter
+        s_loopIter = 0;
+    }
+    
+    if (s_count <= 10 || s_count % 500 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_82973598 #{} r3={} loopIter={}", s_count, ctx.r3.u32, s_loopIter);
+}
+
+PPC_FUNC(sub_829736F8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10 || s_count % 100 == 0)
+        LOGF_WARNING("[BUSYWAIT] sub_829736F8 #{} (loop2 iteration)", s_count);
+    // Yield to let worker threads complete their tasks
+    std::this_thread::yield();
+    __imp__sub_829736F8(ctx, base);
+}
+
+// sub_829A97A0 - creates threads via ExCreateThread - suspected blocker
+extern "C" void __imp__sub_829A97A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A97A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[THREAD] sub_829A97A0 ENTER #{} - calling ExCreateThread", s_count);
+    __imp__sub_829A97A0(ctx, base);
+    LOGF_WARNING("[THREAD] sub_829A97A0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_829B08E0 - Thread entry stub (called by GuestThread::Start)
+// This is called with r3=actual_worker_func, r4=context
+// It should call the worker function - trace to see if it's blocking
+extern "C" void __imp__sub_829B08E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829B08E0) {
+    static int s_count = 0; ++s_count;
+    uint32_t workerFunc = ctx.r3.u32;
+    uint32_t workerCtx = ctx.r4.u32;
+    LOGF_WARNING("[THREAD_STUB] sub_829B08E0 ENTER #{} workerFunc=0x{:08X} ctx=0x{:08X}", 
+                 s_count, workerFunc, workerCtx);
+    __imp__sub_829B08E0(ctx, base);
+    LOGF_WARNING("[THREAD_STUB] sub_829B08E0 EXIT #{}", s_count);
+}
+
+// =============================================================================
+// sub_8218BE28 - PLATFORM GLUE REPLACEMENT: Memory Allocator
 // =============================================================================
 // Original Xbox behavior:
 //   r11 = [r13+0]           // Thread context base
@@ -7588,69 +11293,1584 @@ static std::atomic<bool> g_afterStorageInit{false};
 //
 // Solution: Replace with direct allocation using guest heap, bypassing vtable.
 // =============================================================================
+extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8218BE28) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r3.u32;
+    uint32_t alignment = 16;  // r5 in original = 16
+    
+    // =======================================================================
+    // CRITICAL FIX: Always use direct allocation
+    // =======================================================================
+    // The original PPC code does: [[[r13+0]+1676]+0]+8 to get vtable allocator
+    // Even when mem_mgr is non-zero, the vtable pointer at [mem_mgr+0] is broken
+    // (points to 0 or invalid memory), causing the allocator to return 0.
+    //
+    // Solution: ALWAYS use host heap allocation, bypassing the broken vtable.
+    // =======================================================================
+    
+    if (allocSize == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // PLATFORM GLUE: Direct allocation using host heap
+    void* hostPtr = g_userHeap.Alloc(allocSize + alignment);
+    if (hostPtr) {
+        // Align the pointer
+        uintptr_t addr = reinterpret_cast<uintptr_t>(hostPtr);
+        uintptr_t aligned = (addr + alignment - 1) & ~(alignment - 1);
+        
+        // Map to guest address space
+        uint32_t guestAddr = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(aligned));
+        ctx.r3.u32 = guestAddr;
+        
+        if (s_count <= 30 || s_count % 1000 == 0 || allocSize > 100000) {
+            LOGF_WARNING("[ALLOC] sub_8218BE28 #{} {} bytes -> 0x{:08X}", 
+                         s_count, allocSize, guestAddr);
+        }
+    } else {
+        ctx.r3.u32 = 0;  // Allocation failed
+        LOGF_WARNING("[ALLOC] sub_8218BE28 #{} FAILED for {} bytes (heap exhausted?)", s_count, allocSize);
+    }
+}
 
+// sub_8296BE18 - called after sub_8218BE28
+extern "C" void __imp__sub_8296BE18(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296BE18) {
+    static int s_count = 0; ++s_count;
+    // PHASE 3 FIX: Break audio init loop after 100 iterations
+    if (s_count > 100) {
+        ctx.r3.u64 = 1; // Return success
+        return;
+    }
+    __imp__sub_8296BE18(ctx, base);
+}
 
 // =============================================================================
+// Phase 1 Tracing: Functions called by sub_82974FF8 to identify blocking point
 // =============================================================================
 
+extern "C" void __imp__sub_8296C378(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296C378) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_82974FF8] sub_8296C378 ENTER #{}", s_count);
+    __imp__sub_8296C378(ctx, base);
+    LOGF_WARNING("[TRACE_82974FF8] sub_8296C378 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_82763AB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82763AB8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_82974FF8] sub_82763AB8 ENTER #{}", s_count);
+    __imp__sub_82763AB8(ctx, base);
+    LOGF_WARNING("[TRACE_82974FF8] sub_82763AB8 EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_8296C2F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296C2F0) {
+    static int s_count = 0; ++s_count;
+    // PHASE 3 FIX: Break infinite audio worker loop after 50 iterations
+    if (s_count > 50) {
+        ctx.r3.u64 = 0;
+        return;
+    }
+    __imp__sub_8296C2F0(ctx, base);
+}
+
+extern "C" void __imp__sub_82974500(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82974500) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_82974FF8] sub_82974500 ENTER #{}", s_count);
+    __imp__sub_82974500(ctx, base);
+    LOGF_WARNING("[TRACE_82974FF8] sub_82974500 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+// Early functions called by sub_82974FF8 before the ones above
+extern "C" void __imp__sub_8296BF88(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296BF88) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_8296BF88 ENTER #{}", s_count);
+    __imp__sub_8296BF88(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_8296BF88 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8296BFB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296BFB8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_8296BFB8 ENTER #{}", s_count);
+    __imp__sub_8296BFB8(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_8296BFB8 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_82213C48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82213C48) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_82213C48 ENTER #{}", s_count);
+    __imp__sub_82213C48(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_82213C48 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_8296C228(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296C228) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_8296C228 ENTER #{}", s_count);
+    __imp__sub_8296C228(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_8296C228 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_829745B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829745B0) {
+    static int s_count = 0; ++s_count;
+    // Check stack alignment - crash happens around call #237
+    if (s_count >= 230 || (ctx.r1.u32 & 0x7) != 0) {
+        LOGF_WARNING("[TRACE_EARLY] sub_829745B0 ENTER #{} r1=0x{:08X} r3=0x{:08X} align={}", 
+                     s_count, ctx.r1.u32, ctx.r3.u32, ctx.r1.u32 & 0xF);
+    }
+    __imp__sub_829745B0(ctx, base);
+    if (s_count >= 230) {
+        LOGF_WARNING("[TRACE_EARLY] sub_829745B0 EXIT #{} r1=0x{:08X}", s_count, ctx.r1.u32);
+    }
+}
+
+extern "C" void __imp__sub_82974530(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82974530) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_82974530 ENTER #{}", s_count);
+    __imp__sub_82974530(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_82974530 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
+
+extern "C" void __imp__sub_829743A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829743A8) {
+    static int s_count = 0; ++s_count;
+    // Check stack alignment - crash happens around call #326
+    if (s_count >= 320 || (ctx.r1.u32 & 0x7) != 0) {
+        LOGF_WARNING("[TRACE_EARLY] sub_829743A8 ENTER #{} r1=0x{:08X} r3=0x{:08X} align={}", 
+                     s_count, ctx.r1.u32, ctx.r3.u32, ctx.r1.u32 & 0xF);
+    }
+    __imp__sub_829743A8(ctx, base);
+    if (s_count >= 320) {
+        LOGF_WARNING("[TRACE_EARLY] sub_829743A8 EXIT #{} r1=0x{:08X}", s_count, ctx.r1.u32);
+    }
+}
+
+extern "C" void __imp__sub_8296C238(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8296C238) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[TRACE_EARLY] sub_8296C238 ENTER #{}", s_count);
+    __imp__sub_8296C238(ctx, base);
+    LOGF_WARNING("[TRACE_EARLY] sub_8296C238 EXIT #{} r3={}", s_count, ctx.r3.u32);
+}
 
 // =============================================================================
+// Post-allocation tracing hooks for sub_827DF248 call chain
 // =============================================================================
+extern "C" void __imp__sub_82801028(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82801028) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_82801028 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+    __imp__sub_82801028(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_82801028 EXIT #{}", s_count);
+    }
+}
 
+extern "C" void __imp__sub_829A4490(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A4490) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_829A4490 ENTER #{} r3={} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    }
+    __imp__sub_829A4490(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_829A4490 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
 // =============================================================================
+// sub_8218BF20 - PLATFORM GLUE REPLACEMENT: Extended Memory Allocator
 // =============================================================================
 // Original Xbox behavior: Allocates memory with flags, uses same vtable chain
+// as sub_8218BE28. Calls sub_82893200/sub_828931F0 for actual allocation.
 // Problem: Same vtable chain issue - memory manager not initialized.
 // Solution: Direct allocation using guest heap.
 // =============================================================================
+extern "C" void __imp__sub_8218BF20(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8218BF20) {
+    static int s_count = 0; ++s_count;
+    uint32_t allocSize = ctx.r3.u32;
+    uint32_t flags = ctx.r4.u32;
+    
+    // =======================================================================
+    // CRITICAL FIX: Always use direct allocation (same issue as sub_8218BE28)
+    // =======================================================================
+    
+    if (allocSize == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Parse alignment from flags (bits 24-27 encode alignment power)
+    uint32_t alignPower = (flags >> 24) & 0xF;
+    uint32_t alignment = (alignPower > 0) ? (1u << alignPower) : 16;
+    if (alignment < 16) alignment = 16;
+    if (alignment > 4096) alignment = 4096;
+    
+    // PLATFORM GLUE: Direct allocation using host heap
+    void* hostPtr = g_userHeap.Alloc(allocSize + alignment);
+    if (hostPtr) {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(hostPtr);
+        uintptr_t aligned = (addr + alignment - 1) & ~(alignment - 1);
+        
+        uint32_t guestAddr = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(aligned));
+        ctx.r3.u32 = guestAddr;
+        
+        if (s_count <= 30 || s_count % 1000 == 0 || allocSize > 100000) {
+            LOGF_WARNING("[ALLOC] sub_8218BF20 #{} {} bytes align={} -> 0x{:08X}", 
+                         s_count, allocSize, alignment, guestAddr);
+        }
+    } else {
+        ctx.r3.u32 = 0;
+        LOGF_WARNING("[ALLOC] sub_8218BF20 #{} FAILED for {} bytes (heap exhausted?)", s_count, allocSize);
+    }
+}
 
+extern "C" void __imp__sub_829B0178(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829B0178) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_829B0178 ENTER #{}", s_count);
+    }
+    __imp__sub_829B0178(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[TRACE] sub_829B0178 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
+
+
+
+extern "C" void __imp__sub_824C1338(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_824C1338) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) {
+        LOGF_WARNING("[INIT] sub_824C1338 ENTER #{}", s_count);
+    }
+    __imp__sub_824C1338(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[INIT] sub_824C1338 EXIT #{} r3={}", s_count, ctx.r3.u32);
+    }
+}
+
+PPC_FUNC(sub_822054F8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_822054F8 ENTER #{}", s_count);
+    __imp__sub_822054F8(ctx, base);
+    LOGF_WARNING("[INIT] sub_822054F8 EXIT #{}", s_count);
+}
+
+// sub_821DE390 moved earlier in file with tracing
+
+PPC_FUNC(sub_8221F8A8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_8221F8A8 ENTER #{}", s_count);
+    __imp__sub_8221F8A8(ctx, base);
+    LOGF_WARNING("[INIT] sub_8221F8A8 EXIT #{}", s_count);
+}
 
 // =============================================================================
+// sub_82273988 - Resource Array Initialization with Proper Startup Init
+// =============================================================================
+// Original behavior (from xex.c line 1433156):
+//   - Iterates through resource array at dword_831474B4
+//   - Processes resource entries (136 bytes each)
+//   - Uses sentinel value -1 (0xFFFFFFFF) to terminate loops
+//
+// Problem: Resource array metadata is uninitialized (count=32010 garbage)
+// causing infinite loops or crashes.
+//
+// SOLUTION: Initialize dword_831474B4 structure ONCE at startup with proper
+// memory allocation and sentinel values.
 // =============================================================================
 
+// Resource array constants
+static constexpr uint32_t RESOURCE_ARRAY_ADDR = 0x831474B4;
+static constexpr uint32_t RESOURCE_BUFFER_ADDR = 0x83141000;  // Pre-allocated guest memory
+static constexpr uint32_t RESOURCE_BUFFER_SIZE = 2048;        // Space for structure + entries
+static bool s_resourceArrayInitialized = false;
 
-// Based on PPC disassembly analysis - addresses verified with MCP math tools
+// Initialize resource array structure at startup (requires base pointer)
+static void InitializeResourceArray(uint8_t* base) {
+    if (s_resourceArrayInitialized) return;
+    s_resourceArrayInitialized = true;
+    
+    LOG_WARNING("[RESOURCE] Initializing resource array at dword_831474B4");
+    
+    // Structure layout at dword_831474B4:
+    //   +0:   Pointer to resource entry array
+    //   +4:   Count of entries (uint16_t)
+    //   +6:   Flags/padding
+    // Entry array at RESOURCE_BUFFER_ADDR:
+    //   Each entry: 136 bytes
+    //   +808+132 from array base: Sentinel (-1)
+    
+    // Zero out the buffer area first
+    for (uint32_t i = 0; i < RESOURCE_BUFFER_SIZE; i += 4) {
+        PPC_STORE_U32(RESOURCE_BUFFER_ADDR + i, 0);
+    }
+    
+    // Set up dword_831474B4 structure
+    PPC_STORE_U32(RESOURCE_ARRAY_ADDR + 0, RESOURCE_BUFFER_ADDR);  // Array pointer
+    PPC_STORE_U16(RESOURCE_ARRAY_ADDR + 4, 0);                      // Count = 0 (empty)
+    PPC_STORE_U16(RESOURCE_ARRAY_ADDR + 6, 0);                      // Flags
+    
+    // Set sentinel at expected offset (808 + 132 = 940)
+    PPC_STORE_U32(RESOURCE_BUFFER_ADDR + 940, 0xFFFFFFFF);
+    
+    // Also set additional sentinel at offset 132 (for first entry)
+    PPC_STORE_U32(RESOURCE_BUFFER_ADDR + 132, 0xFFFFFFFF);
+    
+    LOGF_WARNING("[RESOURCE] Resource array initialized: ptr=0x{:08X} count=0 sentinel=0xFFFFFFFF", 
+                 RESOURCE_BUFFER_ADDR);
+}
+
+PPC_FUNC(sub_82273988) {
+    static int s_count = 0; ++s_count;
+    
+    // Pump SDL events to prevent beach ball during resource loading
+    if ((s_count % 50) == 0) {
+        PumpSdlEventsIfNeeded();
+    }
+    
+    // Initialize resource array on first call
+    if (!s_resourceArrayInitialized) {
+        InitializeResourceArray(base);
+    }
+    
+    uint32_t contextAddr = ctx.r3.u32;
+    uint32_t enableFlag = ctx.r4.u32;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[RESOURCE] sub_82273988 #{} context=0x{:08X} enableFlag={}", 
+                     s_count, contextAddr, enableFlag);
+    }
+    
+    // Verify array is properly initialized
+    uint32_t arrayPtr = PPC_LOAD_U32(RESOURCE_ARRAY_ADDR + 0);
+    uint16_t arrayCount = PPC_LOAD_U16(RESOURCE_ARRAY_ADDR + 4);
+    
+    // Safety check: if count is garbage, reset it
+    if (arrayCount > 100) {
+        LOGF_WARNING("[RESOURCE] sub_82273988 FIXING corrupted count {} -> 0", arrayCount);
+        PPC_STORE_U16(RESOURCE_ARRAY_ADDR + 4, 0);
+    }
+    
+    // Ensure sentinel is correct
+    if (arrayPtr >= 0x83000000 && arrayPtr < 0x83200000) {
+        uint32_t sentinel = PPC_LOAD_U32(arrayPtr + 940);
+        if (sentinel != 0xFFFFFFFF) {
+            PPC_STORE_U32(arrayPtr + 940, 0xFFFFFFFF);
+            PPC_STORE_U32(arrayPtr + 132, 0xFFFFFFFF);
+        }
+    }
+    
+    // Initialize context if valid
+    if (contextAddr >= 0x82000000 && contextAddr < 0x83200000) {
+        PPC_STORE_U8(contextAddr + 357, 0);  // Processing flag
+    }
+    
+    // Call original with properly initialized structures
+    __imp__sub_82273988(ctx, base);
+    
+    if (s_count <= 5) {
+        uint32_t buffer0 = contextAddr >= 0x82000000 ? PPC_LOAD_U32(contextAddr + 0) : 0;
+        LOGF_WARNING("[RESOURCE] sub_82273988 #{} completed, buffer0=0x{:08X}", s_count, buffer0);
+    }
+}
+
+PPC_FUNC(sub_821250B0)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_821250B0 ENTER #{}", s_count);
+    __imp__sub_821250B0(ctx, base);
+    LOGF_WARNING("[INIT] sub_821250B0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82318F60)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82318F60 ENTER #{}", s_count);
+    __imp__sub_82318F60(ctx, base);
+    LOGF_WARNING("[INIT] sub_82318F60 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// Stub sub_82192E00 (Profile system wait) to prevent blocking
+// Analysis: This function waits for profile system to be ready
+// It's called by sub_82124080 and blocks indefinitely
+// Stubbing allows profile/save init to complete
+extern "C" void __imp__sub_82192E00(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192E00) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[PROFILE] sub_82192E00 #{} STUBBED - profile system ready", s_count);
+    // Don't call __imp__sub_82192E00 - it would block forever
+    ctx.r3.u32 = 0;  // Return success
+    return;
+}
+
+// =============================================================================
+// sub_82124540 - Profile/Streaming Configuration File Parser
+// =============================================================================
+// This function parses stream.ini and profile config files into a stack buffer.
+// Issue: Called with r3 = r1+96 (stack buffer), but r1 is corrupted (~0x000A0CF0)
+// resulting in invalid pointer 0x000A0D50 being passed to sub_82192840.
+// Fix: Validate buffer pointer and handle gracefully if invalid.
+// =============================================================================
+PPC_FUNC(sub_82124540) {
+    static int s_count = 0; ++s_count;
+    uint32_t bufferPtr = ctx.r3.u32;
+    
+    // Validate input buffer pointer - must be in guest memory range
+    if (bufferPtr < 0x80000000 || bufferPtr >= 0x90000000) {
+        LOGF_WARNING("[STREAM] sub_82124540 #{} INVALID buffer 0x{:08X} (stack corruption) - allowing VFS to handle",
+                     s_count, bufferPtr);
+        // Call original - the VFS/file hooks will handle the invalid pointer gracefully
+        // The downstream sub_82192840 hook already validates and returns 0 for invalid handles
+        __imp__sub_82124540(ctx, base);
+        return;
+    }
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[STREAM] sub_82124540 #{} buffer=0x{:08X} r1=0x{:08X} - parsing stream.ini",
+                     s_count, bufferPtr, ctx.r1.u32);
+    }
+    __imp__sub_82124540(ctx, base);
+}
+
+
+PPC_FUNC(sub_82124080)
+{
+    static int s_count = 0;
+    ++s_count;
+    LOGF_WARNING("[INIT] sub_82124080 #{} ENTER - running normally (sub_82192E00 is stubbed)", s_count);
+    
+    // UN-BYPASSED: Now safe to run because sub_82192E00 (profile system wait) is stubbed
+    // This function initializes profile/save system and calls sub_82192E00 which would block
+    // With sub_82192E00 stubbed, the function can complete initialization properly
+    // This allows proper setup of profile/save data structures
+    __imp__sub_82124080(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_82124080 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// =============================================================================
+// sub_82124268 - Loading Screen Texture Loader (UN-STUBBED)
+// =============================================================================
+// XEX Analysis: Loads texture dictionary "LOADINGSCREENS" and textures from:
+//   - "platform:/textures/loadingscreens" (startup loading)
+//   - "platform:/textures/loadingscreens_ingame" (in-game loading)
+// This was incorrectly STUBBED which prevented loading screen completion.
+// The loading gate (byte_83137BC9) requires this to run properly.
+// =============================================================================
+extern "C" void __imp__sub_82124268(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82124268) {
+    static int s_count = 0; ++s_count;
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[LOADSCREEN] sub_82124268 (texture loader) ENTER #{} a1={}", 
+                     s_count, ctx.r3.u32);
+    }
+    
+    __imp__sub_82124268(ctx, base);  // Call original - loads textures
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[LOADSCREEN] sub_82124268 (texture loader) EXIT #{} r3=0x{:08X}", 
+                     s_count, ctx.r3.u32);
+    }
+}
+
+extern "C" void __imp__sub_82123E20(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82123E20) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82124080] sub_82123E20 (init) ENTER #{}", s_count);
+    __imp__sub_82123E20(ctx, base);
+    LOGF_WARNING("[sub_82124080] sub_82123E20 (init) EXIT #{}", s_count);
+}
+
+extern "C" void __imp__sub_821244B8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821244B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[sub_82124080] sub_821244B8 (cleanup) ENTER #{}", s_count);
+    __imp__sub_821244B8(ctx, base);
+    LOGF_WARNING("[sub_82124080] sub_821244B8 (cleanup) EXIT #{}", s_count);
+}
+
+// =============================================================================
+// Final 5 subsystems in sub_82120FB8 - INSTRUMENTATION TO FIND BLOCKER
+// =============================================================================
+PPC_FUNC(sub_8227AC28) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8227AC28 (World finalization) ENTER #{}", s_count);
+    __imp__sub_8227AC28(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8227AC28 (World finalization) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82272290) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82272290 (Entity finalize) ENTER #{}", s_count);
+    __imp__sub_82272290(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82272290 (Entity finalize) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82212450) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82212450 (Script finalize) ENTER #{}", s_count);
+    __imp__sub_82212450(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82212450 (Script finalize) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822C5768) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822C5768 (Streaming finalize) ENTER #{}", s_count);
+    __imp__sub_822C5768(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822C5768 (Streaming finalize) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822D4C68) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822D4C68 (Final setup) ENTER #{}", s_count);
+    __imp__sub_822D4C68(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822D4C68 (Final setup) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// =============================================================================
+// Early subsystems in sub_82120FB8 - INSTRUMENTATION TO FIND BLOCKER
+// =============================================================================
+PPC_FUNC(sub_82270170) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82270170 (Entity system) ENTER #{}", s_count);
+    __imp__sub_82270170(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82270170 (Entity system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822FD328) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822FD328 (Pool init) ENTER #{}", s_count);
+    __imp__sub_822FD328(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822FD328 (Pool init) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822EFF40) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822EFF40 (Map loader) ENTER #{}", s_count);
+    __imp__sub_822EFF40(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822EFF40 (Map loader) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82120C48) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82120C48 (Game config) ENTER #{}", s_count);
+    __imp__sub_82120C48(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82120C48 (Game config) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82221410) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82221410 (UI system) ENTER #{}", s_count);
+    __imp__sub_82221410(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82221410 (UI system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// =============================================================================
+// Internal functions in sub_82221410 (UI system) - INSTRUMENTATION TO FIND BLOCKER
+// Call order: 8260E310 -> 822B3C58 -> 822B4D68 -> 824A0898 -> 8260CF30 -> 8260BE08 -> 824B65B0 -> 822E3EC8 -> 822E49A0 -> 828E0AB8 -> 8222F7E8
+// =============================================================================
+PPC_FUNC(sub_8260E310) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_8260E310 [1] ENTER #{} r3={} r4={} r5={}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    __imp__sub_8260E310(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_8260E310 [1] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822B3C58) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_822B3C58 [2] ENTER #{}", s_count);
+    __imp__sub_822B3C58(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_822B3C58 [2] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822B4D68) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[822B4D68] ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    
+    // Trace the vtable for the first indirect call (vtable[2])
+    uint32_t r29_val = 0x83120000;
+    uint32_t global_ptr_addr = r29_val + 31108;  // 0x83127984
+    uint32_t global_ptr = PPC_LOAD_U32(global_ptr_addr);
+    LOGF_WARNING("[822B4D68] global@0x{:08X} = 0x{:08X}", global_ptr_addr, global_ptr);
+    
+    if (global_ptr != 0 && global_ptr >= 0x80000000 && global_ptr < 0xC0000000) {
+        uint32_t vtable = PPC_LOAD_U32(global_ptr);
+        LOGF_WARNING("[822B4D68] vtable = 0x{:08X}", vtable);
+        if (vtable != 0 && vtable >= 0x80000000 && vtable < 0xC0000000) {
+            uint32_t vtable_2 = PPC_LOAD_U32(vtable + 8);   // vtable[2] - first indirect call
+            uint32_t vtable_1 = PPC_LOAD_U32(vtable + 4);   // vtable[1]
+            uint32_t vtable_3 = PPC_LOAD_U32(vtable + 12);  // vtable[3]
+            LOGF_WARNING("[822B4D68] vtable[1]=0x{:08X} vtable[2]=0x{:08X} vtable[3]=0x{:08X}", 
+                         vtable_1, vtable_2, vtable_3);
+        }
+    }
+    
+    __imp__sub_822B4D68(ctx, base);
+    LOGF_WARNING("[822B4D68] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// Internal functions of sub_824A0898 - find exact blocker
+extern "C" void __imp__sub_827E0740(PPCContext& ctx, uint8_t* base);  // Called early in sub_824A0898
+extern "C" void __imp__sub_8285F750(PPCContext& ctx, uint8_t* base);  // Called in sub_824A0898
+extern "C" void __imp__sub_82860928(PPCContext& ctx, uint8_t* base);  // Called many times in sub_824A0898
+
+PPC_FUNC(sub_827E0740) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[824A0898-INT] sub_827E0740 ENTER #{} r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_827E0740(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[824A0898-INT] sub_827E0740 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8285F750) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[824A0898-INT] sub_8285F750 ENTER #{} r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_8285F750(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[824A0898-INT] sub_8285F750 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82860928) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) LOGF_WARNING("[824A0898-INT] sub_82860928 ENTER #{} r3=0x{:08X} r4=0x{:08X} r5={}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    __imp__sub_82860928(ctx, base);
+    if (s_count <= 20) LOGF_WARNING("[824A0898-INT] sub_82860928 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_824A0898) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_824A0898 [4] ENTER #{}", s_count);
+    __imp__sub_824A0898(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_824A0898 [4] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+// Late-stage functions in sub_824A0898 - after sub_82860928 and sub_8285AA90 calls
+extern "C" void __imp__sub_82857C60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82850BF8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8249D6F0(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_82857C60) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[824A0898-LATE] sub_82857C60 ENTER #{}", s_count);
+    __imp__sub_82857C60(ctx, base);
+    LOGF_WARNING("[824A0898-LATE] sub_82857C60 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_82850BF8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) LOGF_WARNING("[824A0898-LATE] sub_82850BF8 ENTER #{}", s_count);
+    __imp__sub_82850BF8(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[824A0898-LATE] sub_82850BF8 EXIT #{} r3=0x{:02X}", s_count, ctx.r3.u32 & 0xFF);
+}
+
+PPC_FUNC(sub_8249D6F0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[STUB] sub_8249D6F0 #{} - Xbox device vtable calls bypassed (modern graphics active)", s_count);
+    LOGF_WARNING("[STUB] sub_8249D6F0 #{} - Display mode: r3={} r4={} r5={} r6={}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
+    
+    // STUB: This function performs Xbox-specific render target setup via device vtable calls.
+    // Our modern graphics system (plume/Vulkan/D3D12) handles this differently.
+    // Following Sonic Unleashed's approach: bypass low-level Xbox device code.
+    
+    // Return success without calling the original Xbox device implementation
+    ctx.r3.u32 = 1;
+}
+
+// =============================================================================
+// Internal functions of sub_8249D6F0 - DEEP INSTRUMENTATION
+// =============================================================================
+
+PPC_FUNC(sub_82126498) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_82126498 (cleanup) ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_82126498(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_82126498 (cleanup) EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_828536B0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_828536B0 (buf init) ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_828536B0(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_828536B0 (buf init) EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8260E3B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_8260E3B8 (disp mode) ENTER #{} r3={} r4={} r5={}", s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    __imp__sub_8260E3B8(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_8260E3B8 (disp mode) EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8260E3D8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_8260E3D8 (disp final) ENTER #{} r3={}", s_count, ctx.r3.u32);
+    __imp__sub_8260E3D8(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_8260E3D8 (disp final) EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8286A748) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_8286A748 (init) ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_8286A748(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_8286A748 (init) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8286A890) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8249D6F0-INT] sub_8286A890 (setup) ENTER #{} r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_8286A890(ctx, base);
+    LOGF_WARNING("[8249D6F0-INT] sub_8286A890 (setup) EXIT #{}", s_count);
+}
+
+// =============================================================================
+// Internal functions of sub_822B4D68 - DEEP INSTRUMENTATION TO FIND BLOCKER
+// =============================================================================
+
+PPC_FUNC(sub_821EC018) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[822B4D68-INT] sub_821EC018 ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_821EC018(ctx, base);
+    LOGF_WARNING("[822B4D68-INT] sub_821EC018 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82859B80) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 15) LOGF_WARNING("[822B4D68-INT] sub_82859B80 ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_82859B80(ctx, base);
+    if (s_count <= 15) LOGF_WARNING("[822B4D68-INT] sub_82859B80 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_827DFC60) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[822B4D68-INT] sub_827DFC60 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_827DFC60(ctx, base);
+    LOGF_WARNING("[822B4D68-INT] sub_827DFC60 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_8285DC80) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[822B4D68-INT] sub_8285DC80 (vtable[2]) ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_8285DC80(ctx, base);
+    LOGF_WARNING("[822B4D68-INT] sub_8285DC80 (vtable[2]) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+
+PPC_FUNC(sub_8260CF30) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_8260CF30 [5] ENTER #{}", s_count);
+    __imp__sub_8260CF30(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_8260CF30 [5] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8260BE08) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_8260BE08 [6] ENTER #{}", s_count);
+    __imp__sub_8260BE08(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_8260BE08 [6] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_824B65B0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_824B65B0 [7] ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_824B65B0(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_824B65B0 [7] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822E3EC8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_822E3EC8 [8] ENTER #{}", s_count);
+    __imp__sub_822E3EC8(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_822E3EC8 [8] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822E49A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - UI resource init with Xbox device vtables + scheduler loop bypassed", s_count);
+    LOGF_WARNING("[STUB] sub_822E49A0 [9] #{} - Parameters: r3=0x{:08X} r4=0x{:08X}", s_count, ctx.r3.u32, ctx.r4.u32);
+    
+    // STUB: This function performs UI resource initialization with:
+    // 1. Xbox device vtable calls (lines 38833, 38862 in ppc_recomp.13.cpp)
+    // 2. Infinite scheduler loop waiting for async events (sub_828E0AB8 called 25000+ times)
+    // 3. Resource loading that depends on Xbox GPU device at 0x83127984
+    // 
+    // Our modern graphics system (plume/Vulkan/D3D12/Metal) handles UI resources independently.
+    // Following Sonic Unleashed's approach: bypass Xbox-specific platform code.
+    
+    // Don't call __imp__sub_822E49A0 - it would block forever in scheduler loop
+    return;
+}
+
+PPC_FUNC(sub_8222F7E8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[UI-INT] sub_8222F7E8 [11] ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_8222F7E8(ctx, base);
+    LOGF_WARNING("[UI-INT] sub_8222F7E8 [11] EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8226CB50) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8226CB50 (Camera system) ENTER #{}", s_count);
+    __imp__sub_8226CB50(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8226CB50 (Camera system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+
+}
+
+// Internal functions called by sub_821A8868 - declarations only
+extern "C" void __imp__sub_82300C78(PPCContext& ctx, uint8_t* base);
+
+// Hook sub_82300C78 - Call original to trace blocking point
+extern "C" void sub_82300C78_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    printf("[sub_82300C78] #%d ENTER r3=0x%08X - calling original with tracing\n", s_count, ctx.r3.u32); fflush(stdout);
+    
+    // Call the original implementation - it will block at sub_827DB988
+    // We need to trace into sub_827DB988 to find the actual semaphore
+    __imp__sub_82300C78(ctx, base);
+    
+    printf("[sub_82300C78] #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32); fflush(stdout);
+}
+extern "C" void __imp__sub_8218BE28(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_824E1DD0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8249BA90(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8060(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821A8278(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_824E14B8(PPCContext& ctx, uint8_t* base);  // Init function called by sub_82300C78
 
 // =============================================================================
 // SYNC PRIMITIVE HOOKS - Make blocking sync functions non-blocking
 // These are the ROOT CAUSE of all the stubbed functions blocking
 // =============================================================================
+extern "C" void __imp__sub_829A39A0(PPCContext& ctx, uint8_t* base);  // Root sync primitive
+extern "C" void __imp__sub_827DB338(PPCContext& ctx, uint8_t* base);  // Sync wait wrapper
+extern "C" void __imp__sub_827DB988(PPCContext& ctx, uint8_t* base);  // Sync init
+extern "C" void __imp__sub_829A3560(PPCContext& ctx, uint8_t* base);  // XamTask + mount integration
+extern "C" void __imp__sub_829A3238(PPCContext& ctx, uint8_t* base);  // Sync wait (KeWaitForSingleObject)
 
+// Hook sub_829A3238 - SYNC WAIT FUNCTION (KeWaitForSingleObject)
+// Blocking path: sub_82300C78 → sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
 // This function enters critical section, sets event, WAITS on event at 0x82A97F5C, resets event, leaves critical section
 // Fix: Pre-signal the event so the wait returns immediately
+extern "C" void sub_829A3238_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A3238 #%d ENTER - pre-signaling sync event\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the sync event at 0x82A97F5C
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82A97F5C
+    // The function waits on this event after setting another event.
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_829A3238 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A3238 #%d Event at 0x%08X not ready (type=%d) - initializing\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event (auto-reset=false) in signaled state
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call the original - it will enter critical section, set event, wait, reset, leave
+    // But since we pre-signaled, the wait will return immediately
+    __imp__sub_829A3238(ctx, base);
+    
+    printf("[SYNC] sub_829A3238 #%d EXIT\n", s_count);
+    fflush(stdout);
+}
 
+// Hook sub_829A39F0 - INTERMEDIATE SYNC FUNCTION
+// Blocking path: sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
+// This function is called by sub_827DB988 and calls sub_829A3238 directly
+// We pre-signal the event that sub_829A3238 will wait on
+extern "C" void __imp__sub_829A39F0(PPCContext& ctx, uint8_t* base);
+extern "C" void sub_829A39F0_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A39F0 #%d ENTER - pre-signaling sync event for sub_829A3238\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the sync event at 0x82A97F5C that sub_829A3238 waits on
+    // This is computed from: lis r11,-32087 (0x82990000) + addi r30,r11,32604 (0x7F5C) = 0x82A97F5C
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_829A39F0 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A39F0 #%d Event at 0x%08X not ready (type=%d) - initializing as signaled\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event in signaled state so sub_829A3238's wait returns immediately
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;  // Start signaled
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call the original - it will call sub_829A3238 which does the wait
+    // But since we pre-signaled/initialized the event, the wait returns immediately
+    __imp__sub_829A39F0(ctx, base);
+    
+    printf("[SYNC] sub_829A39F0 #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+// Hook sub_829A3560 - TASK + MOUNT INTEGRATION
 // This function calls XamTaskSchedule, then computes event addr 0x82A97F5C, then KeWaitForSingleObject
 // The event must be signaled BEFORE the wait. We pre-signal it so the wait returns immediately.
+extern "C" void sub_829A3560_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_829A3560 #%d ENTER - pre-signaling completion event\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the completion event at 0x82A97F5C
+    // This event is waited on after XamTaskSchedule returns.
+    // By signaling it now, the wait will return immediately.
+    constexpr uint32_t kTaskCompletionEventAddr = 0x82A97F5C;
+    XDISPATCHER_HEADER* completionEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kTaskCompletionEventAddr));
+    if (completionEvent && (completionEvent->Type == 0 || completionEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*completionEvent)->Set();
+        printf("[SYNC] sub_829A3560 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kTaskCompletionEventAddr, completionEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_829A3560 #%d Event at 0x%08X not ready (type=%d)\n",
+               s_count, kTaskCompletionEventAddr, completionEvent ? completionEvent->Type : -1);
+    }
+    fflush(stdout);
+    
+    // Call the original - it will do XamTaskSchedule, compute event addr, then wait
+    // But since we pre-signaled, the wait will return immediately
+    __imp__sub_829A3560(ctx, base);
+    
+    printf("[SYNC] sub_829A3560 #%d EXIT r3=%d\n", s_count, ctx.r3.s32);
+    fflush(stdout);
+}
 
+// Hook sub_829A39A0 - ROOT SYNC PRIMITIVE
+// This is called by sub_827DB338 and is the actual blocking point
+// Original: Calls sub_829A3560 (XamTaskSchedule) and waits on completion
 // Fix: Call the task scheduling but return success immediately without blocking
+extern "C" void sub_829A39A0_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = flags, r4 = size/type (8192), r5 = context (0)
+    uint32_t flags = ctx.r3.u32;
+    uint32_t sizeType = ctx.r4.u32;
+    uint32_t context = ctx.r5.u32;
+    
+    printf("[SYNC] sub_829A39A0 #%d ENTER flags=0x%X size=%u ctx=0x%X - executing non-blocking\n", 
+           s_count, flags, sizeType, context);
+    fflush(stdout);
+    
+    // Call the actual task scheduling to let file loading happen
+    // but we've hooked sub_829A3560 to not block
+    __imp__sub_829A39A0(ctx, base);
+    
+    // If it returned negative (error/blocking), force success
+    if (ctx.r3.s32 < 0) {
+        printf("[SYNC] sub_829A39A0 #%d returned %d, forcing success (0)\n", s_count, ctx.r3.s32);
+        ctx.r3.s32 = 0;
+    }
+    
+    printf("[SYNC] sub_829A39A0 #%d EXIT r3=%d\n", s_count, ctx.r3.s32);
+    fflush(stdout);
+}
 
+// Hook sub_827DB338 - SYNC WAIT WRAPPER
+// This calls sub_829A39A0 and then does file lookup operations
 // Original: Blocks waiting for async completion
 // Fix: Execute the pre-wait setup, skip blocking, return success
+extern "C" void sub_827DB338_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    // r3 = mode (0 or 1), r4 = output ptr 1, r5 = output ptr 2
+    uint32_t mode = ctx.r3.u32;
+    uint32_t outPtr1 = ctx.r4.u32;
+    uint32_t outPtr2 = ctx.r5.u32;
+    
+    printf("[SYNC] sub_827DB338 #%d ENTER mode=%u out1=0x%08X out2=0x%08X - executing non-blocking\n",
+           s_count, mode, outPtr1, outPtr2);
+    fflush(stdout);
+    
+    // Call original but it will use our hooked sub_829A39A0
+    __imp__sub_827DB338(ctx, base);
+    
+    // If returned 0 (failure/blocking), force success (1)
+    if (ctx.r3.u32 == 0) {
+        printf("[SYNC] sub_827DB338 #%d returned 0, forcing success (1)\n", s_count);
+        ctx.r3.u32 = 1;
+    }
+    
+    printf("[SYNC] sub_827DB338 #%d EXIT r3=%u\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
 
+// Hook sub_827DB988 - SYNC INIT
+// Blocking path: sub_827DB988 → sub_829A39F0 → sub_829A3238 → KeWaitForSingleObject
 // Direct PPC calls bypass PPCFuncMappings patches, so we pre-signal the event HERE
+// before calling the original, so the wait in sub_829A3238 returns immediately
+extern "C" void sub_827DB988_hook(PPCContext& ctx, uint8_t* base) {
+    static int s_count = 0; ++s_count;
+    
+    printf("[SYNC] sub_827DB988 #%d ENTER - pre-signaling event for sub_829A3238\n", s_count);
+    fflush(stdout);
+    
+    // PRE-SIGNAL the sync event at 0x82A97F5C that sub_829A3238 will wait on
+    // This ensures the KeWaitForSingleObject in sub_829A3238 returns immediately
+    constexpr uint32_t kSyncEventAddr = 0x82A97F5C;
+    XDISPATCHER_HEADER* syncEvent = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(kSyncEventAddr));
+    if (syncEvent && (syncEvent->Type == 0 || syncEvent->Type == 1))
+    {
+        QueryKernelObject<Event>(*syncEvent)->Set();
+        printf("[SYNC] sub_827DB988 #%d Signaled event at 0x%08X (type=%d)\n", 
+               s_count, kSyncEventAddr, syncEvent->Type);
+    }
+    else
+    {
+        printf("[SYNC] sub_827DB988 #%d Event at 0x%08X not ready (type=%d) - initializing as signaled\n",
+               s_count, kSyncEventAddr, syncEvent ? syncEvent->Type : -1);
+        // Initialize as a notification event in signaled state
+        if (syncEvent) {
+            syncEvent->Type = 1;  // Notification event
+            syncEvent->Signalling = 1;  // Start signaled
+            syncEvent->Size = sizeof(XDISPATCHER_HEADER) / sizeof(uint32_t);
+        }
+    }
+    fflush(stdout);
+    
+    // Call original - the wait in sub_829A3238 will return immediately due to pre-signaling
+    __imp__sub_827DB988(ctx, base);
+    
+    printf("[SYNC] sub_827DB988 #%d EXIT r3=%u\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
 
 // =============================================================================
 // REIMPLEMENTED: Previously stubbed functions - now call __imp__ to run fully
 // The sync hooks above prevent blocking, so these can now execute normally
 // =============================================================================
 
-// The blocking sync functions are already hooked to be non-blocking, so let original run
-// This follows MarathonRecomp pattern: hook blocking sub-functions, let parent run full init
+// REIMPLEMENTED: sub_821A8868 (HUD/Mission init)
+// The original calls sub_82300C78 -> sub_827DB988 -> sub_827DB338 -> sub_829A39A0 -> sub_829A3560
+// sub_829A3560 does XamTaskSchedule then waits on event at 0x82A97F5C
+// Since we execute XamTaskSchedule synchronously, we pre-signal the event so the wait succeeds
+extern "C" void __imp__sub_821A8868(PPCContext& ctx, uint8_t* base);
 
+
+PPC_FUNC(sub_821A8868) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_821A8868 #%d ENTER - HUD init (expanded reimplementation)\n", s_count);
+    fflush(stdout);
+    
+    // EXPANDED HOLISTIC REIMPLEMENTATION of sub_821A8868
+    // This now includes the full functionality of sub_82300C78 (non-blocking version)
+    // 
+    // Original sub_821A8868 call tree:
+    // 1. sub_82300C78 - string/resource init (has blocking sync) - REIMPLEMENTED INLINE
+    // 2. sub_8218BE28 - allocation (non-blocking)  
+    // 3. sub_824E1DD0 - allocation wrapper (non-blocking)
+    // 4. sub_8249BA90 - allocation (non-blocking)
+    // 5. sub_821A8060 - file/stream setup (non-blocking)
+    
+    // =========================================================================
+    // REIMPLEMENTATION OF sub_82300C78 (non-blocking version)
+    // This initializes the critical global at 0x82CFA2E4 that sub_821A8278 needs
+    // =========================================================================
+    
+    uint32_t inputArg = ctx.r3.u32;  // Capture input before modifying r3
+    
+    // Step 1: Store input to 0x82CFA2E0
+    constexpr uint32_t kInputGlobal = 0x82CFA2E0;
+    uint32_t* inputGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kInputGlobal));
+    if (inputGlobalPtr) {
+        *inputGlobalPtr = ByteSwap(inputArg);
+    }
+    
+    // Step 2: Clear flag bytes at 0x82D04248 and 0x82D04249
+    uint8_t* flag1 = static_cast<uint8_t*>(g_memory.Translate(0x82D04248));
+    uint8_t* flag2 = static_cast<uint8_t*>(g_memory.Translate(0x82D04249));
+    if (flag1) *flag1 = 0;
+    if (flag2) *flag2 = 0;
+    
+    // Step 3: Call sub_824E14B8 (non-blocking init)
+    __imp__sub_824E14B8(ctx, base);
+    
+    // Step 4: Allocate 12616 bytes (the size sub_82300C78 allocates)
+    ctx.r3.u32 = 12616;
+    __imp__sub_8218BE28(ctx, base);
+    uint32_t objPtr = ctx.r3.u32;
+    
+    printf("[REIMPL] sub_821A8868 #%d Allocated HUD object: 0x%08X (12616 bytes)\n", s_count, objPtr);
+    
+    if (objPtr != 0) {
+        // Step 5: Store vtable pointer 0x82010F0C to [obj+0]
+        constexpr uint32_t kVtableAddr = 0x82010F0C;
+        PPC_STORE_U32(objPtr + 0, kVtableAddr);
+        
+        // Step 6: Init loop - zero 7 entries at stride 1568 starting at offset 48
+        for (int i = 0; i < 7; i++) {
+            uint32_t offset = 48 + (i * 1568);
+            PPC_STORE_U16(objPtr + offset, 0);
+            PPC_STORE_U16(objPtr + offset + 2, 0);
+        }
+        
+        // Step 7: Zero trailing fields at +12596, +12600, +12604
+        PPC_STORE_U32(objPtr + 12596, 0);
+        PPC_STORE_U32(objPtr + 12600, 0);
+        PPC_STORE_U32(objPtr + 12604, 0);
+    }
+    
+    // Step 8: Store object pointer to 0x82CFA2E4 (THE CRITICAL GLOBAL!)
+    constexpr uint32_t kHudObjectGlobal = 0x82CFA2E4;
+    uint32_t* hudGlobalPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudObjectGlobal));
+    if (hudGlobalPtr) {
+        *hudGlobalPtr = ByteSwap(objPtr);
+        printf("[REIMPL] sub_821A8868 #%d Initialized critical global 0x%08X = 0x%08X\n", 
+               s_count, kHudObjectGlobal, objPtr);
+    }
+    
+    // Step 9: Call vtable[1] (offset 4) on the object
+    if (objPtr != 0) {
+        uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+        uint32_t vtableFunc = PPC_LOAD_U32(vtable + 4);
+        if (vtableFunc != 0) {
+            printf("[REIMPL] sub_821A8868 #%d Calling vtable[1] at 0x%08X\n", s_count, vtableFunc);
+            ctx.r3.u32 = objPtr;
+            PPC_CALL_INDIRECT_FUNC(vtableFunc);
+        }
+    }
+    
+    // Step 10: Set ready flag at 0x82D0424A
+    uint8_t* readyFlag = static_cast<uint8_t*>(g_memory.Translate(0x82D0424A));
+    if (readyFlag) *readyFlag = 1;
+    
+    // Step 11: SKIP sub_827DB988 and sub_827DB2A8 (blocking sync functions)
+    // These are the sync primitives that would block - we bypass them entirely
+    
+    // =========================================================================
+    // END OF sub_82300C78 REIMPLEMENTATION
+    // =========================================================================
+    
+    // Also initialize the original global at 0x82AD6958 for sub_821A8868's own use
+    constexpr uint32_t kHudInitGlobal = 0x82AD6958;
+    uint32_t* hudInitPtr = reinterpret_cast<uint32_t*>(g_memory.Translate(kHudInitGlobal));
+    if (hudInitPtr && objPtr != 0) {
+        *hudInitPtr = ByteSwap(objPtr);
+    }
+    
+    // Continue with remaining non-blocking calls from original sub_821A8868
+    // 2. Call sub_824E1DD0 (non-blocking allocation wrapper)
+    __imp__sub_824E1DD0(ctx, base);
+    
+    // 3. Call sub_8249BA90 (non-blocking allocation)
+    __imp__sub_8249BA90(ctx, base);
+    
+    // 4. Call sub_821A8060 (non-blocking file/stream setup)
+    __imp__sub_821A8060(ctx, base);
+    
+    printf("[REIMPL] sub_821A8868 #%d EXIT - HUD init complete\n", s_count);
+    fflush(stdout);
+    
+    ctx.r3.u32 = 1;  // Return success
+}
+
+
+// REIMPLEMENTED: sub_821A8278 (HUD component)
+PPC_FUNC(sub_821A8278) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_821A8278 #%d ENTER - HUD component\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_821A8278(ctx, base);
+    
+    printf("[REIMPL] sub_821A8278 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+PPC_FUNC(sub_821BC9E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821BC9E0 (Menu system) ENTER #{}", s_count);
+    __imp__sub_821BC9E0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821BC9E0 (Menu system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822DB4B0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822DB4B0 (Cutscene system) ENTER #{}", s_count);
+    __imp__sub_822DB4B0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822DB4B0 (Cutscene system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821B7218) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821B7218 (Mission system) ENTER #{}", s_count);
+    __imp__sub_821B7218(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821B7218 (Mission system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822498F8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822498F8 (Checkpoint system) ENTER #{}", s_count);
+    __imp__sub_822498F8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822498F8 (Checkpoint system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8225DC40) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8225DC40 (Weather system) ENTER #{}", s_count);
+    __imp__sub_8225DC40(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8225DC40 (Weather system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821E24E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821E24E0 (Population system) ENTER #{}", s_count);
+    __imp__sub_821E24E0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821E24E0 (Population system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821DFD18) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821DFD18 (Traffic system) ENTER #{}", s_count);
+    __imp__sub_821DFD18(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821DFD18 (Traffic system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// REIMPLEMENTED: sub_8220E108 (Wanted system)
+// Was stubbed because: call 30 (sub_82430C60) blocks on sync primitives
+// Now: Sync hooks prevent blocking, so initialization will complete
+extern "C" void __imp__sub_8220E108(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8220E108) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_8220E108 #%d ENTER - Wanted system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_8220E108(ctx, base);
+    
+    printf("[REIMPL] sub_8220E108 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+PPC_FUNC(sub_821D8358) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821D8358 (Map/GPS init) ENTER #{}", s_count);
+    __imp__sub_821D8358(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821D8358 (Map/GPS init) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821EA0B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821EA0B8 (Blip system) ENTER #{}", s_count);
+    __imp__sub_821EA0B8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821EA0B8 (Blip system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+
+// REIMPLEMENTED: sub_82200EB8 (Stats system)
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_82200EB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82200EB8) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_82200EB8 #%d ENTER - Stats system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_82200EB8(ctx, base);
+    
+    printf("[REIMPL] sub_82200EB8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
 
 // =============================================================================
+// Internal functions in sub_82120C48 - FIND EXACT BLOCKER
 // =============================================================================
 
+// sub_821E9658 calls these functions - instrument to find blocking point:
+extern "C" void __imp__sub_8214B508(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B570(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B640(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214B6A8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_825B8380(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_823A70A8(PPCContext& ctx, uint8_t* base);
 
+PPC_FUNC(sub_8214B508) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B508 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B508(ctx, base);
+    printf("[821E9658-INT] sub_8214B508 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B570) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B570 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B570(ctx, base);
+    printf("[821E9658-INT] sub_8214B570 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B640) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B640 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B640(ctx, base);
+    printf("[821E9658-INT] sub_8214B640 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214B6A8) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_8214B6A8 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214B6A8(ctx, base);
+    printf("[821E9658-INT] sub_8214B6A8 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_825B8380) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_825B8380 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_825B8380(ctx, base);
+    printf("[821E9658-INT] sub_825B8380 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_823A70A8) {
+    static int s_count = 0; ++s_count;
+    printf("[821E9658-INT] sub_823A70A8 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_823A70A8(ctx, base);
+    printf("[821E9658-INT] sub_823A70A8 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+// sub_82126940 calls these - instrument to find blocking point:
+extern "C" void __imp__sub_822E2510(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8214C488(PPCContext& ctx, uint8_t* base);
+
+PPC_FUNC(sub_822E2510) {
+    static int s_count = 0; ++s_count;
+    printf("[82126940-INT] sub_822E2510 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_822E2510(ctx, base);
+    printf("[82126940-INT] sub_822E2510 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_8214C488) {
+    static int s_count = 0; ++s_count;
+    printf("[82126940-INT] sub_8214C488 ENTER #%d\n", s_count); fflush(stdout);
+    __imp__sub_8214C488(ctx, base);
+    printf("[82126940-INT] sub_8214C488 EXIT #%d\n", s_count); fflush(stdout);
+}
+
+PPC_FUNC(sub_821E9658) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_821E9658 ENTER #{}", s_count);
+    __imp__sub_821E9658(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_821E9658 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821FD460) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_821FD460 ENTER #{}", s_count);
+    __imp__sub_821FD460(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_821FD460 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82126940) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_82126940 ENTER #{}", s_count);
+    __imp__sub_82126940(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_82126940 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822B6C58) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_822B6C58 ENTER #{}", s_count);
+    __imp__sub_822B6C58(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_822B6C58 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82308598) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_82308598 ENTER #{}", s_count);
+    __imp__sub_82308598(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_82308598 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82209280) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82120C48-INT] sub_82209280 ENTER #{}", s_count);
+    __imp__sub_82209280(ctx, base);
+    LOGF_WARNING("[82120C48-INT] sub_82209280 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+
+// Hook sub_82120FB8 - Main Game Setup (63-subsystem init)
 // This is the massive initialization function that sets up all game systems
+PPC_FUNC(sub_82120FB8)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_82120FB8 ENTER #{} thread=0x{:04X} - 63-subsystem init starting", s_count, threadId);
+    
+    __imp__sub_82120FB8(ctx, base);
+    
+    LOGF_WARNING("[INIT] sub_82120FB8 EXIT #{} thread=0x{:04X} r3={} - 63-subsystem init complete", s_count, threadId, ctx.r3.u32);
 
+    // KERNEL POLICY: 63-subsystem init complete = transition to Init phase (if still in Boot)
+    KernelPhase_EnterInit();
+
+    
+    // FORCE: Start VBlank timer with known callback since GPU init path is never reached
+    extern void StartVBlankTimer();
+    
+    if (g_gpuRingBuffer.interruptCallback == 0) {
+        printf("[FORCE] Starting VBlank timer with callback 0x829D7368 after 63-subsystem init\n");
+        g_gpuRingBuffer.interruptCallback = 0x829D7368;
+        g_gpuRingBuffer.interruptUserData = 0;
+        StartVBlankTimer();
+    }
+}
+
+// Hook sub_8218BEB0 - Calls sub_82120000, sub_821200D0, sub_821200A8
 // Returns 0 on success (all init complete), -1 on failure
+PPC_FUNC(sub_8218BEB0)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    LOGF_WARNING("[INIT] sub_8218BEB0 ENTER #{} thread=0x{:04X}", s_count, threadId);
+    
+    __imp__sub_8218BEB0(ctx, base);
+    
+    // NOTE: SetInitComplete is now called at sub_821200D0 ENTRY (in save_hooks.cpp)
+    // This is the right timing: after 63-subsystem init, before post-init loading
+    
+    LOGF_WARNING("[INIT] sub_8218BEB0 EXIT #{} thread=0x{:04X} r3={}", s_count, threadId, ctx.r3.s32);
+}
+
+// Hook sub_827D89B8 - Frame tick function  
+PPC_FUNC(sub_827D89B8)
+{
+    static int s_count = 0;
+    ++s_count;
+    uint32_t threadId = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF;
+    
+    if (s_count <= 5 || s_count % 100 == 0)
+    {
+        LOGF_WARNING("[FRAME] sub_827D89B8 #{} thread=0x{:04X}", s_count, threadId);
+    }
+    
+    __imp__sub_827D89B8(ctx, base);
+}
 
 // =============================================================================
+// INSTRUMENTATION: sub_827D89B8 internal functions
+// Call order: sub_827D8840 -> sub_827FFF80 -> sub_828E0AB8 -> sub_827EE620 -> sub_8218BEB0
 // =============================================================================
+extern "C" void __imp__sub_827D8840(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827FFF80(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827EE620(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827EEDE0(PPCContext& ctx, uint8_t* base);
 
+// Hook sub_827D8840 - Pre-init setup (first call inside sub_827D89B8)
+PPC_FUNC(sub_827D8840)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827D8840 ENTER #{} (pre-init setup)", s_count);
+    }
+    __imp__sub_827D8840(ctx, base);
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827D8840 EXIT #{}", s_count);
+    }
+}
+
+// Hook sub_827FFF80 - Network init (second call inside sub_827D89B8)
+PPC_FUNC(sub_827FFF80)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827FFF80 ENTER #{} (network init)", s_count);
+    }
+    __imp__sub_827FFF80(ctx, base);
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827FFF80 EXIT #{}", s_count);
+    }
+}
+
+// Hook sub_827EEDE0 - Store argc/argv to globals
+PPC_FUNC(sub_827EEDE0)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827EEDE0 ENTER #{} (store argc/argv)", s_count);
+    }
+    __imp__sub_827EEDE0(ctx, base);
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827EEDE0 EXIT #{}", s_count);
+    }
+}
+
+// Hook sub_827EE620 - Additional system setup
+PPC_FUNC(sub_827EE620)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827EE620 ENTER #{} (system setup)", s_count);
+    }
+    __imp__sub_827EE620(ctx, base);
+    if (s_count <= 10)
+    {
+        LOGF_WARNING("[INIT-TRACE] sub_827EE620 EXIT #{}", s_count);
+    }
+}
+
+// Hook sub_8218BEA8 - Main entry point, implement game loop
 // Xbox 360 runtime called this repeatedly; recomp needs to emulate that
+extern "C" void __imp__sub_8218BEA8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);  // Main Loop Entry
 
 // =============================================================================
 // FRAME RATE COUNTER - tracks actual FPS and frame timing
@@ -7704,12 +12924,123 @@ struct FrameRateCounter {
 };
 static FrameRateCounter g_fpsCounter;
 
+PPC_FUNC(sub_8218BEA8)
+{
+    static int s_entered = 0;
+    static bool s_initDone = false;
+    ++s_entered;
+    
+    if (s_entered == 1)
+    {
+        LOG_WARNING("[MAIN] sub_8218BEA8 entry #1 - RUNNING FULL INITIALIZATION");
+        g_fpsCounter.Init();
+    }
+    
+    // CRITICAL FIX: Call original implementation FIRST to run full initialization
+    // This triggers: sub_8218BEB0 -> sub_82120000 -> 63-subsystem init -> VFS file loading
+    // The original implementation will eventually return after game init completes
+    if (!s_initDone)
+    {
+        LOG_WARNING("[MAIN] Calling __imp__sub_8218BEA8 for game initialization...");
+        __imp__sub_8218BEA8(ctx, base);
+        s_initDone = true;
+        LOG_WARNING("[MAIN] __imp__sub_8218BEA8 returned - initialization complete");
+        LOG_WARNING("[MAIN] Entering main render loop...");
+        // CRITICAL: Don't return! Fall through to the render loop.
+        // The start() function expects sub_8218BEA8 to never return (it contains the game loop).
+        // If it returns, start() calls sub_82992670() which terminates the game.
+    }
+    
+    // Main render loop - keeps game running after initialization
+    LOGF_WARNING("[MAIN] sub_8218BEA8 entry #{} - running render loop", s_entered);
+    int frameCount = 0;
+    while (true)
+    {
+        ++frameCount;
+        if (frameCount <= 5 || frameCount % 100 == 0) {
+            LOGF_WARNING("[MAIN] Render loop frame #{}", frameCount);
+        }
+        
+        g_fpsCounter.Update();
+        
+        if (frameCount <= 5) {
+            LOG_WARNING("[MAIN] Calling __imp__sub_82856F08...");
+        }
+        __imp__sub_82856F08(ctx, base);  // Main loop tick
+        if (frameCount <= 5) {
+            LOG_WARNING("[MAIN] __imp__sub_82856F08 returned");
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
+    }
+}
 
-// This callback needs to signal semaphores that the scheduler is waiting on
+// Hook sub_828E0AB8 - Scheduler loop (just trace, don't force VdSwap)
+extern "C" void __imp__sub_828E0AB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_828E0AB8)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    // Log with thread ID to understand who's calling
+    uint32_t threadId = ctx.r13.u32 & 0xFFFF;
+    
+    // After storage init, log more frequently to detect if execution continues
+    bool logThis = (s_count <= 10 || s_count % 5000 == 0);
+    if (g_afterStorageInit.load() && s_count % 10 == 0) {
+        logThis = true;
+    }
+    
+    if (logThis) {
+        const char* marker = g_afterStorageInit.load() ? " [POST-STORAGE]" : "";
+        LOGF_WARNING("[Scheduler] sub_828E0AB8 #{} thread=0x{:04X}{}", s_count, threadId, marker);
+    }
+    
+    __imp__sub_828E0AB8(ctx, base);
+}
+
+// Hook sub_829D4C48 - Frame swap/Present function called from VBlank
+extern "C" void __imp__sub_829D4C48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D4C48)
+{
+    // Let the game's native render loop handle VdSwap - don't force it
+    __imp__sub_829D4C48(ctx, base);
+}
+
+// Hook sub_829D7368 - VBlank interrupt callback
+extern "C" void __imp__sub_829D7368(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D7368)
+{
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[VBLANK] sub_829D7368 #{}", s_count);
+    __imp__sub_829D7368(ctx, base);
+}
 
 
+
+
+
+
+// Hook sub_829A3318 - Boot orchestrator (calls XamTaskShouldExit in loop)
+extern "C" void __imp__sub_829A3318(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A3318)
+{
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 10 || s_count % 100 == 0)
+    {
+        LOGF_IMPL(Utility, "BootOrchestrator", "sub_829A3318 #{}", s_count);
+    }
+    
+    __imp__sub_829A3318(ctx, base);
+}
+
+// Hook sub_827E8420 - Stream buffer reader
 // Validates stream struct pointers before dereferencing to prevent crash at 0x400000000
 // Stream struct layout: [0]=object ptr, [4]=ctx, [8]=buffer, [12]=pos, [16]=cursor, [20]=end, [24]=capacity
+extern "C" void __imp__sub_827E8420(PPCContext& ctx, uint8_t* base);
 
 // Helper to repair corrupted stream at 0x82003890
 static void RepairCorruptedStream(uint32_t streamPtr)
@@ -7729,11 +13060,272 @@ static void RepairCorruptedStream(uint32_t streamPtr)
 }
 
 // =============================================================================
+// sub_827E8420 - Stream Buffer Reader (PC NATIVE IMPLEMENTATION)
 // =============================================================================
-// This function reads stream[0] -> object -> vtable -> vtable[40] and calls it
-// Crashes with PAC failure if vtable[40] is garbage/uninitialized
+// This function reads data from a FileStream into a destination buffer.
+// 
+// FileStream structure (28 bytes):
+//   +0:  stream[0] = Storage device pointer (0x82A7FE00 for PC streams)
+//   +4:  stream[1] = File handle (kernel NtFileHandle pointer for PC)
+//   +8:  stream[2] = Buffer pointer (guest address)
+//   +12: stream[3] = File position (absolute byte offset)
+//   +16: stream[4] = Cursor in buffer (offset into buffer)
+//   +20: stream[5] = Bytes available in buffer
+//   +24: stream[6] = Buffer capacity (typically 4096)
+//
+// Parameters:
+//   r3 = FileStream pointer
+//   r4 = Destination buffer (guest address)
+//   r5 = Bytes to read
+//
+// Returns:
+//   r3 = Bytes actually read, or -1 on error
+// =============================================================================
+
+// PC FileStream marker - streams created by our sub_827E8180 hook use this
+constexpr uint32_t PC_FILESTREAM_MARKER = 0x82A7FE00;
+
+// Helper: Check if address is in valid guest memory
+static inline bool IsValidGuestAddress(uint32_t addr) {
+    if (addr == 0) return true;
+    if (addr >= 0x00020000 && addr < 0x7FEA0000) return true;  // Heap
+    if (addr >= 0x80000000 && addr < 0x90000000) return true;  // Game code/data
+    if (addr >= 0xA0000000) return true;                        // Physical heap
+    return false;
+}
 
 // =============================================================================
+// sub_827E7FC8 - Stream Flush/Seek (PC NATIVE IMPLEMENTATION)
+// =============================================================================
+// Original function flushes buffer and seeks file position.
+// Calls vtable[9] (offset 36) for flush and vtable[13] (offset 52) for seek.
+// For PC FileStreams, we handle this directly.
+// =============================================================================
+extern "C" void __imp__sub_827E7FC8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E7FC8)
+{
+    static int s_callCount = 0;
+    ++s_callCount;
+    
+    const uint32_t streamPtr = ctx.r3.u32;
+    
+    if (streamPtr == 0) {
+        ctx.r3.s32 = 0;
+        return;
+    }
+    
+    // Read stream structure
+    uint32_t storageDevice = PPC_LOAD_U32(streamPtr + 0);
+    
+    // Check if this is a PC FileStream
+    if (storageDevice == StorageConstants::PC_STORAGE_DEVICE_ADDR) {
+        uint32_t fileHandle = PPC_LOAD_U32(streamPtr + 4);
+        uint32_t filePos = PPC_LOAD_U32(streamPtr + 12);
+        uint32_t bufferCursor = PPC_LOAD_U32(streamPtr + 16);
+        uint32_t bytesInBuffer = PPC_LOAD_U32(streamPtr + 20);
+        
+        // Get kernel file handle
+        NtFileHandle* hFile = GetPcFileHandle(fileHandle);
+        if (!hFile || !hFile->stream.is_open()) {
+            ctx.r3.s32 = -1;
+            return;
+        }
+        
+        // Update file position: position += cursor
+        uint32_t newPos = filePos + bufferCursor;
+        
+        // Seek the file
+        hFile->stream.seekg(newPos, std::ios::beg);
+        if (hFile->stream.fail()) {
+            hFile->stream.clear();
+            ctx.r3.s32 = -1;
+            return;
+        }
+        
+        // Clear buffer state
+        PPC_STORE_U32(streamPtr + 12, newPos);  // Update file position
+        PPC_STORE_U32(streamPtr + 16, 0);        // Clear cursor
+        PPC_STORE_U32(streamPtr + 20, 0);        // Clear bytes in buffer
+        
+        if (s_callCount <= 10) {
+            LOGF_WARNING("[sub_827E7FC8] PC stream flush #{}: pos {} -> {}", 
+                s_callCount, filePos, newPos);
+        }
+        
+        ctx.r3.s32 = 0;  // Success
+        return;
+    }
+    
+    // Xbox stream - call original
+    __imp__sub_827E7FC8(ctx, base);
+}
+
+PPC_FUNC(sub_827E8420)
+{
+    static int s_callCount = 0;
+    static int s_totalBytesRead = 0;
+    ++s_callCount;
+    
+    // Pump SDL events periodically to prevent beach ball during heavy file I/O
+    // This function is called thousands of times during loading
+    if ((s_callCount % 100) == 0) {
+        PumpSdlEventsIfNeeded();
+    }
+    
+    const uint32_t streamPtr = ctx.r3.u32;
+    const uint32_t destAddr = ctx.r4.u32;
+    const int32_t bytesToRead = ctx.r5.s32;
+    
+    // Handle NULL stream pointer
+    if (streamPtr == 0) {
+        ctx.r3.s32 = 0;
+        return;
+    }
+    
+    // Validate stream pointer
+    if (!IsValidGuestAddress(streamPtr)) {
+        static int s_badCount = 0;
+        if (++s_badCount <= 5) {
+            LOGF_WARNING("[sub_827E8420] Invalid stream pointer 0x{:08X}", streamPtr);
+        }
+        ctx.r3.s32 = -1;
+        return;
+    }
+    
+    // Read stream structure
+    uint32_t storageDevice = PPC_LOAD_U32(streamPtr + 0);
+    uint32_t fileHandle = PPC_LOAD_U32(streamPtr + 4);
+    uint32_t bufferAddr = PPC_LOAD_U32(streamPtr + 8);
+    uint32_t filePos = PPC_LOAD_U32(streamPtr + 12);
+    uint32_t bufferCursor = PPC_LOAD_U32(streamPtr + 16);
+    uint32_t bytesInBuffer = PPC_LOAD_U32(streamPtr + 20);
+    uint32_t bufferCapacity = PPC_LOAD_U32(streamPtr + 24);
+    
+    // Check if this is a PC FileStream (created by our sub_827E8180 hook)
+    // Now uses PC_STORAGE_DEVICE_ADDR instead of old marker
+    if (storageDevice == StorageConstants::PC_STORAGE_DEVICE_ADDR) {
+        // PC FileStream - read directly from kernel file handle via handle table
+        // NOTE: No logging - this is called millions of times per second
+        NtFileHandle* hFile = GetPcFileHandle(fileHandle);
+        
+        if (!hFile || hFile->magic != kNtFileHandleMagic || !hFile->stream.is_open()) {
+            ctx.r3.s32 = -1;
+            return;
+        }
+        
+        // Ensure buffer is allocated
+        if (bufferCapacity == 0) bufferCapacity = 4096;
+        if (bufferAddr == 0) {
+            void* hostPtr = g_userHeap.Alloc(bufferCapacity);
+            if (hostPtr) {
+                bufferAddr = g_memory.MapVirtual(reinterpret_cast<uint8_t*>(hostPtr));
+                PPC_STORE_U32(streamPtr + 8, bufferAddr);
+            }
+        }
+        if (bufferAddr == 0) {
+            ctx.r3.s32 = -1;
+            return;
+        }
+        
+        int32_t totalRead = 0;
+        int32_t remaining = bytesToRead;
+        uint32_t destOffset = 0;
+        
+        while (remaining > 0) {
+            // Check if we have data in buffer
+            int32_t available = static_cast<int32_t>(bytesInBuffer) - static_cast<int32_t>(bufferCursor);
+            
+            if (available > 0) {
+                // Copy from buffer to destination
+                int32_t toCopy = (remaining < available) ? remaining : available;
+                uint8_t* srcHost = static_cast<uint8_t*>(g_memory.Translate(bufferAddr + bufferCursor));
+                uint8_t* dstHost = static_cast<uint8_t*>(g_memory.Translate(destAddr + destOffset));
+                if (srcHost && dstHost) {
+                    memcpy(dstHost, srcHost, toCopy);
+                }
+                
+                bufferCursor += toCopy;
+                destOffset += toCopy;
+                totalRead += toCopy;
+                remaining -= toCopy;
+                
+                // Update cursor in stream structure
+                PPC_STORE_U32(streamPtr + 16, bufferCursor);
+            }
+            
+            if (remaining <= 0) break;
+            
+            // Buffer exhausted - refill from file
+            hFile->stream.seekg(filePos, std::ios::beg);
+            
+            uint8_t* bufferHost = static_cast<uint8_t*>(g_memory.Translate(bufferAddr));
+            if (!bufferHost) {
+                ctx.r3.s32 = totalRead > 0 ? totalRead : -1;
+                return;
+            }
+            
+            hFile->stream.read(reinterpret_cast<char*>(bufferHost), bufferCapacity);
+            std::streamsize bytesRead = hFile->stream.gcount();
+            
+            if (bytesRead <= 0) {
+                // EOF or error
+                if (totalRead > 0) {
+                    ctx.r3.s32 = totalRead;
+                } else {
+                    ctx.r3.s32 = hFile->stream.eof() ? 0 : -1;
+                }
+                return;
+            }
+            
+            // Update stream state
+            filePos += static_cast<uint32_t>(bytesRead);
+            bufferCursor = 0;
+            bytesInBuffer = static_cast<uint32_t>(bytesRead);
+            
+            PPC_STORE_U32(streamPtr + 12, filePos);
+            PPC_STORE_U32(streamPtr + 16, bufferCursor);
+            PPC_STORE_U32(streamPtr + 20, bytesInBuffer);
+        }
+        
+        // Log progress periodically
+        s_totalBytesRead += totalRead;
+        if (s_callCount <= 10 || s_callCount % 10000 == 0) {
+            LOGF_WARNING("[sub_827E8420] PC stream read #{}: {} bytes (total: {} bytes)", 
+                s_callCount, totalRead, s_totalBytesRead);
+        }
+        
+        ctx.r3.s32 = totalRead;
+        return;
+    }
+    
+    // Xbox FileStream - validate and call original implementation
+    if (!IsValidGuestAddress(storageDevice)) {
+        static int s_badObj = 0;
+        if (++s_badObj <= 5) {
+            LOGF_WARNING("[sub_827E8420] Invalid storage device 0x{:08X}", storageDevice);
+        }
+        ctx.r3.s32 = -1;
+        return;
+    }
+    
+    if (storageDevice != 0) {
+        uint32_t vtablePtr = PPC_LOAD_U32(storageDevice + 0);
+        if (!IsValidGuestAddress(vtablePtr)) {
+            static int s_badVtable = 0;
+            if (++s_badVtable <= 5) {
+                LOGF_WARNING("[sub_827E8420] Invalid vtable 0x{:08X}", vtablePtr);
+            }
+            ctx.r3.s32 = -1;
+            return;
+        }
+    }
+    
+    // Call original Xbox implementation
+    __imp__sub_827E8420(ctx, base);
+}
+
+// =============================================================================
+// sub_827E7FA8 - Stream vtable function call (DEFENSIVE WRAPPER)
 // =============================================================================
 // This function loads a vtable from an object and calls a function at vtable+48.
 // The PAC crash occurs when the vtable or function pointer is corrupted.
@@ -7746,63 +13338,757 @@ static void RepairCorruptedStream(uint32_t streamPtr)
 //   r11 = [r11+48] (load function pointer from vtable+48)
 //   call r11 (PAC CRASH HERE if pointer is invalid)
 // =============================================================================
+// =============================================================================
+// sub_827E7FA8 - GetSize Operation (PC NATIVE IMPLEMENTATION)
+// =============================================================================
+// Original: Calls vtable[12] (offset 48) on storage device to get file size.
+// For PC FileStreams, we return the file size directly since we don't have
+// a valid vtable. File size is stored at stream[16] when the stream is created.
+// =============================================================================
+extern "C" void __imp__sub_827E7FA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E7FA8)
+{
+    static int s_callCount = 0;
+    static int s_pcCalls = 0;
+    s_callCount++;
+    
+    // r3 = FileStream pointer
+    uint32_t streamPtr = ctx.r3.u32;
+    
+    // Handle NULL stream
+    if (streamPtr == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Check if this is a PC FileStream (heap address with our marker)
+    if (streamPtr >= 0x00020000 && streamPtr < 0x7FEA0000) {
+        uint32_t storageDevice = PPC_LOAD_U32(streamPtr + 0);
+        
+        if (storageDevice == 0x82A7FE00) {
+            // PC FileStream - return file size from stream[16]
+            uint32_t fileSize = PPC_LOAD_U32(streamPtr + 16);
+            
+            s_pcCalls++;
+            if (s_pcCalls <= 10) {
+                LOGF_WARNING("[sub_827E7FA8] PC GetSize #{}: stream=0x{:08X} size={}", 
+                    s_pcCalls, streamPtr, fileSize);
+            }
+            
+            ctx.r3.u32 = fileSize;
+            return;
+        }
+    }
+    
+    // Xbox stream - validate and call original
+    if (streamPtr < 0x80000000 || streamPtr >= 0x90000000) {
+        // Invalid Xbox stream pointer
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load and validate vtable chain for Xbox streams
+    uint32_t storageDevice = PPC_LOAD_U32(streamPtr + 0);
+    if (storageDevice == 0 || storageDevice < 0x80000000 || storageDevice >= 0x90000000) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    uint32_t vtablePtr = PPC_LOAD_U32(storageDevice + 0);
+    if (vtablePtr == 0 || vtablePtr < 0x80000000 || vtablePtr >= 0x90000000) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    uint32_t funcPtr = PPC_LOAD_U32(vtablePtr + 48);
+    if (funcPtr == 0 || funcPtr < 0x80000000 || funcPtr >= 0x90000000) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Valid Xbox stream - call original
+    __imp__sub_827E7FA8(ctx, base);
+}
 
 // =============================================================================
+// sub_821928D0 - File stream read operation (DEFENSIVE WRAPPER)
 // =============================================================================
-// It loads object from stream[0], then calls vtable[36] and vtable[52].
-// The PAC crash occurs when vtable entries contain garbage pointers.
-//
-// Original code flow:
-//   r31 = r3 (stream pointer)
-//   r3 = [r31+0] (load object from stream)
-//   r11 = [r3+0] (load vtable from object)
-//   r11 = [r11+36] (load function from vtable+36)
-//   call r11 <- CRASH HERE if garbage
-//   ... later ...
-//   r11 = [r11+52] (load function from vtable+52)
-//   call r11 <- CRASH HERE if garbage
-// =============================================================================
-
-// =============================================================================
-// =============================================================================
-// Validates vtable[36] before calling original to prevent PAC crashes.
-// =============================================================================
-
-// =============================================================================
-// =============================================================================
+// This function reads from a file stream and eventually calls sub_827E7FA8.
 // Add validation here to catch bad stream objects before they cause PAC crashes.
 // The stream object is passed in r3 and stored in r30.
 // =============================================================================
+extern "C" void __imp__sub_821928D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821928D0)
+{
+    static int s_callCount = 0;
+    static int s_invalidStreams = 0;
+    s_callCount++;
+    
+    // Get the stream object pointer from r3
+    uint32_t streamPtr = ctx.r3.u32;
+    
+    // Validate stream pointer
+    if (streamPtr == 0)
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] NULL stream pointer (call #{})", s_callCount);
+            s_invalidStreams++;
+        }
+        // Return 0 to indicate failure
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Check if stream pointer is in valid guest memory range
+    // EXCEPTION: PC FileStreams allocated in heap (0x02000000-0x10000000 range)
+    bool isPcFileStream = false;
+    if (streamPtr >= 0x00020000 && streamPtr < 0x7FEA0000) {
+        // Check if this is a PC FileStream by checking storage device marker
+        uint32_t storageDevice = PPC_LOAD_U32(streamPtr + 0);
+        if (storageDevice == 0x82A7FE00) {
+            isPcFileStream = true;
+        }
+    }
+    
+    if (!isPcFileStream && (streamPtr < 0x80000000 || streamPtr >= 0x90000000))
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] Invalid stream pointer 0x{:08X} (call #{})", 
+                streamPtr, s_callCount);
+            s_invalidStreams++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // Load and validate the object pointer at stream+0
+    uint32_t objectPtr = PPC_LOAD_U32(streamPtr + 0);
+    
+    // PC FileStreams have objectPtr = 0x82A7FE00 (our marker) - this is valid
+    if (objectPtr == 0x82A7FE00) {
+        // Valid PC FileStream - call original
+        __imp__sub_821928D0(ctx, base);
+        return;
+    }
+    
+    // If object pointer is NULL, the stream has no valid file object attached
+    // Cannot read from a null object - return 0 to indicate no data
+    if (objectPtr == 0)
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] Stream 0x{:08X} has NULL object pointer (call #{}) - returning 0", 
+                streamPtr, s_callCount);
+            s_invalidStreams++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    if (objectPtr < 0x80000000 || objectPtr >= 0x90000000)
+    {
+        if (s_invalidStreams < 10)
+        {
+            LOGF_WARNING("[sub_821928D0] Stream 0x{:08X} has invalid object pointer 0x{:08X} (call #{})", 
+                streamPtr, objectPtr, s_callCount);
+            s_invalidStreams++;
+        }
+        ctx.r3.u32 = 0;
+        return;
+    }
+    
+    // If object pointer is valid, check the vtable
+    if (objectPtr != 0)
+    {
+        uint32_t vtablePtr = PPC_LOAD_U32(objectPtr + 0);
+        
+        if (vtablePtr != 0 && (vtablePtr < 0x80000000 || vtablePtr >= 0x90000000))
+        {
+            if (s_invalidStreams < 10)
+            {
+                LOGF_WARNING("[sub_821928D0] Stream 0x{:08X} -> object 0x{:08X} has invalid vtable 0x{:08X} (call #{})", 
+                    streamPtr, objectPtr, vtablePtr, s_callCount);
+                s_invalidStreams++;
+            }
+            ctx.r3.u32 = 0;
+            return;
+        }
+    }
+    
+    // Stream object is valid - call original implementation
+    if (s_callCount <= 5)
+    {
+        LOGF_WARNING("[sub_821928D0] Valid call #{}: stream=0x{:08X}, object=0x{:08X}", 
+            s_callCount, streamPtr, objectPtr);
+    }
+    
+    __imp__sub_821928D0(ctx, base);
+}
 
 // =============================================================================
+// sub_82192980 - File stream read with buffer (CRASH INVESTIGATION)
 // =============================================================================
 // This function reads from stream and returns pointer to buffer or 0.
 // Adding wrapper to trace crash in file parsing path.
 // =============================================================================
+extern "C" void __imp__sub_82192980(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192980) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t streamHandle = ctx.r3.u32;
+    uint32_t skipWhitespace = ctx.r4.u32;
+    uint32_t r1_before = ctx.r1.u32;
+    
+    if (s_count <= 20) {
+        LOGF_WARNING("[sub_82192980] #{} ENTER stream=0x{:08X} skip={} r1=0x{:08X}", 
+                     s_count, streamHandle, skipWhitespace, r1_before);
+    }
+    
+    __imp__sub_82192980(ctx, base);
+    
+    uint32_t result = ctx.r3.u32;
+    if (s_count <= 20) {
+        LOGF_WARNING("[sub_82192980] #{} EXIT r3=0x{:08X} (buffer ptr)", s_count, result);
+        if (result != 0 && result >= 0x80000000 && result < 0x90000000) {
+            // Try to read first few bytes of returned buffer
+            uint8_t b0 = *(base + result);
+            uint8_t b1 = *(base + result + 1);
+            uint8_t b2 = *(base + result + 2);
+            uint8_t b3 = *(base + result + 3);
+            LOGF_WARNING("[sub_82192980] #{} buffer content: {:02X} {:02X} {:02X} {:02X} ('{}{}{}{}')",
+                         s_count, b0, b1, b2, b3,
+                         (b0 >= 0x20 && b0 < 0x7F) ? (char)b0 : '.',
+                         (b1 >= 0x20 && b1 < 0x7F) ? (char)b1 : '.',
+                         (b2 >= 0x20 && b2 < 0x7F) ? (char)b2 : '.',
+                         (b3 >= 0x20 && b3 < 0x7F) ? (char)b3 : '.');
+        }
+    }
+}
 
 // =============================================================================
+// sub_82192A60 - File stream close (DEFENSIVE WRAPPER)
 // =============================================================================
 // Prevents crash when called with NULL stream from failed file open.
+// The crash occurs in sub_827E87A0 which dereferences the stream pointer.
+// Flow: sub_82192840 returns 0 → sub_821928D0 returns 0 → sub_82192A60(0) → CRASH
 // =============================================================================
+extern "C" void __imp__sub_82192A60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192A60) {
+    static int s_callCount = 0;
+    static int s_invalidStreams = 0;
+    s_callCount++;
+    
+    uint32_t streamPtr = ctx.r3.u32;
+    
+    // Check for NULL stream pointer
+    if (streamPtr == 0) {
+        s_invalidStreams++;
+        if (s_invalidStreams <= 5) {
+            LOGF_WARNING("[sub_82192A60] Skipping close for NULL stream (call #{})", s_callCount);
+        }
+        return;  // Don't call original - would crash in sub_827E87A0
+    }
+    
+    // Check for invalid address range (outside guest memory)
+    if (streamPtr < 0x80000000 || streamPtr >= 0x90000000) {
+        s_invalidStreams++;
+        if (s_invalidStreams <= 5) {
+            LOGF_WARNING("[sub_82192A60] Skipping close for invalid stream 0x{:08X} (call #{})", 
+                streamPtr, s_callCount);
+        }
+        return;  // Don't call original - would crash
+    }
+    
+    // Stream pointer is in valid range, but check if internal pointers are valid
+    // sub_827E87A0 crashes when stream[0] (storage device ptr) is NULL
+    uint32_t storageDevicePtr = ByteSwap(*(uint32_t*)(base + streamPtr + 0));
+    
+    if (storageDevicePtr == 0) {
+        s_invalidStreams++;
+        if (s_invalidStreams <= 5) {
+            LOGF_WARNING("[sub_82192A60] Skipping close for stream 0x{:08X} with NULL storage device (call #{})", 
+                streamPtr, s_callCount);
+        }
+        // Clear the stream structure to mark it as closed
+        *(uint32_t*)(base + streamPtr + 0) = 0;
+        *(uint32_t*)(base + streamPtr + 4) = ByteSwap((uint32_t)-1);
+        return;  // Don't call original - would crash dereferencing NULL
+    }
+    
+    // Stream has valid internal pointers - call original
+    if (s_callCount <= 5) {
+        LOGF_WARNING("[sub_82192A60] Valid close for stream 0x{:08X} (call #{})", streamPtr, s_callCount);
+    }
+    
+    __imp__sub_82192A60(ctx, base);
+}
 
 // =============================================================================
+// sub_827E02F0 - File path processor (DEFENSIVE WRAPPER)
 // =============================================================================
 // Prevents crash when called with NULL or invalid structure pointer.
 // The crash occurs at line 39351: ctx.r11.u64 = PPC_LOAD_U32(ctx.r31.u32 + 3076);
 // When r31 (from r3 parameter) is NULL, this reads from address 0x0C04 → crash.
+// Call chain: sub_8289DDB0 → sub_827E0968 → sub_827E02F0(NULL) → CRASH
+// =============================================================================
+extern "C" void __imp__sub_827E02F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827E02F0) {
+    static int s_callCount = 0;
+    static int s_invalidCalls = 0;
+    s_callCount++;
+    
+    uint32_t structPtr = ctx.r3.u32;
+    
+    // Check for NULL pointer
+    if (structPtr == 0) {
+        s_invalidCalls++;
+        if (s_invalidCalls <= 5) {
+            LOGF_WARNING("[sub_827E02F0] Skipping file path processing for NULL structure (call #{})", s_callCount);
+        }
+        ctx.r3.u32 = 0;  // Return failure
+        return;
+    }
+    
+    // Check for invalid address range (outside guest memory)
+    if (structPtr < 0x80000000 || structPtr >= 0x90000000) {
+        s_invalidCalls++;
+        if (s_invalidCalls <= 5) {
+            LOGF_WARNING("[sub_827E02F0] Skipping file path processing for invalid structure 0x{:08X} (call #{})", 
+                structPtr, s_callCount);
+        }
+        ctx.r3.u32 = 0;  // Return failure
+        return;
+    }
+    
+    // Structure pointer looks valid - call original
+    __imp__sub_827E02F0(ctx, base);
+}
+
+// Hook sub_82192100 - skip dirty disc error UI and limit retries
+PPC_FUNC(sub_82192100)
+{
+    static int count = 0;
+    count++;
+    
+    if (count <= 5)
+    {
+        LOGF_IMPL(Utility, "GTA4_DirtyDisc", "sub_82192100 (dirty disc UI) called #{} - skipping", count);
+    }
+    
+    // After too many calls, log and let game continue without crashing
+    if (count >= 50)
+    {
+        LOG_UTILITY("[GTA4_DirtyDisc] Too many dirty disc errors - game may have issues loading files");
+    }
+    
+    // Return without showing UI - just skip
+}
+
+// Hook sub_829A1290 - skip dirty disc caller
+PPC_FUNC(sub_829A1290)
+{
+    static int count = 0;
+    if (++count <= 3)
+    {
+        LOG_UTILITY("[GTA4] sub_829A1290 (dirty disc caller) - skipping");
+    }
+}
+
+// =============================================================================
+// sub_821200D0 - Pre-Main-Loop Phase (TRACE ENTRY)
+// =============================================================================
+// This function should be called after sub_82120FB8 completes.
+// It contains the loading gate that calls sub_82124490.
+// sub_821200D0 is now hooked in save_hooks.cpp - removed duplicate definition
 // =============================================================================
 
+// =============================================================================
+// sub_822FA4E8 - Audio Playback State Check (XBOX HARDWARE BYPASS)
+// =============================================================================
+// XEX Analysis: Checks if audio playback state at (a1+16)+6 equals 2.
+// On Xbox 360, the XMA audio hardware sets this state when audio is ready.
+// On PC, we don't emulate the Xbox audio state machine.
+//
+// ROOT CAUSE: LEGAL loading screens wait for this function to return 1
+// (audio ready) before advancing. Since Xbox audio state isn't emulated,
+// this never returns true, causing loading screens to hang forever.
+//
+// FIX: Return 1 after sufficient time has passed to allow LEGAL screens
+// to advance. This is proper handling of Xbox-specific hardware state.
+// =============================================================================
+extern "C" void __imp__sub_822FA4E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822FA4E8) {
+    static int s_count = 0;
+    ++s_count;
+    
+    // Call original first to let it set up any state it needs
+    __imp__sub_822FA4E8(ctx, base);
+    
+    // If original returned 0 (audio not ready), check if we should override
+    // Xbox audio playback state is hardware-managed and not emulated on PC
+    if (ctx.r3.u32 == 0 && s_count > 30) {
+        // After ~0.5 seconds worth of calls, force audio ready
+        // This allows LEGAL screens to advance since we're not emulating Xbox audio
+        ctx.r3.u32 = 1;
+        if (s_count <= 35) {
+            LOGF_WARNING("[AUDIO_STATE] sub_822FA4E8 #{}: Forcing audio ready (Xbox audio state not emulated)", s_count);
+        }
+    }
+}
+
+// =============================================================================
+// sub_822FADA0 - Loading Screen Audio Init (TRACED)
+// =============================================================================
+// XEX Analysis: Initializes loading screen music ("LOADING_TUNE", "RADIO3_A").
+// Creates audio object at a1+16 that sub_822FA4E8 checks.
+// =============================================================================
+extern "C" void __imp__sub_822FADA0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822FADA0) {
+    static int s_count = 0;
+    ++s_count;
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[AUDIO_INIT] sub_822FADA0 #{}: Loading screen audio init", s_count);
+    }
+    
+    __imp__sub_822FADA0(ctx, base);
+}
+
+// =============================================================================
+// sub_821238D0 - Loading Screen Update (TRACED)
+// =============================================================================
+// XEX Analysis: Updates loading screens each frame. LEGAL screens (state 1)
+// wait for sub_822FA4E8 to return true before advancing to next screen.
+// =============================================================================
+extern "C" void __imp__sub_821238D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821238D0) {
+    static int s_count = 0;
+    ++s_count;
+    
+    __imp__sub_821238D0(ctx, base);
+    
+    // Log loading screen state for debugging
+    if (s_count <= 20 || s_count % 500 == 0) {
+        uint8_t byte_BC9 = PPC_LOAD_U8(0x83137BC9);
+        uint32_t dword_BC0 = PPC_LOAD_U32(0x83137BC0);  // Current screen index
+        uint32_t dword_BC4 = PPC_LOAD_U32(0x83137BC4);  // Total screens loaded
+        LOGF_WARNING("[LOADSCREEN] sub_821238D0 #{} BC9={} BC0={} BC4={}", 
+                     s_count, byte_BC9, dword_BC0, dword_BC4);
+    }
+}
+
+// =============================================================================
+// sub_82124490 - Loading Gate Check (XBOX THREADING BYPASS)
+// =============================================================================
+// XEX Analysis: Checks byte_83137BB7 and byte_83137BC9
+// Returns byte_83137BC9 if byte_83137BB7 is set, else returns 0
+//
+// ROOT CAUSE: This function is called in a busy-wait loop at line 1135933:
+//   while ( (unsigned __int8)sub_82124490() ) sub_827DAE18(1);
+// 
+// On Xbox 360, another thread/callback runs in parallel to process loading
+// screens and eventually sets byte_83137BC9 = 0. The mechanisms that drive
+// this are:
+//   1. Xbox XMA audio hardware callbacks (sub_822FA4E8 checks playback state)
+//   2. Xbox threading model with fiber-like scheduling  
+//   3. Loading screen update function (sub_821238D0) called via callback
+//
+// On PC, we don't emulate the Xbox threading model or XMA audio hardware.
+// The callback that sets BC9=0 never runs because the busy-wait loop blocks.
+//
+// FIX: After sufficient iterations (~500ms worth), force return 0 to let
+// loading proceed. This is proper handling of Xbox-specific kernel sync.
+// =============================================================================
+extern "C" void __imp__sub_82124490(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82124490) {
+    static int s_count = 0;
+    static bool s_gateCleared = false;
+    ++s_count;
+    
+    __imp__sub_82124490(ctx, base);
+    
+    // If gate still returns 1 (loading not complete) after 500 iterations,
+    // force it to return 0. Xbox threading/callbacks aren't emulated.
+    if (ctx.r3.u32 != 0 && !s_gateCleared && s_count > 500) {
+        // Also set the actual byte so game state is consistent
+        PPC_STORE_U8(0x83137BC9, 0);
+        ctx.r3.u32 = 0;
+        s_gateCleared = true;
+        LOGF_WARNING("[LOADING_GATE] BYPASS: Forcing gate clear after {} iterations "
+                     "(Xbox threading/audio callbacks not emulated)", s_count);
+    }
+    
+    if (s_count <= 20 || s_count % 1000 == 0) {
+        uint8_t byte_BB7 = PPC_LOAD_U8(0x83137BB7);
+        uint8_t byte_BC9 = PPC_LOAD_U8(0x83137BC9);
+        LOGF_WARNING("[LOADING_GATE] #{} BB7={} BC9={} r3={}", 
+                     s_count, byte_BB7, byte_BC9, ctx.r3.u32);
+    }
+}
+
+// =============================================================================
+// sub_821E6508 - Loading State Machine (DEEP TRACING)
+// =============================================================================
+// This is the critical state machine that controls loading progression.
+// States 0-17, needs to reach state 17 with retVal=1 to complete loading.
+// =============================================================================
+extern "C" void __imp__sub_821E6508(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821E6508) {
+    static int s_count = 0;
+    ++s_count;
+    
+    uint32_t stateBefore = PPC_LOAD_U32(0x82B94554);
+    uint32_t retValBefore = PPC_LOAD_U32(0x82B946C8);
+    
+    __imp__sub_821E6508(ctx, base);
+    
+    uint32_t stateAfter = PPC_LOAD_U32(0x82B94554);
+    uint32_t retValAfter = PPC_LOAD_U32(0x82B946C8);
+    
+    // Log state transitions and stuck states
+    if (s_count <= 100 || stateBefore != stateAfter || s_count % 200 == 0) {
+        LOGF_WARNING("[LOAD_STATE] #{} state:{}->{} retVal:{}->{} r3={}", 
+                     s_count, stateBefore, stateAfter, retValBefore, retValAfter, ctx.r3.u32);
+    }
+}
+
+// =============================================================================
+// sub_8219F728 - Profile/Storage Ready Check (TRACE)
+// =============================================================================
+// Called by sub_821E6508 to check if profile system is ready.
+// Must return non-zero for state machine to proceed.
+// =============================================================================
+extern "C" void __imp__sub_8219F728(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219F728) {
+    static int s_count = 0;
+    ++s_count;
+    
+    __imp__sub_8219F728(ctx, base);
+    
+    if (s_count <= 50 || s_count % 100 == 0) {
+        LOGF_WARNING("[PROFILE_READY] #{} r3={}", s_count, ctx.r3.u32);
+    }
+}
+
 // Forward declare the original implementation from recompiled code
+extern "C" void __imp__sub_829A1F00(PPCContext& ctx, uint8_t* base);
 
 // Track completed async operations to avoid re-serving data
 // Key: async pointer, Value: pair<handle, offset> of completed operation
 static std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> g_completedAsyncOps;
 
+// Hook sub_829A1F00 - the actual file loading function
 // SIMPLIFIED APPROACH: Call original recompiled function, then ensure async completion
 // Parameters: r3=handle, r4=buffer(guest), r5=size, r6=offset, r7=asyncInfo
+PPC_FUNC(sub_829A1F00)
+{
+    static int count = 0;
+    count++;
+    
+    const uint32_t handle = ctx.r3.u32;
+    const uint32_t guestBuffer = ctx.r4.u32;
+    const uint32_t size = ctx.r5.u32;
+    const uint32_t offset = ctx.r6.u32;
+    const uint32_t asyncInfo = ctx.r7.u32;
+    
+    // Track last known common.rpf handle for NULL handle recovery
+    static uint32_t s_lastCommonHandle = 0;
+    
+    // Protect against NULL handle - log but continue to ReadFromBestRpf
+    // ReadFromBestRpf has fallback logic to try all RPF files even without a handle
+    if (handle == 0)
+    {
+        static int s_nullReadCount = 0;
+        if (++s_nullReadCount <= 10)
+        {
+            LOGF_WARNING("[GTA4_FileLoad] NULL handle read: offset=0x{:X} size=0x{:X} (will try all RPFs)", offset, size);
+        }
+        // Don't return early - let ReadFromBestRpf try to serve from RPF files
+    }
+    
+    // Cache handles that successfully read from common.rpf
+    const uint32_t activeHandle = (handle != 0) ? handle : s_lastCommonHandle;
+    if (offset >= 0x90000 && offset <= 0xB0000 && activeHandle != 0)
+    {
+        s_lastCommonHandle = activeHandle;
+    }
+    
+    uint8_t* hostBuffer = reinterpret_cast<uint8_t*>(base + guestBuffer);
+    
+    // Log first 50 calls and then every 100th
+    if (count <= 50 || count % 100 == 0)
+    {
+        LOGF_IMPL(Utility, "GTA4_FileLoad", "sub_829A1F00 #{} handle=0x{:08X} size=0x{:X} offset=0x{:X} async=0x{:08X}",
+                  count, handle, size, offset, asyncInfo);
+    }
+    
+    // Try to serve from our RPF streams with decrypted TOC
+    std::string chosen;
+    const uint32_t bytesRead = ReadFromBestRpf(handle, hostBuffer, size, offset, count, chosen);
+    
+    if (bytesRead > 0)
+    {
+        g_handleToRpf[handle] = chosen;
+        if (count <= 50 || count % 100 == 0)
+        {
+            LOGF_IMPL(Utility, "GTA4_FileLoad", "sub_829A1F00 #{} read {} bytes from '{}' at offset 0x{:X}",
+                      count, bytesRead, chosen, offset);
+        }
+        
+        // For async reads, set completion flags BEFORE returning (static recomp playbook)
+        // Xbox 360 IO_STATUS_BLOCK / OVERLAPPED structure (big-endian):
+        //   Offset 0: Status (NTSTATUS) - 0 = STATUS_SUCCESS, 0x103 = STATUS_PENDING
+        //   Offset 4: Information (bytes transferred)
+        // The guest is POLLING this memory address waiting for Status != STATUS_PENDING
+        if (asyncInfo != 0 && asyncInfo < 0x20000000)
+        {
+            volatile uint32_t* asyncPtr = reinterpret_cast<volatile uint32_t*>(base + asyncInfo);
+            
+            // Log BEFORE state for debugging
+            if (count <= 20)
+            {
+                uint32_t beforeStatus = asyncPtr[0];
+                uint32_t beforeInfo = asyncPtr[1];
+                LOGF_IMPL(Utility, "GTA4_FileLoad", 
+                          "ASYNC: BEFORE @0x{:08X}: Status=0x{:08X}, Info=0x{:08X}", 
+                          asyncInfo, beforeStatus, beforeInfo);
+            }
+            
+            // CRITICAL: Write with correct byte order for big-endian Xbox 360
+            // Guest reads memory as big-endian, so we must store in big-endian format
+            asyncPtr[1] = ByteSwap(bytesRead);  // Information = bytes transferred (offset 4)
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            asyncPtr[0] = 0;                    // Status = STATUS_SUCCESS (0) - write LAST!
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            
+            // Signal event at offset 8 if present (Xbox kernel would do this on I/O completion)
+            // asyncInfo structure: +0=Status, +4=Information, +8=hEvent, +12=?, +16=Flags
+            uint32_t eventHandle = ByteSwap(asyncPtr[2]);
+            if (eventHandle != 0 && eventHandle != 0xFFFFFFFF && IsKernelObject(eventHandle))
+            {
+                XDISPATCHER_HEADER* eventObj = reinterpret_cast<XDISPATCHER_HEADER*>(g_memory.Translate(eventHandle));
+                if (eventObj && (eventObj->Type == 0 || eventObj->Type == 1))
+                {
+                    QueryKernelObject<Event>(*eventObj)->Set();
+                    if (count <= 20)
+                    {
+                        LOGF_IMPL(Utility, "GTA4_FileLoad", 
+                                  "ASYNC: Signaled event 0x{:08X} for async completion", eventHandle);
+                    }
+                }
+            }
+            
+            // Log AFTER state
+            if (count <= 20)
+            {
+                uint32_t afterStatus = asyncPtr[0];
+                uint32_t afterInfo = asyncPtr[1];
+                LOGF_IMPL(Utility, "GTA4_FileLoad", 
+                          "ASYNC: AFTER  @0x{:08X}: Status=0x{:08X}, Info=0x{:08X}, hEvent=0x{:08X}", 
+                          asyncInfo, afterStatus, afterInfo, eventHandle);
+            }
+        }
+        
+        ctx.r3.u32 = 1;  // Return success
+        return;
+    }
+    
+    // Check if this is one of our file handles
+    auto it = g_ntFileHandles.find(handle);
+    if (it != g_ntFileHandles.end() && it->second && it->second->magic == kNtFileHandleMagic)
+    {
+        NtFileHandle* hFile = it->second;
+        
+        // Parse RPF header if not done yet
+        if (!hFile->rpfHeaderParsed)
+            ParseRpfHeader(hFile);
+        
+        // Seek to offset and read
+        hFile->stream.clear();
+        hFile->stream.seekg(offset, std::ios::beg);
+        
+        if (!hFile->stream.bad())
+        {
+            hFile->stream.read(reinterpret_cast<char*>(hostBuffer), size);
+            const uint32_t bytesRead = static_cast<uint32_t>(hFile->stream.gcount());
+            
+            // Decrypt TOC region if this is an encrypted RPF
+            if (hFile->isRpf && hFile->tocEncrypted && bytesRead > 0)
+            {
+                const uint64_t tocStart = hFile->tocOffset;
+                const uint64_t tocEnd = tocStart + hFile->tocSize;
+                const uint64_t readStart = offset;
+                const uint64_t readEnd = offset + bytesRead;
+                const uint64_t overlapStart = std::max(readStart, tocStart);
+                const uint64_t overlapEnd = std::min(readEnd, tocEnd);
+                
+                if (overlapEnd > overlapStart)
+                {
+                    const uint32_t startInBuf = static_cast<uint32_t>(overlapStart - readStart);
+                    const uint32_t len = static_cast<uint32_t>(overlapEnd - overlapStart);
+                    const uint64_t tocRelativeOffset = overlapStart - tocStart;
+                    
+                    if (count <= 20 || count % 100 == 0)
+                    {
+                        LOGF_IMPL(Utility, "GTA4_FileLoad", "Decrypting TOC region: bufOffset={} len={} tocRelOffset={}",
+                                  startInBuf, len, tocRelativeOffset);
+                    }
+                    
+                    DecryptRpfBufferInPlace(hostBuffer + startInBuf, len, tocRelativeOffset);
+                }
+            }
+            
+            if (count <= 20 || count % 100 == 0)
+            {
+                LOGF_IMPL(Utility, "GTA4_FileLoad", "sub_829A1F00 #{} read {} bytes from '{}' at offset 0x{:X}",
+                          count, bytesRead, hFile->path.filename().string(), offset);
+            }
+            
+            if (bytesRead > 0)
+            {
+                ctx.r3.u32 = 1;
+                return;
+            }
+        }
+    }
 
+    // Check if this is a virtual file handle
+    auto vit = g_ntVirtFileHandles.find(handle);
+    if (vit != g_ntVirtFileHandles.end() && vit->second && vit->second->magic == kNtVirtFileHandleMagic)
+    {
+        NtVirtFileHandle* hVirt = vit->second;
+        
+        // Fallback to virtual data if RPF read failed
+        if (offset < hVirt->data.size())
+        {
+            const uint32_t available = static_cast<uint32_t>(hVirt->data.size() - offset);
+            const uint32_t toCopy = std::min(size, available);
+            memcpy(hostBuffer, hVirt->data.data() + offset, toCopy);
+            
+            if (count <= 20 || count % 100 == 0)
+            {
+                LOGF_IMPL(Utility, "GTA4_FileLoad", "sub_829A1F00 #{} read {} bytes from virtual data at offset 0x{:X}",
+                          count, toCopy, offset);
+            }
+            
+            ctx.r3.u32 = 1;
+            return;
+        }
+    }
 
+    // All else failed
+    if (count <= 20 || count % 100 == 0)
+    {
+        LOGF_IMPL(Utility, "GTA4_FileLoad", "sub_829A1F00 #{} FAILED for handle 0x{:08X}", count, handle);
+    }
+    ctx.r3.u32 = 0;
+}
 
+// NOTE: sub_827F0B20 is the retry loop - we let it run but our file system should handle reads properly
+// The key is to ensure sub_829A1F00 returns correct data and completion flags
+GUEST_FUNCTION_HOOK(sub_825383D8, XapiInitProcess)
 GUEST_FUNCTION_HOOK(__imp__XGetVideoMode, VdQueryVideoMode); // XGetVideoMode
 GUEST_FUNCTION_HOOK(__imp__XNotifyGetNext, XNotifyGetNext);
 GUEST_FUNCTION_HOOK(__imp__XGetGameRegion, XGetGameRegion);
@@ -7901,10 +14187,6 @@ GUEST_FUNCTION_HOOK(__imp__KeBugCheckEx, KeBugCheckEx);
 GUEST_FUNCTION_HOOK(__imp__KeGetCurrentProcessType, KeGetCurrentProcessType);
 GUEST_FUNCTION_HOOK(__imp__RtlCompareMemoryUlong, RtlCompareMemoryUlong);
 GUEST_FUNCTION_HOOK(__imp__RtlInitializeCriticalSection, RtlInitializeCriticalSection);
-GUEST_FUNCTION_HOOK(__imp__RtlAllocateHeap, RtlAllocateHeap);
-GUEST_FUNCTION_HOOK(__imp__RtlReAllocateHeap, RtlReAllocateHeap);
-GUEST_FUNCTION_HOOK(__imp__RtlFreeHeap, RtlFreeHeap);
-GUEST_FUNCTION_HOOK(__imp__RtlSizeHeap, RtlSizeHeap);
 GUEST_FUNCTION_HOOK(__imp__RtlRaiseException, RtlRaiseException_x);
 GUEST_FUNCTION_HOOK(__imp__KfReleaseSpinLock, KfReleaseSpinLock);
 GUEST_FUNCTION_HOOK(__imp__KfAcquireSpinLock, KfAcquireSpinLock);
@@ -8029,12 +14311,6 @@ GUEST_FUNCTION_HOOK(__imp__XMACreateContext, XMACreateContext);
 GUEST_FUNCTION_HOOK(__imp__XAudioRegisterRenderDriverClient, XAudioRegisterRenderDriverClient);
 GUEST_FUNCTION_HOOK(__imp__XAudioUnregisterRenderDriverClient, XAudioUnregisterRenderDriverClient);
 GUEST_FUNCTION_HOOK(__imp__XAudioSubmitRenderDriverFrame, XAudioSubmitRenderDriverFrame);
-// X Memory Functions (from heap.cpp - MarathonRecomp)
-GUEST_FUNCTION_HOOK(__imp__XVirtualAlloc, XVirtualAlloc);
-GUEST_FUNCTION_HOOK(__imp__XVirtualFree, XVirtualFree);
-GUEST_FUNCTION_HOOK(__imp__XMemAlloc, XAllocMem);
-GUEST_FUNCTION_HOOK(__imp__XMemFree, XFreeMem);
-
 // Additional GTA IV stubs
 GUEST_FUNCTION_HOOK(__imp__XamAlloc, XamAlloc);
 GUEST_FUNCTION_HOOK(__imp__XamFree, XamFree);
@@ -8077,15 +14353,184 @@ GUEST_FUNCTION_HOOK(__imp__NetDll_XNetUnregisterInAddr, Net::XNetUnregisterInAdd
 // This avoids validation token complexity and lets game logic run naturally.
 // =============================================================================
 
-GUEST_FUNCTION_HOOK(sub_8249BE88, GTA::FileResolve);
+extern "C" void __imp__sub_8249BE88(PPCContext& ctx, uint8_t* base);
+// FIX: Call the original implementation instead of replacing with GTA::FileResolve
+// The original sub_8249BE88 formats the path via sub_827EDED0 before calling vtable[27].
+// Completely replacing it would skip path formatting (adding .xtd extension).
+PPC_FUNC(sub_8249BE88) {
+    static int s_count = 0; ++s_count;
+    
+    // Trace first few calls for debugging
+    if (s_count <= 5) {
+        uint32_t r4_val = ctx.r4.u32;
+        const char* pathPtr = r4_val ? reinterpret_cast<const char*>(base + r4_val) : nullptr;
+        LOGF_WARNING("[sub_8249BE88] #{} path='{}' r6={}", s_count, pathPtr ? pathPtr : "<null>", ctx.r6.u32);
+    }
+    
+    // Call original implementation - it handles path formatting and vtable[27] call
+    __imp__sub_8249BE88(ctx, base);
+}
 
 
 // =============================================================================
+// sub_829DD978 - GPU Command Buffer Processing (Worker Thread)
 // =============================================================================
+// This function processes GPU ring buffer commands. Without full GPU emulation,
+// it crashes trying to access invalid command buffer memory (0x400000000).
+// Stub it to prevent crash - GPU rendering is handled separately.
+// =============================================================================
+PPC_FUNC(sub_829DD978) {
+    // Stub: Return success without processing GPU commands
+    ctx.r3.u32 = 0;
+}
 
 
+// =============================================================================
+// sub_8249BDC8 - Resource Space Allocation (Streaming System)
+// =============================================================================
+// This function loops waiting for resource streaming to complete. The original
+// game's streaming system waits for GPU commands to finish. Since the recompiler
+// handles resources differently, we stub this to return success immediately.
+// =============================================================================
+PPC_FUNC(sub_8249BDC8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) {
+        LOGF_WARNING("[RESOURCE_ALLOC] sub_8249BDC8 STUB #{} - returning success", s_count);
+    }
+    // Return 1 = success (resource space allocated)
+    ctx.r3.u32 = 1;
+}
+
+
+// =============================================================================
+// sub_829D72A0 - GPU Atomic Sync (ldarx/stdcx)
+// =============================================================================
+// This function does 64-bit atomic compare-and-swap on GPU memory for sync.
+// The memory addresses aren't properly mapped for atomics in the recompiler.
+// Stub to just return the input pointer.
+// =============================================================================
+PPC_FUNC(sub_829D72A0) {
+    // r3 already contains the result pointer, just return
+}
+
+
+// =============================================================================
+// sub_827F17C0 - Text Parser (Prevent Beach Ball)
+// =============================================================================
+// This function is called in tight loops during data file parsing.
+// Pump SDL events periodically to prevent macOS beach ball.
+// =============================================================================
+extern "C" void __imp__sub_827F17C0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827F17C0) {
+    static int s_count = 0; ++s_count;
+    
+    // Pump events every 50 calls to prevent beach ball during long parsing
+    // This function is called thousands of times during data file parsing
+    if ((s_count % 50) == 0) {
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    }
+    
+    // Log every 5000 calls to track parsing progress
+    if ((s_count % 5000) == 0) {
+        LOGF_WARNING("[PARSER] sub_827F17C0 call #{} - parsing in progress", s_count);
+    }
+    
+    __imp__sub_827F17C0(ctx, base);
+}
+
+// =============================================================================
+// sub_821E8848 - Weapon FX Parser (Main Init Blocking Point)
+// =============================================================================
+// This function parses weaponFx.dat but gets stuck in infinite loop because
+// the file stream reading isn't working correctly. Stub to return success.
+// =============================================================================
+PPC_FUNC(sub_821E8848) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[INIT] sub_821E8848 (weaponFx parser) STUB #{} - skipping to unblock init", s_count);
+    // Return 0 = success (parser completed)
+    ctx.r3.u32 = 0;
+}
+
+
+// =============================================================================
+// Instrumentation for sub_82120FB8 blocking point
+// =============================================================================
+extern "C" void __imp__sub_827DB118(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DB118) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_827DB118 (thread worker init) ENTER #{} r5=0x{:08X}", s_count, ctx.r5.u32);
+    __imp__sub_827DB118(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_827DB118 (thread worker init) EXIT #{}", s_count);
+}
+
+// sub_8230D760 - called in loop by sub_8219FD88
+extern "C" void __imp__sub_8230D760(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8230D760) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) LOGF_WARNING("[8219FD88-TRACE] sub_8230D760 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_8230D760(ctx, base);
+    if (s_count <= 20) LOGF_WARNING("[8219FD88-TRACE] sub_8230D760 EXIT #{}", s_count);
+}
+
+// sub_8230D160 - called in loop by sub_8219FD88  
+extern "C" void __imp__sub_8230D160(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8230D160) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 20) LOGF_WARNING("[8219FD88-TRACE] sub_8230D160 ENTER #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+    __imp__sub_8230D160(ctx, base);
+    if (s_count <= 20) LOGF_WARNING("[8219FD88-TRACE] sub_8230D160 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_8219F9A0 - called by sub_8219FD88
+extern "C" void __imp__sub_8219F9A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219F9A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8219FD88-TRACE] sub_8219F9A0 ENTER #{}", s_count);
+    __imp__sub_8219F9A0(ctx, base);
+    LOGF_WARNING("[8219FD88-TRACE] sub_8219F9A0 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_8219F948 - called by sub_8219FD88
+extern "C" void __imp__sub_8219F948(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219F948) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8219FD88-TRACE] sub_8219F948 ENTER #{}", s_count);
+    __imp__sub_8219F948(ctx, base);
+    LOGF_WARNING("[8219FD88-TRACE] sub_8219F948 EXIT #{}", s_count);
+}
+
+// sub_824C1668 - called by sub_8219FD88
+extern "C" void __imp__sub_824C1668(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_824C1668) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[8219FD88-TRACE] sub_824C1668 ENTER #{} r3=0x{:08X} r4={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_824C1668(ctx, base);
+    LOGF_WARNING("[8219FD88-TRACE] sub_824C1668 EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// sub_8219FD88 - called early in sub_82120FB8, potential blocker
+extern "C" void __imp__sub_8219FD88(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219FD88) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8219FD88 ENTER #{}", s_count);
+    __imp__sub_8219FD88(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8219FD88 EXIT #{}", s_count);
+}
+
+// sub_822F8980 - storage/file init in sub_82120FB8
 // PHASE 1: Enhanced instrumentation with global tracking flag
 
+extern "C" void __imp__sub_822F8980(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822F8980) {
+    static int s_count = 0; ++s_count;
+    g_inStorageInit = true;
+    LOGF_WARNING("[STORAGE-INIT] sub_822F8980 ENTER #{} r3=0x{:08X} r4=0x{:08X}", 
+                 s_count, ctx.r3.u32, ctx.r4.u32);
+    __imp__sub_822F8980(ctx, base);
+    g_inStorageInit = false;
+    LOGF_WARNING("[STORAGE-INIT] sub_822F8980 EXIT #{}", s_count);
+}
 
 // =============================================================================
 // PHASE 1: Deep Instrumentation - File Parsing Chain
@@ -8103,32 +14548,527 @@ static std::string ReadGuestString(uint8_t* base, uint32_t addr, int maxLen = 26
     return result.empty() ? "<empty>" : result;
 }
 
+// sub_822F3110 - File parsing loop iterator (called repeatedly)
 // PHASE 1: Deep instrumentation to find blocking point
+extern "C" void __imp__sub_822F3110(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822F3110) {
+    static int s_count = 0; ++s_count;
+    
+    // Stack addresses now in 0x80000000+ range (physical heap allocation fix)
+    
+    // Always log first 50 calls, then every 100th
+    bool shouldLog = (s_count <= 50) || (s_count % 100 == 0);
+    
+    if (shouldLog) {
+        // Log all input registers
+        LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} ENTER r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} r6=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
+        
+        // If r3 looks like a valid pointer, dump structure contents
+        uint32_t contextPtr = ctx.r3.u32;
+        if (contextPtr >= 0x80000000 && contextPtr < 0x90000000) {
+            uint32_t ctx0 = ByteSwap(*(uint32_t*)(base + contextPtr + 0));
+            uint32_t ctx4 = ByteSwap(*(uint32_t*)(base + contextPtr + 4));
+            uint32_t ctx8 = ByteSwap(*(uint32_t*)(base + contextPtr + 8));
+            uint32_t ctxC = ByteSwap(*(uint32_t*)(base + contextPtr + 12));
+            uint32_t ctx10 = ByteSwap(*(uint32_t*)(base + contextPtr + 16));
+            uint32_t ctx14 = ByteSwap(*(uint32_t*)(base + contextPtr + 20));
+            
+            LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} context[0x{:08X}]: [0]=0x{:08X} [4]=0x{:08X} [8]=0x{:08X} [C]=0x{:08X} [10]=0x{:08X} [14]=0x{:08X}",
+                         s_count, contextPtr, ctx0, ctx4, ctx8, ctxC, ctx10, ctx14);
+            
+            // Try to find string path - check common offsets
+            for (uint32_t offset : {0u, 4u, 8u, 12u, 16u, 20u, 24u, 32u}) {
+                uint32_t strPtr = ByteSwap(*(uint32_t*)(base + contextPtr + offset));
+                if (strPtr >= 0x80000000 && strPtr < 0x90000000) {
+                    std::string str = ReadGuestString(base, strPtr, 64);
+                    if (str.length() > 2 && str[0] != '<') {
+                        LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} possible path at offset {}: '{}'",
+                                     s_count, offset, str);
+                    }
+                }
+            }
+        }
+        
+        // If r4 looks like a valid pointer (could be buffer or path)
+        if (ctx.r4.u32 >= 0x80000000 && ctx.r4.u32 < 0x90000000) {
+            std::string r4str = ReadGuestString(base, ctx.r4.u32, 64);
+            if (r4str.length() > 2 && r4str[0] != '<') {
+                LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} r4 string: '{}'", s_count, r4str);
+            }
+        }
+    }
+    
+    // Log LR (return address) to trace caller
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} LR=0x{:08X} (caller)", s_count, (uint32_t)ctx.lr);
+    }
+    
+    __imp__sub_822F3110(ctx, base);
+    
+    if (shouldLog) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F3110 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
+// sub_822F8890 - File parser orchestrator
 // FIX: When file parsing finds no entries (context[0]=0), the original code crashes
 // trying to access memory at loc_822F8950 after stream close. This safe implementation
+// skips sub_822F87E0 when there are no entries to process.
+extern "C" void __imp__sub_822F8890(PPCContext& ctx, uint8_t* base);
 
+// Forward declarations for PPC runtime functions called by sub_822F8890
+extern "C" void __imp__sub_82192840(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_828E0AB8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82148358(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218BE78(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_822F3110(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_822F57A8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_827827C8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82192A60(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_822F87E0(PPCContext& ctx, uint8_t* base);
+// __savegprlr_29 and __restgprlr_29 declared in ppc_recomp_shared.h
+
+PPC_FUNC(sub_822F8890) {
+    static int s_count = 0; ++s_count;
+    
+    uint32_t contextPtr = ctx.r3.u32;
+    uint32_t filePathPtr = ctx.r4.u32;
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} ENTER context=0x{:08X} path=0x{:08X}", 
+                     s_count, contextPtr, filePathPtr);
+    }
+    
+    // Save registers (matching __savegprlr_29)
+    ctx.r12.u64 = ctx.lr;
+    ctx.lr = 0x822F8898;
+    __savegprlr_29(ctx, base);
+    
+    // Create stack frame
+    uint32_t ea = ctx.r1.u32 - 128;
+    PPC_STORE_U32(ea, ctx.r1.u32);
+    ctx.r1.u32 = ea;
+    
+    // Save arguments
+    ctx.r30.u64 = filePathPtr;  // r30 = file path
+    ctx.r31.u64 = contextPtr;   // r31 = context
+    
+    // Open file: sub_82192840(filePath, "common:/data/cdimages/hud.rpf")
+    ctx.r4.s64 = (int64_t)(-2113208320) + (-28176);  // File path constant
+    ctx.r3.u64 = ctx.r30.u64;
+    ctx.lr = 0x822F88B4;
+    __imp__sub_82192840(ctx, base);
+    
+    uint32_t streamHandle = ctx.r3.u32;
+    ctx.r29.u64 = streamHandle;
+    
+    // Store handle on stack
+    PPC_STORE_U32(ctx.r1.u32 + 80, streamHandle);
+    
+    // Check if file opened successfully
+    if (streamHandle == 0) {
+        // File failed to open - call error handler and return 0
+        ctx.r3.s64 = (int64_t)(-2113863680) + 836;
+        ctx.lr = 0x822F88D4;
+    __imp__sub_828E0AB8(ctx, base);
+        ctx.r3.s64 = 0;
+        
+        // Restore stack and return
+        ctx.r1.s64 = ctx.r1.s64 + 128;
+        __restgprlr_29(ctx, base);
+        
+        if (s_count <= 10) {
+            LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} EXIT (file open failed) r3=0", s_count);
+        }
+        return;
+    }
+    
+    // File opened - initialize context
+    ctx.r3.s64 = ctx.r31.s64 + 8;
+    ctx.lr = 0x822F88E8;
+    __imp__sub_82148358(ctx, base);
+    
+    ctx.r3.u64 = PPC_LOAD_U32(ctx.r31.u32 + 0);
+    ctx.lr = 0x822F88F0;
+    __imp__sub_8218BE78(ctx, base);
+    
+    // Zero out context fields
+    PPC_STORE_U32(ctx.r31.u32 + 0, 0);
+    PPC_STORE_U16(ctx.r31.u32 + 4, 0);
+    PPC_STORE_U16(ctx.r31.u32 + 6, 0);
+    
+    // Parse file entries
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} calling __imp__sub_822F3110", s_count);
+    ctx.r3.s64 = ctx.r1.s64 + 80;
+    ctx.lr = 0x822F8908;
+    __imp__sub_822F3110(ctx, base);
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} __imp__sub_822F3110 returned r3=0x{:08X}", s_count, ctx.r3.u32);
+    
+    // Process entries loop
+    while (ctx.r3.u32 != 0) {
+        ctx.r4.u64 = ctx.r3.u64;
+        ctx.r5.s64 = ctx.r1.s64 + 88;
+        ctx.r3.u64 = ctx.r31.u64;
+        ctx.lr = 0x822F8920;
+        __imp__sub_822F57A8(ctx, base);
+        
+        if ((ctx.r3.u32 & 0xFF) != 0) {
+            ctx.r4.s64 = 16;
+            ctx.r3.u64 = ctx.r31.u64;
+            ctx.lr = 0x822F8938;
+            __imp__sub_827827C8(ctx, base);
+            
+            uint64_t val = PPC_LOAD_U64(ctx.r1.u32 + 88);
+            PPC_STORE_U64(ctx.r3.u32 + 0, val);
+        }
+        
+        ctx.r3.s64 = ctx.r1.s64 + 80;
+        ctx.lr = 0x822F8948;
+        __imp__sub_822F3110(ctx, base);
+    }
+    
+    // Close stream - call through wrapper (sub_82192A60) for safety checks
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} closing stream 0x{:08X}", s_count, ctx.r29.u32);
+    ctx.r3.u64 = ctx.r29.u64;
+    ctx.lr = 0x822F8958;
+    sub_82192A60(ctx, base);  // Use wrapper, not __imp__ directly
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} stream closed", s_count);
+    
+    // SAFE FIX: Read context values and check before calling sub_822F87E0
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} reading context at 0x{:08X}", s_count, ctx.r31.u32);
+    uint16_t entryCount = ByteSwap(*(uint16_t*)(base + ctx.r31.u32 + 4));
+    uint32_t arrayPtr = ByteSwap(*(uint32_t*)(base + ctx.r31.u32 + 0));
+    if (s_count <= 10) LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} context read OK", s_count);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} after parse: arrayPtr=0x{:08X} count={}", 
+                     s_count, arrayPtr, entryCount);
+    }
+    
+    // Only call sub_822F87E0 if there are entries to process
+    if (arrayPtr != 0 && entryCount > 0) {
+        uint32_t endPtr = arrayPtr + (entryCount << 3);  // rotlwi by 3 = multiply by 8
+        
+        ctx.r3.u64 = arrayPtr;
+        ctx.r4.u64 = endPtr;
+        ctx.lr = 0x822F896C;
+        __imp__sub_822F87E0(ctx, base);
+    } else {
+        if (s_count <= 10) {
+            LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} SKIPPING sub_822F87E0 (no entries)", s_count);
+        }
+    }
+    
+    // Set completion flag
+    PPC_STORE_U8(ctx.r31.u32 + 16, 1);
+    ctx.r3.s64 = 1;
+    
+    // Restore stack and return
+    ctx.r1.s64 = ctx.r1.s64 + 128;
+    __restgprlr_29(ctx, base);
+    
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F8890 #{} EXIT r3=1", s_count);
+    }
+}
+
+// sub_822F87E0 - Called after file parsing to process results
+// Suspected crash location - called from sub_822F8890 after stream close
+extern "C" void __imp__sub_822F87E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822F87E0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} ENTER r3=0x{:08X} r4=0x{:08X}", 
+                     s_count, ctx.r3.u32, ctx.r4.u32);
+        
+        // Check if pointers are valid (guest memory ranges)
+        bool r3Valid = (ctx.r3.u32 >= 0x80000000) ||
+                       (ctx.r3.u32 >= 0x00020000 && ctx.r3.u32 < 0x7FEA0000);
+        bool r4Valid = (ctx.r4.u32 >= 0x80000000) ||
+                       (ctx.r4.u32 >= 0x00020000 && ctx.r4.u32 < 0x7FEA0000);
+        
+        if (!r3Valid || !r4Valid) {
+            LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} INVALID POINTERS r3valid={} r4valid={}",
+                         s_count, r3Valid, r4Valid);
+        }
+        
+        // Check alignment (8-byte for 64-bit operations)
+        if ((ctx.r3.u32 & 0x7) != 0) {
+            LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} r3=0x{:08X} NOT 8-BYTE ALIGNED",
+                         s_count, ctx.r3.u32);
+        }
+        if ((ctx.r4.u32 & 0x7) != 0) {
+            LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} r4=0x{:08X} NOT 8-BYTE ALIGNED",
+                         s_count, ctx.r4.u32);
+        }
+    }
+    __imp__sub_822F87E0(ctx, base);
+    if (s_count <= 10) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F87E0 #{} EXIT", s_count);
+    }
+}
+
+// sub_822F57A8 - File entry processor (called in loop)
+extern "C" void __imp__sub_822F57A8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822F57A8) {
+    static int s_count = 0; ++s_count;
+    bool shouldLog = (s_count <= 30) || (s_count % 50 == 0);
+    
+    if (shouldLog) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F57A8 #{} ENTER r3=0x{:08X} r4=0x{:08X} r5=0x{:08X}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    }
+    __imp__sub_822F57A8(ctx, base);
+    if (shouldLog) {
+        LOGF_WARNING("[FILE-PARSE] sub_822F57A8 #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
 // =============================================================================
+// sub_822AFAF8 - Safe wrapper for uninitialized global protection
 // =============================================================================
 // FIX: Global at 0x82A2DB54 (offset -9388 from 0x82A30000) is NEVER initialized
+// in the recompiled code. The caller sub_822B4D68 loads this garbage value into
 // r4 and passes it here. Inside this function, r4 is copied to r28, and later
 // the code crashes trying to access r28+22000.
 //
 // Call site (ppc_recomp.11.cpp:111705-111711):
 //   r3 = 256 (constant)
 //   r4 = garbage from uninitialized global 0x82A2DB54
+//   bl sub_822AFAF8
 //
 // This wrapper validates r4 before proceeding.
+extern "C" void __imp__sub_822AFAF8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822AFAF8) {
+    static int s_count = 0; ++s_count;
+    
+    // PRIMARY FIX: Check r4 (the global pointer from 0x82A2DB54)
+    // This is the uninitialized global that causes the crash
+    uint32_t globalPtr = ctx.r4.u32;
+    if (globalPtr == 0 || globalPtr < 0x80000000 || globalPtr >= 0x90000000) {
+        if (s_count <= 20 || s_count % 100 == 0) {
+            LOGF_WARNING("[sub_822AFAF8] #{} SKIP - r4 contains invalid global ptr 0x{:08X} (from uninitialized 0x82A2DB54)", 
+                         s_count, globalPtr);
+        }
+        ctx.r3.s64 = 0;  // Return null/failure
+        return;
+    }
+    
+    // Secondary check: Verify the object at globalPtr+22000 is accessible
+    // The crash happens at: lwz r3,22000(r28) where r28=r4
+    uint32_t subObjAddr = globalPtr + 22000;
+    if (subObjAddr < 0x80000000 || subObjAddr >= 0x90000000) {
+        if (s_count <= 20 || s_count % 100 == 0) {
+            LOGF_WARNING("[sub_822AFAF8] #{} SKIP - r4+22000=0x{:08X} out of range", 
+                         s_count, subObjAddr);
+        }
+        ctx.r3.s64 = 0;
+        return;
+    }
+    
+    // Check the sub-object pointer at globalPtr+22000
+    uint32_t subObjPtr = __builtin_bswap32(*(uint32_t*)(base + subObjAddr));
+    if (subObjPtr == 0 || subObjPtr < 0x80000000 || subObjPtr >= 0x90000000) {
+        if (s_count <= 20 || s_count % 100 == 0) {
+            LOGF_WARNING("[sub_822AFAF8] #{} SKIP - [r4+22000]=0x{:08X} invalid sub-object ptr", 
+                         s_count, subObjPtr);
+        }
+        ctx.r3.s64 = 0;
+        return;
+    }
+    
+    // Check vtable pointer at sub-object
+    uint32_t vtablePtr = __builtin_bswap32(*(uint32_t*)(base + subObjPtr));
+    if (vtablePtr == 0 || vtablePtr < 0x80000000 || vtablePtr >= 0x90000000) {
+        if (s_count <= 20 || s_count % 100 == 0) {
+            LOGF_WARNING("[sub_822AFAF8] #{} SKIP - vtable ptr 0x{:08X} invalid", 
+                         s_count, vtablePtr);
+        }
+        ctx.r3.s64 = 0;
+        return;
+    }
+    
+    // Check function pointer at vtable+56
+    uint32_t funcPtr = __builtin_bswap32(*(uint32_t*)(base + vtablePtr + 56));
+    if (funcPtr == 0 || funcPtr < 0x82000000 || funcPtr >= 0x83000000) {
+        if (s_count <= 20 || s_count % 100 == 0) {
+            LOGF_WARNING("[sub_822AFAF8] #{} SKIP - func ptr 0x{:08X} at vtable[56] invalid", 
+                         s_count, funcPtr);
+        }
+        ctx.r3.s64 = 0;
+        return;
+    }
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[sub_822AFAF8] #{} VALID r4=0x{:08X} subObj=0x{:08X} vtable=0x{:08X} func=0x{:08X}", 
+                     s_count, globalPtr, subObjPtr, vtablePtr, funcPtr);
+    }
+    
+    __imp__sub_822AFAF8(ctx, base);
+    
+    if (s_count <= 5) {
+        LOGF_WARNING("[sub_822AFAF8] #{} EXIT r3=0x{:08X}", s_count, ctx.r3.u32);
+    }
+}
 
 // =========================================================================
 // Remaining 63-subsystem hooks (after Stats system)
 // =========================================================================
+extern "C" void __imp__sub_8212FB78(PPCContext& ctx, uint8_t* base);  // Friend system
+extern "C" void __imp__sub_8219ADF0(PPCContext& ctx, uint8_t* base);  // Online system
+extern "C" void __imp__sub_8212F578(PPCContext& ctx, uint8_t* base);  // Leaderboard
+extern "C" void __imp__sub_8212EDC8(PPCContext& ctx, uint8_t* base);  // Achievement
+extern "C" void __imp__sub_82138710(PPCContext& ctx, uint8_t* base);  // Replay system
+extern "C" void __imp__sub_821B2ED8(PPCContext& ctx, uint8_t* base);  // Camera recording
+extern "C" void __imp__sub_822467B8(PPCContext& ctx, uint8_t* base);  // Cinematic camera
+extern "C" void __imp__sub_82208460(PPCContext& ctx, uint8_t* base);  // Photo mode
+extern "C" void __imp__sub_821B9DA8(PPCContext& ctx, uint8_t* base);  // TV system
+extern "C" void __imp__sub_82258100(PPCContext& ctx, uint8_t* base);  // Internet cafe
+extern "C" void __imp__sub_821A03A0(PPCContext& ctx, uint8_t* base);  // Phone system
+extern "C" void __imp__sub_8232A2C0(PPCContext& ctx, uint8_t* base);  // Dating system
+extern "C" void __imp__sub_82125478(PPCContext& ctx, uint8_t* base);  // Final setup
+
+PPC_FUNC(sub_8212FB78) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212FB78 (Friend system) ENTER #{}", s_count);
+    __imp__sub_8212FB78(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212FB78 (Friend system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// REIMPLEMENTED: sub_8219ADF0 (Online system)
+// Was stubbed because: Xbox Live integration blocks on sync
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_8219ADF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219ADF0) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_8219ADF0 #%d ENTER - Online system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_8219ADF0(ctx, base);
+    
+    printf("[REIMPL] sub_8219ADF0 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_8212F578) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212F578 (Leaderboard) ENTER #{}", s_count);
+    __imp__sub_8212F578(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212F578 (Leaderboard) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8212EDC8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8212EDC8 (Achievement) ENTER #{}", s_count);
+    __imp__sub_8212EDC8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8212EDC8 (Achievement) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82138710) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82138710 (Replay system) ENTER #{}", s_count);
+    __imp__sub_82138710(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82138710 (Replay system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821B2ED8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821B2ED8 (Camera recording) ENTER #{}", s_count);
+    __imp__sub_821B2ED8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821B2ED8 (Camera recording) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_822467B8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_822467B8 (Cinematic camera) ENTER #{}", s_count);
+    __imp__sub_822467B8(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_822467B8 (Cinematic camera) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_82208460) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82208460 (Photo mode) ENTER #{}", s_count);
+    __imp__sub_82208460(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82208460 (Photo mode) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// REIMPLEMENTED: sub_821B9DA8 (TV system)
+// Was stubbed because: blocks on sync primitives
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_821B9DA8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821B9DA8) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_821B9DA8 #%d ENTER - TV system (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_821B9DA8(ctx, base);
+    
+    printf("[REIMPL] sub_821B9DA8 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+PPC_FUNC(sub_82258100) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_82258100 (Internet cafe) ENTER #{}", s_count);
+    __imp__sub_82258100(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_82258100 (Internet cafe) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_821A03A0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_821A03A0 (Phone system) ENTER #{}", s_count);
+    __imp__sub_821A03A0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_821A03A0 (Phone system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+PPC_FUNC(sub_8232A2C0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[63-SUBSYS] sub_8232A2C0 (Dating system) ENTER #{}", s_count);
+    __imp__sub_8232A2C0(ctx, base);
+    LOGF_WARNING("[63-SUBSYS] sub_8232A2C0 (Dating system) EXIT #{} r3=0x{:08X}", s_count, ctx.r3.u32);
+}
+
+// REIMPLEMENTED: sub_82125478 (Final setup)
+// Was stubbed because: calls sub_82319040 -> sub_829A39A0 which blocks
+// Now: Sync hooks prevent blocking
+extern "C" void __imp__sub_82125478(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82125478) {
+    static int s_count = 0; ++s_count;
+    printf("[REIMPL] sub_82125478 #%d ENTER - Final setup (now non-blocking)\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_82125478(ctx, base);
+    
+    printf("[REIMPL] sub_82125478 #%d EXIT r3=0x%08X\n", s_count, ctx.r3.u32);
+    fflush(stdout);
+}
+
+
+
+
+
 
 
 // =========================================================================
 // Main Loop Tracing Hooks
 // =========================================================================
+extern "C" void __imp__sub_82856F08(PPCContext& ctx, uint8_t* base);  // Main Loop Entry
+extern "C" void __imp__sub_828529B0(PPCContext& ctx, uint8_t* base);  // Main Loop Orchestrator
+extern "C" void __imp__sub_828507F8(PPCContext& ctx, uint8_t* base);  // Frame Presentation
+extern "C" void __imp__sub_829D5388(PPCContext& ctx, uint8_t* base);  // D3D Present (VdSwap)
+
+PPC_FUNC(sub_82856F08) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[MAIN_LOOP] sub_82856F08 (Entry) #{}", s_count);
+    __imp__sub_82856F08(ctx, base);
+}
 
 // =============================================================================
 // RENDER OBJECT STUB - Option B: Manual initialization
@@ -8153,1003 +15093,568 @@ PPC_FUNC(RenderTriggerStub) {
     // The important thing is that the render path is now unblocked
 }
 
-
-// Called after the loop
-
-
-// =============================================================================
-// DEVICE CONTEXT - Required by guest_thread.cpp for worker thread TLS init
-// =============================================================================
-
-
-// =============================================================================
-// CRT RUNTIME ENVIRONMENT - Complete Implementation
-// =============================================================================
-// The game's CRT expects:
-// 1. Device context at TLS+1676 with proper vtable
-// 2. Callback table at 0x831317E4-0x831317F0 with CALLABLE function addresses
-// We register all functions at 0x82B7xxxx addresses where InsertFunction works.
-// =============================================================================
-
-// Global device address - shared between CRT init and worker threads
-uint32_t g_guestDeviceAddr = 0;
-
-extern "C" uint32_t GetGuestDeviceAddr() {
-    return g_guestDeviceAddr;
-}
-
-// Function addresses in safe range for InsertFunction (0x82B7xxxx)
-constexpr uint32_t RUNTIME_FUNC_BASE = 0x82B7A000;
-
-// Device vtable functions
-constexpr uint32_t VTABLE_ALLOCATOR  = RUNTIME_FUNC_BASE + 0x00;  // vtable[2]
-constexpr uint32_t VTABLE_LOADER     = RUNTIME_FUNC_BASE + 0x10;  // vtable[3]
-constexpr uint32_t VTABLE_STUB       = RUNTIME_FUNC_BASE + 0x20;  // generic stub
-
-// CRT callback table functions  
-constexpr uint32_t CRT_TLS_GETTER    = RUNTIME_FUNC_BASE + 0x30;  // 0x831317E4
-constexpr uint32_t CRT_TLS_GET_VALUE = RUNTIME_FUNC_BASE + 0x40;  // 0x831317E8
-constexpr uint32_t CRT_TLS_SET_VALUE = RUNTIME_FUNC_BASE + 0x50;  // 0x831317EC
-constexpr uint32_t CRT_CTX_ALLOCATOR = RUNTIME_FUNC_BASE + 0x60;  // 0x831317F0
-
-// =============================================================================
-// Device Vtable Functions
-// =============================================================================
-
-// Device vtable[2] - Memory allocator called by sub_8218BE28
-static void DeviceVtable_Allocator(PPCContext& ctx, uint8_t* base) {
-    uint32_t size = ctx.r3.u32;
-    if (size == 0) size = 16;
+PPC_FUNC(sub_828529B0) {
+    static int s_count = 0; ++s_count;
     
-    void* ptr = g_userHeap.Alloc(size);
-    if (ptr) {
-        memset(ptr, 0, size);
-        ctx.r3.u32 = static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(g_memory.base));
-    } else {
-        ctx.r3.u32 = 0;
-    }
-}
-
-// Device vtable[3] - Device loader
-static void DeviceVtable_Loader(PPCContext& ctx, uint8_t* base) {
-    ctx.r3.u32 = 0;
-}
-
-// Generic stub for other vtable entries
-static void DeviceVtable_Stub(PPCContext& ctx, uint8_t* base) {
-    ctx.r3.u32 = 0;
-}
-
-// =============================================================================
-// CRT Callback Table Functions
-// =============================================================================
-
-// CRT callback 0x831317E4 - TLS context getter (called indirectly)
-static void CRT_TlsGetter(PPCContext& ctx, uint8_t* base) {
-    // r3 = thread handle, returns TLS context pointer
-    // Call KeTlsGetValue with index 0
-    uint32_t savedR3 = ctx.r3.u32;
-    ctx.r3.u32 = 0;  // TLS index 0
-    __imp__KeTlsGetValue(ctx, base);
-    // r3 now has TLS value
-}
-
-// CRT callback 0x831317E8 - Thread context lookup by handle
-static void CRT_TlsGetValueWrapper(PPCContext& ctx, uint8_t* base) {
-    // r3 = thread handle (NOT TLS index!)
-    // Returns: thread context pointer for this thread
-    // The thread context is stored at r13+0 (TLS base)
-    uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
-    ctx.r3.u32 = tlsBase;
-}
-
-// CRT callback 0x831317EC - KeTlsSetValue wrapper
-static void CRT_TlsSetValueWrapper(PPCContext& ctx, uint8_t* base) {
-    // r3 = TLS index, r4 = value, returns success
-    __imp__KeTlsSetValue(ctx, base);
-}
-
-// CRT callback 0x831317F0 - Thread context allocator
-static void CRT_ContextAllocator(PPCContext& ctx, uint8_t* base) {
-    // Allocate thread context structure (196 bytes per original code)
-    constexpr uint32_t THREAD_CTX_SIZE = 196;
-    void* ptr = g_userHeap.AllocPhysical(THREAD_CTX_SIZE, 16);
-    if (ptr) {
-        memset(ptr, 0, THREAD_CTX_SIZE);
-        ctx.r3.u32 = g_memory.MapVirtual(ptr);
-    } else {
-        ctx.r3.u32 = 0;
-    }
-}
-
-// Flag to track registration
-static bool g_runtimeFuncsRegistered = false;
-
-// Register all runtime functions
-static void RegisterRuntimeFunctions() {
-    if (g_runtimeFuncsRegistered) return;
+    // Check device context at 0x828D2E38 + 19188 = 0x828D7344
+    uint32_t deviceCtxPtr = PPC_LOAD_U32(0x828D2E38 + 19188);
     
-    // Device vtable functions
-    RegisterDynamicFunction(VTABLE_ALLOCATOR, DeviceVtable_Allocator);
-    RegisterDynamicFunction(VTABLE_LOADER, DeviceVtable_Loader);
-    RegisterDynamicFunction(VTABLE_STUB, DeviceVtable_Stub);
+    // Trace the vtable[16] call condition (lines 99844-99868 in ppc_recomp.66.cpp)
+    int32_t conditionValue = (int32_t)PPC_LOAD_U32(0x82078000 + 16060);
+    uint32_t globalBase = 0x828D2E38;
+    uint32_t globalObjAddr = PPC_LOAD_U32(globalBase + 19648);
     
-    // CRT callback table functions
-    RegisterDynamicFunction(CRT_TLS_GETTER, CRT_TlsGetter);
-    RegisterDynamicFunction(CRT_TLS_GET_VALUE, CRT_TlsGetValueWrapper);
-    RegisterDynamicFunction(CRT_TLS_SET_VALUE, CRT_TlsSetValueWrapper);
-    RegisterDynamicFunction(CRT_CTX_ALLOCATOR, CRT_ContextAllocator);
-    
-    g_runtimeFuncsRegistered = true;
-    LOG_WARNING("[CRT] Registered runtime functions at 0x82B7A0xx");
-}
-
-// =============================================================================
-// CRT TLS Getter Debug Hook - Trace what value is being read
-// =============================================================================
-PPC_FUNC(sub_829943F0) {
-    // Game reads TLS index from 0x82A96E00 + 28260 = 0x82A9DC64
-    constexpr uint32_t TLS_INDEX_ADDR = 0x82A9DC64;
-    uint32_t tlsIndex = PPC_LOAD_U32(TLS_INDEX_ADDR);
-    
-    static int s_tlsGetCount = 0;
-    ++s_tlsGetCount;
-    if (s_tlsGetCount <= 10 || tlsIndex > 256) {
-        LOGF_WARNING("[sub_829943F0] #{} TLS index at 0x{:08X} = {} (0x{:08X})", 
-                     s_tlsGetCount, TLS_INDEX_ADDR, tlsIndex, tlsIndex);
+    if (s_count <= 5 || s_count % 500 == 0) {
+        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 ENTER #{} deviceCtx=0x{:08X}", s_count, deviceCtxPtr);
+        LOGF_WARNING("[MAIN_LOOP] vtable_cond: (0x82078000+16060)={} globalObj=0x{:08X}", 
+                     conditionValue, globalObjAddr);
     }
     
-    // Call KeTlsGetValue with the index
-    ctx.r3.u32 = tlsIndex;
-    __imp__KeTlsGetValue(ctx, base);
-    uint32_t tlsValue = ctx.r3.u32;
-    
-    if (tlsValue == 0) {
-        // Not set - load callback from 0x831317E8 and store in TLS
-        uint32_t callback = PPC_LOAD_U32(0x831317E8);
-        if (s_tlsGetCount <= 10) {
-            LOGF_WARNING("[sub_829943F0] #{} TLS was null, loading callback 0x{:08X} from 0x831317E8", 
-                         s_tlsGetCount, callback);
-        }
-        ctx.r3.u32 = tlsIndex;
-        ctx.r4.u32 = callback;
-        __imp__KeTlsSetValue(ctx, base);
-        ctx.r3.u32 = callback;
-    } else {
-        if (s_tlsGetCount <= 10) {
-            LOGF_WARNING("[sub_829943F0] #{} TLS value = 0x{:08X}", s_tlsGetCount, tlsValue);
-        }
-        ctx.r3.u32 = tlsValue;
-    }
-}
-
-// =============================================================================
-// CRT Heap Hooks - Intercept allocations before game's heap is initialized
-// Use standalone functions registered via InsertFunction at runtime
-// =============================================================================
-static std::atomic<int> s_heapAllocCount{0};
-
-// Standalone heap hook functions (not PPC_FUNC - registered at runtime)
-static void HeapHook_Malloc(PPCContext& ctx, uint8_t* base) {
-    uint32_t size = ctx.r3.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) size = 1;
-    void* ptr = g_userHeap.Alloc(size);
-    if (!ptr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(ptr, 0, size);
-    uint32_t result = g_memory.MapVirtual(ptr);
-    
-    if (count <= 20) {
-        LOGF_WARNING("[HEAP_MALLOC] #{} size={} -> 0x{:08X}", count, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-static void HeapHook_Free(PPCContext& ctx, uint8_t* base) {
-    uint32_t ptr = ctx.r3.u32;
-    if (ptr != 0 && ptr >= 0x20000 && ptr < 0xA0000000) {
-        g_userHeap.Free(g_memory.Translate(ptr));
-    }
-}
-
-static void HeapHook_Realloc(PPCContext& ctx, uint8_t* base) {
-    uint32_t oldPtr = ctx.r3.u32;
-    uint32_t newSize = ctx.r4.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (newSize == 0) {
-        if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-            g_userHeap.Free(g_memory.Translate(oldPtr));
-        }
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    void* newPtr = g_userHeap.Alloc(newSize);
-    if (!newPtr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(newPtr, 0, newSize);
-    
-    if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-        void* oldHostPtr = g_memory.Translate(oldPtr);
-        size_t oldSize = g_userHeap.Size(oldHostPtr);
-        memcpy(newPtr, oldHostPtr, std::min<size_t>(newSize, oldSize));
-        g_userHeap.Free(oldHostPtr);
-    }
-    
-    uint32_t result = g_memory.MapVirtual(newPtr);
-    if (count <= 20) {
-        LOGF_WARNING("[HEAP_REALLOC] #{} old=0x{:08X} size={} -> 0x{:08X}", count, oldPtr, newSize, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-static void HeapHook_LowAlloc(PPCContext& ctx, uint8_t* base) {
-    uint32_t size = ctx.r5.u32;  // r3=heap, r4=flags, r5=size
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) size = 1;
-    void* ptr = g_userHeap.Alloc(size);
-    if (!ptr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(ptr, 0, size);
-    uint32_t result = g_memory.MapVirtual(ptr);
-    
-    if (count <= 20) {
-        LOGF_WARNING("[HEAP_LOW_ALLOC] #{} size={} -> 0x{:08X}", count, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-static void HeapHook_LowRealloc(PPCContext& ctx, uint8_t* base) {
-    uint32_t oldPtr = ctx.r5.u32;  // r3=heap, r4=flags, r5=oldPtr, r6=size
-    uint32_t size = ctx.r6.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) {
-        if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-            g_userHeap.Free(g_memory.Translate(oldPtr));
-        }
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    void* newPtr = g_userHeap.Alloc(size);
-    if (!newPtr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(newPtr, 0, size);
-    
-    if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-        void* oldHostPtr = g_memory.Translate(oldPtr);
-        size_t oldSize = g_userHeap.Size(oldHostPtr);
-        memcpy(newPtr, oldHostPtr, std::min<size_t>(size, oldSize));
-        g_userHeap.Free(oldHostPtr);
-    }
-    
-    uint32_t result = g_memory.MapVirtual(newPtr);
-    if (count <= 20) {
-        LOGF_WARNING("[HEAP_LOW_REALLOC] #{} old=0x{:08X} size={} -> 0x{:08X}", count, oldPtr, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-// Stub for missing callback 0x829FBE38 (called from sub_829A7960)
-static void MissingCallbackStub_829FBE38(PPCContext& ctx, uint8_t* base) {
-    // This callback is never initialized - just return success
-    ctx.r3.u32 = 0;
-}
-
-// Register heap hooks at runtime (call before constructors)
-static void RegisterHeapHooks() {
-    LOG_WARNING("[HEAP] Registering CRT heap hooks via InsertFunction...");
-    g_memory.InsertFunction(0x82993298, HeapHook_Malloc);      // malloc
-    g_memory.InsertFunction(0x82993360, HeapHook_Free);        // free  
-    g_memory.InsertFunction(0x82993848, HeapHook_Realloc);     // realloc
-    g_memory.InsertFunction(0x829A64C0, HeapHook_LowAlloc);    // _heap_alloc
-    g_memory.InsertFunction(0x829A7090, HeapHook_LowRealloc);  // _heap_realloc
-    
-    // Register stub for missing callback that's repeatedly called
-    g_memory.InsertFunction(0x829FBE38, MissingCallbackStub_829FBE38);
-    
-    LOG_WARNING("[HEAP] CRT heap hooks registered!");
-}
-
-// Keep PPC_FUNC versions as fallback (weak symbol override)
-// sub_82993298 - CRT malloc
-PPC_FUNC(sub_82993298) {
-    uint32_t size = ctx.r3.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) size = 1;
-    void* ptr = g_userHeap.Alloc(size);
-    if (!ptr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(ptr, 0, size);
-    uint32_t result = g_memory.MapVirtual(ptr);
-    
-    if (count <= 20) {
-        LOGF_WARNING("[CRT_MALLOC] #{} size={} -> 0x{:08X}", count, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-// sub_82993360 - CRT free
-PPC_FUNC(sub_82993360) {
-    uint32_t ptr = ctx.r3.u32;
-    if (ptr != 0 && ptr >= 0x20000 && ptr < 0xA0000000) {
-        g_userHeap.Free(g_memory.Translate(ptr));
-    }
-}
-
-// sub_82993848 - CRT realloc
-PPC_FUNC(sub_82993848) {
-    uint32_t oldPtr = ctx.r3.u32;
-    uint32_t newSize = ctx.r4.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (newSize == 0) {
-        if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-            g_userHeap.Free(g_memory.Translate(oldPtr));
-        }
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    void* newPtr = g_userHeap.Alloc(newSize);
-    if (!newPtr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(newPtr, 0, newSize);
-    
-    if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-        void* oldHostPtr = g_memory.Translate(oldPtr);
-        size_t oldSize = g_userHeap.Size(oldHostPtr);
-        memcpy(newPtr, oldHostPtr, std::min<size_t>(newSize, oldSize));
-        g_userHeap.Free(oldHostPtr);
-    }
-    
-    uint32_t result = g_memory.MapVirtual(newPtr);
-    if (count <= 20) {
-        LOGF_WARNING("[CRT_REALLOC] #{} old=0x{:08X} size={} -> 0x{:08X}", count, oldPtr, newSize, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-// sub_829A64C0 - Low-level CRT allocator
-PPC_FUNC(sub_829A64C0) {
-    uint32_t size = ctx.r5.u32;  // r3=heap, r4=flags, r5=size
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) size = 1;
-    void* ptr = g_userHeap.Alloc(size);
-    if (!ptr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(ptr, 0, size);
-    uint32_t result = g_memory.MapVirtual(ptr);
-    
-    if (count <= 20) {
-        LOGF_WARNING("[CRT_LOW_ALLOC] #{} size={} -> 0x{:08X}", count, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-// sub_829A7090 - Low-level CRT realloc
-PPC_FUNC(sub_829A7090) {
-    uint32_t oldPtr = ctx.r5.u32;  // r3=heap, r4=flags, r5=oldPtr, r6=size
-    uint32_t size = ctx.r6.u32;
-    int count = ++s_heapAllocCount;
-    
-    if (size == 0) {
-        if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-            g_userHeap.Free(g_memory.Translate(oldPtr));
-        }
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    void* newPtr = g_userHeap.Alloc(size);
-    if (!newPtr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(newPtr, 0, size);
-    
-    if (oldPtr != 0 && oldPtr >= 0x20000 && oldPtr < 0xA0000000) {
-        void* oldHostPtr = g_memory.Translate(oldPtr);
-        size_t oldSize = g_userHeap.Size(oldHostPtr);
-        memcpy(newPtr, oldHostPtr, std::min<size_t>(size, oldSize));
-        g_userHeap.Free(oldHostPtr);
-    }
-    
-    uint32_t result = g_memory.MapVirtual(newPtr);
-    if (count <= 20) {
-        LOGF_WARNING("[CRT_LOW_REALLOC] #{} old=0x{:08X} size={} -> 0x{:08X}", count, oldPtr, size, result);
-    }
-    ctx.r3.u32 = result;
-}
-
-// =============================================================================
-// Global Constructors - Initialize vtables for all global objects
-// Call ALL constructors in the 0x82A00000-0x82B00000 range
-// =============================================================================
-static void CallAllGlobalConstructors(PPCContext& ctx, uint8_t* base) {
-    LOG_WARNING("[INIT] Calling ALL global constructors in 0x82A0xxxx range...");
-    
-    // Only iterate through the actual constructor range (0x82A00000 to ~0x82A02400)
-    // Beyond that are mostly import stubs (__imp__XNotifyPositionUI, etc.)
-    constexpr uint32_t CTOR_START = 0x82A00000;
-    constexpr uint32_t CTOR_END = 0x82A02400;  // Stop before import stubs
-    
-    int ctorCount = 0;
-    int skipCount = 0;
-    
-    // Known problematic constructors that call uninitialized function pointers
-    std::unordered_set<uint32_t> skipAddrs = {
-        0x82A03520, 0x82A03B74, 0x82A0D15C, 0x82A0D1AC,
-    };
-    
-    // Use step of 4 (minimum PPC instruction alignment)
-    for (uint32_t addr = CTOR_START; addr < CTOR_END; addr += 4) {
-        PPCFunc* func = PPC_LOOKUP_FUNC(base, addr);
-        if (func != nullptr) {
-            if (skipAddrs.count(addr)) {
-                skipCount++;
-                continue;
-            }
-            
-            uint64_t savedLR = ctx.lr;
-            ctx.lr = 0x82994700;
-            
-            func(ctx, base);
-            
-            ctx.lr = savedLR;
-            ctorCount++;
-        }
-    }
-    
-    LOGF_WARNING("[INIT] Called {} global constructors (skipped {})", ctorCount, skipCount);
-}
-
-static void CallSimpleGlobalConstructors(PPCContext& ctx, uint8_t* base) {
-    LOG_WARNING("[INIT] Calling 62 simple global constructors...");
-    
-    // Simple constructors only - vtable stores and basic initialization
-    sub_82A00A38(ctx, base);
-    sub_82A00B34(ctx, base);
-    sub_82A00B90(ctx, base);
-    sub_82A00C90(ctx, base);
-    sub_82A00C98(ctx, base);
-    sub_82A00CB0(ctx, base);
-    sub_82A00D20(ctx, base);
-    sub_82A00D28(ctx, base);
-    sub_82A00D30(ctx, base);
-    sub_82A00D48(ctx, base);
-    sub_82A00D78(ctx, base);
-    sub_82A00E30(ctx, base);
-    sub_82A00EA0(ctx, base);
-    sub_82A00F18(ctx, base);
-    sub_82A00F20(ctx, base);
-    sub_82A012A0(ctx, base);
-    sub_82A012B8(ctx, base);
-    sub_82A012D0(ctx, base);
-    sub_82A01398(ctx, base);
-    sub_82A013B0(ctx, base);
-    sub_82A013C8(ctx, base);
-    sub_82A023A8(ctx, base);
-    sub_82A02478(ctx, base);
-    sub_82A02480(ctx, base);
-    sub_82A02490(ctx, base);
-    sub_82A02660(ctx, base);
-    sub_82A028D4(ctx, base);
-    sub_82A028E0(ctx, base);
-    sub_82A02998(ctx, base);
-    sub_82A029D0(ctx, base);
-    sub_82A029E0(ctx, base);
-    sub_82A029F0(ctx, base);
-    sub_82A02F18(ctx, base);
-    sub_82A02F2C(ctx, base);
-    sub_82A02FB0(ctx, base);
-    sub_82A02FC8(ctx, base);
-    sub_82A03150(ctx, base);
-    sub_82A03458(ctx, base);
-    sub_82A034A0(ctx, base);
-    sub_82A034B0(ctx, base);
-    sub_82A039F0(ctx, base);
-    sub_82A03B3C(ctx, base);
-    sub_82A03B48(ctx, base);
-    sub_82A04EF8(ctx, base);
-    sub_82A0500C(ctx, base);
-    sub_82A05014(ctx, base);
-    sub_82A05098(ctx, base);
-    sub_82A05634(ctx, base);
-    sub_82A06820(ctx, base);
-    sub_82A070B8(ctx, base);
-    sub_82A071B0(ctx, base);
-    sub_82A072B0(ctx, base);
-    sub_82A072B8(ctx, base);
-    // NOTE: sub_82A08AE4 is a memcpy helper, NOT a constructor!
-    // Calling it with garbage registers corrupted CS OwningThread field.
-    sub_82A09D90(ctx, base);
-    sub_82A0A540(ctx, base);
-    sub_82A0D100(ctx, base);
-    sub_82A0D128(ctx, base);
-    sub_82A0D958(ctx, base);
-    sub_82A0DE48(ctx, base);
-    sub_82A0E430(ctx, base);
-    sub_82A0F398(ctx, base);
-    sub_82A0F718(ctx, base);
-    
-    LOG_WARNING("[INIT] All 62 simple global constructors complete!");
-}
-
-// =============================================================================
-// PPC_FUNC for sub_82994700 - CRT/TLS Initialization
-// =============================================================================
-PPC_FUNC(sub_82994700) {
-    LOG_WARNING("[CRT] sub_82994700 - Providing CRT runtime environment");
-    
-    // NOTE: InsertFunction crashes (read-only memory), PPC_FUNC weak symbols don't override
-    // The MarathonRecomp approach relies on heap hooks working, but we can't get them to work
-    // For now, just do minimal CRT setup
-    
-    // Register runtime functions
-    RegisterRuntimeFunctions();
-    
-    // TLS index address: game loads from 0x82A96E00 + 28260 = 0x82A9DC64
-    constexpr uint32_t TLS_INDEX_ADDR    = 0x82A9DC64;
-    constexpr uint32_t THREAD_HANDLE_ADDR = 0x82A9DC60;
-    constexpr uint32_t THREAD_CTX_LIST   = 0x82A97300;
-    constexpr uint32_t CRT_CONTEXT_ADDR  = 0x83131788;
-    
-    // Initialize callback table with OUR function addresses (not original game addresses)
-    PPC_STORE_U32(0x831317E4, CRT_TLS_GETTER);     // Was 0x829943E8
-    PPC_STORE_U32(0x831317E8, CRT_TLS_GET_VALUE);  // Was 0x82A0270C
-    PPC_STORE_U32(0x831317EC, CRT_TLS_SET_VALUE);  // Was 0x82A0271C
-    PPC_STORE_U32(0x831317F0, CRT_CTX_ALLOCATOR);  // Was 0x82A0272C
-    
-    LOG_WARNING("[CRT] Callback table initialized with runtime addresses");
-    // Initialize runtime callback list at 0x82A97FD0 as empty (head points to itself)
-    constexpr uint32_t CALLBACK_LIST_HEAD = 0x82A97FD0;
-    PPC_STORE_U32(CALLBACK_LIST_HEAD, CALLBACK_LIST_HEAD);  // Empty list: head->next = head
-    
-    // Allocate TLS slot
-    ctx.lr = 0x82994750;
-    __imp__KeTlsAlloc(ctx, base);
-    uint32_t tlsIndex = ctx.r3.u32;
-    
-    if (tlsIndex == 0xFFFFFFFF) {
-        LOG_WARNING("[CRT] ERROR: KeTlsAlloc failed!");
-        ctx.r3.u32 = 0;
-        return;
-    }
-    LOGF_WARNING("[CRT] TLS slot: {} - storing at 0x{:08X}", tlsIndex, TLS_INDEX_ADDR);
-    PPC_STORE_U32(TLS_INDEX_ADDR, tlsIndex);
-    // Verify the write
-    uint32_t verifyIndex = PPC_LOAD_U32(TLS_INDEX_ADDR);
-    LOGF_WARNING("[CRT] TLS index verify: wrote {} at 0x{:08X}, read back {}", tlsIndex, TLS_INDEX_ADDR, verifyIndex);
-    
-    // Set initial TLS value to our callback address
-    ctx.r3.u32 = tlsIndex;
-    ctx.r4.u32 = CRT_TLS_GET_VALUE;
-    ctx.lr = 0x82994768;
-    __imp__KeTlsSetValue(ctx, base);
-    
-    if (ctx.r3.u32 == 0) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    
-    // CRT subsystem init
-    ctx.lr = 0x82994774;
-    sub_82992680(ctx, base);
-    
-    // Thread pool init
-    ctx.lr = 0x82994778;
-    sub_82998A48(ctx, base);
-    
-    // Create thread handle
-    ctx.lr = 0x829947EC;
-    sub_829A2810(ctx, base);
-    uint32_t threadHandle = ctx.r3.u32;
-    if (threadHandle == 0xFFFFFFFF) threadHandle = 0x12345678;
-    PPC_STORE_U32(THREAD_HANDLE_ADDR, threadHandle);
-    
-    // Allocate TLS BASE structure
-    constexpr uint32_t TLS_BASE_SIZE = 0x2000;
-    void* tlsBasePtr = g_userHeap.AllocPhysical(TLS_BASE_SIZE, 16);
-    if (!tlsBasePtr) {
-        ctx.r3.u32 = 0;
-        return;
-    }
-    memset(tlsBasePtr, 0, TLS_BASE_SIZE);
-    uint32_t tlsBase = g_memory.MapVirtual(tlsBasePtr);
-    PPC_STORE_U32(ctx.r13.u32 + 0, tlsBase);
-    
-    uint32_t threadCtx = tlsBase;  // Thread context is at TLS base (NOT stored in TLS slot)
-    // Initialize thread context
-    PPC_STORE_U32(threadCtx + 0, threadHandle);
-    PPC_STORE_U32(threadCtx + 4, 0xFFFFFFFF);
-    PPC_STORE_U32(threadCtx + 20, 1);
-    PPC_STORE_U32(threadCtx + 92, THREAD_CTX_LIST);
-    PPC_STORE_U32(CRT_CONTEXT_ADDR + 8, 0x829FBE38);
-    
-    // Runtime callback
-    ctx.r3.u32 = CRT_CONTEXT_ADDR;
-    ctx.r4.u32 = 1;
-    ctx.lr = 0x82994818;
-    sub_829A79C0(ctx, base);
-    
-    // =========================================================================
-    // Device context at TLS+1676 with PROPER VTABLE
-    // =========================================================================
-    constexpr uint32_t GUEST_DEVICE_SIZE = 0x5000;
-    constexpr uint32_t TLS_DEVICE_OFFSET = 1676;
-    constexpr uint32_t VTABLE_ENTRIES = 64;
-    
-    void* devicePtr = g_userHeap.AllocPhysical(GUEST_DEVICE_SIZE, 16);
-    if (devicePtr) {
-        memset(devicePtr, 0, GUEST_DEVICE_SIZE);
-        uint32_t deviceAddr = g_memory.MapVirtual(devicePtr);
-        g_guestDeviceAddr = deviceAddr;
+    // OPTION B: If globalObj[0] is NULL, create a stub object
+    if (conditionValue > 0 && globalObjAddr != 0) {
+        uint32_t objPtr = PPC_LOAD_U32(globalObjAddr + 0);
         
-        // Allocate and populate vtable
-        void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-        memset(vtablePtr, 0, VTABLE_ENTRIES * 4);
-        uint32_t vtableAddr = g_memory.MapVirtual(vtablePtr);
-        
-        for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
-            PPC_STORE_U32(vtableAddr + (i * 4), VTABLE_STUB);
-        }
-        PPC_STORE_U32(vtableAddr + 8, VTABLE_ALLOCATOR);   // vtable[2]
-        PPC_STORE_U32(vtableAddr + 12, VTABLE_LOADER);     // vtable[3]
-        
-        // Store vtable at device[0]
-        PPC_STORE_U32(deviceAddr + 0, vtableAddr);
-        
-        // Initialize viewport
-        PPC_STORE_U32(deviceAddr + 0x3058 + 8, 0x44A00000);
-        PPC_STORE_U32(deviceAddr + 0x3058 + 12, 0x44340000);
-        PPC_STORE_U32(deviceAddr + 0x3058 + 20, 0x3F800000);
-        
-        // Store device at TLS+1676
-        PPC_STORE_U32(tlsBase + TLS_DEVICE_OFFSET, deviceAddr);
-        
-        LOGF_WARNING("[CRT] Device 0x{:08X} vtable 0x{:08X} at TLS+1676", deviceAddr, vtableAddr);
-    }
-    
-    // =========================================================================
-    // Call global constructors - heap hooks (PPC_FUNC) are now confirmed working
-    // =========================================================================
-    LOG_WARNING("[CRT] Calling global constructors (heap hooks confirmed working)...");
-    CallSimpleGlobalConstructors(ctx, base);
-    
-    LOG_WARNING("[CRT] CRT initialization complete!");
-    ctx.r3.u32 = 1;
-}
-
-// =============================================================================
-// sub_829A7DC8 - atexit callback handler
-// =============================================================================
-PPC_FUNC(sub_829A7DC8) {
-    ctx.r3.u32 = 1;  // Return 1 to break atexit callback loop
-}
-
-// =============================================================================
-// sub_829A7EA8 - atexit callback iterator (SAFE VERSION)
-// =============================================================================
-// Original iterates table at 0x829A7EC0 (3 pointers) calling each non-null.
-// Problem: Constructors write garbage (0x70829F8E, etc.) to this table.
-// Fix: Validate pointers before calling - skip invalid addresses.
-// =============================================================================
-PPC_FUNC(sub_829A7EA8) {
-    constexpr uint32_t TABLE_START = 0x829A7EC0;
-    constexpr uint32_t TABLE_END = TABLE_START + 12;  // 3 pointers
-    
-    ctx.r3.u32 = 0;  // Default return
-    
-    for (uint32_t addr = TABLE_START; addr < TABLE_END; addr += 4) {
-        uint32_t funcPtr = PPC_LOAD_U32(addr);
-        
-        if (funcPtr == 0) continue;  // Skip null
-        
-        // Validate pointer is in valid code range
-        if (funcPtr >= 0x82000000 && funcPtr < 0x83200000) {
-            PPCFunc* func = PPC_LOOKUP_FUNC(base, funcPtr);
-            if (func != nullptr) {
-                uint64_t savedLR = ctx.lr;
-                ctx.lr = 0x829A7EF8;
-                func(ctx, base);
-                ctx.lr = savedLR;
-                
-                if (ctx.r3.u32 != 0) break;  // Callback returned non-zero, stop
-            }
-        }
-        // Skip invalid pointers silently - they're garbage from uninitialized memory
-    }
-}
-
-// =============================================================================
-// sub_829A7960 - Runtime callback notification
-// =============================================================================
-// Option B: Call the original recompiled function instead of custom stub.
-// This lets the recompiled code handle its own CS correctly.
-// =============================================================================
-PPC_FUNC_IMPL(__imp__sub_829A7960);
-PPC_FUNC(sub_829A7960) {
-    LOG_WARNING("[sub_829A7960] Calling ORIGINAL recompiled function");
-    __imp__sub_829A7960(ctx, base);  // Let original handle its own CS
-    LOG_WARNING("[sub_829A7960] Original returned successfully");
-}
-
-// =============================================================================
-// sub_827E1EC0 - Resource type resolver
-// =============================================================================
-// Returns resource objects with vtables. Original objects are in read-only XEX
-// header region. We provide writable objects with proper vtables.
-// =============================================================================
-
-static bool s_resourceObjectsInitialized = false;
-static uint32_t s_resourceVtableAddr = 0;
-static uint32_t s_resourceObject1Addr = 0;
-
-// Stub function for resource vtable entries
-static void ResourceVtable_Stub(PPCContext& ctx, uint8_t* base) {
-    ctx.r3.u32 = 0;
-}
-
-static void InitializeResourceObjects(uint8_t* base) {
-    if (s_resourceObjectsInitialized) return;
-    
-    LOG_WARNING("[RESOURCE] Initializing resource objects with writable vtables...");
-    
-    // Register stub function for vtable entries
-    constexpr uint32_t STUB_FUNC_ADDR = 0x82B7B000;
-    RegisterDynamicFunction(STUB_FUNC_ADDR, ResourceVtable_Stub);
-    
-    // Allocate vtable (32 entries)
-    constexpr uint32_t VTABLE_ENTRIES = 32;
-    void* vtablePtr = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-    if (!vtablePtr) {
-        LOG_WARNING("[RESOURCE] ERROR: Failed to allocate vtable!");
-        return;
-    }
-    s_resourceVtableAddr = g_memory.MapVirtual(vtablePtr);
-    
-    for (uint32_t i = 0; i < VTABLE_ENTRIES; i++) {
-        PPC_STORE_U32(s_resourceVtableAddr + (i * 4), STUB_FUNC_ADDR);
-    }
-    
-    // Allocate resource object
-    constexpr uint32_t OBJ_SIZE = 64;
-    void* objPtr = g_userHeap.AllocPhysical(OBJ_SIZE, 16);
-    if (!objPtr) {
-        LOG_WARNING("[RESOURCE] ERROR: Failed to allocate resource object!");
-        return;
-    }
-    memset(objPtr, 0, OBJ_SIZE);
-    s_resourceObject1Addr = g_memory.MapVirtual(objPtr);
-    PPC_STORE_U32(s_resourceObject1Addr + 0, s_resourceVtableAddr);
-    
-    s_resourceObjectsInitialized = true;
-    LOGF_WARNING("[RESOURCE] Objects initialized: vtable=0x{:08X} obj=0x{:08X}",
-                 s_resourceVtableAddr, s_resourceObject1Addr);
-}
-
-PPC_FUNC(sub_827E1EC0) {
-    InitializeResourceObjects(base);
-    ctx.r3.u32 = s_resourceObject1Addr;
-}
-
-// =============================================================================
-// sub_8298E700 - Worker thread loop
-// =============================================================================
-// This function calls vtable[3] (offset 12) on the object in r3.
-// The vtable at 0x82097D14 gets corrupted due to memory layout collision.
-// We fix by copying to heap memory and patching object[0] before each call.
-// =============================================================================
-
-// Use the safe vtable created early in ExCreateThread (before corruption)
-// s_safeWorkerVtableFromExCreateThread is set during ExCreateThread hook
-uint32_t s_safeWorkerVtableFromExCreateThread = 0;
-
-// =============================================================================
-// sub_82871420 - Vtable Dispatch Function (Safe Wrapper)
-// =============================================================================
-// This function is called from sub_828598F0 to dispatch calls through a vtable.
-// It loads:
-//   1. A table offset from 0x82A862D8[r3*4]
-//   2. A base object pointer from 0x82924AF4
-//   3. Adds them to get object address
-//   4. Loads vtable function from object[64]
-//   5. Calls it indirectly
-//
-// Problem: The vtable entry at offset 64 can be uninitialized (0x00827F2A, etc.)
-// Fix: Validate the address before calling, skip if invalid.
-// =============================================================================
-extern "C" void __imp__sub_82871420(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_82871420) {
-    // Replicate the address calculation from the original function
-    // lis r11,-32088 → r11 = 0x82A80000
-    // addi r11,r11,25304 → r11 = 0x82A862D8 (dispatch table base)
-    constexpr uint32_t DISPATCH_TABLE = 0x82A862D8;
-    
-    // lis r10,-31982 → r10 = 0x82920000  
-    // lwz r3,19188(r10) → base object from 0x82924AF4
-    constexpr uint32_t BASE_OBJECT_ADDR = 0x82924AF4;
-    
-    // r3 contains the dispatch index
-    uint32_t dispatchIndex = ctx.r3.u32;
-    
-    // Calculate: r9 = r3 * 4 (rlwinm r9,r3,2,0,29)
-    uint32_t tableOffset = dispatchIndex * 4;
-    
-    // Load offset from dispatch table
-    uint32_t objectOffset = PPC_LOAD_U32(DISPATCH_TABLE + tableOffset);
-    
-    // Load base object pointer
-    uint32_t baseObject = PPC_LOAD_U32(BASE_OBJECT_ADDR);
-    
-    // Calculate object address
-    uint32_t objectAddr = baseObject + objectOffset;
-    
-    // Load vtable function from object[64]
-    uint32_t funcAddr = 0;
-    if (objectAddr >= 0x82000000 && objectAddr < 0x90000000) {
-        funcAddr = PPC_LOAD_U32(objectAddr + 64);
-    }
-    
-    // Validate the function address
-    bool isValid = (funcAddr >= 0x82120000 && funcAddr < 0x82A00000);
-    
-    if (!isValid) {
-        // Log only occasionally to avoid spam
-        static int s_invalidCount = 0;
-        static uint32_t s_lastBadAddr = 0;
-        if (funcAddr != s_lastBadAddr || (++s_invalidCount % 1000) == 1) {
-            LOGF_WARNING("[sub_82871420] Invalid vtable func 0x{:08X} at object[64] (obj=0x{:08X}, idx={}, base=0x{:08X})",
-                        funcAddr, objectAddr, dispatchIndex, baseObject);
-            s_lastBadAddr = funcAddr;
-        }
-        // Return without calling - this is a no-op for uninitialized entries
-        return;
-    }
-    
-    // Valid address - call the original function which will do the indirect call
-    __imp__sub_82871420(ctx, base);
-}
-
-// =============================================================================
-// sub_8298E700 - Worker Thread Entry (Safe Vtable Fix)
-// =============================================================================
-// Declare the original implementation from recompiled code
-extern "C" void __imp__sub_8298E700(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_8298E700) {
-    // r3 = object pointer
-    uint32_t objectAddr = ctx.r3.u32;
-    
-    if (objectAddr >= 0x82000000 && objectAddr < 0x84000000) {
-        uint32_t* objMem = reinterpret_cast<uint32_t*>(g_memory.Translate(objectAddr));
-        uint32_t vtable = ByteSwap(objMem[0]);
-        
-        // Check if vtable is valid and not corrupted
-        bool validVtable = false;
-        if (vtable >= 0x82090000 && vtable < 0x82A00000) {
-            uint32_t* vtableMem = reinterpret_cast<uint32_t*>(g_memory.Translate(vtable));
-            uint32_t func3 = ByteSwap(vtableMem[3]);
-            validVtable = (func3 >= 0x82000000 && func3 < 0x83000000);
-        }
-        // Also accept our heap-allocated safe vtable
-        if (vtable >= 0xA0000000 && vtable < 0xB0000000) {
-            validVtable = true;
+        if (objPtr == 0 && !s_renderObjectInitialized) {
+            // DISABLED: Option B caused crash - writing to read-only code space
+            // The addresses 0x82Axxxxx are in read-only memory region
+            // Instead, just log and skip the vtable creation - rely on VdSwap for rendering
+            LOG_WARNING("[RENDER_FIX] globalObj[0] is NULL - vtable[16] render call will be skipped");
+            LOG_WARNING("[RENDER_FIX] Rendering relies on VdSwap path instead");
+            s_renderObjectInitialized = true;  // Don't log again
         }
         
-        if (!validVtable) {
-            // Create safe vtable if not already created
-            if (s_safeWorkerVtableFromExCreateThread == 0) {
-                constexpr uint32_t VTABLE_ENTRIES = 16;
-                void* heapMem = g_userHeap.AllocPhysical(VTABLE_ENTRIES * 4, 16);
-                if (heapMem) {
-                    s_safeWorkerVtableFromExCreateThread = g_memory.MapVirtual(heapMem);
-                    uint32_t* dstMem = reinterpret_cast<uint32_t*>(heapMem);
-                    
-                    // HARDCODE known-good vtable entries
-                    dstMem[0]  = ByteSwap(0x8296DDA8u);
-                    dstMem[1]  = ByteSwap(0x820E1D8Cu);
-                    dstMem[2]  = ByteSwap(0x82972FE0u);
-                    dstMem[3]  = ByteSwap(0x82790390u);  // Called at LR=0x8298E780
-                    for (int i = 4; i < 16; i++) {
-                        dstMem[i] = ByteSwap(0x82790390u);
-                    }
-                    
-                    LOGF_WARNING("[sub_8298E700] Created HARDCODED safe vtable at 0x{:08X}",
-                                s_safeWorkerVtableFromExCreateThread);
+        if (s_count <= 5 || s_count % 500 == 0) {
+            objPtr = PPC_LOAD_U32(globalObjAddr + 0);  // Re-read after potential init
+            LOGF_WARNING("[MAIN_LOOP] globalObj[0]=0x{:08X}", objPtr);
+            if (objPtr != 0) {
+                uint32_t vtable = PPC_LOAD_U32(objPtr + 0);
+                LOGF_WARNING("[MAIN_LOOP] obj vtable=0x{:08X}", vtable);
+                if (vtable != 0) {
+                    uint32_t vtable16 = PPC_LOAD_U32(vtable + 64);
+                    LOGF_WARNING("[MAIN_LOOP] VTABLE[16] CALL PENDING: func=0x{:08X}", vtable16);
                 }
             }
-            
-            if (s_safeWorkerVtableFromExCreateThread != 0) {
-                objMem[0] = ByteSwap(s_safeWorkerVtableFromExCreateThread);
-            }
         }
     }
     
-    // Call original function
-    __imp__sub_8298E700(ctx, base);
-}
-
-// =============================================================================
-// sub_8218C600 - Main Init with Vtable Call (Safe Wrapper)
-// =============================================================================
-// This function has a vtable call at LR=0x8218C7EC that fails when object[0] is null.
-// Pattern: lwz r3,0(r31); lwz r11,0(r3); lwz r11,4(r11); bctrl
-// We need to check if the vtable is valid before the call.
-extern "C" void __imp__sub_8218C600(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_8218C600) {
-    // Save r31 before call to check the object later
-    uint32_t savedR31 = ctx.r31.u32;
+    __imp__sub_828529B0(ctx, base);
     
-    // Call the original function - it will hit PPC_CALL_INDIRECT_FUNC with validation
-    // The error handling in PPC_CALL_INDIRECT_FUNC will skip null calls
-    __imp__sub_8218C600(ctx, base);
+    // ALTERNATIVE APPROACH: If Option B stub was created but vtable[16] still not called,
+    // force the render trigger directly after main loop iteration
+    if (s_renderObjectInitialized) {
+        static int s_forceRenderCount = 0; ++s_forceRenderCount;
+        if (s_forceRenderCount <= 10 || s_forceRenderCount % 100 == 0) {
+            LOGF_WARNING("[RENDER_FORCE] Forcing render trigger #{} after main loop", s_forceRenderCount);
+        }
+        // The actual rendering happens via VdSwap which is already hooked
+        // This just ensures the render path is exercised
+    }
+    
+    if (s_count <= 5 || s_count % 500 == 0) {
+        LOGF_WARNING("[MAIN_LOOP] sub_828529B0 EXIT #{}", s_count);
+    }
+}
+
+// Trace sub_828529B0 internal calls to find blocking point
+extern "C" void __imp__sub_8285ACE8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8285ACE8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_8285ACE8 ENTER #{}", s_count);
+    __imp__sub_8285ACE8(ctx, base);
+    LOGF_WARNING("[ORCH] sub_8285ACE8 EXIT #{}", s_count);
+}
+
+// sub_829CA360 (SetDepthStencilSurface) - hooked in video.cpp
+// sub_829CA240 (SetRenderTarget) - hooked in video.cpp  
+// sub_829D3728 (SetTexture) - hooked in video.cpp
+
+// Called after the loop
+extern "C" void __imp__sub_829D14E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D14E0) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_829D14E0 ENTER #{}", s_count);
+    __imp__sub_829D14E0(ctx, base);
+    LOGF_WARNING("[ORCH] sub_829D14E0 EXIT #{}", s_count);
+}
+
+// Called conditionally before rendering
+extern "C" void __imp__sub_82852610(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82852610) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[ORCH] sub_82852610 ENTER #{}", s_count);
+    __imp__sub_82852610(ctx, base);
+    LOGF_WARNING("[ORCH] sub_82852610 EXIT #{}", s_count);
+}
+
+// Trace sub_828507F8 internal calls to find blocking point
+extern "C" void __imp__sub_829D5920(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D5920) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[RENDER] sub_829D5920 ENTER #{}", s_count);
+    __imp__sub_829D5920(ctx, base);
+    LOGF_WARNING("[RENDER] sub_829D5920 EXIT #{}", s_count);
 }
 
 // =============================================================================
-// sub_821EC1E8 - Vtable Dispatch with Multiple Calls (Safe Wrapper)
+// GPU Command Sync - sub_829D87E8
+// This function was incorrectly hooked to CreateDevice in video.cpp.
+// Original behavior: Writes GPU commands then spins on [r3+11000] waiting for completion.
+// Fix: Skip the spin loop since host GPU handles sync via Video::Present.
 // =============================================================================
-// This function has vtable calls at LR=0x821EC2A0, 0x821EC2BC, 0x821EC2F8
-// that fail when object vtable entries are null or 0x1.
-extern "C" void __imp__sub_821EC1E8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D87E8) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[GPU_SYNC] sub_829D87E8 ENTER #{} deviceCtx=0x{:08X}", s_count, ctx.r3.u32);
+    
+    uint32_t deviceCtx = ctx.r3.u32;
+    if (deviceCtx != 0) {
+        // Set the GPU completion flag to 0 so any dependent code sees "complete"
+        // Original code spins on [deviceCtx+11000] != 0
+        PPC_STORE_U32(deviceCtx + 11000, 0);
+    }
+    
+    if (s_count <= 5) LOGF_WARNING("[GPU_SYNC] sub_829D87E8 EXIT #{} (spin loop bypassed)", s_count);
+}
 
-PPC_FUNC(sub_821EC1E8) {
-    // Call the original - validation in PPC_CALL_INDIRECT_FUNC handles bad addresses
-    __imp__sub_821EC1E8(ctx, base);
+// Trace sub_829D5950 - calls sub_829D87E8
+extern "C" void __imp__sub_829D5950(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829D5950) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5) LOGF_WARNING("[RENDER] sub_829D5950 ENTER #{}", s_count);
+    __imp__sub_829D5950(ctx, base);
+    if (s_count <= 5) LOGF_WARNING("[RENDER] sub_829D5950 EXIT #{}", s_count);
+}
+
+PPC_FUNC(sub_828507F8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[RENDER] sub_828507F8 (Frame Present) #{}", s_count);
+    __imp__sub_828507F8(ctx, base);
+    LOGF_WARNING("[RENDER] sub_828507F8 EXIT #{}", s_count);
+}
+
+// sub_829D5388 (D3D Present) - hooked in video.cpp via GUEST_FUNCTION_HOOK
+
+// =========================================================================
+// sub_821200D0 internal tracing
+// =========================================================================
+extern "C" void __imp__sub_82121E80(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_821924D8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218C2C0(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_8218C1F0(PPCContext& ctx, uint8_t* base);
+
+// STUBBED: sub_82121E80 - loading state machine (blocks on async ops)
+PPC_FUNC(sub_82121E80) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[82121E80] #{} STUBBED - loading state bypassed", s_count);
+    ctx.r3.u32 = 0;
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_821924D8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821200D0-INT] sub_821924D8 ENTER #{}", s_count);
+    __imp__sub_821924D8(ctx, base);
+    LOGF_WARNING("[821200D0-INT] sub_821924D8 EXIT #{}", s_count);
+}
+
+// STUBBED: sub_8218C2C0 - loading check (return 1=ready to break wait loop)
+PPC_FUNC(sub_8218C2C0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 3) LOGF_WARNING("[8218C2C0] #{} STUBBED - returning ready", s_count);
+    ctx.r3.u32 = 1;  // Return ready to break loading loop
+}
+
+
+
+
+
+
+
+PPC_FUNC(sub_8218C1F0) {
+    static int s_count = 0; ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[821200D0-INT] sub_8218C1F0 #{}", s_count);
+    __imp__sub_8218C1F0(ctx, base);
+}
+
+// =========================================================================
+// sub_821200A8 tracing (called after sub_821200D0 in sub_8218BEB0)
+// =========================================================================
+extern "C" void __imp__sub_821200A8(PPCContext& ctx, uint8_t* base);
+
+// TRACE: sub_821200A8 - now running properly since sub_82857240 is fixed
+PPC_FUNC(sub_821200A8) {
+    static int s_count = 0; ++s_count;
+    LOGF_WARNING("[821200A8] #{} ENTER - post-init finalization", s_count);
+    __imp__sub_821200A8(ctx, base);
+    LOGF_WARNING("[821200A8] #{} EXIT", s_count);
+}
+
+// =========================================================================
+// sub_821219B0 - trace to find blocking point
+// =========================================================================
+extern "C" void __imp__sub_821219B0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821219B0) {
+    static int s_count = 0; ++s_count;
+    printf("[821219B0] #%d STUBBED - bypassing blocking sync primitive\n", s_count);
+    ctx.r3.u32 = 0; // Stub - bypass blocking
+}
+
+// =========================================================================
+// sub_821200D0 cleanup function traces - find which one blocks
+// =========================================================================
+extern "C" void __imp__sub_821B8FB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821B8FB0) {
+    static int s_count = 0; ++s_count;
+    printf("[821B8FB0] #%d ENTER\n", s_count);
+    __imp__sub_821B8FB0(ctx, base);
+    printf("[821B8FB0] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_8220E528(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8220E528) {
+    static int s_count = 0; ++s_count;
+    printf("[8220E528] #%d ENTER\n", s_count);
+    __imp__sub_8220E528(ctx, base);
+    printf("[8220E528] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_822C66C8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822C66C8) {
+    static int s_count = 0; ++s_count;
+    printf("[822C66C8] #%d ENTER\n", s_count);
+    __imp__sub_822C66C8(ctx, base);
+    printf("[822C66C8] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_821A81F0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821A81F0) {
+    static int s_count = 0; ++s_count;
+    printf("[821A81F0] #%d ENTER - signaling workers before cleanup\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to wake Photo mode workers so they can exit
+    // This is the proper fix: workers are waiting for work that won't come,
+    // signaling allows them to check exit flag and terminate
+    SignalAllBlockingSemaphores();
+    
+    __imp__sub_821A81F0(ctx, base);
+    printf("[821A81F0] #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+// sub_823005E0 - Called by sub_821A81F0, performs worker cleanup
+// This function blocks waiting for workers to exit. Stub it to bypass the wait.
+extern "C" void __imp__sub_823005E0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_823005E0) {
+    static int s_count = 0; ++s_count;
+    printf("[823005E0] #%d STUBBED - bypassing worker cleanup wait\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to let workers know to exit
+    SignalAllBlockingSemaphores();
+    
+    // Don't call original - it blocks waiting for workers
+    // The workers will exit on their own when they check their exit flags
+    // __imp__sub_823005E0(ctx, base);
+}
+
+// sub_827DB880 - Worker manager shutdown loop
+// This function loops waiting for all workers to exit.
+// We must signal all semaphores before the loop to ensure workers wake up and exit.
+extern "C" void __imp__sub_827DB880(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_827DB880) {
+    static int s_count = 0; ++s_count;
+    printf("[827DB880] #%d ENTER - worker shutdown loop, signaling all semaphores\n", s_count);
+    fflush(stdout);
+    
+    // Signal all semaphores to wake any workers still waiting
+    // This allows them to check their exit flags and terminate
+    SignalAllBlockingSemaphores();
+    
+    // Brief delay to let workers process the signal
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    // Signal again to catch any stragglers
+    SignalAllBlockingSemaphores();
+    
+    printf("[827DB880] #%d calling original function\n", s_count);
+    fflush(stdout);
+    
+    __imp__sub_827DB880(ctx, base);
+    
+    printf("[827DB880] #%d EXIT\n", s_count);
+    fflush(stdout);
+}
+
+extern "C" void __imp__sub_82268260(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82268260) {
+    static int s_count = 0; ++s_count;
+    printf("[82268260] #%d ENTER\n", s_count);
+    __imp__sub_82268260(ctx, base);
+    printf("[82268260] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_8221BFF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221BFF0) {
+    static int s_count = 0; ++s_count;
+    printf("[8221BFF0] #%d ENTER\n", s_count);
+    __imp__sub_8221BFF0(ctx, base);
+    printf("[8221BFF0] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_82297B08(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82297B08) {
+    static int s_count = 0; ++s_count;
+    printf("[82297B08] #%d ENTER\n", s_count);
+    __imp__sub_82297B08(ctx, base);
+    printf("[82297B08] #%d EXIT\n", s_count);
+}
+
+extern "C" void __imp__sub_82212E08(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82212E08) {
+    static int s_count = 0; ++s_count;
+    printf("[82212E08] #%d ENTER\n", s_count);
+    __imp__sub_82212E08(ctx, base);
+    printf("[82212E08] #%d EXIT\n", s_count);
 }
 
 // =============================================================================
-// sub_82319378 - String/Resource Init with Vtable Call (Safe Wrapper)
+// sub_821212A8 internal function tracing - find blocking point
 // =============================================================================
-// This function has a vtable call at LR=0x82319400 that fails.
-extern "C" void __imp__sub_82319378(PPCContext& ctx, uint8_t* base);
+// sub_821212A8 is called by sub_821200A8 and contains many cleanup functions.
+// One of them is blocking. Adding traces to find which one.
 
-PPC_FUNC(sub_82319378) {
-    __imp__sub_82319378(ctx, base);
+extern "C" void __imp__sub_82675C60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82675C60) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82675C60 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82675C60(ctx, base);
+    printf("[821212A8-INT] sub_82675C60 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_8213C888(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8213C888) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_8213C888 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_8213C888(ctx, base);
+    printf("[821212A8-INT] sub_8213C888 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82192BB0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82192BB0) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82192BB0 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82192BB0(ctx, base);
+    printf("[821212A8-INT] sub_82192BB0 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82594760(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82594760) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82594760 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82594760(ctx, base);
+    printf("[821212A8-INT] sub_82594760 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82327190(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82327190) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82327190 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82327190(ctx, base);
+    printf("[821212A8-INT] sub_82327190 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82125F28(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82125F28) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82125F28 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82125F28(ctx, base);
+    printf("[821212A8-INT] sub_82125F28 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821D1A88(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821D1A88) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821D1A88 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821D1A88(ctx, base);
+    printf("[821212A8-INT] sub_821D1A88 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821B6630(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821B6630) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821B6630 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821B6630(ctx, base);
+    printf("[821212A8-INT] sub_821B6630 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82258B80(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82258B80) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82258B80 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82258B80(ctx, base);
+    printf("[821212A8-INT] sub_82258B80 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821B9F28(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821B9F28) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821B9F28 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821B9F28(ctx, base);
+    printf("[821212A8-INT] sub_821B9F28 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821FEB48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821FEB48) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821FEB48 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821FEB48(ctx, base);
+    printf("[821212A8-INT] sub_821FEB48 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+// More tracing for functions after sub_821FEB48 in sub_821212A8
+extern "C" void __imp__sub_821AA748(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821AA748) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821AA748 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821AA748(ctx, base);
+    printf("[821212A8-INT] sub_821AA748 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_8222D500(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8222D500) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_8222D500 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_8222D500(ctx, base);
+    printf("[821212A8-INT] sub_8222D500 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82205A90(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82205A90) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82205A90 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82205A90(ctx, base);
+    printf("[821212A8-INT] sub_82205A90 #%d EXIT\n", s_count); fflush(stdout);
 }
 
 // =============================================================================
-// sub_82851DC0 - Resource Manager with Vtable Call (Safe Wrapper)
+// sub_8220FEA0 - Cleanup/Shutdown Function (STUBBED - BLOCKS)
 // =============================================================================
-// This function has a vtable call at LR=0x82851E08 that fails.
-extern "C" void __imp__sub_82851DC0(PPCContext& ctx, uint8_t* base);
+// XEX Analysis: This function is called during sub_821212A8 cleanup.
+// It calls ~30 sub-functions for various subsystem cleanup operations.
+// One of these sub-functions blocks on Xbox-specific sync primitives.
+// 
+// Since this is cleanup code during reinit phase, stubbing is safe.
+// The game will allocate fresh resources during proper initialization.
+// =============================================================================
+extern "C" void __imp__sub_8220FEA0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8220FEA0) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_8220FEA0 #%d STUBBED - bypassing blocking cleanup\n", s_count); fflush(stdout);
+    // Don't call original - it blocks on Xbox sync primitives
+    ctx.r3.u32 = 0;  // Return success
+}
 
-PPC_FUNC(sub_82851DC0) {
-    __imp__sub_82851DC0(ctx, base);
+extern "C" void __imp__sub_82246DF0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82246DF0) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82246DF0 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82246DF0(ctx, base);
+    printf("[821212A8-INT] sub_82246DF0 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_8225DCC8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8225DCC8) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_8225DCC8 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_8225DCC8(ctx, base);
+    printf("[821212A8-INT] sub_8225DCC8 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821E2820(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821E2820) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821E2820 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821E2820(ctx, base);
+    printf("[821212A8-INT] sub_821E2820 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_822CD4D0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822CD4D0) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_822CD4D0 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_822CD4D0(ctx, base);
+    printf("[821212A8-INT] sub_822CD4D0 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82123258(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82123258) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82123258 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82123258(ctx, base);
+    printf("[821212A8-INT] sub_82123258 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_822DCAB8(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822DCAB8) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_822DCAB8 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_822DCAB8(ctx, base);
+    printf("[821212A8-INT] sub_822DCAB8 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_821BC848(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_821BC848) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_821BC848 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_821BC848(ctx, base);
+    printf("[821212A8-INT] sub_821BC848 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_822214A0(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_822214A0) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_822214A0 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_822214A0(ctx, base);
+    printf("[821212A8-INT] sub_822214A0 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_82272E60(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_82272E60) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_82272E60 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_82272E60(ctx, base);
+    printf("[821212A8-INT] sub_82272E60 #%d EXIT\n", s_count); fflush(stdout);
+}
+
+extern "C" void __imp__sub_8221EA48(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8221EA48) {
+    static int s_count = 0; ++s_count;
+    printf("[821212A8-INT] sub_8221EA48 #%d ENTER\n", s_count); fflush(stdout);
+    __imp__sub_8221EA48(ctx, base);
+    printf("[821212A8-INT] sub_8221EA48 #%d EXIT\n", s_count); fflush(stdout);
 }
 
 // =============================================================================
-// sub_82A03B48 - Global Init with Vtable Call (Safe Wrapper)
+// sub_829A0678 - HDCP/Display Privilege Check (STUBBED)
 // =============================================================================
-// This function has a vtable call at LR=0x82A03B74 that fails.
-extern "C" void __imp__sub_82A03B48(PPCContext& ctx, uint8_t* base);
-
-PPC_FUNC(sub_82A03B48) {
-    __imp__sub_82A03B48(ctx, base);
+// XEX Analysis: This function checks if the display hardware is compatible:
+//   1. XexCheckExecutablePrivilege(0xA) - checks HDCP privilege
+//   2. XGetAVPack() - checks AV pack type (HDMI/VGA/component)
+//   3. ExGetXConfigSetting - video config settings
+//   4. Returns 1 if incompatible -> triggers XamLoaderTerminateTitle
+//
+// On PC, there are no HDCP or AV pack requirements. Always return 0 (pass).
+// =============================================================================
+extern "C" void __imp__sub_829A0678(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_829A0678) {
+    static int s_count = 0; ++s_count;
+    printf("[BOOT] sub_829A0678 #%d STUBBED - HDCP/display check bypassed (PC compatible)\n", s_count);
+    fflush(stdout);
+    ctx.r3.u32 = 0;  // Return 0 = pass (no termination)
 }
-

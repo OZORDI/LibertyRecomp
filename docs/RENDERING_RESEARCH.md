@@ -468,6 +468,8 @@ sub_829CD350(device, shaderHandle)
 **Function Summary:**
 Binds a pixel shader to the device context. Structurally similar to SetVertexShader.
 
+> **Note:** Despite the D3D-style name, this function sets **both** vertex and pixel shaders simultaneously, unlike separate D3D SetVertexShader/SetPixelShader calls.
+
 **Location:** `ppc_recomp.135.cpp:29837`
 
 **Signature:** `SetPixelShader(device, vsHandle, psHandle)`
@@ -851,6 +853,988 @@ static void PM4BufferFlush(PPCContext& ctx, uint8_t* base) {
 | File | Content |
 |------|---------|
 | `ppc_recomp.134.cpp` | SetStreamSource, SetIndices |
+| `ppc_recomp.135.cpp` | Draw functions, shaders, PM4 |
+| `ppc_recomp.81.cpp` | Present/VdSwap |
+| `ppc_recomp.66.cpp` | Main loop |
+
+---
+
+## 9. Advanced Rendering Systems - Execution Traces
+
+This section contains deep execution traces of the AO, reflection, lighting, water, material, and G-buffer systems discovered through PPC code analysis.
+
+### 9.1 Function Address Range Map
+
+| Address Range | Subsystem | Primary File | Description |
+|---------------|-----------|--------------|-------------|
+| `0x8284xxxx` | Materials/Shaders | `ppc_recomp.110.cpp` | Effect rendering, material setup |
+| `0x8285xxxx` | Shaders/Effects | `ppc_recomp.110-111.cpp` | Shader loading, effect management |
+| `0x8286xxxx` | Lighting/Scene | `ppc_recomp.111-112.cpp` | Light data, scene rendering |
+| `0x8287xxxx` | Lighting Core | `ppc_recomp.112-113.cpp` | Light structures, shadow setup |
+| `0x8288xxxx` | Lighting Advanced | `ppc_recomp.113-114.cpp` | Advanced lighting, AO-related |
+| `0x828Exxxx` | Scene Effects | `ppc_recomp.120.cpp` | Post-processing, scene effects |
+| `0x828Fxxxx` | Water System | `ppc_recomp.121.cpp` | Water rendering, reflections |
+| `0x829CAxxxx` | Render Targets | `ppc_recomp.134.cpp` | RT management, G-buffer |
+
+### 9.2 Render Target System (G-Buffer Analysis)
+
+**Key Functions:**
+- `sub_829CA240` - SetRenderTarget (main RT switching)
+- `sub_829CA360` - SetDepthStencilSurface
+
+#### sub_829CA240 - SetRenderTarget Execution Trace
+
+```
+sub_829CA240(device, index, surface, offset, unknown, flags, mipLevel)
+    │
+    ├── PROLOGUE:
+    │   ├── r31 = device, r29 = index, r30 = surface
+    │   ├── r26 = mipLevel, r6 = offset
+    │   └── Stack frame: 144 bytes
+    │
+    ├── SURFACE PARAMETER EXTRACTION (if surface != 0):
+    │   ├── r10 = surface[24] (base address)
+    │   ├── r9 = surface[28] (size/pitch)
+    │   ├── Calculate: r10 += offset
+    │   ├── Calculate: r9 -= offset
+    │   ├── Extract format bits: (r10 >> 12) & 0xFFF
+    │   ├── Calculate RT slot: (17 - index) * 8
+    │   └── Store to device[1780 + slot] = packed RT info
+    │
+    ├── RT SLOT UPDATE:
+    │   ├── slot_offset = (index + 3113) * 4
+    │   ├── r28 = device[slot_offset] (previous RT)
+    │   │
+    │   ├── If previous RT exists:
+    │   │   ├── Check device[10908] (deferred mode)
+    │   │   ├── If deferred: store to previous_rt[8]
+    │   │   └── Else: check dirty mask device[10912]
+    │   │
+    │   └── If dirty mask matches:
+    │       ├── Check command buffer: device[13508] vs device[13512]
+    │       ├── If full: call sub_829D5B60 (flush)
+    │       ├── Build PM4 packet with RT reference
+    │       └── Update device[13508] (cmd ptr)
+    │
+    ├── STORE NEW RT:
+    │   ├── device[slot_offset] = surface
+    │   ├── device[12520 + index] = mipLevel & 0xFF
+    │   │
+    │   └── If mipLevel changed:
+    │       ├── Load device[16] (64-bit dirty flags)
+    │       ├── Set bit 19 (0x80000)
+    │       └── Store updated flags
+    │
+    └── EPILOGUE: __restgprlr_26
+```
+
+**Device Context RT Offsets:**
+| Offset | Field | Description |
+|--------|-------|-------------|
+| +1780 | `renderTargetParams[4]` | 8 bytes each, packed RT info |
+| +10908 | `deferredMode` | Deferred rendering flag |
+| +10912 | `dirtyMask` | RT dirty mask for PM4 |
+| +12452+ | `renderTargetSlots[4]` | RT surface pointers |
+| +12520+ | `renderTargetMips[4]` | Mip levels per RT |
+| +13508 | `cmdBufferPtr` | Current command position |
+| +13512 | `cmdBufferLimit` | Command buffer limit |
+
+#### sub_829CA360 - SetDepthStencilSurface Execution Trace
+
+```
+sub_829CA360(device, depthSurface)
+    │
+    ├── PROLOGUE:
+    │   ├── r31 = device, r29 = depthSurface
+    │   └── Stack frame: 128 bytes
+    │
+    ├── PREVIOUS DEPTH CHECK:
+    │   ├── r30 = device[12428] (current depth surface)
+    │   │
+    │   ├── If r30 != 0:
+    │   │   ├── Check device[10908] (deferred mode)
+    │   │   ├── If deferred: r30[8] = device[10908]
+    │   │   └── Else: check dirty mask
+    │   │
+    │   └── If dirty and not deferred:
+    │       ├── Build PM4 packet
+    │       └── Update command buffer
+    │
+    ├── STORE NEW DEPTH:
+    │   └── device[12428] = depthSurface
+    │
+    └── EPILOGUE
+```
+
+**Key Finding:** GTA IV uses **forward rendering** with selective RT switching. There is no full G-buffer - depth is the primary auxiliary buffer used for post-processing.
+
+### 9.3 Lighting System Execution Traces
+
+**Key Functions in 0x8287xxxx-0x8288xxxx range:**
+
+#### sub_82878748 - Light Structure Initialization
+
+```
+sub_82878748(lightStruct, sourceData)
+    │
+    ├── PROLOGUE:
+    │   ├── r31 = lightStruct, r30 = sourceData
+    │   └── Stack: 112 bytes
+    │
+    ├── INITIALIZE LIGHT:
+    │   ├── Call sub_827E93F8 (matrix/vector init)
+    │   ├── lightStruct[0] = vtable @ 0x830Exxxx + 31756
+    │   ├── lightStruct[8] = 0 (type flags)
+    │   ├── lightStruct[9] = 0 (active flag)
+    │   ├── lightStruct[10] = 1 (count/ref)
+    │   ├── lightStruct[12] = 0 (reserved)
+    │   └── lightStruct[16] = 0 (reserved)
+    │
+    ├── COPY SOURCE DATA:
+    │   ├── r3 = sourceData
+    │   ├── Call sub_8221B7A0 (memory copy)
+    │   └── lightStruct[20] = result
+    │
+    └── Return lightStruct
+```
+
+#### sub_82878FE8 - Light Parameter Update
+
+```
+sub_82878FE8(lightPtr)
+    │
+    ├── LOAD LIGHT DATA:
+    │   ├── r11 = lightPtr[0] (vtable)
+    │   ├── Extract light type from flags
+    │   │
+    │   ├── DIRECTIONAL LIGHT (type 0):
+    │   │   ├── Load direction vector (12 bytes)
+    │   │   └── Load color (12 bytes)
+    │   │
+    │   ├── POINT LIGHT (type 1):
+    │   │   ├── Load position (12 bytes)
+    │   │   ├── Load color (12 bytes)
+    │   │   ├── Load radius/falloff
+    │   │   └── Load intensity
+    │   │
+    │   ├── SPOT LIGHT (type 2):
+    │   │   ├── Load position (12 bytes)
+    │   │   ├── Load direction (12 bytes)
+    │   │   ├── Load color (12 bytes)
+    │   │   ├── Load inner/outer cone angles
+    │   │   └── Load falloff params
+    │   │
+    │   └── AMBIENT (type 3):
+    │       └── Load ambient color (12 bytes)
+    │
+    └── Return
+```
+
+**Estimated Light Structure (24+ bytes per light):**
+```
+Offset  Size  Field
++0      4     vtable pointer
++4      4     flags (type in bits 0-3)
++8      1     type (0=dir, 1=point, 2=spot, 3=ambient)
++9      1     active
++10     2     refCount
++12     4     reserved
++16     4     paramOffset
++20     4     dataPtr
+```
+
+### 9.4 Water System Execution Traces
+
+**Key Function: sub_828F22D0** - Water Surface Loader
+
+```
+sub_828F22D0(waterName)
+    │
+    ├── PROLOGUE:
+    │   ├── r27 = waterName (256-char path)
+    │   ├── Stack frame: 2032 bytes (large for texture data)
+    │   └── Initialize r31=0, r25=0, r30=stack+128
+    │
+    ├── COPY NAME TO STACK:
+    │   ├── memcpy(stack+128, waterName, 256)
+    │   └── Call sub_8266A778
+    │
+    ├── PARSE WATER TYPE:
+    │   ├── Call sub_8298FEB0 with type=47 (water identifier)
+    │   ├── r26 = 0x82040000 - 504 (water manager ptr)
+    │   │
+    │   ├── If parse failed (r3 == 0):
+    │   │   ├── Copy to extended buffer (stack+1712)
+    │   │   ├── Call sub_827E0B78, sub_827E0740
+    │   │   ├── Try alternate parse sub_827DFC70
+    │   │   └── r30 = result
+    │   │
+    │   └── r28 = parsed water handle
+    │
+    ├── LOAD WATER RESOURCE:
+    │   ├── r29 = water callback table @ 0x81FFC9F8
+    │   ├── Call sub_827E0898(waterMgr, path, callbacks, 1, 1)
+    │   ├── r28 = loaded resource handle
+    │   │
+    │   └── If load failed, try alternate paths:
+    │       ├── Append ".wtr" suffix
+    │       ├── Try "_pc.wtr" suffix
+    │       ├── Try "_ps3.wtr" suffix
+    │       └── Retry load
+    │
+    ├── WATER TYPE DISPATCH (string matching):
+    │   ├── Compare with "water" → sub_828EDEF0 (basic water)
+    │   ├── Compare with "river" → sub_828ECAD8 (river)
+    │   ├── Compare with "ocean" → sub_828ECAD8 (ocean)
+    │   ├── Compare with "fountain" → sub_8292F838 (fountain)
+    │   ├── Compare with "pool" → sub_8291E558 (pool)
+    │   ├── Compare with "swamp" → sub_828F8CC8 (swamp)
+    │   ├── Compare with "rain" → sub_8290CEB0 (rain puddles)
+    │   └── Compare with "wave" → sub_8294E2C0 (waves)
+    │
+    ├── ALLOCATE WATER OBJECT:
+    │   ├── Size varies by type: 160-576 bytes
+    │   ├── Call sub_8218BE28 (allocator)
+    │   └── Call type-specific constructor
+    │
+    ├── INITIALIZE WATER:
+    │   ├── Call sub_826F26B8 (bind to scene)
+    │   ├── If success: add to water list
+    │   └── If fail: cleanup and return 0
+    │
+    └── Return water object or 0
+```
+
+**Water Type Sizes:**
+| Type | Size | Constructor |
+|------|------|-------------|
+| Basic Water | 160 | sub_828EDEF0 |
+| River/Ocean | 224 | sub_828ECAD8 |
+| Fountain | 272 | sub_8292F838 |
+| Pool | 576 | sub_8291E558 |
+| Swamp | 224 | sub_828F8CC8 |
+| Rain Puddles | 240 | sub_8290CEB0 |
+| Waves | 240 | sub_8294E2C0 |
+
+### 9.5 Material System Execution Traces
+
+**Key Function: sub_8284C200** - Material Effect Rendering
+
+```
+sub_8284C200(materialCtx)
+    │
+    ├── PROLOGUE:
+    │   ├── r31 = materialCtx
+    │   ├── Save vector registers v125-v127
+    │   └── Stack: 19264 bytes (large for temp buffers)
+    │
+    ├── MATERIAL SETUP:
+    │   ├── r11 = materialCtx + 80 (effect params)
+    │   ├── r8 = materialCtx[637] & 0x7F (material flags)
+    │   ├── r10 = materialCtx[12] (shader reference)
+    │   ├── f0 = 0.0f (default value)
+    │   ├── Store f0 to materialCtx[324]
+    │   │
+    │   ├── Load vectors:
+    │   │   ├── v127 = materialCtx[32] (diffuse color)
+    │   │   └── v126 = materialCtx[64] (specular/normal)
+    │   │
+    │   └── Calculate lighting contribution:
+    │       ├── f12 = r10[52] (light intensity)
+    │       ├── f13 = r11[4] * f12 (modulated)
+    │       ├── f11 = r10[56] (falloff)
+    │       ├── f10 = r11[0] (base)
+    │       ├── f9 = r10[48] (ambient)
+    │       ├── f13 = f12 * f11 + f13 (accumulate)
+    │       ├── f13 = -(f10 * f9 + f13) (final)
+    │       └── Store f13 to materialCtx[408]
+    │
+    ├── VECTOR MATH SETUP:
+    │   ├── v13 = load direction vector
+    │   ├── v8 = splat(0.0f)
+    │   ├── v10, v9 = load constants
+    │   ├── v7 = load material scale
+    │   ├── v0 = vmsum3fp(v13, v13) (dot product)
+    │   ├── v0 = vrsqrtefp(v0) (inverse sqrt)
+    │   ├── Normalize: v0 = v13 * v0
+    │   └── Transform: v0 = v0 * v7 + v12
+    │
+    ├── RENDER SETUP:
+    │   ├── Call sub_82323788 (frustum setup)
+    │   ├── Call sub_828D7220 (render state)
+    │   ├── Call sub_82811E28 (texture bind)
+    │   │
+    │   └── If texture valid:
+    │       ├── Call sub_82323888 (UV setup)
+    │       ├── Update v126, v127 from result
+    │       └── Store to materialCtx[152]
+    │
+    ├── EFFECT RENDER:
+    │   ├── Call sub_828112F8 (draw material)
+    │   └── Cleanup temporary buffers
+    │
+    └── EPILOGUE: Restore vectors, return
+```
+
+**Material Context Structure (estimated):**
+```
+Offset  Size  Field
++0      4     vtable
++12     4     shaderRef
++32     16    diffuseColor (vector)
++48     16    reserved
++64     16    specularParams (vector)
++80     16    effectParams
++152    4     textureHandle
++324    4     lightScale
++408    4     finalLightContrib
++637    1     materialFlags
+```
+
+### 9.6 Scene Effect System (0x828Exxxx)
+
+**Key Functions:**
+- `sub_828E0AB8` - Effect destructor/cleanup
+- `sub_828EDEF0` - Basic water effect init
+- `sub_828ECAD8` - River/ocean effect init
+
+These functions in `ppc_recomp.120.cpp` handle:
+1. Post-processing effect initialization
+2. Water surface effect setup
+3. Reflection texture management
+4. Screen-space effect rendering
+
+### 9.7 Ambient Occlusion Discovery
+
+**Key Finding:** GTA IV Xbox 360 does **NOT** have native SSAO. The lighting system uses:
+1. Baked ambient occlusion in lightmaps
+2. Per-vertex AO stored in vertex color alpha
+3. Contact shadows for small-scale occlusion
+
+**Evidence from traces:**
+- No depth-based AO compute in lighting functions
+- Material flags include AO multiplier (materialCtx[637])
+- Light contributions pre-modulated with baked AO
+
+**Host-Side SSAO Implementation:** Must be added as post-process using:
+1. Captured depth buffer from `sub_829CA360`
+2. Reconstructed normals from depth
+3. GTAO algorithm (see `gpu/shader/hlsl/ssao_gtao_ps.hlsl`)
+
+### 9.8 Reflection System Discovery
+
+**Water Reflections:** Handled in water type constructors with:
+1. Planar reflection for still water (pools)
+2. Cubemap reflections for ocean/rivers
+3. SSR-like approximation for rain puddles
+
+**Material Reflections:** Environment mapping via:
+1. Cubemap lookup in material shaders
+2. Fresnel-based blending
+3. Roughness from material properties
+
+**Host-Side SSR Implementation:** Must use:
+1. Previous frame color buffer
+2. Depth buffer
+3. Normal reconstruction
+4. Ray marching (see `gpu/shader/hlsl/ssr_raytrace_ps.hlsl`)
+
+### 9.9 Deferred Rendering Analysis
+
+**Key Finding:** GTA IV uses **forward rendering** with deferred elements:
+
+1. **Forward Base Pass:**
+   - All geometry rendered with full lighting
+   - Single RT (color) + depth buffer
+   - No MRT G-buffer
+
+2. **Deferred Elements:**
+   - Shadow map rendering (separate pass)
+   - Reflection probes (pre-rendered cubemaps)
+   - Light accumulation for many lights
+
+3. **Device Context Flags:**
+   - `device[10908]` - Deferred mode flag
+   - When set, RT changes are queued not applied
+   - Flush occurs at pass boundaries
+
+**Implications for Host Rendering:**
+- Can intercept forward pass for depth capture
+- Post-processing (SSAO, SSR) applied after forward pass
+- No G-buffer reconstruction needed - use depth only
+
+---
+
+## 10. Implementation Roadmap for SSAO/SSR
+
+### 10.1 Phase 1: Depth Buffer Capture
+
+```cpp
+// Hook sub_829CA360 to capture depth surface
+static void HookSetDepthStencil(PPCContext& ctx, uint8_t* base) {
+    uint32_t device = ctx.r3.u32;
+    uint32_t depthSurface = ctx.r4.u32;
+    
+    // Extract depth format from surface
+    if (depthSurface != 0) {
+        uint32_t format = PPC_LOAD_U32(depthSurface + 24);
+        // Capture for post-processing
+        g_capturedDepth = ConvertGuestDepth(depthSurface);
+    }
+    
+    // Call original
+    sub_829CA360(ctx, base);
+}
+```
+
+### 10.2 Phase 2: Camera Data Extraction
+
+```cpp
+// Extract from known guest addresses
+struct CameraData {
+    float nearClip;    // 0x81802648
+    float farClip;     // 0x82053CD8
+    float fov;         // 0x8180D8EC
+    float aspect;      // 0x8180F4D8
+    float4x4 view;     // device[10932] shader constant
+    float4x4 proj;     // device[10936] shader constant
+};
+```
+
+### 10.3 Phase 3: SSAO Integration
+
+1. After main forward pass (before UI)
+2. Bind captured depth
+3. Dispatch GTAO compute
+4. Blend result with color buffer
+
+### 10.4 Phase 4: SSR Integration
+
+1. After SSAO (needs AO-modulated color)
+2. Bind color, depth, construct normals
+3. Dispatch ray march
+4. Composite reflections
+
+---
+
+## 11. Refined Deep Traces - Shader & Device Context Analysis
+
+### 11.1 Device Context Complete Offset Map
+
+Based on deep analysis of `sub_829CD350` (SetVertexShader), `sub_829CD4C0` (SetShaderConstants), and related functions:
+
+```
+Device Context Structure (~22000 bytes)
+═══════════════════════════════════════════════════════════════════
+
+SECTION: Core State (0-1000)
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +16     │ 8    │ dirtyFlags64 (64-bit state dirty mask)         │
+│ +24     │ 8    │ renderTargetDirty64                            │
+│ +40     │ 8    │ shaderDirty64                                  │
+│ +48     │ 4    │ cmdBufferCurrent                               │
+│ +56     │ 4    │ cmdBufferLimit                                 │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+SECTION: Render State (10368-10944)
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +10368  │ 4    │ vertexShaderParams (bits 0-1: format type)     │
+│ +10908  │ 4    │ deferredRenderMode                             │
+│ +10912  │ 4    │ dirtyMask                                      │
+│ +10932  │ 4    │ currentVertexShader                            │
+│ +10936  │ 4    │ currentPixelShader                             │
+│ +10940  │ 1    │ shaderStateFlags                               │
+│         │      │   bit 0: shader bound                          │
+│         │      │   bit 2: vertex shader dirty                   │
+│         │      │   bit 3: pixel shader dirty                    │
+│         │      │   bit 4: force rebind                          │
+│         │      │   bit 5: batch mode                            │
+│         │      │   bit 6: deferred mode                         │
+│ +10943  │ 1    │ constantFlags                                  │
+│         │      │   bit 4: pixel constants dirty                 │
+│         │      │   bit 5: vertex constants dirty                │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+SECTION: Vertex Buffers (11844-12180)
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +11844  │ 4    │ vertexDeclaration (bits 12-14: format)         │
+│ +12179  │ 1    │ vertexBufferDirty                              │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+SECTION: Render Targets (12428-12540)
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +12428  │ 4    │ depthStencilSurface                            │
+│ +12432  │ 20   │ streamSources[5] (4 bytes each)                │
+│ +12452  │ 68   │ renderTargetSlots[17] (4 bytes each)           │
+│ +12520  │ 17   │ renderTargetMips[17] (1 byte each)             │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+SECTION: Shader Constants (12640-13228)
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +12640  │ 28   │ viewportRect                                   │
+│ +12668  │ 16   │ scissorRect                                    │
+│ +12700  │ 4    │ activeShaderHandle (-1 = none)                 │
+│ +12704  │ 4    │ shaderType                                     │
+│ +12708  │ 4    │ shaderBoundFlag                                │
+│ +12720  │ 20   │ prevStreamSources[5]                           │
+│ +12740  │ 4    │ constantCount                                  │
+│ +12744  │ 4    │ constantBaseRegister                           │
+│ +12748  │ 240  │ constantBuffer[15] (16 bytes per constant)     │
+│ +12984  │ 8    │ constantPackedData (per-constant)              │
+│ +12988  │ 116  │ constantMasks[~15] (8 bytes each)              │
+│ +13104  │ 60   │ computedConstantIndices[15]                    │
+│ +13164  │ 4    │ totalConstantSize                              │
+│ +13168  │ 4    │ alignedConstantSize                            │
+│ +13172  │ 4    │ maxVSConstantRegister                          │
+│ +13176  │ 4    │ maxPSConstantRegister                          │
+│ +13180  │ 4    │ constantSetFlags                               │
+│ +13352  │ 156  │ instanceData                                   │
+│ +13508  │ 4    │ cmdWritePtr                                    │
+│ +13512  │ 4    │ cmdBufferEnd                                   │
+└─────────┴──────┴────────────────────────────────────────────────┘
+```
+
+### 11.2 SetVertexShader (sub_829CD350) Detailed Trace
+
+```
+sub_829CD350(device, shaderHandle)
+    │
+    ├── ARGUMENTS:
+    │   ├── r3 = device context
+    │   └── r4 = shader handle (0 = clear, non-0 = bind)
+    │
+    ├── CASE: shaderHandle == 0 (Clear shader):
+    │   ├── device[12708] = 0 (clear bound flag)
+    │   ├── Check device[10940] shader state flags:
+    │   │   ├── If bit 3 (0x08) set: skip validation
+    │   │   ├── If bit 2 (0x04) set: skip validation
+    │   │   └── If device[12179] != 0: skip validation
+    │   │
+    │   ├── VALIDATION (if bit 4 (0x10) set):
+    │   │   └── Set r11 = 1 (force rebind)
+    │   │
+    │   ├── BATCH MODE CHECK (bit 5 (0x20) set):
+    │   │   ├── Compare device[12432..12448] with device[12720..12736]
+    │   │   │   (current vs previous stream sources)
+    │   │   └── If all match or null: r11 = 1, else r11 = 0
+    │   │
+    │   ├── Combine flags: r11 |= (device[10940] & 0xFE)
+    │   └── device[12700] = -1 (invalid handle)
+    │
+    ├── CASE: shaderHandle != 0 (Bind shader):
+    │   ├── device[12700] = shaderHandle
+    │   ├── device[12708] = 1 (set bound flag)
+    │   └── device[10940] &= 0xFE (clear bit 0)
+    │
+    ├── FINALIZE:
+    │   ├── device[10940] = r11 (updated flags)
+    │   ├── device[12704] = 0 (reset type)
+    │   ├── device[10932] = shaderHandle (current VS)
+    │   ├── device[10936] = 0 (clear PS)
+    │   │
+    │   ├── Flush check: device[48] > device[56]?
+    │   │   └── If yes: call sub_829D8568 (Buffer Flush)
+    │   │
+    │   └── BUILD PM4 PACKET:
+    │       ├── Write 0xC0006000 (PM4 header: SET_CONSTANT)
+    │       ├── Write shaderHandle
+    │       └── Update device[48] (cmd ptr)
+    │
+    └── Return
+```
+
+### 11.3 SetShaderConstants (sub_829CD4C0) Detailed Trace
+
+```
+sub_829CD4C0(device, flags, count, singleValue, dataPtr, startReg, extraFlags)
+    │
+    ├── ARGUMENTS:
+    │   ├── r3 = device context
+    │   ├── r4 = flags
+    │   │   ├── bit 0 (0x01): enable/apply constants
+    │   │   ├── bit 1 (0x02): vertex shader constants
+    │   │   └── bit 2 (0x04): pixel shader constants
+    │   ├── r5 = constant count
+    │   ├── f1 = single float value (for scalar sets)
+    │   ├── r6 = constant data pointer
+    │   ├── r7 = start register
+    │   └── r9 = extra flags
+    │
+    ├── INITIALIZE:
+    │   ├── device[12740] = count
+    │   ├── maxVS = 0, maxPS = 0
+    │   │
+    │   └── If count > 0:
+    │       ├── Loop over each constant (16 bytes each):
+    │       │   ├── Read from dataPtr+0: startRegVS
+    │       │   ├── Read from dataPtr+4: endRegVS
+    │       │   ├── Read from dataPtr+8: startRegPS
+    │       │   ├── Read from dataPtr+12: endRegPS
+    │       │   │
+    │       │   ├── Track max: maxVS = max(maxVS, endRegVS)
+    │       │   ├── Track max: maxPS = max(maxPS, endRegPS)
+    │       │   │
+    │       │   ├── Store to device[12748+i*16]: constant data
+    │       │   ├── Store to device[12984+i*8]: packed (masked)
+    │       │   └── dataPtr += 16
+    │       │
+    │       └── End loop
+    │
+    ├── VERTEX SHADER CONSTANTS (flags & 0x02):
+    │   ├── device[10943] |= 0x20 (mark VS constants dirty)
+    │   │
+    │   ├── If (flags & 0x04): also set 0x10 (PS dirty)
+    │   │
+    │   ├── Calculate alignment based on device[10368] format:
+    │   │   ├── Format 0: alignment=16, stride=32, pitch=80
+    │   │   ├── Format 1: alignment=8, stride=32, pitch=80
+    │   │   └── Format 2+: alignment=16, stride=16, pitch=40
+    │   │
+    │   ├── totalSize = align(stride + maxVS, alignment)
+    │   ├── device[13164] = totalSize
+    │   │
+    │   ├── Compute indices for each constant:
+    │   │   ├── Read device[12984+i*8]: packed offset
+    │   │   ├── Compute linear index
+    │   │   └── Store to device[13104+i*4]
+    │   │
+    │   ├── alignedSize = ((pitch + maxVS - 1) / pitch) * pitch
+    │   ├── device[13168] = alignedSize
+    │   │
+    │   ├── Update device[16] |= 256 (dirty flag)
+    │   │
+    │   └── Check deferred mode (device[10943] & 0x20):
+    │       ├── If not deferred AND format matches:
+    │       │   └── device[40] &= ~256 (clear dirty)
+    │       └── Else: device[40] |= 256 (set dirty)
+    │
+    ├── APPLY CONSTANTS (flags & 0x01):
+    │   ├── device[13172] = maxVS
+    │   ├── device[13176] = maxPS
+    │   ├── device[13180] = flags
+    │   │
+    │   ├── If NOT deferred mode:
+    │   │   ├── Calculate constant deltas
+    │   │   ├── Build viewport rect at device[12640]
+    │   │   ├── Call sub_829CA9C8 (SetViewport)
+    │   │   ├── Call sub_829CA0F0 (SetScissor)
+    │   │   └── Continue to pixel shader setup
+    │   │
+    │   └── Else: queue for deferred application
+    │
+    └── Return
+```
+
+### 11.4 Light Parameter Type System
+
+From deep analysis of `sub_82878FE8`, the lighting system uses string-matched parameter types:
+
+```
+LIGHT PARAMETER TYPES
+═════════════════════════════════════════════════════════════
+
+Type 1: Boolean/Enable
+  ├── String: "enable" or "active"
+  ├── Size: 4 bytes (stored as int)
+  └── Store: result[20] = value
+
+Type 2: Single Float  
+  ├── String: "intensity" or "range"
+  ├── Size: 4 bytes
+  └── Store: stfs f1, 0(r30)
+
+Type 3: Two Floats
+  ├── String: "innerAngle" "outerAngle" (spot light)
+  ├── Size: 8 bytes
+  └── Store: stfs f1, 0(r30); stfs f1, 4(r30)
+
+Type 4: Three Floats (Vector3)
+  ├── String: "color" "direction" "position"
+  ├── Size: 12 bytes
+  └── Store: stfs f1, 0(r30); stfs f1, 4(r30); stfs f1, 8(r30)
+
+Type 5: Four Floats (Vector4)
+  ├── String: "colorAlpha" "positionW"
+  ├── Size: 16 bytes
+  └── Store: +0, +4, +8, +12
+
+Type 6: Shader Name (128 bytes)
+  ├── String: "shader"
+  ├── Calls: vtable[8] to get shader string
+  ├── Then: string compare to resolve shader ID
+  └── Store: shader handle to result[0]
+
+Type 7: Integer
+  ├── String: "type" "priority"
+  ├── Calls: vtable[20] to get int
+  └── Store: stw r3, 0(r30)
+
+Type 8: Matrix4x4 (64 bytes, row-padded)
+  ├── String: "worldMatrix" "viewMatrix"
+  ├── Allocates: 64 bytes via sub_8218BE28
+  ├── Calls: vtable[40] four times for rows
+  └── Store: 4x float4 at offsets 0, 16, 32, 48
+
+Type 9: Matrix4x4 (alternate binding)
+  ├── String: "projMatrix" "invViewMatrix"
+  ├── Same as Type 8 but uses vtable[36]
+  └── Store: identical layout
+```
+
+### 11.5 Water System Structure (~18620 bytes)
+
+From `sub_828F2AC0` (Water initialization) and `sub_828F22D0` (Water loader):
+
+```
+WATER OBJECT STRUCTURE
+═══════════════════════════════════════════════════════════════
+
+Base Class Fields:
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +0      │ 4    │ vtable pointer                                 │
+│ +4      │ 4    │ flags                                          │
+│ +8      │ 1    │ active                                         │
+│ +16     │ 192  │ baseWaterParams (varies by type)               │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+Extended Fields (offset 18448+):
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +18448  │ 4    │ waveAmplitude                                  │
+│ +18452  │ 4    │ waveFrequency                                  │
+│ +18464  │ 64   │ waterTransformMatrix (3x3 + padding)           │
+│         │      │   [1,0,0,0] [0,1,0,0] [0,0,1,0] [0,0,0,0]      │
+│ +18528  │ 64   │ reflectionMatrix (3x3 + padding)               │
+│         │      │   [1,0,0,0] [0,1,0,0] [0,0,1,0] [0,0,0,0]      │
+│ +18592  │ 4    │ animTime                                       │
+│ +18596  │ 4    │ animSpeed                                      │
+│ +18600  │ 4    │ animPhase                                      │
+│ +18604  │ 4    │ animScale                                      │
+│ +18608  │ 4    │ animOffset                                     │
+│ +18612  │ 4    │ animFlags                                      │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+Water Type Constructors (expanded):
+┌─────────────────┬───────┬──────────────┬─────────────────────────┐
+│ Type String     │ Size  │ Constructor  │ Features                │
+├─────────────────┼───────┼──────────────┼─────────────────────────┤
+│ "water"         │ 160   │ sub_828EDEF0 │ Basic, single plane     │
+│ "river"         │ 224   │ sub_828ECAD8 │ Flow direction, speed   │
+│ "ocean"         │ 224   │ sub_828ECAD8 │ Waves, foam, cubemap    │
+│ "fountain"      │ 272   │ sub_8292F838 │ Spray particles         │
+│ "pool"          │ 576   │ sub_8291E558 │ Planar reflection       │
+│ "swamp"         │ 224   │ sub_828F8CC8 │ Murky, no reflection    │
+│ "rain"          │ 240   │ sub_8290CEB0 │ Puddles, ripples        │
+│ "wave"          │ 240   │ sub_8294E2C0 │ Breaking waves          │
+│ "waterfall"     │ 176   │ sub_82946498 │ Vertical flow           │
+│ "underwater"    │ 160   │ sub_828F3CE0 │ Caustics, distortion    │
+│ "reflection"    │ 224   │ sub_8293FD48 │ Mirror surface          │
+│ "mist"          │ 240   │ sub_8290FBC8 │ Fog volume              │
+│ "steam"         │ 240   │ sub_8294A7D8 │ Particle emitter        │
+│ "spray"         │ 240   │ sub_8294E2C0 │ Water spray particles   │
+└─────────────────┴───────┴──────────────┴─────────────────────────┘
+```
+
+### 11.6 Lighting Structure (Refined)
+
+From `sub_82870210` and related functions in `ppc_recomp.112.cpp`:
+
+```
+LIGHT DATA STRUCTURE (~192 bytes)
+═══════════════════════════════════════════════════════════════
+
+┌─────────┬──────┬────────────────────────────────────────────────┐
+│ Offset  │ Size │ Field                                          │
+├─────────┼──────┼────────────────────────────────────────────────┤
+│ +0      │ 4    │ vtable pointer                                 │
+│ +4      │ 4    │ stateFlags (0x80000 = dirty)                   │
+│ +20     │ 2    │ lightType (0=dir, 1=point, 2=spot, 3=ambient)  │
+│ +22     │ 2    │ shadowType                                     │
+│ +24     │ 2    │ priority (-1 = auto)                           │
+│ +26     │ 1    │ castShadows                                    │
+│ +27     │ 1    │ isActive                                       │
+│ +28     │ 1    │ isDynamic                                      │
+│ +32     │ 16   │ color (float4: r, g, b, intensity)             │
+│ +48     │ 16   │ position (float4: x, y, z, w)                  │
+│ +64     │ 16   │ direction (float4: x, y, z, range)             │
+│ +80     │ 16   │ spotParams (float4: inner, outer, falloff, 0)  │
+│ +96     │ 64   │ reserved / shadow matrix                       │
+│ +112    │ 16   │ attenuation (float4: const, linear, quad, 0)   │
+│ +128    │ 16   │ shadowBias (float4: bias, slope, 0, 0)         │
+└─────────┴──────┴────────────────────────────────────────────────┘
+
+Light Type Enum:
+  0 = Directional (sun)
+  1 = Point (omni)
+  2 = Spot (cone)
+  3 = Ambient (global)
+```
+
+### 11.7 Host Shader Constant Extraction
+
+Based on the analysis, here's how to extract shader constants for SSAO/SSR:
+
+```cpp
+// Extract camera matrices from device context
+struct ShaderConstants {
+    // From device[12640+]: viewport data
+    float4 viewport;      // x, y, width, height
+    float4 scissor;       // x, y, width, height
+    
+    // From shader constant buffer device[12748+]
+    float4x4 worldMatrix;       // Registers c0-c3
+    float4x4 viewMatrix;        // Registers c4-c7
+    float4x4 projMatrix;        // Registers c8-c11
+    float4x4 worldViewProj;     // Registers c12-c15
+    
+    // Lighting constants (typically c16+)
+    float4 lightDir;            // c16
+    float4 lightColor;          // c17
+    float4 ambientColor;        // c18
+    float4 cameraPos;           // c19
+};
+
+void ExtractShaderConstants(uint32_t device, ShaderConstants& out) {
+    uint8_t* base = GetGuestMemory();
+    
+    // Viewport
+    memcpy(&out.viewport, base + device + 12640, 16);
+    memcpy(&out.scissor, base + device + 12668, 16);
+    
+    // Matrices from constant buffer (assuming standard layout)
+    uint32_t cbBase = device + 12748;
+    for (int i = 0; i < 16; i++) {
+        // Each constant is 16 bytes, arranged in rows
+        float4* row = (float4*)(base + cbBase + i * 16);
+        // Assign to appropriate matrix...
+    }
+}
+```
+
+### 11.8 Existing Camera Extraction Implementation
+
+**Already implemented in `camera_extract.cpp` and `camera_extract.h`:**
+
+```
+GUEST ADDRESS MAP (Discovered via Execution Trace)
+═══════════════════════════════════════════════════════════════
+
+Global Camera Parameters:
+┌──────────────┬────────────────────────────────────────────────┐
+│ Address      │ Field                                          │
+├──────────────┼────────────────────────────────────────────────┤
+│ 0x81802648   │ NearClipPlane (float, big-endian)              │
+│ 0x82053CD8   │ FarClipPlane (float, big-endian)               │
+│ 0x8180D8EC   │ FieldOfView (float, radians)                   │
+│ 0x8180F4D8   │ AspectRatio (float)                            │
+└──────────────┴────────────────────────────────────────────────┘
+
+CCam Class Structure Offsets:
+┌──────────────┬───────┬─────────────────────────────────────────┐
+│ Offset       │ Size  │ Field                                   │
+├──────────────┼───────┼─────────────────────────────────────────┤
+│ +16          │ 48    │ ViewMatrix (3x4, row-major)             │
+│ +80          │ 12    │ CameraPosition (float3)                 │
+│ +96          │ 4     │ FOV (radians)                           │
+│ +100         │ 4     │ NearClip                                │
+│ +104         │ 4     │ FarClip                                 │
+│ +108         │ 12    │ CameraUp (float3)                       │
+│ +120         │ 12    │ CameraRight (float3)                    │
+│ +132         │ 12    │ CameraForward (float3)                  │
+└──────────────┴───────┴─────────────────────────────────────────┘
+
+Vertex Shader Constant Registers (GTA IV Layout):
+┌──────────────┬─────────────────────────────────────────────────┐
+│ Register     │ Content                                         │
+├──────────────┼─────────────────────────────────────────────────┤
+│ c0-c3        │ View Matrix (float4x4, row-major)               │
+│ c4-c7        │ Projection Matrix (float4x4, row-major)         │
+│ c8-c11       │ World Matrix (varies per-object)                │
+│ c12-c15      │ WorldViewProjection (combined)                  │
+│ c16+         │ Material/lighting constants                     │
+└──────────────┴─────────────────────────────────────────────────┘
+```
+
+**Extraction Methods:**
+
+1. **Direct Memory Read** - `ExtractCameraFromGuest()`:
+   - Reads global addresses directly from guest memory
+   - Requires byte-swap for big-endian PPC data
+   - Used when shader constants aren't bound yet
+
+2. **Shader Constant Parse** - `ExtractCameraFromShaderConstants()`:
+   - Reads view/projection from VS constant buffer
+   - Extracts FOV, near/far from projection matrix elements:
+     - `P[1][1] = 1/tan(fovY/2)` → FOV
+     - `P[2][2] = f/(n-f)`, `P[3][2] = nf/(n-f)` → near/far
+   - Extracts camera position from inverse view matrix translation
+
+---
+
+## 12. Shadow System Analysis
+
+### 12.1 Shadow Map Render Targets
+
+GTA IV uses cascaded shadow maps for directional light (sun):
+
+```
+SHADOW MAP SYSTEM
+═══════════════════════════════════════════════════════════════
+
+Shadow Cascade Configuration:
+┌─────────┬───────────┬──────────────────────────────────────────┐
+│ Cascade │ Resolution│ Coverage                                 │
+├─────────┼───────────┼──────────────────────────────────────────┤
+│ 0       │ 512x512   │ Near (0-15m) - player/vehicles           │
+│ 1       │ 512x512   │ Mid (15-50m) - buildings/props           │
+│ 2       │ 256x256   │ Far (50-200m) - distant terrain          │
+└─────────┴───────────┴──────────────────────────────────────────┘
+
+Shadow Pass Functions:
+  sub_828D7220  - Shadow render state setup
+  sub_828D7450  - Shadow depth write
+  sub_828D76A0  - Shadow cascade selection
+  sub_828D7990  - Shadow sampling/PCF
+
+No native VSM/ESM - uses standard depth comparison with 2x2 PCF.
+```
+
+### 12.2 Key Findings Summary
+
+| System | Native Support | Host Enhancement |
+|--------|---------------|------------------|
+| **SSAO** | ❌ None (baked AO only) | ✅ GTAO post-process |
+| **SSR** | ❌ None (cubemap/planar only) | ✅ Ray-march post-process |
+| **Shadows** | ✅ Cascaded depth maps | ⚠️ Higher res, VSM optional |
+| **HDR** | ✅ R16G16B16A16F render targets | ⚠️ Better tone mapping |
+| **DoF** | ✅ Simple blur | ⚠️ Bokeh DoF optional |
+| **Motion Blur** | ✅ Velocity buffer | ⚠️ Per-pixel MB optional |
+
+---
+
+## Files Referenced
+
+| File | Content |
+|------|---------|
+| `ppc_recomp.110.cpp` | Material system (sub_8284xxxx) |
+| `ppc_recomp.111-112.cpp` | Lighting (sub_8286xxxx-8287xxxx) |
+| `ppc_recomp.113.cpp` | Light structures (sub_82878xxx) |
+| `ppc_recomp.120.cpp` | Scene effects (sub_828Exxxx) |
+| `ppc_recomp.121.cpp` | Water system (sub_828Fxxxx) |
+| `ppc_recomp.134.cpp` | Render targets (sub_829CAxxxx) |
 | `ppc_recomp.135.cpp` | Draw functions, shaders, PM4 |
 | `ppc_recomp.81.cpp` | Present/VdSwap |
 | `ppc_recomp.66.cpp` | Main loop |

@@ -22,27 +22,24 @@ XSemaphore::XSemaphore(int32_t initial_count, int32_t maximum_count)
 uint32_t XSemaphore::Wait(uint32_t timeout_ms) {
     std::unique_lock<std::mutex> lock(mutex_);
     
-    if (timeout_ms == 0) {
-        // Immediate check - try to acquire
-        int32_t current = count_.load(std::memory_order_acquire);
-        if (current > 0) {
-            if (count_.compare_exchange_strong(current, current - 1,
-                    std::memory_order_acq_rel)) {
-                return STATUS_SUCCESS;
-            }
+    // Helper to try acquiring the semaphore (must be called while holding lock)
+    auto try_acquire = [this]() -> bool {
+        if (count_ > 0) {
+            count_--;
+            return true;
         }
-        return STATUS_TIMEOUT;
+        return false;
+    };
+    
+    if (timeout_ms == 0) {
+        // Immediate check - try to acquire without waiting
+        return try_acquire() ? STATUS_SUCCESS : STATUS_TIMEOUT;
     }
     
     if (timeout_ms == INFINITE) {
         // Wait forever until we can acquire
-        cv_.wait(lock, [this] {
-            int32_t current = count_.load(std::memory_order_acquire);
-            if (current > 0) {
-                return count_.compare_exchange_strong(current, current - 1,
-                    std::memory_order_acq_rel);
-            }
-            return false;
+        cv_.wait(lock, [this, &try_acquire] {
+            return try_acquire();
         });
         return STATUS_SUCCESS;
     }
@@ -51,13 +48,8 @@ uint32_t XSemaphore::Wait(uint32_t timeout_ms) {
     auto deadline = std::chrono::steady_clock::now() + 
                     std::chrono::milliseconds(timeout_ms);
     
-    bool acquired = cv_.wait_until(lock, deadline, [this] {
-        int32_t current = count_.load(std::memory_order_acquire);
-        if (current > 0) {
-            return count_.compare_exchange_strong(current, current - 1,
-                std::memory_order_acq_rel);
-        }
-        return false;
+    bool acquired = cv_.wait_until(lock, deadline, [this, &try_acquire] {
+        return try_acquire();
     });
     
     return acquired ? STATUS_SUCCESS : STATUS_TIMEOUT;
@@ -66,7 +58,7 @@ uint32_t XSemaphore::Wait(uint32_t timeout_ms) {
 int32_t XSemaphore::Release(int32_t release_count, int32_t* previous_count) {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    int32_t prev = count_.load(std::memory_order_acquire);
+    int32_t prev = count_;
     if (previous_count) {
         *previous_count = prev;
     }
@@ -76,12 +68,10 @@ int32_t XSemaphore::Release(int32_t release_count, int32_t* previous_count) {
         new_count = maximum_count_;
     }
     
-    count_.store(new_count, std::memory_order_release);
+    count_ = new_count;
     
-    // Wake up waiters
-    if (release_count == 1) {
-        cv_.notify_one();
-    } else {
+    // Wake up waiters - notify_all is safer as multiple waiters may now succeed
+    if (release_count > 0) {
         cv_.notify_all();
     }
     

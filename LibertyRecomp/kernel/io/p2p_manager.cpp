@@ -1,5 +1,6 @@
 #include "p2p_manager.h"
 #include "session_tracker.h"
+#include "voice_chat.h"
 #include <os/logger.h>
 #include <user/config.h>
 #include <random>
@@ -311,6 +312,8 @@ void P2PManager::LeaveLobby() {
     {
         std::lock_guard<std::mutex> lock(peersMutex_);
         for (auto& [connId, virtualIp] : connectionToPeer_) {
+            // Notify voice chat of peer disconnection
+            VoiceChatManager::Instance().OnPeerDisconnected(virtualIp);
             pInterface->CloseConnection(connId, 0, "Leaving lobby", false);
         }
         peers_.clear();
@@ -429,35 +432,27 @@ void P2PManager::Broadcast(const void* data, size_t size, bool reliable) {
 }
 
 int P2PManager::ReceiveFromPeer(uint32_t* outPeerId, void* buffer, size_t bufferSize) {
-    if (!IsInSession() || !pollGroup_) {
+    if (!IsInSession()) {
         return 0;
     }
     
-    auto* pInterface = SteamNetworkingSockets();
+    // Get packet from game packet queue (populated by ProcessIncomingMessages)
+    std::lock_guard<std::mutex> lock(gamePacketsMutex_);
     
-    ISteamNetworkingMessage* pMsg = nullptr;
-    int numMsgs = pInterface->ReceiveMessagesOnPollGroup(
-        static_cast<HSteamNetPollGroup>(pollGroup_),
-        &pMsg, 1);
-    
-    if (numMsgs <= 0 || !pMsg) {
+    if (gamePackets_.empty()) {
         return 0;
     }
     
-    // Find the virtual IP for this connection
-    {
-        std::lock_guard<std::mutex> lock(peersMutex_);
-        auto it = connectionToPeer_.find(pMsg->m_conn);
-        if (it != connectionToPeer_.end() && outPeerId) {
-            *outPeerId = it->second;
-        }
+    auto& packet = gamePackets_.front();
+    
+    if (outPeerId) {
+        *outPeerId = packet.peerId;
     }
     
-    // Copy data to buffer
-    size_t copySize = std::min(static_cast<size_t>(pMsg->m_cbSize), bufferSize);
-    std::memcpy(buffer, pMsg->m_pData, copySize);
+    size_t copySize = std::min(packet.data.size(), bufferSize);
+    std::memcpy(buffer, packet.data.data(), copySize);
     
-    pMsg->Release();
+    gamePackets_.pop();
     
     return static_cast<int>(copySize);
 }
@@ -519,11 +514,77 @@ void P2PManager::Poll() {
             LOGF_INFO("[P2P] New peer connected, assigned IP: 192.168.100.{}", 
                      GetVirtualIpSuffix(peerVirtualIp));
             
+            // Notify voice chat of new peer
+            VoiceChatManager::Instance().OnPeerConnected(peerVirtualIp, "Player");
+            
             if (onPeerConnected_) {
                 std::lock_guard<std::mutex> lock(peersMutex_);
                 onPeerConnected_(peers_[peerVirtualIp]);
             }
         }
+    }
+    
+    // Process incoming messages and route voice packets to VoiceChatManager
+    ProcessIncomingMessages();
+    
+    // Poll voice chat
+    VoiceChatManager::Instance().Poll();
+}
+
+void P2PManager::ProcessIncomingMessages() {
+    if (!IsInSession() || !pollGroup_) {
+        return;
+    }
+    
+    auto* pInterface = SteamNetworkingSockets();
+    
+    // Process all pending messages
+    ISteamNetworkingMessage* messages[32];
+    int numMsgs = pInterface->ReceiveMessagesOnPollGroup(
+        static_cast<HSteamNetPollGroup>(pollGroup_),
+        messages, 32);
+    
+    for (int i = 0; i < numMsgs; ++i) {
+        ISteamNetworkingMessage* pMsg = messages[i];
+        if (!pMsg) continue;
+        
+        // Find the virtual IP for this connection
+        uint32_t peerVirtualIp = 0;
+        {
+            std::lock_guard<std::mutex> lock(peersMutex_);
+            auto it = connectionToPeer_.find(pMsg->m_conn);
+            if (it != connectionToPeer_.end()) {
+                peerVirtualIp = it->second;
+            }
+        }
+        
+        // Check if this is a voice packet
+        if (IsVoicePacket(pMsg->m_pData, pMsg->m_cbSize)) {
+            // Route to voice chat manager
+            VoiceChatManager::Instance().OnVoiceDataReceived(
+                peerVirtualIp, pMsg->m_pData, pMsg->m_cbSize);
+        } else {
+            // Queue for game's socket layer
+            QueueGamePacket(peerVirtualIp, pMsg->m_pData, pMsg->m_cbSize);
+        }
+        
+        pMsg->Release();
+    }
+}
+
+void P2PManager::QueueGamePacket(uint32_t peerId, const void* data, size_t size) {
+    std::lock_guard<std::mutex> lock(gamePacketsMutex_);
+    
+    GamePacket pkt;
+    pkt.peerId = peerId;
+    pkt.data.resize(size);
+    std::memcpy(pkt.data.data(), data, size);
+    
+    gamePackets_.push(std::move(pkt));
+    
+    // Limit queue size to prevent memory growth
+    while (gamePackets_.size() > 1000) {
+        gamePackets_.pop();
     }
 }
 

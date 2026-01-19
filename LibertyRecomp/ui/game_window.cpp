@@ -189,9 +189,54 @@ void GameWindow::Init(const char* sdlVideoDriver)
         SDL_DisplayMode displayMode;
         if (SDL_GetDesktopDisplayMode(0, &displayMode) == 0)
         {
-            s_width = displayMode.w;
-            s_height = displayMode.h;
-            LOGFN("Using native display resolution: {}x{}", s_width, s_height);
+            // On macOS Retina/HiDPI displays, SDL_GetDesktopDisplayMode returns logical resolution
+            // (e.g., 1728x1117) instead of native pixel resolution (e.g., 3456x2234).
+            // We need to detect the scale factor by creating a temporary window.
+            int logicalW = displayMode.w;
+            int logicalH = displayMode.h;
+            
+            // Create a small temporary hidden window to detect the HiDPI scale factor
+            SDL_Window* tempWindow = SDL_CreateWindow(
+                "HiDPI Detection",
+                SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                100, 100,
+                SDL_WINDOW_HIDDEN | SDL_WINDOW_ALLOW_HIGHDPI
+            );
+            
+            float scaleX = 1.0f;
+            float scaleY = 1.0f;
+            
+            if (tempWindow)
+            {
+                int windowW, windowH;
+                int pixelW, pixelH;
+                
+                SDL_GetWindowSize(tempWindow, &windowW, &windowH);
+                SDL_GetWindowSizeInPixels(tempWindow, &pixelW, &pixelH);
+                
+                if (windowW > 0 && windowH > 0)
+                {
+                    scaleX = static_cast<float>(pixelW) / static_cast<float>(windowW);
+                    scaleY = static_cast<float>(pixelH) / static_cast<float>(windowH);
+                }
+                
+                SDL_DestroyWindow(tempWindow);
+            }
+            
+            // Apply the HiDPI scale factor to get native pixel resolution
+            s_width = static_cast<int>(logicalW * scaleX);
+            s_height = static_cast<int>(logicalH * scaleY);
+            
+            if (scaleX > 1.0f || scaleY > 1.0f)
+            {
+                LOGFN("Detected HiDPI/Retina display (scale: {:.1f}x{:.1f})", scaleX, scaleY);
+                LOGFN("Logical resolution: {}x{}, Native pixel resolution: {}x{}", 
+                      logicalW, logicalH, s_width, s_height);
+            }
+            else
+            {
+                LOGFN("Using native display resolution: {}x{}", s_width, s_height);
+            }
         }
         else
         {

@@ -92,13 +92,18 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/net_socket.cpp"
     "kernel/io/net_session.cpp"
     "kernel/io/p2p_manager.cpp"
+    "kernel/io/voice_chat.cpp"
+    "kernel/io/session_tracker.cpp"
+    "kernel/io/session_tracker_community.cpp"
+    "kernel/io/session_tracker_firebase.cpp"
+    "kernel/io/session_tracker_lan.cpp"
     "kernel/io/signaling_client.cpp"
     "kernel/io/img_loader.cpp"
     "kernel/io/texture_convert.cpp"
     "kernel/io/rpf_loader.cpp"
     "kernel/io/gxt_loader.cpp"
     "kernel/game_init.cpp"
-    # "kernel/sync_table.cpp"  # REMOVED - using Sonic approach
+    "kernel/sync_table.cpp"
 )
 
 set(LIBERTY_RECOMP_LOCALE_CXX_SOURCES
@@ -138,10 +143,32 @@ set(LIBERTY_RECOMP_CPU_CXX_SOURCES
 
 set(LIBERTY_RECOMP_GPU_CXX_SOURCES
     "gpu/video.cpp"
+    "gpu/gfx_state.cpp"
+    "gpu/gtaiv_render_state.cpp"
+    "gpu/postprocess_aa.cpp"
+    "gpu/postprocess_renderer.cpp"
+    "gpu/upscaler.cpp"
+    "gpu/shadow_quality.cpp"
+    "gpu/camera_extract.cpp"
     "gpu/imgui/imgui_common.cpp"
     "gpu/imgui/imgui_font_builder.cpp"
     "gpu/imgui/imgui_snapshot.cpp"
 )
+
+# Windows-only upscaler implementations (require D3D12)
+if (WIN32)
+    list(APPEND LIBERTY_RECOMP_GPU_CXX_SOURCES
+        "gpu/upscaler_xess.cpp"
+        "gpu/upscaler_fsr3.cpp"
+        "gpu/upscaler_dlss.cpp"
+    )
+endif()
+
+if (APPLE)
+    list(APPEND LIBERTY_RECOMP_GPU_CXX_SOURCES
+        "gpu/upscaler_metalfx.mm"
+    )
+endif()
 
 set(LIBERTY_RECOMP_APU_CXX_SOURCES
     "apu/audio.cpp"
@@ -259,6 +286,10 @@ set(LIBERTY_RECOMP_THIRDPARTY_INCLUDES
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/GameNetworkingSockets/include"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/bc_diff"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp/thirdparty/smol-v/source"
+    # Upscaler SDKs
+    "${LIBERTY_RECOMP_TOOLS_ROOT}/FidelityFX-SDK/Kits/FidelityFX"
+    "${LIBERTY_RECOMP_TOOLS_ROOT}/DLSS/include"
+    "${LIBERTY_RECOMP_TOOLS_ROOT}/xess/inc"
 )
 
 set_source_files_properties(${LIBERTY_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
@@ -566,6 +597,7 @@ compile_pixel_shader(gaussian_blur_5x5)
 compile_pixel_shader(gaussian_blur_7x7)
 compile_pixel_shader(gaussian_blur_9x9)
 compile_pixel_shader(gamma_correction_ps)
+compile_pixel_shader(hdr_tonemap_ps)
 compile_pixel_shader(imgui_ps)
 compile_vertex_shader(imgui_vs)
 compile_pixel_shader(resolve_msaa_color_2x)
@@ -574,6 +606,15 @@ compile_pixel_shader(resolve_msaa_color_8x)
 compile_pixel_shader(resolve_msaa_depth_2x)
 compile_pixel_shader(resolve_msaa_depth_4x)
 compile_pixel_shader(resolve_msaa_depth_8x)
+
+# Post-process shaders for TAA, SMAA, FSR 1.0
+compile_vertex_shader(fullscreen_vs)
+compile_pixel_shader(taa_ps)
+compile_pixel_shader(smaa_edge_detect_ps)
+compile_pixel_shader(smaa_blend_ps)
+compile_pixel_shader(smaa_neighborhood_blend_ps)
+compile_pixel_shader(fsr1_easu_ps)
+compile_pixel_shader(fsr1_rcas_ps)
 
 function(generate_aggregate_header INPUT_DIRECTORY OUTPUT_FILE)
     get_filename_component(ABS_OUTPUT_FILE "${OUTPUT_FILE}" ABSOLUTE)
