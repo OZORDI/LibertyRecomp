@@ -310,7 +310,10 @@ namespace VFS
         g_pathMappings.push_back({"xbox360.rpf", "xbox360"});
         g_pathMappings.push_back({"audio.rpf", "audio"});
         
-        // Common paths
+        // Common paths - game uses "common:/" prefix for common.rpf contents
+        // e.g., "common:/data/version.txt" -> "common/data/version.txt"
+        g_pathMappings.push_back({"common:", "common"});
+        g_pathMappings.push_back({"common:/", "common/"});
         g_pathMappings.push_back({"common/", "common/"});
         g_pathMappings.push_back({"data/", "common/data/"});
         g_pathMappings.push_back({"text/", "common/text/"});

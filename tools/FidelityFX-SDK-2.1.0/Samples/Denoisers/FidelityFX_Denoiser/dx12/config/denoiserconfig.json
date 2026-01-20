@@ -1,0 +1,104 @@
+{
+    "FSR Ray Regeneration": {
+        "MotionVectorGeneration": "GBufferRenderModule",
+        "FeatureSupport": {
+            "RT1.1": true,
+            "ShaderModel": "SM6_6"
+        },
+        "BuildRayTracingAccelerationStructure": true,
+        "Allocations": {
+            "GPUResourceViewCount": 600000,
+            "GPUSamplerViewCount": 2000
+        },
+        "RenderResources": {
+            "ReactiveMask": {
+                "Format": "R8_UNORM",
+                "AllowUAV": true,
+                "RenderResolution": false
+            },
+            "TransCompMask": {
+                "Format": "R8_UNORM",
+                "AllowUAV": true,
+                "RenderResolution": false
+            },
+            "NormalsResource": {
+                "Format": "RGB10A2_UNORM",
+                "AllowUAV": true
+            },
+            "SpecularAlbedoResource": {
+                "Format": "RGBA8_UNORM",
+                "AllowUAV": true
+            },
+            "DiffuseAlbedoResource": {
+                "Format": "RGBA8_UNORM",
+                "AllowUAV": true
+            },
+            "FusedAlbedoResource": {
+                "Format": "RGBA8_UNORM",
+                "AllowUAV": true
+            },
+            "SkipSignalResource": {
+                "Format": "RGBA16_FLOAT",
+                "AllowUAV": true
+            },
+            "DirectDiffuseResource": {
+                "Format": "RGBA16_FLOAT",
+                "AllowUAV": true
+            },
+            "DirectSpecularResource": {
+                "Format": "RGBA16_FLOAT",
+                "AllowUAV": true
+            },
+            "IndirectDiffuseResource": {
+                "Format": "RGBA16_FLOAT",
+                "AllowUAV": true
+            },
+            "IndirectSpecularResource": {
+                "Format": "RGBA16_FLOAT",
+                "AllowUAV": true
+            },
+            "DominantLightVisibilityResource": {
+                "Format": "R16_FLOAT",
+                "AllowUAV": true
+            },
+
+            "DenoiserDirectDiffuseTarget": "DirectDiffuseResource",
+            "DenoiserDirectSpecularTarget": "DirectSpecularResource",
+            "DenoiserIndirectDiffuseTarget": "IndirectDiffuseResource",
+            "DenoiserIndirectSpecularTarget": "IndirectSpecularResource",
+            "DenoiserDominantLightVisibilityTarget": "DominantLightVisibilityResource",
+            "DenoiserNormalsTarget": "NormalsResource",
+            "DenoiserSpecularAlbedoTarget": "SpecularAlbedoResource",
+            "DenoiserDiffuseAlbedoTarget": "DiffuseAlbedoResource",
+            "DenoiserFusedAlbedoTarget": "FusedAlbedoResource",
+            "DenoiserSkipSignalTarget": "SkipSignalResource"
+        },
+        "RenderModules": [
+            "GBufferRenderModule",
+            "SkyDomeRenderModule",
+            "PathTracingRenderModule",
+            "DenoiserRenderModule",
+            "TranslucencyRenderModule",
+            "TAARenderModule",
+            "FSRApiRenderModule",
+            "ToneMappingRenderModule"
+        ],
+        "RenderModuleOverrides": {
+            "SkyDomeRenderModule": {
+                "Procedural": true,
+                "Hour": 7,
+                "Minute": 0,
+                "Luminance": 4.0
+            }
+        },
+
+        "Content": {
+            "Scenes": [
+                "../../../../../../media/cauldronmedia/HybridReflections/scene.gltf"
+            ],
+            "Camera": "DenoiserCamera",
+            "SceneExposure": 1.5,
+            "IBLFactor": 0.1
+        }
+    }
+}

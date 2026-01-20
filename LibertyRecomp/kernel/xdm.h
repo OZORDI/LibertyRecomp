@@ -176,6 +176,11 @@ uint32_t GetKernelHandle(KernelObject* obj);
 void DestroyKernelObject(KernelObject* obj);
 void DestroyKernelObject(uint32_t handle);
 
+// Object table functions - host-side storage to avoid guest memory corruption
+KernelObject* LookupKernelObject(uint32_t guestAddr);
+void RegisterKernelObject(uint32_t guestAddr, KernelObject* obj);
+void UnregisterKernelObject(KernelObject* obj);
+
 bool IsKernelObject(uint32_t handle);
 bool IsKernelObject(void* obj);
 
@@ -193,24 +198,27 @@ template<typename T>
 inline T* QueryKernelObject(XDISPATCHER_HEADER& header)
 {
     std::lock_guard guard{ g_kernelLock };
-    if (header.WaitListHead.Flink != OBJECT_SIGNATURE)
-    {
-        header.WaitListHead.Flink = OBJECT_SIGNATURE;
-        auto* obj = CreateKernelObject<T>(reinterpret_cast<typename T::guest_type*>(&header));
-        header.WaitListHead.Blink = g_memory.MapVirtual(obj);
-
-        return obj;
-    }
-
-    return static_cast<T*>(g_memory.Translate(header.WaitListHead.Blink.get()));
+    uint32_t guestAddr = g_memory.MapVirtual(&header);
+    
+    // Look up in host-side table instead of reading from guest memory
+    KernelObject* existing = LookupKernelObject(guestAddr);
+    if (existing != nullptr)
+        return static_cast<T*>(existing);
+    
+    // Create new object and register in table
+    auto* obj = CreateKernelObject<T>(reinterpret_cast<typename T::guest_type*>(&header));
+    RegisterKernelObject(guestAddr, obj);
+    return obj;
 }
 
 // Get object without initialisation
 template<typename T>
 inline T* TryQueryKernelObject(XDISPATCHER_HEADER& header)
 {
-    if (header.WaitListHead.Flink != OBJECT_SIGNATURE)
+    std::lock_guard guard{ g_kernelLock };
+    uint32_t guestAddr = g_memory.MapVirtual(&header);
+    KernelObject* existing = LookupKernelObject(guestAddr);
+    if (existing == nullptr)
         return nullptr;
-
-    return static_cast<T*>(g_memory.Translate(header.WaitListHead.Blink.get()));
+    return static_cast<T*>(existing);
 }

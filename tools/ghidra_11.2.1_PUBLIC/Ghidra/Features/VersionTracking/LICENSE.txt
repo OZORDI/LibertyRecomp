@@ -1,0 +1,45 @@
+Ghidra software is released under the Apache 2.0 license. In addition, 
+there are numerous 3rd party components that each have their 
+own license. The license file for each of these licenses can be found
+in the licenses directory in the installation root directory.
+
+The 3rd party files in this module are as follows:
+
+
+Oxygen Icons - LGPL 3.0:
+
+	src/main/resources/images/edit-rename.png
+	src/main/resources/images/go-down.png
+	src/main/resources/images/user-online.png
+	src/main/resources/images/go-next.png
+
+Nuvola Icons - LGPL 2.1:
+
+	src/main/resources/images/cache.png
+	src/main/resources/images/undo-apply.png
+	src/main/resources/images/ledorange.png
+	src/main/resources/images/ledpurple.png
+	src/main/resources/images/ledblue.png
+
+FAMFAMFAM Icons - CC 2.5:
+
+	src/main/resources/images/tag_blue_delete.png
+	src/main/resources/images/application_tile_horizontal.png
+	src/main/resources/images/tag_blue_add.png
+	src/main/resources/images/asterisk_orange.png
+	src/main/resources/images/bullet_black.png
+	src/main/resources/images/table_gear.png
+	src/main/resources/images/bullet_error.png
+	src/main/resources/images/application_view_detail.png
+	src/main/resources/images/tag_blue_edit.png
+	src/main/resources/images/lightbulb_off.png
+	src/main/resources/images/accept.png
+	src/main/resources/images/lightbulb.png
+
+Tango Icons - Public Domain:
+
+	src/main/resources/defaultTools/images/start-here.png
+	src/main/resources/images/start-here_16.png
+	src/main/resources/images/filter_matched.png
+	src/main/help/help/topics/VersionTrackingPlugin/images/start-here.png
+

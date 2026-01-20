@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Add FfxDllPath and FfxLibPath to change copy source in the sample -->
+  <PropertyGroup>
+    <FfxDllPath>$(FFX_DLL_PATH)</FfxDllPath>
+    <FfxLibPath>$(FFX_LIB_PATH)</FfxLibPath>
+    <FfxLibPathLoader>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxLibPathLoader>
+    <FfxLibPathDenoiser>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxLibPathDenoiser>
+    <FfxLibPathRadianceCache>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxLibPathRadianceCache>
+    <FfxDllPathLoader>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxDllPathLoader>
+    <FfxDllPathDenoiser>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxDllPathDenoiser>
+    <FfxDllPathRadianceCache>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxDllPathRadianceCache>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FfxDllPath)' == '' OR !Exists('$(FfxDllPath)')">
+    <FfxDllPath>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxDllPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FfxLibPath)' == '' OR !Exists('$(FfxDllPath)')">
+    <FfxLibPath>$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\</FfxLibPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_loader_dx12.lib')">
+    <FfxLibPathLoader>$(FfxLibPath)</FfxLibPathLoader>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_denoiser_dx12.lib')">
+    <FfxLibPathDenoiser>$(FfxLibPath)</FfxLibPathDenoiser>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_radiancecache_dx12.lib')">
+    <FfxLibPathRadianceCache>$(FfxLibPath)</FfxLibPathRadianceCache>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_loader_dx12.dll')">
+    <FfxDllPathLoader>$(FfxDllPath)</FfxDllPathLoader>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_denoiser_dx12.dll')">
+    <FfxDllPathDenoiser>$(FfxDllPath)</FfxDllPathDenoiser>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(FfxLibPath)amd_fidelityfx_radiancecache_dx12.dll')">
+    <FfxDllPathRadianceCache>$(FfxDllPath)</FfxDllPathRadianceCache>
+  </PropertyGroup>
+</Project>

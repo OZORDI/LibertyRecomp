@@ -1,0 +1,15 @@
+{
+    "files":
+    {
+        "renderer": "Renderer.hlsl",
+        "display": "Display.hlsl",
+        "clearCache": "ClearCache.hlsl",
+        "composite": "Composite.hlsl"
+    },
+    "dxc":
+    {
+        "ignoreWarnings": true,
+        "warningAsErrors": false,
+        "debugMode": false
+    }
+}

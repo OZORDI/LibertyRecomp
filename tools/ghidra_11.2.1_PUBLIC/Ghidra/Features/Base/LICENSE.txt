@@ -1,0 +1,190 @@
+Ghidra software is released under the Apache 2.0 license. In addition, 
+there are numerous 3rd party components that each have their 
+own license. The license file for each of these licenses can be found
+in the licenses directory in the installation root directory.
+
+The 3rd party files in this module are as follows:
+
+
+Oxygen Icons - LGPL 3.0:
+
+	src/main/resources/defaultTools/images/Caution.png
+	src/main/resources/defaultTools/images/preferences-web-browser-cache.png
+	src/main/resources/defaultTools/images/chronometer.png
+	src/main/resources/defaultTools/images/tools.png
+	src/main/resources/defaultTools/images/ClearData.png
+	src/main/resources/defaultTools/images/bookmarks.png
+	src/main/resources/images/applications-engineering.png
+	src/main/resources/images/oxygen/16x16/text-x-c++src.png
+	src/main/resources/images/oxygen/16x16/application-x-java-archive.png
+	src/main/resources/images/oxygen/16x16/games-config-background.png
+	src/main/resources/images/oxygen/16x16/insert-table.png
+	src/main/resources/images/oxygen/16x16/text-x-csharp.png
+	src/main/resources/images/oxygen/16x16/text-x-bibtex.png
+	src/main/resources/images/oxygen/16x16/application-x-subrip.png
+	src/main/resources/images/oxygen/16x16/text-x-pascal.png
+	src/main/resources/images/oxygen/16x16/text-x-chdr.png
+	src/main/resources/images/oxygen/16x16/application-pdf.png
+	src/main/resources/images/oxygen/16x16/multimedia-player-apple-ipod.png
+	src/main/resources/images/oxygen/16x16/application-x-bzip.png
+	src/main/resources/images/oxygen/16x16/bookmarks.png
+	src/main/resources/images/oxygen/16x16/insert-text.png
+	src/main/resources/images/text-xml.png
+	src/main/resources/images/help-hint.png
+	src/main/resources/images/text-x-csrc.png
+	src/main/resources/images/media-playback-stop.png
+	src/main/resources/images/flag-yellow.png
+	src/main/resources/images/applications-development.png
+	src/main/resources/images/view-sort-ascending.png
+	src/main/resources/images/applications-internet.png
+	src/main/resources/images/akregator.png
+	src/main/resources/images/edit-bomb.png
+	src/main/resources/images/flag-green.png
+	src/main/resources/images/view-sort-descending.png
+	src/main/resources/images/media-flash.png
+
+Nuvola Icons - LGPL 2.1:
+
+	src/main/resources/defaultTools/images/tar.png
+	src/main/resources/defaultTools/images/cdwriter_unmount.png
+	src/main/resources/defaultTools/images/color_line.png
+	src/main/resources/defaultTools/images/encrypted.png
+	src/main/resources/defaultTools/images/kcmprocessor.png
+	src/main/resources/defaultTools/images/display.png
+	src/main/resources/defaultTools/images/exit.png
+	src/main/resources/defaultTools/images/edu_science.png
+	src/main/resources/defaultTools/images/ftp.png
+	src/main/resources/defaultTools/images/homepage.png
+	src/main/resources/defaultTools/images/edittrash.png
+	src/main/resources/images/view_bottom.png
+	src/main/resources/images/ledred.png
+	src/main/resources/images/package.png
+	src/main/resources/images/nuvola/16x16/usb.png
+	src/main/resources/images/nuvola/16x16/cdimage.png
+	src/main/resources/images/2leftarrow.png
+	src/main/resources/images/wizard.png
+	src/main/resources/images/view_top_bottom.png
+	src/main/resources/images/kmessedwords.png
+	src/main/resources/images/2rightarrow.png
+	src/main/resources/images/package_development.png
+	src/main/resources/images/view_left_right.png
+	src/main/resources/images/ledgreen.png
+	src/main/resources/images/katomic.png
+	src/main/resources/images/reload.png
+	src/main/help/help/topics/DataTypeManagerPlugin/images/lockoverlay.png
+
+Apache License 2.0:
+
+	lib/biz.aQute.bndlib-7.0.0.jar
+	lib/biz.aQute.bnd.util-7.0.0.jar
+	lib/phidias-0.3.7.jar
+	lib/org.osgi.util.promise-1.3.0.jar
+	lib/org.apache.felix.framework-7.0.5.jar
+
+Crystal Clear Icons - LGPL 2.1:
+
+	src/main/resources/images/viewmag+.png
+
+MIT:
+
+	lib/slf4j-api-1.7.25.jar
+	lib/slf4j-nop-1.7.25.jar
+
+FAMFAMFAM Icons - CC 2.5:
+
+	ghidra_scripts/world.png
+	src/main/resources/images/bullet_star.png
+	src/main/resources/images/package_green.png
+	src/main/resources/images/sitemap_color.png
+	src/main/resources/images/page_white_c.png
+	src/main/resources/images/function_graph.png
+	src/main/resources/images/script_add.png
+	src/main/resources/images/arrow_up.png
+	src/main/resources/images/arrow_rotate_clockwise.png
+	src/main/resources/images/table_row_delete.png
+	src/main/resources/images/tag_yellow.png
+	src/main/resources/images/key.png
+	src/main/resources/images/table_delete.png
+	src/main/resources/images/house.png
+	src/main/resources/images/tag_blue.png
+	src/main/resources/images/bullet_green.png
+	src/main/resources/images/application_double.png
+	src/main/resources/images/text_list_bullets.png
+	src/main/resources/images/table_go.png
+	src/main/resources/images/stopNode.png
+	src/main/resources/images/famfamfam_silk_icons_v013/rss.png
+	src/main/resources/images/famfamfam_silk_icons_v013/bullet_purple.png
+	src/main/resources/images/famfamfam_silk_icons_v013/controller.png
+	src/main/resources/images/famfamfam_silk_icons_v013/arrow_inout.png
+	src/main/resources/images/famfamfam_silk_icons_v013/server.png
+	src/main/resources/images/famfamfam_silk_icons_v013/compress.png
+	src/main/resources/images/famfamfam_silk_icons_v013/application_cascade.png
+	src/main/resources/images/famfamfam_silk_icons_v013/database.png
+	src/main/resources/images/famfamfam_silk_icons_v013/application_get.png
+	src/main/resources/images/famfamfam_silk_icons_v013/arrow_in.png
+	src/main/resources/images/famfamfam_silk_icons_v013/bullet_orange.png
+	src/main/resources/images/famfamfam_silk_icons_v013/photo.png
+	src/main/resources/images/famfamfam_silk_icons_v013/bullet_blue.png
+	src/main/resources/images/famfamfam_silk_icons_v013/bullet_pink.png
+	src/main/resources/images/famfamfam_silk_icons_v013/bullet_red.png
+	src/main/resources/images/famfamfam_silk_icons_v013/cup.png
+	src/main/resources/images/famfamfam_silk_icons_v013/html.png
+	src/main/resources/images/famfamfam_silk_icons_v013/door_open.png
+	src/main/resources/images/famfamfam_silk_icons_v013/door.png
+	src/main/resources/images/famfamfam_silk_icons_v013/xhtml.png
+	src/main/resources/images/famfamfam_silk_icons_v013/folder_table.png
+	src/main/resources/images/famfamfam_silk_icons_v013/folder_brick.png
+	src/main/resources/images/famfamfam_silk_icons_v013/phone.png
+	src/main/resources/images/famfamfam_silk_icons_v013/css.png
+	src/main/resources/images/famfamfam_silk_icons_v013/page_white_cup.png
+	src/main/resources/images/famfamfam_silk_icons_v013/images.png
+	src/main/resources/images/page_white.png
+	src/main/resources/images/arrow_down.png
+	src/main/resources/images/layout_add.png
+
+Modified Nuvola Icons - LGPL 2.1:
+
+	src/main/resources/images/openFolderArchive.png
+	src/main/resources/images/closedFolderArchive.png
+	src/main/resources/images/openFolderCheckedOut.png
+	src/main/resources/images/closedFolderCheckedOut.png
+	src/main/resources/images/closedFolderExternals.png
+	src/main/resources/images/closedFolderInView.png
+	src/main/resources/images/closedFolderLabels.png
+	src/main/resources/images/openFolderGroup.png
+	src/main/resources/images/openFolderExternals.png
+	src/main/resources/images/closedFolderGroup.png
+	src/main/resources/images/closedFolderClasses.png
+	src/main/resources/images/openFolderClasses.png
+	src/main/resources/images/closedFolderNamespaces.png
+	src/main/resources/images/closedFolderFunctions.png
+	src/main/resources/images/openFolderNamespaces.png
+	src/main/resources/images/closedDescendantsInView.png
+	src/main/resources/images/dataTypes.png
+	src/main/resources/images/disabledClosedFolder.png
+	src/main/resources/images/openFolderFunctions.png
+	src/main/resources/images/closedFolderInvalid.png
+	src/main/resources/images/disabledOpenFolder.png
+	src/main/resources/images/openFolderLabels.png
+	src/main/resources/images/openFolderInView.png
+
+Tango Icons - Public Domain:
+
+	src/main/resources/defaultTools/images/network-receive.png
+	src/main/resources/defaultTools/images/internet-web-browser.png
+	src/main/resources/defaultTools/images/video-x-generic.png
+	src/main/resources/defaultTools/images/applications-multimedia.png
+	src/main/resources/images/go-down.tango.16.png
+	src/main/resources/images/format-text-bold.png
+	src/main/resources/images/emblem-favorite.png
+	src/main/resources/images/dialog-warning_red.png
+	src/main/resources/images/go-up.tango.16.png
+	src/main/resources/images/x-office-document-template.png
+	src/main/resources/images/applications-system.png
+	src/main/resources/images/camera-photo.png
+	src/main/resources/images/preferences-system.png
+
+Copyright Distribution Permitted:
+
+	src/main/javacc/ghidra/app/util/cparser/CPP/CPP.jj
+

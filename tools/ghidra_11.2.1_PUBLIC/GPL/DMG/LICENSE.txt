@@ -1,0 +1,62 @@
+The program in this module is released under the GPL 3 license. 
+The files used to create this program include both public domain
+files created by the Ghidra team and 3rd party files with 
+the GPL 3 or GPL 3 compatible license. The license files for each of license used can be found in the
+<installation root>/GPL/licenses.
+
+
+The 3rd party files in this module are as follows:
+
+
+GPL 3:
+
+	data/lib/hfsexplorer-0_21-src.zip
+	data/lib/hfsx_dmglib.jar
+	data/lib/hfsx.jar
+	data/lib/iharder-base64.jar
+	data/os/win_x86_32/llio_i386.dll
+	data/os/win_x86_32/llio_ia64.dll
+	data/os/win_x86_32/llio_amd64.dll
+	data/os/win_x86_64/llio_i386.dll
+	data/os/win_x86_64/llio_ia64.dll
+	data/os/win_x86_64/llio_amd64.dll
+	data/lib/dmg.jar
+
+LGPL 2.1:
+
+	data/lib/csframework.jar
+
+Public Domain:
+
+	data/server_memory.cfg
+	src/dmg/java/mobiledevices/dmg/reader/DmgInfoGenerator.java
+	src/dmg/java/mobiledevices/dmg/reader/DmgFileReader.java
+	src/dmg/java/mobiledevices/dmg/reader/DmgInputStream.java
+	src/dmg/java/mobiledevices/dmg/decmpfs/DecmpfsStates.java
+	src/dmg/java/mobiledevices/dmg/decmpfs/DecmpfsCompressionTypes.java
+	src/dmg/java/mobiledevices/dmg/decmpfs/DecmpfsHeader.java
+	src/dmg/java/mobiledevices/dmg/decmpfs/DecmpfsConstants.java
+	src/dmg/java/mobiledevices/dmg/server/DmgServer.java
+	src/dmg/java/mobiledevices/dmg/zlib/ZLIB.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeNodeRecord.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeHeaderRecordAttributes.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeMapRecord.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeUserDataRecord.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeTypes.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeRootNodeDescriptor.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeNodeDescriptor.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeNodeKinds.java
+	src/dmg/java/mobiledevices/dmg/btree/BTreeHeaderRecord.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GDataConverter.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GByteProvider.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GRandomAccessFile.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GFileUtilityMethods.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GStringUtilities.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GDataConverterBE.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GBinaryReader.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GConv.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GDataConverterLE.java
+	src/dmg/java/mobiledevices/dmg/ghidra/GSystemUtilities.java
+	src/dmg/java/mobiledevices/dmg/hfsplus/AttributesFileParser.java
+	src/dmg/java/mobiledevices/dmg/xattr/XattrConstants.java
+

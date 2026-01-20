@@ -1,0 +1,6 @@
+breakpoint set -n __imp__sub_8289D490
+breakpoint command add 1
+register read x19 w9 x8 w8 x20 x21 x22
+continue
+DONE
+run

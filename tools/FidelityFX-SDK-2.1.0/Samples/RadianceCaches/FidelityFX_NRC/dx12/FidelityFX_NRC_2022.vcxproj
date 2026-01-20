@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{440B47B2-4BEF-4E62-BAAC-79BEDF03A4D4}</ProjectGuid>
+    <RootNamespace>FidelityFXNRC</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>FidelityFX_NRC</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Condition="Exists('$(SolutionDir)\$(SolutionName).props')" Project="$(SolutionDir)\$(SolutionName).props" Label="FFX Sample" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <VcpkgHostTriplet>x64-windows</VcpkgHostTriplet>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <VcpkgHostTriplet>x64-windows</VcpkgHostTriplet>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_NONSTDC_NO_WARNINGS ;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\..\Kits\;$(ProjectDir)..\..\..\..\Kits\OpenSource\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <Optimization>Disabled</Optimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies);"$(SolutionDir)..\..\..\..\Kits\OpenSource\amd\acs\amd_acs_x64.lib";"$(SolutionDir)..\..\..\..\Kits\OpenSource\amd\ags\amd_ags_x64.lib";"$(FfxLibPathLoader)amd_fidelityfx_loader_dx12d.lib";Xinput.lib;Shcore.lib;d3dcompiler.lib;DXGI.lib;D3D12.lib</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /y $(FfxDllPathLoader)amd_fidelityfx_loader_dx12d.dll $(OutDir)
+xcopy /y $(FfxDllPathLoader)amd_fidelityfx_loader_dx12d.pdb $(OutDir)
+xcopy /y $(FfxDllPathRadianceCache)amd_fidelityfx_radiancecache_dx12d.dll $(OutDir)
+xcopy /y $(FfxDllPathRadianceCache)amd_fidelityfx_radiancecache_dx12d.pdb $(OutDir)
+xcopy /y $(ProjectDir)config.json $(OutDir)
+xcopy /y /s $(ProjectDir)shaders\ $(OutDir)shaders\</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying required sample files</Message>
+    </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(SolutionDir)dpiawarescaling.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_NONSTDC_NO_WARNINGS ;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\..\Kits\;$(ProjectDir)..\..\..\..\Kits\OpenSource\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies);"$(SolutionDir)..\..\..\..\Kits\OpenSource\amd\acs\amd_acs_x64.lib";"$(SolutionDir)..\..\..\..\Kits\OpenSource\amd\ags\amd_ags_x64.lib";"$(SolutionDir)..\..\..\..\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.lib";Xinput.lib;Shcore.lib;d3dcompiler.lib;DXGI.lib;D3D12.lib</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /y $(FfxDllPathLoader)amd_fidelityfx_loader_dx12.dll $(OutDir)
+xcopy /y $(FfxDllPathLoader)amd_fidelityfx_loader_dx12.pdb $(OutDir)
+xcopy /y $(FfxDllPathRadianceCache)amd_fidelityfx_radiancecache_dx12.dll $(OutDir)
+xcopy /y $(FfxDllPathRadianceCache)amd_fidelityfx_radiancecache_dx12.pdb $(OutDir)
+xcopy /y $(ProjectDir)config.json $(OutDir)
+xcopy /y /s $(ProjectDir)shaders\ $(OutDir)shaders\</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying required sample files</Message>
+    </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(SolutionDir)dpiawarescaling.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui.cpp" />
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="D3DPipeline.cpp" />
+    <ClCompile Include="DXC.cpp" />
+    <ClCompile Include="RenderManager.cpp" />
+    <ClCompile Include="ShaderGraph.cpp" />
+    <ClCompile Include="utils\Backtrace.cpp" />
+    <ClCompile Include="utils\FilesystemUtils.cpp" />
+    <ClCompile Include="utils\Json.cpp" />
+    <ClCompile Include="utils\Log.cpp" />
+    <ClCompile Include="utils\StringUtils.cpp" />
+    <ClCompile Include="Win32.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imconfig.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imgui.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imgui_internal.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_rectpack.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_textedit.h" />
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_truetype.h" />
+    <ClInclude Include="D3DBase.h" />
+    <ClInclude Include="D3DPipeline.h" />
+    <ClInclude Include="DXC.h" />
+    <ClInclude Include="RenderManager.h" />
+    <ClInclude Include="resources\resource.h" />
+    <ClInclude Include="ShaderGraph.h" />
+    <ClInclude Include="utils\Assert.h" />
+    <ClInclude Include="utils\Backtrace.h" />
+    <ClInclude Include="utils\FilesystemUtils.h" />
+    <ClInclude Include="utils\HighResTimer.h" />
+    <ClInclude Include="utils\Json.h" />
+    <ClInclude Include="utils\Log.h" />
+    <ClInclude Include="utils\StringUtils.h" />
+    <ClInclude Include="Win32.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\cauldron.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\GPUOpenChip.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config.json" />
+    <None Include="shaders\common\Basis.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\bsdf\Beckmann.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\bsdf\GGX.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\bsdf\Simple.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Camera.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Cel.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\color\Color.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\color\Grade.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Constants.hlsli" />
+    <None Include="shaders\common\Ctor.hlsli" />
+    <None Include="shaders\common\Half.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Hash.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Hatch.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\integrator\PT.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\light\Planar.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Map.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Math.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\random\Halton.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\random\OwenSobol.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\random\PCG.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\random\Random.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Ray.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Transform.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\Triplanar.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\scene\Meta.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\bsdf\BSDF.hlsli" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\texture\Simple.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\scene\Composite.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\scene\Display.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\scene\Renderer.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\tracable\Intersector.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\tracable\KIFS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="shaders\common\tracable\Primitive.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\tracable\Boolean.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\FrameCtx.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\tracable\SimpleCSG.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\RadianceCache.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

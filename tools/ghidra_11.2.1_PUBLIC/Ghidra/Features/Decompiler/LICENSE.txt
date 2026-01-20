@@ -1,0 +1,29 @@
+Ghidra software is released under the Apache 2.0 license. In addition, 
+there are numerous 3rd party components that each have their 
+own license. The license file for each of these licenses can be found
+in the licenses directory in the installation root directory.
+
+The 3rd party files in this module are as follows:
+
+
+zlib License:
+
+	src/decompile/zlib/zutil.h
+	src/decompile/zlib/inftrees.h
+	src/decompile/zlib/inflate.c
+	src/decompile/zlib/deflate.c
+	src/decompile/zlib/inffixed.h
+	src/decompile/zlib/trees.h
+	src/decompile/zlib/inffast.h
+	src/decompile/zlib/zutil.c
+	src/decompile/zlib/deflate.h
+	src/decompile/zlib/gzguts.h
+	src/decompile/zlib/zlib.h
+	src/decompile/zlib/inflate.h
+	src/decompile/zlib/inftrees.c
+	src/decompile/zlib/trees.c
+	src/decompile/zlib/inffast.c
+	src/decompile/zlib/adler32.c
+	src/decompile/zlib/zconf.h
+	src/decompile/zlib
+

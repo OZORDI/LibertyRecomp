@@ -1,0 +1,12 @@
+# CRT Constructor Skip List for GTA IV
+# Format: ADDRESS [REASON]
+# Addresses can be in hex (0x...) or decimal
+# Lines starting with # are comments
+
+# Known problematic addresses:
+0x82A08AE4 memcpy helper - corrupts CS when called with garbage regs
+
+# Add new entries below as they are discovered during testing
+# Each line should contain:
+# - The hex address (e.g., 0x82A0xxxx)
+# - A description of why it should be skipped

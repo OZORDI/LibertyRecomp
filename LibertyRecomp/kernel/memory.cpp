@@ -116,23 +116,26 @@ Memory::Memory()
     PPC_STORE_U32(0x8207BB9C, 0x8280D3A8);
     PPC_STORE_U32(0x8207BBA0, 0x826F26B8);
 
-    // Protect the recomp function lookup table from guest writes.
-    // If the game overwrites these host function pointers, it can lead to crashes that look like
-    // invalid indirect branches / pointer-authentication failures on arm64e.
-    constexpr size_t kPageSize = 0x1000;
-    constexpr size_t kFuncTableOffset = PPC_IMAGE_BASE + PPC_IMAGE_SIZE;
-    constexpr size_t kFuncTableSize = (PPC_CODE_SIZE * 2) + sizeof(PPCFunc*);
-    const size_t protectBegin = AlignDown(kFuncTableOffset, kPageSize);
-    const size_t protectEnd = AlignUp(kFuncTableOffset + kFuncTableSize, kPageSize);
-    if (protectEnd > protectBegin)
-    {
-#ifdef _WIN32
-        DWORD oldProtect{};
-        VirtualProtect(base + protectBegin, protectEnd - protectBegin, PAGE_READONLY, &oldProtect);
-#else
-        mprotect(base + protectBegin, protectEnd - protectBegin, PROT_READ);
-#endif
-    }
+    // NOTE: Function table protection DISABLED
+    // The region 0x831F0000+ overlaps with texture buffer addresses that the game
+    // legitimately writes to during texture tiling/swizzling operations (sub_829E4970).
+    // On Xbox 360, this entire memory range was writable.
+    // 
+    // The texture system computes destination addresses by adding large offsets
+    // (up to 25+ MB) to base addresses in the 0x82000000 range. This can produce
+    // addresses like 0x83942000 which land in what we had protected as the function table.
+    //
+    // Keeping this region writable is necessary for correct texture operations.
+    // The risk of game code corrupting function pointers is lower than the certainty
+    // of crashes from texture operations being blocked.
+    //
+    // Original protection code (kept for reference):
+    // constexpr size_t kPageSize = 0x1000;
+    // constexpr size_t kFuncTableOffset = PPC_IMAGE_BASE + PPC_IMAGE_SIZE;
+    // constexpr size_t kFuncTableSize = (PPC_CODE_SIZE * 2) + sizeof(PPCFunc*);
+    // const size_t protectBegin = AlignDown(kFuncTableOffset, kPageSize);
+    // const size_t protectEnd = AlignUp(kFuncTableOffset + kFuncTableSize, kPageSize);
+    // mprotect(base + protectBegin, protectEnd - protectBegin, PROT_READ);
 }
 
 void* MmGetHostAddress(uint32_t ptr)

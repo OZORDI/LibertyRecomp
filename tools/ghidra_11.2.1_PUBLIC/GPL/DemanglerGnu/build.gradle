@@ -1,0 +1,171 @@
+/* ###
+ * IP: Public Domain
+ */
+
+if (findProject(':Generic') != null) {
+	apply from: "$rootProject.projectDir/gradle/nativeProject.gradle"
+	apply from: "$rootProject.projectDir/gradle/distributableGPLModule.gradle"
+}
+else {
+	apply from: "../utils.gradle"
+	apply from: "../nativePlatforms.gradle"
+	apply from: "../nativeBuildProperties.gradle"
+}
+
+apply plugin: 'eclipse'
+
+eclipse.project.name = 'GPL DemanglerGnu'
+
+
+def v41 = "demangler_gnu_v2_41"
+def v24 = "demangler_gnu_v2_24"
+def srcVersion41 = "src/demangler_gnu_v2_41"
+def srcVersion24 = "src/demangler_gnu_v2_24"
+
+/**
+ * This project has some native 'c' code we need to include in the zip for licensing 
+ * and build reasons. So include them here, but we have to do something special: the 
+ * source is divided up into folders for makefiles, headers and .c files:
+ * 		/headers
+ * 		/c
+ * 		/build
+ *
+ * The contents of all these need to be merged into the same folder for distribution.  
+ * Hence the following 3 'from' clauses:
+ */
+task zipBuildableSource(type:Zip) {
+
+	group 'private'
+	description "Collects the source files needed to build this module."
+	archiveBaseName = project.name + "-src-for-build"
+	archiveExtension = 'zip'
+		
+	//
+	// Version 2.41
+	// 
+	from (project.projectDir.toString() + "/" + srcVersion41 + "c") {
+		into "/" + srcVersion41
+	}
+	from (project.projectDir.toString() + "/" + srcVersion41 + "/headers") {
+		into "/" + srcVersion41
+	}
+	from (project.projectDir.toString() + "/" + srcVersion41 + "/build") {
+		into "/" + srcVersion41
+	}
+	from (project.projectDir.toString() + "/" + srcVersion41 + "/README.txt")
+	
+	//
+	// Version 2.24
+	// 
+	from (project.projectDir.toString() + "/" + srcVersion24 + "c") {
+		into "/" + srcVersion24
+	}
+	from (project.projectDir.toString() + "/" + srcVersion24 + "/headers") {
+		into "/" + srcVersion24
+	}
+	from (project.projectDir.toString() + "/" + srcVersion24 + "/build") {
+		into "/" + srcVersion24
+	}
+	from (project.projectDir.toString() + "/" + srcVersion24 + "/README.txt")
+}
+
+model {
+				
+	components {
+		//
+		// Version 2.41
+		//
+		demangler_gnu_v2_41(NativeExecutableSpec) {
+			targetPlatform "win_x86_64"
+			targetPlatform "linux_x86_64"
+			targetPlatform "linux_arm_64"
+			targetPlatform "mac_x86_64"
+			targetPlatform "mac_arm_64"
+			targetPlatform "freebsd_x86_64"
+			targetPlatform "freebsd_arm_64"
+			sources {
+				c {
+					source {
+						srcDir srcVersion41 + "/c"
+					}
+					exportedHeaders {
+						srcDir srcVersion41 + "/headers"
+					}
+				}
+			}			
+		}
+		
+		//
+		// Version 2.24
+		//
+		demangler_gnu_v2_24(NativeExecutableSpec) {
+			targetPlatform "win_x86_64"
+			targetPlatform "linux_x86_64"
+			targetPlatform "linux_arm_64"
+			targetPlatform "mac_x86_64"
+			targetPlatform "mac_arm_64"
+			targetPlatform "freebsd_x86_64"
+			targetPlatform "freebsd_arm_64"
+			sources {
+				c {
+					source {
+						srcDir srcVersion24 + "/c"
+					}
+					exportedHeaders {
+						srcDir srcVersion24 + "/headers"
+					}
+				}
+			}			
+		}	
+	}
+}
+
+model {
+	binaries {
+	
+		/*
+			Note: 'all' will pass all binary output, which is each platform for each version
+		*/
+		all{ b ->
+		
+			def version = b.getApplication().getName()
+		
+			if (version.equals(v41)) {
+				if (toolChain in Gcc) {			
+					//cCompiler.args "-DCP_DEMANGLE_DEBUG"
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+				else if (toolChain in VisualCpp) {
+					cCompiler.args "/D_CONSOLE"
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+				else if (toolChain in Clang) {
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+			}
+			else if (version.equals(v24)) {
+				if (toolChain in Gcc) {
+					cCompiler.args "-DMAIN_CPLUS_DEM"
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+				else if (toolChain in VisualCpp) {
+					cCompiler.args "/D_CONSOLE"
+					cCompiler.args "/DMAIN_CPLUS_DEM"
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+				else if (toolChain in Clang) {
+					cCompiler.args "-DMAIN_CPLUS_DEM"
+					cCompiler.args "-DHAVE_STDLIB_H"
+					cCompiler.args "-DHAVE_STRING_H"
+				}
+			}
+		
+			
+		}
+	}
+}

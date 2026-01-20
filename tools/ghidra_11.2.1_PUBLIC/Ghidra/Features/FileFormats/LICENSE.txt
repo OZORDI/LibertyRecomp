@@ -1,0 +1,62 @@
+Ghidra software is released under the Apache 2.0 license. In addition, 
+there are numerous 3rd party components that each have their 
+own license. The license file for each of these licenses can be found
+in the licenses directory in the installation root directory.
+
+The 3rd party files in this module are as follows:
+
+
+Apache License 2.0:
+
+	src/main/java/ghidra/file/formats/sparseimage/SparseImageDecompressor.java
+	src/main/java/ghidra/file/formats/sparseimage/ChunkHeader.java
+	src/main/java/ghidra/file/formats/sparseimage/SparseConstants.java
+	src/main/java/ghidra/file/formats/sparseimage/SparseHeader.java
+	src/main/java/ghidra/file/formats/android/xml/AndroidXmlConvertor.java
+	lib/dex-reader-2.1.jar
+	lib/AXMLPrinter2.jar
+	lib/dex-translator-2.1.jar
+	lib/dex-ir-2.1.jar
+	lib/dex-reader-api-2.1.jar
+
+INRIA License:
+
+	lib/asm-debug-all-5.0.3.jar
+
+BSD-3-GRUVER:
+
+	lib/util-2.5.2.jar
+	lib/baksmali-2.5.2.jar
+	lib/dexlib2-2.5.2.jar
+
+LGPL 2.1:
+
+	lib/sevenzipjbinding-all-platforms-16.02-2.01.jar
+	lib/sevenzipjbinding-16.02-2.01.jar
+
+Public Domain:
+
+	src/main/java/ghidra/file/formats/ios/png/CrushedPNGUtil.java
+
+BSD-3-APPLE:
+
+	src/lzfse/c/lzfse_tunables.h
+	src/lzfse/c/lzvn_decode_base.h
+	src/lzfse/c/lzfse_encode_tables.h
+	src/lzfse/c/lzfse_main.c
+	src/lzfse/c/lzfse_fse.h
+	src/lzfse/c/lzvn_encode_base.h
+	src/lzfse/c/lzvn_decode_base.c
+	src/lzfse/c/lzfse_encode.c
+	src/lzfse/c/lzfse_decode_base.c
+	src/lzfse/c/lzfse_decode.c
+	src/lzfse/c/lzfse_fse.c
+	src/lzfse/c/lzfse_internal.h
+	src/lzfse/c/lzfse.h
+	src/lzfse/c/lzvn_encode_base.c
+	src/lzfse/c/lzfse_encode_base.c
+	os/mac_86_64/lzfse
+	os/mac_arm_64/lzfse
+	os/linux_x86_64/lzfse
+	os/win_86_64/lzfse.exe
+

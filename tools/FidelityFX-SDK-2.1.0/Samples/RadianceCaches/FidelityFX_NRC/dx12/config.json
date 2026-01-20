@@ -1,0 +1,12 @@
+{
+  "paths": 
+  {
+    "shaderDirectory": "shaders",
+    "sceneDirectory": "scene"
+  },
+  "window": 
+  {
+    "dimensions": [ 1280, 720 ],
+    "startupMonitor": 0
+  }
+}

@@ -1,0 +1,65 @@
+Ghidra software is released under the Apache 2.0 license. In addition, 
+there are numerous 3rd party components that each have their 
+own license. The license file for each of these licenses can be found
+in the licenses directory in the installation root directory.
+
+The 3rd party files in this module are as follows:
+
+
+Oxygen Icons - LGPL 3.0:
+
+	src/main/resources/images/mail-folder-outbox.png
+	src/main/resources/images/dialog-warning.png
+	src/main/resources/images/mail-receive.png
+	src/main/resources/images/media-playback-start.png
+	src/main/resources/images/user-home.png
+	src/main/resources/images/inode-directory.png
+	src/main/resources/images/oxygen-edit-redo.png
+	src/main/resources/images/trash-empty.png
+	src/main/resources/images/warning.help.png
+	src/main/resources/images/application-vnd.oasis.opendocument.spreadsheet-template.png
+	src/main/resources/images/view-filter.png
+
+Nuvola Icons - LGPL 2.1:
+
+	src/main/resources/images/desktop.png
+	src/main/resources/images/www_128.png
+	src/main/resources/images/www_16.png
+
+FAMFAMFAM Icons - CC 2.5:
+
+	src/main/resources/images/zoom.png
+	src/main/resources/images/page_code.png
+	src/main/resources/images/table_relationship.png
+	src/main/resources/images/zoom_in.png
+	src/main/resources/images/tag.png
+	src/main/resources/images/bullet_delete.png
+	src/main/resources/images/textfield_rename.png
+	src/main/resources/images/application_xp.png
+	src/main/resources/images/page_go.png
+	src/main/resources/images/hourglass.png
+	src/main/resources/images/font.png
+	src/main/resources/images/zoom_out.png
+	src/main/resources/images/page_green.png
+	src/main/resources/images/page_excel.png
+	src/main/resources/images/magnifier.png
+	src/main/resources/images/drive.png
+	src/main/resources/images/folder_add.png
+	src/main/resources/images/text_lowercase.png
+	src/main/resources/images/table.png
+
+Modified Nuvola Icons - LGPL 2.1:
+
+	src/main/resources/images/closedFolder.png
+
+Tango Icons - Public Domain:
+
+	src/main/resources/images/edit-redo.png
+	src/main/resources/images/preferences-system-windows.png
+	src/main/resources/images/document-properties.png
+	src/main/resources/images/software-update-available.png
+	src/main/resources/images/edit-clear.png
+	src/main/resources/images/edit-undo.png
+	src/main/resources/images/computer.png
+	src/main/resources/images/accessories-text-editor.png
+

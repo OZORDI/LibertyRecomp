@@ -1,0 +1,292 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\utils">
+      <UniqueIdentifier>{95114cbd-8e44-4c28-8a2f-b53e140563ff}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders">
+      <UniqueIdentifier>{c8e6a72f-67f9-457c-88ad-693ee215e60b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common">
+      <UniqueIdentifier>{dea580e1-def9-452c-b4ba-6f4e209db33b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\bsdf">
+      <UniqueIdentifier>{b044b17c-4434-410d-a314-159f5b049468}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\color">
+      <UniqueIdentifier>{00d9de47-19bd-4d2a-a1a4-ffb2f59cb4a3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\integrator">
+      <UniqueIdentifier>{9a194885-ac6f-488c-aa48-e3e749aaf3e8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\light">
+      <UniqueIdentifier>{3f1d05ca-0932-4407-b8e8-824207ab5d82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\random">
+      <UniqueIdentifier>{dff1bcb7-c848-44eb-8413-c227108b1e85}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="OpenSrc">
+      <UniqueIdentifier>{9dcd5044-c02b-4426-ae01-eb3327b6eb2a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="OpenSrc\ImGui">
+      <UniqueIdentifier>{aaf3c7cc-342f-4c88-b956-39349946ac48}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="OpenSrc\ImGui\backends">
+      <UniqueIdentifier>{97115443-0f4d-429d-a7ce-6899cb76af98}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\scene">
+      <UniqueIdentifier>{a1e46b3d-4d64-431e-8c18-a0999ec38fcc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\shaders\common\tracable">
+      <UniqueIdentifier>{cf019885-3649-4222-9e98-958b3a87eaf4}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="D3DPipeline.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderGraph.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Win32.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\Backtrace.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\FilesystemUtils.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\Json.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\Log.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\StringUtils.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui.cpp">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_draw.cpp">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_tables.cpp">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\imgui_widgets.cpp">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_dx12.cpp">
+      <Filter>OpenSrc\ImGui\backends</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_win32.cpp">
+      <Filter>OpenSrc\ImGui\backends</Filter>
+    </ClCompile>
+    <ClCompile Include="DXC.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resources\resource.h">
+      <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3DBase.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3DPipeline.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderManager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderGraph.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Win32.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\Assert.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\Backtrace.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\FilesystemUtils.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\HighResTimer.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\Json.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\Log.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\StringUtils.h">
+      <Filter>Source Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imconfig.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imgui.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imgui_internal.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_rectpack.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_textedit.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\imstb_truetype.h">
+      <Filter>OpenSrc\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_dx12.h">
+      <Filter>OpenSrc\ImGui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Kits\OpenSource\imgui\backends\imgui_impl_win32.h">
+      <Filter>OpenSrc\ImGui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="DXC.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\cauldron.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\GPUOpenChip.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\common\bsdf\BSDF.hlsli">
+      <Filter>Source Files\shaders\common\bsdf</Filter>
+    </None>
+    <None Include="shaders\common\bsdf\Beckmann.hlsl">
+      <Filter>Source Files\shaders\common\bsdf</Filter>
+    </None>
+    <None Include="shaders\common\bsdf\GGX.hlsl">
+      <Filter>Source Files\shaders\common\bsdf</Filter>
+    </None>
+    <None Include="shaders\common\bsdf\Simple.hlsl">
+      <Filter>Source Files\shaders\common\bsdf</Filter>
+    </None>
+    <None Include="shaders\common\color\Color.hlsl">
+      <Filter>Source Files\shaders\common\color</Filter>
+    </None>
+    <None Include="shaders\common\color\Grade.hlsl">
+      <Filter>Source Files\shaders\common\color</Filter>
+    </None>
+    <None Include="shaders\common\integrator\PT.hlsl">
+      <Filter>Source Files\shaders\common\integrator</Filter>
+    </None>
+    <None Include="shaders\common\light\Planar.hlsl">
+      <Filter>Source Files\shaders\common\light</Filter>
+    </None>
+    <None Include="shaders\common\random\Halton.hlsl">
+      <Filter>Source Files\shaders\common\random</Filter>
+    </None>
+    <None Include="shaders\common\random\OwenSobol.hlsl">
+      <Filter>Source Files\shaders\common\random</Filter>
+    </None>
+    <None Include="shaders\common\random\PCG.hlsl">
+      <Filter>Source Files\shaders\common\random</Filter>
+    </None>
+    <None Include="shaders\common\random\Random.hlsl">
+      <Filter>Source Files\shaders\common\random</Filter>
+    </None>
+    <None Include="shaders\common\Basis.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Camera.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Cel.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Half.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Hash.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Hatch.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Map.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Math.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Ray.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Transform.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Triplanar.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\Constants.hlsli">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="config.json" />
+    <None Include="shaders\common\texture\Simple.hlsl" />
+    <None Include="shaders\scene\Meta.json">
+      <Filter>Source Files\shaders\scene</Filter>
+    </None>
+    <None Include="shaders\scene\Composite.hlsl">
+      <Filter>Source Files\shaders\scene</Filter>
+    </None>
+    <None Include="shaders\scene\Display.hlsl">
+      <Filter>Source Files\shaders\scene</Filter>
+    </None>
+    <None Include="shaders\scene\Renderer.hlsl">
+      <Filter>Source Files\shaders\scene</Filter>
+    </None>
+    <None Include="shaders\common\tracable\Intersector.hlsl">
+      <Filter>Source Files\shaders\common\tracable</Filter>
+    </None>
+    <None Include="shaders\common\tracable\KIFS.hlsl">
+      <Filter>Source Files\shaders\common\tracable</Filter>
+    </None>
+    <None Include="shaders\common\tracable\Primitive.hlsl">
+      <Filter>Source Files\shaders\common\tracable</Filter>
+    </None>
+    <None Include="shaders\common\tracable\Boolean.hlsl">
+      <Filter>Source Files\shaders\common\tracable</Filter>
+    </None>
+    <None Include="shaders\common\Ctor.hlsli">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\FrameCtx.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+    <None Include="shaders\common\tracable\SimpleCSG.hlsl">
+      <Filter>Source Files\shaders\common\tracable</Filter>
+    </None>
+    <None Include="shaders\common\RadianceCache.hlsl">
+      <Filter>Source Files\shaders\common</Filter>
+    </None>
+  </ItemGroup>
+</Project>

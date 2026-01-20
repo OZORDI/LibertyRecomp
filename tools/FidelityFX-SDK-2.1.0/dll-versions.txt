@@ -1,0 +1,35 @@
+================================================================================
+DLL Version Information: FidelityFX SDK Release DLLs
+Generated: 2025-12-09 10:08:55 UTC
+================================================================================
+DLL: amd_fidelityfx_denoiser_dx12.dll
+  Version:     1.0.0.604
+  Size:        3.52 MB
+  Product:     AMD FidelityFX Denoiser
+  Description: AMD FidelityFX (DirectX) Denoiser Library
+  Path:        X:\Kits\FidelityFX\signedbin\amd_fidelityfx_denoiser_dx12.dll
+DLL: amd_fidelityfx_framegeneration_dx12.dll
+  Version:     4.0.0.604
+  Size:        36.46 MB
+  Product:     AMD FidelityFX Frame Generation
+  Description: AMD FidelityFX (DirectX) Frame Generation Library
+  Path:        X:\Kits\FidelityFX\signedbin\amd_fidelityfx_framegeneration_dx12.dll
+DLL: amd_fidelityfx_loader_dx12.dll
+  Version:     2.1.0.604
+  Size:        0.01 MB
+  Product:     AMD FidelityFX
+  Description: AMD FidelityFX (DirectX) Loader Library
+  Path:        X:\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.dll
+DLL: amd_fidelityfx_radiancecache_dx12.dll
+  Version:     0.9.0.604
+  Size:        0.75 MB
+  Product:     AMD FidelityFX Radiance Cache
+  Description: AMD FidelityFX (DirectX) Radiance Cache Library
+  Path:        X:\Kits\FidelityFX\signedbin\amd_fidelityfx_radiancecache_dx12.dll
+DLL: amd_fidelityfx_upscaler_dx12.dll
+  Version:     4.0.3.604
+  Size:        21.30 MB
+  Product:     AMD FidelityFX Upscaler
+  Description: AMD FidelityFX (DirectX) Upscaler Library
+  Path:        X:\Kits\FidelityFX\signedbin\amd_fidelityfx_upscaler_dx12.dll
+

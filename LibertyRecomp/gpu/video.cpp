@@ -4633,6 +4633,11 @@ static void ProcClear(const RenderCommand& cmd)
 
 static void SetViewport(GuestDevice* device, GuestViewport* viewport)
 {
+    if (viewport == nullptr || device == nullptr)
+    {
+        return;
+    }
+    
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetViewport;
     cmd.setViewport.x = viewport->x;
@@ -4742,6 +4747,11 @@ static void ProcSetTexture(const RenderCommand& cmd)
 
 static void SetScissorRect(GuestDevice* device, GuestRect* rect)
 {
+    if (rect == nullptr || device == nullptr)
+    {
+        return;
+    }
+    
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetScissorRect;
     cmd.setScissorRect.top = rect->top;
@@ -5599,76 +5609,17 @@ static void SetPrimitiveType(uint32_t primitiveType)
 }
 
 // =============================================================================
-// GTAIV Render State Helper
-// Extracts render state from device context and binds shaders/buffers
-// Returns the extracted state for logging/debugging purposes
+// GTAIV Render State Helper - LOGGING ONLY
+// NOTE: Resource binding is handled by D3D hooks (SetVertexShader, SetStreamSource, etc.)
+// which receive host objects directly. Device context lookup was removed because:
+// 1. CreateShader registers with bytecode pointer as handle
+// 2. Device context stores different values (game's internal handles)
+// 3. The lookups would fail, causing null shader/buffer bindings
 // =============================================================================
-static GTAIV::RenderState ApplyGTAIVRenderState(GuestDevice* device) {
+static GTAIV::RenderState ExtractGTAIVRenderStateForLogging(GuestDevice* device) {
     uint8_t* devicePtr = reinterpret_cast<uint8_t*>(device);
     GTAIV::RenderState gtaState = GTAIV::RenderState::Extract(devicePtr);
-    
-    // Bind shaders from device context if valid
-    if (gtaState.shaderValid) {
-        GuestShader* vs = GTAIV::LookupShader(gtaState.vertexShaderHandle);
-        GuestShader* ps = GTAIV::LookupShader(gtaState.pixelShaderHandle);
-        if (vs) {
-            SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexShader, vs);
-        }
-        if (ps) {
-            SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.pixelShader, ps);
-        }
-    }
-    
-    // Bind vertex buffers from device context
-    for (int i = 0; i < 4; i++) {
-        if (gtaState.streamSource[i] != 0) {
-            GuestBuffer* vb = GTAIV::LookupBuffer(gtaState.streamSource[i]);
-            if (vb && vb->buffer) {
-                bool dirty = false;
-                SetDirtyValue(dirty, g_vertexBufferViews[i].buffer, vb->buffer->at(0));
-                SetDirtyValue(dirty, g_vertexBufferViews[i].size, vb->dataSize);
-                // Stride is set separately by SetStreamSource, use existing value
-                if (dirty) {
-                    g_dirtyStates.vertexStreamFirst = std::min<uint8_t>(g_dirtyStates.vertexStreamFirst, i);
-                    g_dirtyStates.vertexStreamLast = std::max<uint8_t>(g_dirtyStates.vertexStreamLast, i);
-                }
-            }
-        }
-    }
-    
-    // Bind index buffer from device context if present
-    if (gtaState.indexBuffer != 0) {
-        GuestBuffer* ib = GTAIV::LookupBuffer(gtaState.indexBuffer);
-        if (ib && ib->buffer) {
-            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.buffer, ib->buffer->at(0));
-            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.format, ib->format);
-            SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.size, ib->dataSize);
-        }
-    }
-    
-    // Bind textures from device context
-    for (int i = 0; i < 19; i++) {
-        if (gtaState.textureSlots[i] != 0) {
-            GuestTexture* tex = GTAIV::LookupTexture(gtaState.textureSlots[i]);
-            if (tex && tex->texture) {
-                // Mark texture as bound - the texture descriptor is already set during creation
-                // The descriptor index is used in the draw call
-            }
-        }
-    }
-    
-    // Track state changes for optimization
-    uint64_t changes = GTAIV::DetectStateChanges(gtaState);
-    if (changes != 0) {
-        // State changed - log significant changes for debugging
-        if (changes & GTAIV::DirtyBit::VertexShader) g_dirtyStates.pipelineState = true;
-        if (changes & GTAIV::DirtyBit::PixelShader) g_dirtyStates.pipelineState = true;
-        if (changes & GTAIV::DirtyBit::RenderTarget) g_dirtyStates.renderTargetAndDepthStencil = true;
-        if (changes & GTAIV::DirtyBit::DepthStencil) g_dirtyStates.renderTargetAndDepthStencil = true;
-        if (changes & GTAIV::DirtyBit::BlendState) g_dirtyStates.pipelineState = true;
-    }
     GTAIV::CommitState(gtaState);
-    
     return gtaState;
 }
 
@@ -5677,14 +5628,11 @@ static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t 
     static uint32_t s_drawPrimitiveCount = 0;
     ++s_drawPrimitiveCount;
     
-    // Extract and apply GTA IV render state from device context
-    GTAIV::RenderState gtaState = ApplyGTAIVRenderState(device);
-    
-    if (s_drawPrimitiveCount <= 10 || (s_drawPrimitiveCount % 5000) == 0)
+    // ALWAYS log first 50 calls to verify hook is working
+    if (s_drawPrimitiveCount <= 50 || (s_drawPrimitiveCount % 5000) == 0)
     {
-        LOGF_WARNING("DrawPrimitive #{} type={} startVertex={} primCount={} HDR={}",
-            s_drawPrimitiveCount, primitiveType, startVertex, primitiveCount,
-            gtaState.IsHDR10Bit() ? "10bit" : (gtaState.IsHDR16Bit() ? "16bit" : "SDR"));
+        LOGF_WARNING("[HOOK] DrawPrimitive #{} type={} start={} count={} device={:p}",
+            s_drawPrimitiveCount, primitiveType, startVertex, primitiveCount, (void*)device);
     }
 
     LocalRenderCommandQueue queue;
@@ -5727,15 +5675,11 @@ static void DrawIndexedPrimitive(GuestDevice* device, uint32_t primitiveType, in
     static uint32_t s_drawIndexedPrimitiveCount = 0;
     ++s_drawIndexedPrimitiveCount;
     
-    // Extract and apply GTA IV render state from device context
-    GTAIV::RenderState gtaState = ApplyGTAIVRenderState(device);
-    
-    if (s_drawIndexedPrimitiveCount <= 10 || (s_drawIndexedPrimitiveCount % 5000) == 0)
+    // ALWAYS log first 50 calls to verify hook is working
+    if (s_drawIndexedPrimitiveCount <= 50 || (s_drawIndexedPrimitiveCount % 5000) == 0)
     {
-        LOGF_WARNING("DrawIndexedPrimitive #{} type={} baseVtx={} startIdx={} primCount={} VS=0x{:08X} PS=0x{:08X} HDR={}",
-            s_drawIndexedPrimitiveCount, primitiveType, baseVertexIndex, startIndex, primitiveCount,
-            gtaState.vertexShaderHandle, gtaState.pixelShaderHandle,
-            gtaState.IsHDR10Bit() ? "10bit" : (gtaState.IsHDR16Bit() ? "16bit" : "SDR"));
+        LOGF_WARNING("[HOOK] DrawIndexedPrimitive #{} type={} baseVtx={} startIdx={} count={} device={:p}",
+            s_drawIndexedPrimitiveCount, primitiveType, baseVertexIndex, startIndex, primitiveCount, (void*)device);
     }
 
     LocalRenderCommandQueue queue;
@@ -6508,6 +6452,9 @@ static void ProcSetConditionalRendering(const RenderCommand& cmd)
 
 static void SetClipPlane(GuestDevice* device, uint32_t index, const be<float>* plane)
 {
+    if (plane == nullptr || device == nullptr)
+        return;
+        
     if (index != 0)
         return;
 

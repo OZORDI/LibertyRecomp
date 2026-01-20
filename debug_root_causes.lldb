@@ -1,0 +1,31 @@
+# LLDB debug script to trace root causes of hacks
+# Run: lldb -s debug_root_causes.lldb
+
+# Set the target
+target create "./out/build/macos-relwithdebinfo/LibertyRecomp/Liberty Recompiled.app/Contents/MacOS/Liberty Recompiled"
+
+# Break on sub_82859E98 to trace dictionary lookup failures
+breakpoint set -n "sub_82859E98" -c "s_count < 3"
+
+# Break on sub_829A64C0 to trace heap corruption
+breakpoint set -n "sub_829A64C0"
+
+# Break on sub_8218BE28 to trace memory allocation failures  
+breakpoint set -n "sub_8218BE28"
+
+# Break on sub_8285A538 to trace shader effect param initialization
+breakpoint set -n "sub_8285A538"
+
+# Set working directory
+settings set target.process.working-directory /Users/ozordi/Library/Application\ Support/LibertyRecomp
+
+# Run with output to log
+process launch -- 2>&1
+
+# Print backtrace when we hit breakpoints
+breakpoint command add 1 -o "bt 10"
+breakpoint command add 2 -o "bt 10"
+breakpoint command add 3 -o "bt 10"
+breakpoint command add 4 -o "bt 10"
+
+run

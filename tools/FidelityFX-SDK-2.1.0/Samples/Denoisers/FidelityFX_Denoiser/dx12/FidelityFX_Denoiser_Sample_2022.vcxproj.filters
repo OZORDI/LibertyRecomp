@@ -1,0 +1,100 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Config">
+      <UniqueIdentifier>{e6f9089d-b59d-4dca-b348-8edf5e7f268a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{fb5aa3cd-52f3-4c7b-bf2b-fd061e596a12}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{5667b6b7-e836-4645-9db7-537cb934a5d5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{756f22ba-3311-483e-962b-169400aa4a2a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="denoiserrendermodule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sample.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pathtracingrendermodule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="fsrapirendermodule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="denoiserrendermodule.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sample.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="resources\resource.h">
+      <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pathtracingrendermodule.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="fsrapirendermodule.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="config\denoiserconfig.json">
+      <Filter>Config</Filter>
+    </None>
+    <None Include="shaders\common.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\geometry.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\importance_sampling.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\material.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\denoiser_compose.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\denoiser_prepass.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\trace_rays_denoiser.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\random.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\raytracing_common.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\types.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shared.h">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\cauldron.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\GPUOpenChip.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+</Project>
