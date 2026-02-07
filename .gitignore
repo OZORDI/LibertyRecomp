@@ -528,3 +528,35 @@ watchdog_test*.txt
 
 # Review files - local development notes only
 review/
+
+# Build output directory
+build/
+
+# Development/debug directories
+FRAMERATE_ISSUES/
+gemini-env/
+glue/
+
+# LLDB debug files
+lldb_*.cmd
+lldb_*.txt
+
+# XTD tool build/work artifacts
+tools/xtd_tools/build_work/
+tools/xtd_tools/build_log*.txt
+tools/xtd_tools/debug_*/
+tools/xtd_tools/nvidia-texture-tools*/
+tools/xtd_tools/nvidia-texture-tools.zip
+tools/xtd_tools/original_extracted_textures/
+tools/xtd_tools/test_convert/
+tools/xtd_tools/*.txt
+tools/xtd_tools/os
+tools/xtd_tools/strucbeimport
+
+# Development helper scripts
+tools/impl_plan_research.py
+tools/research_calc.py
+
+# Misc temp files
+buttons_360.xtd
+xex_hash.txt
