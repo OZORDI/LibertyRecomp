@@ -14,31 +14,15 @@ target_compile_definitions(XenonRecomp PRIVATE
     XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml\"
     XENON_RECOMP_HEADER_FILE_PATH=\"${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/ppc_context.h\")
 
-set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_config.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_context.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_func_mapping.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp_shared.h"
-)
+# =============================================================================
+# PPC Recompiled Sources: use RexGlue's gta4-recomp generated code
+# =============================================================================
+# RexGlue's codegen output is authoritative. Legacy LibertyRecompLib/ppc/
+# files are preserved but no longer built.
+set(REXGLUE_GTA4_RECOMP "${CMAKE_CURRENT_SOURCE_DIR}/../glue/rexglue-sdk-main/gta4-recomp")
 
-foreach(i RANGE 0 143)
-    list(APPEND LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp.${i}.cpp")
-endforeach()
-
-# XenonRecomp custom command disabled - PPC files already generated
-# To regenerate, run manually:
-#   cd LibertyRecompLib/config && /path/to/XenonRecomp ./GTA4.toml ../../LibertyRecomp/cpu/ppc_context.h
-#
-# add_custom_command(
-#     OUTPUT 
-#         ${LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES}
-#     COMMAND 
-#         $<TARGET_FILE:XenonRecomp>
-#     DEPENDS 
-#         "${CMAKE_CURRENT_SOURCE_DIR}/private/default.xex"
-#         "${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml"
-#     USES_TERMINAL
-# )
+include("${REXGLUE_GTA4_RECOMP}/generated/sources.cmake")
+set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES ${GENERATED_SOURCES})
 
 # NOTE: GTA IV shader handling is different from Sonic '06
 # The shader.arc/shader_lt.arc extraction is disabled for GTA IV
@@ -89,7 +73,6 @@ file(GLOB XENOS_RECOMP_SOURCES
 
 add_library(LibertyRecompLib
     ${LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES}
-    "ppc/ppc_indirect.cpp"
     "shader/shader_cache.h"
     "shader/shader_cache.cpp"
     "shader/postprocess_cache.h"
@@ -97,5 +80,15 @@ add_library(LibertyRecompLib
 )
 
 target_include_directories(LibertyRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(LibertyRecompLib PRIVATE "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde" "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils")
-target_precompile_headers(LibertyRecompLib PUBLIC "ppc/ppc_recomp_shared.h")
+target_include_directories(LibertyRecompLib PRIVATE
+    "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde"
+    "${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils"
+    # RexGlue headers for generated PPC code
+    "${REXGLUE_GTA4_RECOMP}"
+    "${REXGLUE_GTA4_RECOMP}/generated"
+)
+
+# RexGlue generated code needs access to RexGlue SDK headers
+if(TARGET rexcore)
+    target_link_libraries(LibertyRecompLib PRIVATE rexcore rexruntime rexkernel)
+endif()

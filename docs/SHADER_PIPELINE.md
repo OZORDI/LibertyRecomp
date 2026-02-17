@@ -56,6 +56,38 @@ GTA IV for Xbox 360 uses RAGE engine shaders stored in a proprietary `.fxc` cont
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## RAGE SPS (Shader Preset) Files
+
+GTA IV also stores **shader preset files** (`.sps`) alongside compiled shaders. These are **plain-text material definition files** — NOT compiled bytecode. They live in `common/shaders/db/` (131 files) and map material names to FXC shaders with default parameters.
+
+### SPS Format
+
+```
+shader <fxc_shader_name>
+[ParameterName {
+    <type> <value>
+}]
+[__rage_drawbucket {
+    int <bucket_number>
+}]
+```
+
+### SPS ↔ FXC Relationship
+
+| Aspect | .sps (Shader Preset) | .fxc (Compiled Shader) |
+|--------|---------------------|----------------------|
+| Format | Plain text | Binary (Xbox 360 Xenos microcode) |
+| Count | 131 files | 89 files |
+| Contains | Material name → shader mapping, draw bucket, default params | Vertex + pixel shader bytecode |
+| Used by | Model files (.wdr/.wdd) reference SPS names | XenosRecomp extracts and recompiles bytecode |
+| Conversion needed | None (platform-agnostic text) | Xbox 360 → HLSL → DXIL/SPIR-V/AIR |
+
+- 68 unique FXC shaders are referenced by 131 SPS presets (many-to-one mapping)
+- 21 FXC files are system shaders not referenced by any SPS (deferred_lighting, water, postfx, shadows, etc.)
+- All 68 SPS shader references have matching FXC files on disk
+
+> **Note:** SPS files are served at runtime through the VFS. They do not need build-time conversion. See [SPS_SHADER_PRESETS.md](SPS_SHADER_PRESETS.md) for full analysis.
+
 ## RAGE FXC Format
 
 ### Container Structure

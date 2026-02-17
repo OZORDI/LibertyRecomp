@@ -15,7 +15,10 @@ namespace GTAIV {
 namespace DeviceOffset {
     // Command Buffer Management
     constexpr uint32_t CommandBufferPtr    = 48;      // +48: Current write position in PM4 buffer
-    constexpr uint32_t CommandBufferLimit  = 56;      // +56: End of PM4 buffer (flush trigger)
+    constexpr uint32_t CommandBufferEnd    = 52;      // +52: End of current buffer segment
+    constexpr uint32_t CommandBufferLimit  = 56;      // +56: Soft limit (flush trigger)
+    constexpr uint32_t BufferSegmentBase   = 14912;   // +14912: Current buffer segment base (set by sub_829D8188)
+    constexpr uint32_t SecondaryBufferBase = 16712;   // +16712: Secondary/fallback buffer base
 
     // Render State Flags
     constexpr uint32_t DirtyFlags          = 16;      // +16: 64-bit dirty state bitmask

@@ -5,11 +5,37 @@
 #define MEM_RESERVE 0x00002000  
 #endif
 
+#include <memory>
+namespace rex::memory { class Memory; }
+
 struct Memory
 {
     uint8_t* base{};
 
     Memory();
+    ~Memory();  // Defined in .cpp where rex::memory::Memory is complete
+
+    // Initialize memory from RexGlue's memory::Memory system.
+    // Must be called before KiSystemStartup(). Creates a file-backed 4GB
+    // mapping with proper heap management, then populates function tables
+    // and vtables identically to the legacy constructor path.
+    void InitializeFromRexGlue();
+
+    // Access the underlying RexGlue memory system (available after InitializeFromRexGlue)
+    rex::memory::Memory* GetRexMemory() const noexcept { return rex_memory_.get(); }
+
+    // Transfer ownership of the RexGlue memory to caller (e.g. rex::Runtime).
+    // After this call, GetRexMemory() returns nullptr but base remains valid
+    // as long as the caller keeps the returned unique_ptr alive.
+    std::unique_ptr<rex::memory::Memory> TakeRexMemory() noexcept { return std::move(rex_memory_); }
+
+private:
+    std::unique_ptr<rex::memory::Memory> rex_memory_;
+
+    // Shared init logic: manual stubs, vtable pre-population.
+    void PopulateFunctionTableAndVtables();
+
+public:
 
     bool IsInMemoryRange(const void* host) const noexcept
     {
@@ -39,7 +65,7 @@ struct Memory
 
     void InsertFunction(uint32_t guest, PPCFunc* host)
     {
-        PPC_LOOKUP_FUNC(base, guest) = host;
+        PPC_LOOKUP_FUNC_RAW(base, guest) = host;
     }
 };
 

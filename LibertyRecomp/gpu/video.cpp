@@ -81,6 +81,7 @@ namespace GTAIV {
 #endif
 
 #include "../../tools/XenosRecomp/XenosRecomp/shader_common.h"
+#include "sps_preset_table.h"
 // MarathonRecomp-style: Transition to Runtime phase on first Present
 extern void KernelPhase_EnterRuntime();
 
@@ -390,7 +391,7 @@ Backend GetCurrentBackend() {
 
 static bool g_triangleStripWorkaround = false;
 
-// Forward declarations for GTA IV default shaders (populated by EnsureAllShadersLoaded)
+// Default shaders used as fallback when NULL is passed to SetVertexShader/SetPixelShader
 static GuestShader* g_defaultVertexShader = nullptr;
 static GuestShader* g_defaultPixelShader = nullptr;
 
@@ -2960,28 +2961,9 @@ static void DrawProfiler()
             ImGui::Checkbox("Show FPS", &Config::ShowFPS.Value);
         }
 
-        if (g_userHeap.heap != nullptr && g_userHeap.physicalHeap != nullptr)
+        if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen))
-            {
-                O1HeapDiagnostics diagnostics, physicalDiagnostics;
-                {
-                    std::lock_guard lock(g_userHeap.mutex);
-                    diagnostics = o1heapGetDiagnostics(g_userHeap.heap);
-                }
-                {
-                    std::lock_guard lock(g_userHeap.physicalMutex);
-                    physicalDiagnostics = o1heapGetDiagnostics(g_userHeap.physicalHeap);
-                }
-
-                if (ImGui::BeginTable("Memory", 2))
-                {
-                    IMGUI_GENERIC_ROW("Heap Allocated", "%d MB", int32_t(diagnostics.allocated / (1024 * 1024)));
-                    IMGUI_GENERIC_ROW("Physical Heap Allocated", "%d MB", int32_t(diagnostics.allocated / (1024 * 1024)));
-
-                    ImGui::EndTable();
-                }
-            }
+            ImGui::Text("Memory managed by RexGlue");
         }
 
         if (ImGui::CollapsingHeader("GPU", ImGuiTreeNodeFlags_DefaultOpen))
@@ -3824,6 +3806,7 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
             };
 
             auto &commandList = g_commandLists[g_frame];
+            commandList->setFramebuffer(framebuffer.get());
             commandList->barriers(RenderBarrierStage::GRAPHICS, srcBarriers, std::size(srcBarriers));
             commandList->setGraphicsPipelineLayout(g_pipelineLayout.get());
             
@@ -3838,7 +3821,6 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
             }
             
             commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
-            commandList->setFramebuffer(framebuffer.get());
             commandList->setViewports(RenderViewport(0.0f, 0.0f, g_swapChain->getWidth(), g_swapChain->getHeight()));
             commandList->setScissors(RenderRect(0, 0, g_swapChain->getWidth(), g_swapChain->getHeight()));
             commandList->drawInstanced(6, 1, 0, 0);
@@ -8804,126 +8786,252 @@ static int CreateShadersForFxc(const char* fxcBaseName)
     return created;
 }
 
-// Pre-load ALL shaders from cache at startup
-static void EnsureAllShadersLoaded()
-{
-    static bool s_loaded = false;
-    if (s_loaded) return;
-    s_loaded = true;
-    
-    LOG_WARNING("[EffectManager] Pre-loading ALL shaders from cache...");
-    
-    int totalCreated = 0;
-    
-    // Create GuestShader objects for ALL cache entries
-    for (size_t i = 0; i < g_shaderCacheEntryCount; i++) {
-        ShaderCacheEntry* entry = &g_shaderCacheEntries[i];
-        
-        if (entry->guestShader == nullptr) {
-            // Determine shader type from filename (_vs = vertex, _ps = pixel)
-            bool isPixelShader = strstr(entry->filename, "_ps") != nullptr;
-            ResourceType type = isPixelShader ? ResourceType::PixelShader : ResourceType::VertexShader;
-            
-            GuestShader* shader = g_userHeap.AllocPhysical<GuestShader>(type);
-            shader->shaderCacheEntry = entry;
-            entry->guestShader = shader;
-            ++totalCreated;
-            
-            // Set default shaders (first VS and PS we find from gta_default)
-            if (strstr(entry->filename, "gta_default") != nullptr) {
-                if (!isPixelShader && g_defaultVertexShader == nullptr) {
-                    g_defaultVertexShader = shader;
-                }
-                if (isPixelShader && g_defaultPixelShader == nullptr) {
-                    g_defaultPixelShader = shader;
+// =============================================================================
+// RAGE Shader Loading — VFS pass-through
+// sub_8285E048 (batch FXC loader) reads common:/shaders/preload.list and calls
+// sub_82858758 for each FXC name.  sub_82858758 opens the .fxc file, parses
+// the binary container, and calls CreateShader (sub_829D1758) for each VS/PS
+// fragment.  CreateShader hashes the Xenos bytecode and finds the matching
+// pre-compiled shader in our embedded cache.
+//
+// Previously these were stubbed because the game entered an infinite loop
+// opening "game:\(null).sps".  Now that the SPS DB is populated (no more
+// NULL shader names) and RexGlue handles VFS, we let the native FXC loading
+// run so CreateShader is called for all 1132 shader variants — giving each
+// material the correct per-FXC vertex/pixel shader pair.
+// =============================================================================
+
+// sub_828574A0 — Shader reload: iterates dword_83125900[] and calls
+// sub_8285BDC8(entry, NULL, 0) for each entry whose version changed.
+// The NULL second arg means "use stored path" which can be NULL → (null).sps.
+PPC_FUNC(sub_828574A0) { /* no-op: Liberty shaders are immutable */ }
+
+// sub_8285BDC8 — Opens a shader .fxc file via RAGE VFS and parses it.
+// Stubbed: XEX-embedded shaders (rage_im) aren't in the cache, and the
+// original code calls GPU functions that trap.  Liberty's CreateShader()
+// path handles all shader creation through the embedded cache.
+PPC_FUNC(sub_8285BDC8) { ctx.r3.u64 = 1; }
+
+// sub_8285DF10 — Shader fixup processor (vtable[5] of the shader factory).
+// Stubbed: depends on FXC loading which is also stubbed.
+PPC_FUNC(sub_8285DF10) { /* no-op */ }
+
+// sub_82858758 — Individual shader preload from file.  Called by the
+// batch loader (sub_8285E048) with each FXC name from preload.list.
+// Stubbed: returns slot 0.  Liberty's CreateShader() handles all shaders.
+PPC_FUNC(sub_82858758) { ctx.r3.s64 = 0; }
+
+// sub_82869F30 — Shader database scanner.  Called from sub_823193A8 as
+// sub_82869F30("common:/shaders/db", 0) to enumerate .sps files on disk
+// and register them in the shader database.
+//
+// Replacement: populate the guest shader DB from our embedded SPS preset
+// table (sps_preset_table.h) without any file I/O.  This lets the game's
+// material setup code (sub_82869FC0 lookup → sub_82869620 get entry) find
+// the correct SPS preset for each model material.
+//
+// Guest shader database layout (reverse-engineered from PPC):
+//   Global:  *(uint32_t*)0x83127DA4 = entry count
+//   Global:  *(uint32_t*)0x83127DAC = guest ptr to entries array
+//   Global:  *(uint32_t*)0x83127DB0 = guest ptr to db path string
+//   Each entry is 28 bytes:
+//     +0:  uint32_t flags          (unknown, set to 0)
+//     +4:  uint32_t paramListPtr   (linked list of SPS param nodes)
+//     +8:  uint32_t spsNamePtr     (guest ptr to SPS preset name)
+//     +12: uint32_t fxcShaderPtr   (guest ptr to loaded FXC effect object)
+//     +16: uint32_t reserved       (unknown, set to 0)
+//     +20: uint32_t fxcNamePtr     (guest ptr to FXC shader name from "shader" keyword)
+//     +24: uint32_t reserved2      (unknown, set to 0)
+PPC_FUNC(sub_82869F30) {
+    // r3 = path string ("common:/shaders/db"), r4 = flags
+    static bool s_populated = false;
+    if (s_populated) return;
+    s_populated = true;
+
+    constexpr uint32_t GUEST_SPS_ENTRY_COUNT = 0x83127DA4;
+    constexpr uint32_t GUEST_SPS_ENTRIES_PTR = 0x83127DAC;
+    constexpr uint32_t GUEST_SPS_DB_PATH    = 0x83127DB0;
+    constexpr size_t   SPS_ENTRY_SIZE       = 28;
+
+    const size_t entryCount = g_spsPresetTableCount;
+
+    // Calculate total string pool size (SPS names + FXC names + db path)
+    size_t stringPoolSize = 0;
+    for (size_t i = 0; i < entryCount; i++) {
+        stringPoolSize += strlen(g_spsPresetTable[i].spsName) + 1;
+        stringPoolSize += strlen(g_spsPresetTable[i].fxcName) + 1;
+    }
+    const char* dbPath = "common:/shaders/db";
+    stringPoolSize += strlen(dbPath) + 1;
+
+    // Allocate a single guest-visible block: entries array + string pool
+    size_t entriesSize = entryCount * SPS_ENTRY_SIZE;
+    size_t totalSize   = entriesSize + stringPoolSize;
+    void* guestBlock   = g_userHeap.AllocPhysical(totalSize, 16);
+    if (!guestBlock) {
+        LOGF_WARNING("[SPS DB] Failed to allocate {} bytes of guest memory", totalSize);
+        return;
+    }
+    memset(guestBlock, 0, totalSize);
+
+    uint8_t* entriesBase = static_cast<uint8_t*>(guestBlock);
+    uint8_t* stringPool  = entriesBase + entriesSize;
+    size_t   stringOff   = 0;
+
+    // Helper: copy a C string into the guest string pool, return guest address
+    auto copyStr = [&](const char* s) -> uint32_t {
+        size_t len  = strlen(s) + 1;
+        uint8_t* dst = stringPool + stringOff;
+        memcpy(dst, s, len);
+        uint32_t ga = g_memory.MapVirtual(dst);
+        stringOff += len;
+        return ga;
+    };
+
+    // Populate each 28-byte entry (big-endian via be<uint32_t>)
+    for (size_t i = 0; i < entryCount; i++) {
+        auto* e = reinterpret_cast<be<uint32_t>*>(entriesBase + i * SPS_ENTRY_SIZE);
+        const auto& sps = g_spsPresetTable[i];
+
+        uint32_t spsNameAddr = copyStr(sps.spsName);
+        uint32_t fxcNameAddr = copyStr(sps.fxcName);
+
+        e[0] = 0;              // +0:  flags
+        e[1] = 0;              // +4:  paramListPtr (no guest param nodes)
+        e[2] = spsNameAddr;    // +8:  spsNamePtr
+        e[3] = 0;              // +12: fxcShaderPtr (NULL — will be resolved by material setup)
+        e[4] = 0;              // +16: reserved
+        e[5] = fxcNameAddr;    // +20: fxcNamePtr
+        e[6] = 0;              // +24: reserved
+    }
+
+    // Copy db path string into pool
+    uint32_t dbPathAddr = copyStr(dbPath);
+
+    // Write the three global pointers that sub_82869FC0 / sub_82869620 read
+    uint32_t entriesGuestAddr = g_memory.MapVirtual(entriesBase);
+    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRY_COUNT)) = static_cast<uint32_t>(entryCount);
+    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRIES_PTR)) = entriesGuestAddr;
+    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_DB_PATH))     = dbPathAddr;
+
+    LOGF_WARNING("[SPS DB] Populated {} SPS preset entries ({} bytes) at guest 0x{:08X}",
+                 entryCount, totalSize, entriesGuestAddr);
+}
+
+// =============================================================================
+// RAGE VFS Diagnostic Hooks — REMOVED
+// These were read-through logging hooks for debugging VFS mount/file-open
+// failures caused by the xex_header_data overwrite corrupting .data values.
+// Now that RexGlue's PE is authoritative, VFS runs natively without hooks.
+// Removed hooks: sub_827EF208, sub_827E0CF8, sub_827E0C30, sub_827E1EC0,
+//   sub_827E8180, sub_827E0898, sub_827E04F0, sub_827EF2F8, sub_827EF938
+// =============================================================================
+
+// sub_82869620 — Convert SPS DB index to entry pointer.
+// Original: if (index == -1) return NULL; else return entries_base + index*28;
+//
+// Enhanced: when entry+12 (fxcShaderPtr) is NULL, lazily create an FXC
+// effect object via shaderMgr->vtable[1](fxcName, 0, 0) and store it at
+// entry+12.  This mirrors what sub_82869578 does during the original init
+// scan.  If creation fails, return NULL to prevent crash in sub_8285FF30
+// which dereferences entry+12 as a vtable pointer without checking.
+PPC_FUNC(sub_82869620) {
+    int32_t index = ctx.r3.s32;
+    if (index == -1) {
+        ctx.r3.u64 = 0;
+        return;
+    }
+
+    constexpr uint32_t GUEST_SPS_ENTRIES_PTR = 0x83127DAC;
+    constexpr uint32_t GUEST_SHADER_MGR     = 0x83127984;
+
+    uint32_t entriesBase = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRIES_PTR));
+    if (entriesBase == 0) {
+        ctx.r3.u64 = 0;
+        return;
+    }
+
+    uint32_t entryAddr = entriesBase + static_cast<uint32_t>(index) * 28;
+    uint32_t fxcPtr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 12));
+
+    // Lazy creation: if entry+12 is NULL, try to create an FXC effect object
+    if (fxcPtr == 0) {
+        static bool s_creationInProgress = false;
+        if (s_creationInProgress) {
+            // Guard against re-entrance (shouldn't happen, but be safe)
+            ctx.r3.u64 = 0;
+            return;
+        }
+
+        uint32_t shaderMgr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SHADER_MGR));
+        uint32_t fxcNameAddr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 20));
+        if (shaderMgr != 0 && fxcNameAddr != 0) {
+            // Read shaderMgr->vtable[1] (CreateEffect factory method)
+            uint32_t vtable = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(shaderMgr));
+            uint32_t createFunc = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(vtable + 4));
+
+            if (createFunc != 0) {
+                // Save volatile registers the caller may depend on
+                auto saved_r3 = ctx.r3;  auto saved_r4 = ctx.r4;
+                auto saved_r5 = ctx.r5;  auto saved_r6 = ctx.r6;
+                auto saved_r7 = ctx.r7;  auto saved_r8 = ctx.r8;
+                auto saved_r9 = ctx.r9;  auto saved_r10 = ctx.r10;
+                auto saved_r11 = ctx.r11; auto saved_r12 = ctx.r12;
+                auto saved_lr = ctx.lr;   auto saved_ctr = ctx.ctr;
+
+                // Call shaderMgr->vtable[1](shaderMgr, fxcName, 0, 0)
+                ctx.r3.u64 = shaderMgr;
+                ctx.r4.u64 = fxcNameAddr;
+                ctx.r5.u64 = 0;
+                ctx.r6.u64 = 0;
+
+                s_creationInProgress = true;
+                PPC_CALL_INDIRECT_FUNC(createFunc);
+                s_creationInProgress = false;
+
+                uint32_t newEffect = ctx.r3.u32;
+
+                // Restore volatile registers
+                ctx.r3 = saved_r3;   ctx.r4 = saved_r4;
+                ctx.r5 = saved_r5;   ctx.r6 = saved_r6;
+                ctx.r7 = saved_r7;   ctx.r8 = saved_r8;
+                ctx.r9 = saved_r9;   ctx.r10 = saved_r10;
+                ctx.r11 = saved_r11; ctx.r12 = saved_r12;
+                ctx.lr = saved_lr;   ctx.ctr = saved_ctr;
+
+                if (newEffect != 0) {
+                    // Store the new effect at entry+12
+                    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 12)) = newEffect;
+                    fxcPtr = newEffect;
+
+                    const char* fxcName = reinterpret_cast<const char*>(g_memory.Translate(fxcNameAddr));
+                    LOGF_WARNING("[SPS DB] Lazy-created FXC effect for '{}' → guest 0x{:08X}", fxcName, newEffect);
                 }
             }
         }
-    }
-    
-    LOGF_WARNING("[EffectManager] Pre-loaded {} shaders (VS={}, PS={})", 
-        totalCreated, 
-        g_defaultVertexShader ? "OK" : "NULL", 
-        g_defaultPixelShader ? "OK" : "NULL");
-}
 
-// By returning success with a "valid" structure, the game should proceed
-// instead of trying to enumerate directories.
-static uint32_t EffectManagerStub(be<uint32_t>* effectContext, be<uint32_t>* outputPtr)
-{
-    static int callCount = 0;
-    ++callCount;
-    
-    // Pre-load ALL shaders from cache on first call
-    EnsureAllShadersLoaded();
-    
-    uint32_t ctxAddr = effectContext ? g_memory.MapVirtual(effectContext) : 0;
-    uint32_t outAddr = outputPtr ? g_memory.MapVirtual(outputPtr) : 0;
-    
-    // Log first 20 calls
-    if (callCount <= 20) {
-        LOGF_WARNING("EffectManager::Load #{} ctx=0x{:08X} out=0x{:08X}", callCount, ctxAddr, outAddr);
-    }
-    
-    // Return success with a minimal valid structure
-    // RAGE effect structure offsets (from RE):
-    // +0x00: status/flags (1 = loaded)
-    // +0x04: technique count
-    // +0x08: pass count  
-    // +0x0C: vertex shader handle
-    // +0x10: pixel shader handle
-    // +0x14-0x5F: other data
-    if (outputPtr) {
-        memset(outputPtr, 0, 0x60);
-        outputPtr[0] = 1;  // Status: loaded
-        outputPtr[1] = 1;  // 1 technique
-        outputPtr[2] = 1;  // 1 pass
-        // Leave shader handles as 0 for now - game should still render
-    }
-    
-    // Return 1 (success) - game should proceed with rendering
-    return 1;
-}
-
-// EffectManager stub that returns real shader handles from our cache
-// The original EffectManager hangs trying to do file I/O, so we bypass it
-// and return our pre-compiled shaders instead.
-static uint32_t EffectManagerWithCachedShaders(be<uint32_t>* effectContext, be<uint32_t>* outputPtr)
-{
-    static int callCount = 0;
-    ++callCount;
-    
-    // Ensure all shaders are pre-loaded from cache on first call
-    EnsureAllShadersLoaded();
-    
-    if (callCount <= 30 || callCount % 100 == 0) {
-        LOGF_WARNING("EffectManager::Load #{} - returning cached shaders (VS={} PS={})",
-                     callCount,
-                     g_defaultVertexShader ? "OK" : "NULL",
-                     g_defaultPixelShader ? "OK" : "NULL");
-    }
-    
-    // Return success with our cached shader handles
-    if (outputPtr) {
-        memset(outputPtr, 0, 0x60);
-        outputPtr[0] = 1;  // Status: loaded
-        outputPtr[1] = 1;  // 1 technique
-        outputPtr[2] = 1;  // 1 pass
-        
-        // Return our cached shader handles
-        // The game expects valid shader pointers at these offsets
-        if (g_defaultVertexShader) {
-            outputPtr[3] = g_memory.MapVirtual(g_defaultVertexShader);  // VS handle at +0x0C
-        }
-        if (g_defaultPixelShader) {
-            outputPtr[4] = g_memory.MapVirtual(g_defaultPixelShader);   // PS handle at +0x10
+        // Final check: if still NULL after creation attempt, return NULL
+        if (fxcPtr == 0) {
+            ctx.r3.u64 = 0;
+            return;
         }
     }
-    
-    return 1;  // Success
+
+    ctx.r3.u64 = entryAddr;
 }
 
-GUEST_FUNCTION_HOOK(sub_8285E048, EffectManagerWithCachedShaders);
+// =============================================================================
+// RAGE fiStream NULL-Handle Safety Layer — REMOVED (Phase 4)
+//
+// These band-aid hooks (sub_82273988, sub_827E8420, sub_827E87A0, sub_827E8730,
+// sub_827E7F98) are no longer needed.  The root cause was the RAGE allocator
+// returning NULL due to TLS[1676] being zeroed by an unbalanced push/pop.
+// The fix in imports.cpp (Phase 2 push/pop guards + Phase 3 fallback allocator)
+// prevents the allocator from dying, which means:
+//   - TDAT buffers get real allocations (no heap aliasing)
+//   - Streaming table entries stay uncorrupted
+//   - fiStream handles are never NULL from allocation failure
+// =============================================================================
 
 // =============================================================================
 // GTA IV Shader Creation Hook (sub_829D1758)
@@ -8994,6 +9102,12 @@ PPC_FUNC(sub_829D1758)
                         LOGF_WARNING("CreateShaderFromBytecode #{}: CACHE MISS hash=0x{:X} size={} flags=0x{:08X}",
                                      s_createShaderFromBytecodeCount, hash, totalSize, flags);
                     }
+                    // Return a dummy shader — do NOT fall through to original
+                    // GPU code which contains td assertions that trap.
+                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
+                    GuestShader* dummy = g_userHeap.AllocPhysical<GuestShader>(type);
+                    ctx.r3.u32 = g_memory.MapVirtual(dummy);
+                    return;
                 }
             } else if (s_createShaderFromBytecodeCount <= 20) {
                 LOGF_WARNING("CreateShaderFromBytecode #{}: Invalid magic addr=0x{:08X} flags=0x{:08X}",
@@ -9008,8 +9122,10 @@ PPC_FUNC(sub_829D1758)
                      s_createShaderFromBytecodeCount, s_createShaderHits, s_createShaderMisses);
     }
     
-    // Fall through to original function if we didn't intercept
-    __imp__sub_829D1758(ctx, base);
+    // Return dummy shader for any uncategorized case — never fall through
+    // to original GPU code which contains td assertions that trap.
+    GuestShader* fallback = g_userHeap.AllocPhysical<GuestShader>(ResourceType::VertexShader);
+    ctx.r3.u32 = g_memory.MapVirtual(fallback);
 }
 
 // =============================================================================
@@ -9186,6 +9302,9 @@ GUEST_FUNCTION_HOOK(sub_829D69D8, UnlockVertexBuffer);
 // Render path: sub_82856F08 → sub_828529B0 → sub_828507F8 → sub_829D5388 → Video::Present
 GUEST_FUNCTION_HOOK(sub_829D5388, Video::Present);
 
+// PM4 ring buffer hooks — defined via PPC_FUNC above (sub_829D95E8, sub_829D8568)
+// PPC_FUNC(name) auto-registers as a guest function hook, no GUEST_FUNCTION_HOOK needed.
+
 // =============================================================================
 // Sonic 06 D3D hooks - DISABLED for GTA IV
 // These addresses are from Sonic 06 and don't exist in GTA IV's address space.
@@ -9260,14 +9379,54 @@ PPC_FUNC(sub_829D7E58)
     ctx.r3.u64 = ctx.r4.u64;
 }
 
-// PM4 Buffer Flush - No-op to skip GPU ring buffer submission  
-// sub_829D8568(device) -> returns buffer position
+// PM4 Ring Buffer Write - No-op since there's no Xenos GPU hardware.
+// Original function writes PM4 command packets into the GPU ring buffer,
+// calling sub_829D8568 (flush) when space runs out. Without real hardware,
+// the flush never frees space, causing an infinite loop.
+// Fix: skip all ring buffer writes, return write pointer unchanged.
+PPC_FUNC(sub_829D95E8)
+{
+    // r3=device, r4=writePtr — return writePtr unchanged in r3
+    ctx.r3.u32 = ctx.r4.u32;
+}
+
+// PM4 Buffer Flush - Replicate sub_829D83E0's buffer pointer reset
+// Original function submits commands to Xenos ring buffer (skipped — no hardware)
+// then resets device[48] so callers see available buffer space.
+// Without reset, sub_829D95E8 loops forever (zero available space).
 PPC_FUNC(sub_829D8568)
 {
-    // Return current command buffer position from device[48]
     uint32_t device = ctx.r3.u32;
     if (device != 0) {
         uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(device));
+        
+        // Replicate sub_829D83E0 epilogue (loc_829D8520):
+        //   r28 = device[48] + 4
+        //   aligned = (r28 + 31) & ~0x1F
+        //   if (aligned <= device[56]): stay in current segment
+        //   else: reset to secondary buffer (sub_829D8188 fallback)
+        uint32_t writePtr  = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr);
+        uint32_t r28       = writePtr + 4;
+        uint32_t aligned   = (r28 + 31) & ~0x1Fu;
+        uint32_t softLimit = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferLimit);
+        
+        if (softLimit != 0 && aligned <= softLimit) {
+            // Normal case: advance within current segment
+            GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::BufferSegmentBase, aligned);
+            GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr, aligned - 4);
+        } else {
+            // Buffer full or uninitialized: reset to secondary buffer (sub_829D8188 fallback)
+            uint32_t secBuf = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::SecondaryBufferBase);
+            if (secBuf != 0) {
+                GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr, secBuf);
+                GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferEnd, secBuf + 4800);
+                GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferLimit, secBuf + 4800 - 160);
+            } else {
+                // Last resort: advance writePtr to break the loop
+                GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr, writePtr + 4);
+            }
+        }
+        
         ctx.r3.u32 = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr);
     }
 }

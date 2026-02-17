@@ -1,15 +1,15 @@
 #pragma once
 
-#include "mutex.h"
+// =============================================================================
+// Guest-memory allocator — thin wrapper around RexGlue's Memory system.
+// Liberty uses this to place data structures in guest-addressable memory
+// (GPU resources, audio buffers, mod data, stdx containers, etc.).
+// Game code's own malloc (sub_8218BF20) runs natively through RexGlue's
+// NtAllocateVirtualMemory — it is NOT hooked here.
+// =============================================================================
 
 struct Heap
 {
-    Mutex mutex;
-    O1HeapInstance* heap;
-
-    Mutex physicalMutex;
-    O1HeapInstance* physicalHeap;
-
     void Init();
 
     void* Alloc(size_t size);
@@ -36,15 +36,3 @@ struct Heap
 };
 
 extern Heap g_userHeap;
-
-// Rtl Heap Functions (from MarathonRecomp)
-uint32_t RtlAllocateHeap(uint32_t heapHandle, uint32_t flags, uint32_t size);
-uint32_t RtlReAllocateHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer, uint32_t size);
-uint32_t RtlFreeHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer);
-uint32_t RtlSizeHeap(uint32_t heapHandle, uint32_t flags, uint32_t memoryPointer);
-
-// X Memory Functions
-uint32_t XAllocMem(uint32_t size, uint32_t flags);
-void XFreeMem(uint32_t baseAddress, uint32_t flags);
-uint32_t XVirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect);
-uint32_t XVirtualFree(uint32_t lpAddress, unsigned int dwSize, unsigned int dwFreeType);

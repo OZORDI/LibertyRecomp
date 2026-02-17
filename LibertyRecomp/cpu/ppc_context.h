@@ -1,9 +1,14 @@
 #pragma once
-// Forward to the generated ppc_context.h in LibertyRecompLib
-#include "../../LibertyRecompLib/ppc/ppc_context.h"
+// RexGlue's PPC types are authoritative.
+// LibertyRecompLib/ppc/ppc_context.h is legacy (kept but not used).
+//
+// ppc_config.h must be included before context.h so PPC_LOOKUP_FUNC
+// and PPC_CALL_INDIRECT_FUNC resolve to the real function table macros.
+#include "ppc_config.h"
+#include <rex/runtime/guest/context.h>
 
-// Thread-local PPC context pointer
-inline thread_local PPCContext* g_ppcContext = nullptr;
+// g_ppcContext is now defined in rex/runtime/guest/context.h
+// so both Liberty and the SDK share the same thread-local variable.
 
 inline PPCContext* GetPPCContext()
 {

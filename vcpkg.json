@@ -11,7 +11,11 @@
         },
         "freetype",
         "curl",
-        "protobuf"
+        "protobuf",
+        { "name": "spdlog", "default-features": false },
+        "fmt",
+        "date",
+        "utfcpp"
     ],
     "vcpkg-configuration": {
         "overlay-triplets": [

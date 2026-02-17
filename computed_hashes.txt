@@ -1,7 +1,0 @@
-default.xex: 7291180115558113634ULL (11841536 bytes)
-TU Grand Theft Auto IV (USA) (v4): 2937875892003139094ULL (3596288 bytes)
-TU Grand Theft Auto IV (USA) (v5): 415201722583792035ULL (3788800 bytes)
-TU Grand Theft Auto IV (USA) (v6): 16958872475154186956ULL (3727360 bytes)
-TU Grand Theft Auto IV (USA) (v8): 11658001583472505406ULL (3715072 bytes)
-DLC Grand Theft Auto IV - The Ballad of Gay Tony (World) (Addon): 2763848136321726940ULL (2011172864 bytes)
-DLC Grand Theft Auto IV - The Lost and Damned (World) (Addon): 8826874730743299848ULL (1915875328 bytes)

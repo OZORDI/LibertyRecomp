@@ -73,10 +73,6 @@ set(LIBERTY_RECOMP_PRECOMPILED_HEADERS
 
 set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/imports.cpp"
-    "kernel/object_table.cpp"
-    "kernel/xevent.cpp"
-    "kernel/xsemaphore.cpp"
-    "kernel/xmutant.cpp"
     "kernel/xdm.cpp"
     "kernel/heap.cpp"
     "kernel/memory.cpp"
@@ -90,7 +86,6 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/vfs.cpp"
     "kernel/button_prompts.cpp"
     "kernel/mod_overlay.cpp"
-    "kernel/mapped_file.cpp"
     "kernel/io/file_system.cpp"
     "kernel/io/gta_file_system.cpp"
     "kernel/io/net_socket.cpp"
@@ -107,7 +102,6 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/io/rpf_loader.cpp"
     "kernel/io/gxt_loader.cpp"
     "kernel/game_init.cpp"
-    "kernel/sync_table.cpp"
 )
 
 set(LIBERTY_RECOMP_LOCALE_CXX_SOURCES
@@ -272,6 +266,11 @@ set(LIBERTY_RECOMP_UTILS_CXX_SOURCES
     "utils/ring_buffer.cpp"
 )
 
+# RexGlue runtime integration (headers-only mode for now)
+set(LIBERTY_RECOMP_RUNTIME_CXX_SOURCES
+    # rex_adapter.h is header-only, no .cpp files yet
+)
+
 set(LIBERTY_RECOMP_THIRDPARTY_SOURCES
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl2.cpp"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/imgui.cpp"
@@ -301,6 +300,8 @@ set(LIBERTY_RECOMP_THIRDPARTY_INCLUDES
     "${LIBERTY_RECOMP_TOOLS_ROOT}/FidelityFX-SDK/Kits/FidelityFX"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/DLSS/include"
     "${LIBERTY_RECOMP_TOOLS_ROOT}/xess/inc"
+    # RexGlue SDK headers (for runtime migration)
+    "${CMAKE_CURRENT_SOURCE_DIR}/../glue/rexglue-sdk-main/include"
 )
 
 set_source_files_properties(${LIBERTY_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
@@ -328,6 +329,7 @@ set(LIBERTY_RECOMP_CXX_SOURCES
     ${LIBERTY_RECOMP_USER_CXX_SOURCES}
     ${LIBERTY_RECOMP_UTILS_CXX_SOURCES}
     ${LIBERTY_RECOMP_MOD_CXX_SOURCES}
+    ${LIBERTY_RECOMP_RUNTIME_CXX_SOURCES}
     ${LIBERTY_RECOMP_THIRDPARTY_SOURCES}
 )
 
@@ -486,7 +488,6 @@ target_link_libraries(LibertyRecomp PRIVATE
     libzstd_static
     msdf-atlas-gen::msdf-atlas-gen
     nfd::nfd
-    o1heap
     XenonUtils
     SDL2::SDL2-static
     SDL2_mixer
@@ -507,6 +508,22 @@ else()
 endif()
 
 target_link_libraries(LibertyRecomp PRIVATE ffmpeg)
+
+# RexGlue SDK runtime libraries
+if(USE_REXGLUE_RUNTIME)
+    target_compile_definitions(LibertyRecomp PRIVATE REX_USE_FULL_SDK)
+    target_link_libraries(LibertyRecomp PRIVATE
+        rexcore
+        rexruntime
+        rexkernel
+    )
+    # Ensure vcpkg fmt headers are found before XenonRecomp's vendored fmt.
+    # The copied headers live outside vcpkg_installed/ to avoid -isystem demotion.
+    set(_REXFMT_INC "${CMAKE_BINARY_DIR}/glue/rexglue_fmt_inc")
+    if(EXISTS "${_REXFMT_INC}/fmt")
+        target_include_directories(LibertyRecomp BEFORE PRIVATE "${_REXFMT_INC}")
+    endif()
+endif()
 
 # Link abseil libraries for GameNetworkingSockets (protobuf dependency)
 if (APPLE)

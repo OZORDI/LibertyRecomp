@@ -1,3 +1,4 @@
+#include <atomic>
 #include <apu/audio.h>
 #include <cpu/guest_thread.h>
 #include <kernel/heap.h>
@@ -60,7 +61,7 @@ void XAudioInitializeSystem() {
 }
 
 static std::unique_ptr<std::thread> g_audioThread;
-static volatile bool g_audioThreadShouldExit;
+static std::atomic<bool> g_audioThreadShouldExit{false};
 
 static void AudioThread() {
   using namespace std::chrono_literals;
@@ -180,7 +181,7 @@ void XAudioSubmitFrame(void *samples) {
     for (size_t i = 0; i < XAUDIO_NUM_SAMPLES; i++) {
       for (size_t j = 0; j < XAUDIO_NUM_CHANNELS; j++) {
         float samp = floatSamples[j * XAUDIO_NUM_SAMPLES + i] * volume;
-        audioFrames[i * 2 + j] = isnan(samp) ? 0.0f : samp;
+        audioFrames[i * XAUDIO_NUM_CHANNELS + j] = isnan(samp) ? 0.0f : samp;
       }
     }
 

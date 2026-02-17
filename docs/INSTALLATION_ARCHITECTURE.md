@@ -158,6 +158,8 @@ Liberty Recompiled supports several command-line arguments for troubleshooting a
 │     Look for .fxc files in:                                            │
 │     ├── Extracted game folders directly                                │
 │     └── Inside RPF archives (extract if needed)                        │
+│     Also verify .sps shader preset files in:                           │
+│     └── common/shaders/db/ (131 plain-text material presets)           │
 │                                                                         │
 │  10. COMPILE SHADER CACHE                                               │
 │      Detect platform and compile:                                      │

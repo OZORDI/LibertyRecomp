@@ -30,7 +30,8 @@ using Microsoft::WRL::ComPtr;
 #include <xxhash.h>
 #include <ankerl/unordered_dense.h>
 #include <ddspp.h>
-#include <ppc/ppc_recomp_shared.h>
+// RexGlue PPC types + function declarations (replaces legacy ppc_recomp_shared.h)
+#include "cpu/ppc_func_decls.h"
 #include <toml++/toml.hpp>
 #include <zstd.h>
 #include <stb_image.h>
@@ -41,7 +42,6 @@ using Microsoft::WRL::ComPtr;
 #include <imgui_internal.h>
 #include <implot.h>
 #include <backends/imgui_impl_sdl2.h>
-#include <o1heap.h>
 #include <cstddef>
 #include <smolv.h>
 #include <set>

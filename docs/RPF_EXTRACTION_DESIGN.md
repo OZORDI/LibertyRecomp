@@ -40,7 +40,8 @@ game/
 │   │   ├── handling.dat
 │   │   └── ...
 │   ├── shaders/
-│   │   └── fxl_final/
+│   │   ├── db/            ← 131 .sps shader preset files
+│   │   └── fxl_final/     ← 89 .fxc compiled shader files
 │   └── text/
 ├── xbox360/          # Extracted from xbox360.rpf
 │   ├── textures/

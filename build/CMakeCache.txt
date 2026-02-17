@@ -14,17 +14,1407 @@
 # EXTERNAL cache entries
 ########################
 
-//No help, variable specified on the command line.
-CMAKE_BUILD_TYPE:UNINITIALIZED=RelWithDebInfo
+//Path to a library.
+APPKIT_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework
+
+//Enable Apple Retina display support
+APPLE_RETINA_ENABLED:BOOL=ON
+
+//Build the included examples
+BUILD_EXAMPLES:BOOL=OFF
+
+//Build Framework bundle for OSX
+BUILD_FRAMEWORK:BOOL=OFF
+
+//Build the shared library version of the client library
+BUILD_SHARED_LIB:BOOL=OFF
+
+//Build the static link version of the client library
+BUILD_STATIC_LIB:BOOL=ON
+
+//Build crypto, pki and network connection tests
+BUILD_TESTS:BOOL=OFF
+
+//Build cert management tool
+BUILD_TOOLS:BOOL=OFF
+
+//Path to a program.
+CCACHE_BINARY:FILEPATH=CCACHE_BINARY-NOTFOUND
+
+//Path to a program.
+CMAKE_ADDR2LINE:FILEPATH=CMAKE_ADDR2LINE-NOTFOUND
+
+//Path to a program.
+CMAKE_AR:FILEPATH=/usr/bin/ar
+
+//ASM compiler
+CMAKE_ASM_COMPILER:FILEPATH=/usr/bin/cc
+
+//Flags used by the ASM compiler during all build types.
+CMAKE_ASM_FLAGS:STRING=
+
+//Flags used by the ASM compiler during DEBUG builds.
+CMAKE_ASM_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the ASM compiler during MINSIZEREL builds.
+CMAKE_ASM_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the ASM compiler during RELEASE builds.
+CMAKE_ASM_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the ASM compiler during RELWITHDEBINFO builds.
+CMAKE_ASM_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//Choose the type of build, options are: None Debug Release RelWithDebInfo
+// MinSizeRel ...
+CMAKE_BUILD_TYPE:STRING=Release
+
+//CXX compiler
+CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
+
+//Flags used by the CXX compiler during all build types.
+CMAKE_CXX_FLAGS:STRING=
+
+//Flags used by the CXX compiler during DEBUG builds.
+CMAKE_CXX_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the CXX compiler during MINSIZEREL builds.
+CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the CXX compiler during RELEASE builds.
+CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the CXX compiler during RELWITHDEBINFO builds.
+CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//C compiler
+CMAKE_C_COMPILER:FILEPATH=/usr/bin/cc
+
+//Flags used by the C compiler during all build types.
+CMAKE_C_FLAGS:STRING=
+
+//Flags used by the C compiler during DEBUG builds.
+CMAKE_C_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the C compiler during MINSIZEREL builds.
+CMAKE_C_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the C compiler during RELEASE builds.
+CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the C compiler during RELWITHDEBINFO builds.
+CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//Path to a program.
+CMAKE_DLLTOOL:FILEPATH=CMAKE_DLLTOOL-NOTFOUND
+
+//Flags used by the linker during all build types.
+CMAKE_EXE_LINKER_FLAGS:STRING=
+
+//Flags used by the linker during DEBUG builds.
+CMAKE_EXE_LINKER_FLAGS_DEBUG:STRING=
+
+//Flags used by the linker during MINSIZEREL builds.
+CMAKE_EXE_LINKER_FLAGS_MINSIZEREL:STRING=
+
+//Flags used by the linker during RELEASE builds.
+CMAKE_EXE_LINKER_FLAGS_RELEASE:STRING=
+
+//Flags used by the linker during RELWITHDEBINFO builds.
+CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
+
+//Enable/Disable output of build database during the build.
+CMAKE_EXPORT_BUILD_DATABASE:BOOL=
+
+//Enable/Disable output of compile commands during generation.
+CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=
 
 //Value Computed by CMake.
 CMAKE_FIND_PACKAGE_REDIRECTS_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/CMakeFiles/pkgRedirects
+
+//User executables (bin)
+CMAKE_INSTALL_BINDIR:PATH=bin
+
+//Read-only architecture-independent data (DATAROOTDIR)
+CMAKE_INSTALL_DATADIR:PATH=
+
+//Read-only architecture-independent data root (share)
+CMAKE_INSTALL_DATAROOTDIR:PATH=share
+
+//Documentation root (DATAROOTDIR/doc/PROJECT_NAME)
+CMAKE_INSTALL_DOCDIR:PATH=
+
+//C header files (include)
+CMAKE_INSTALL_INCLUDEDIR:PATH=include
+
+//Info documentation (DATAROOTDIR/info)
+CMAKE_INSTALL_INFODIR:PATH=
+
+//Object code libraries (lib)
+CMAKE_INSTALL_LIBDIR:PATH=lib
+
+//Program executables (libexec)
+CMAKE_INSTALL_LIBEXECDIR:PATH=libexec
+
+//Locale-dependent data (DATAROOTDIR/locale)
+CMAKE_INSTALL_LOCALEDIR:PATH=
+
+//Modifiable single-machine data (var)
+CMAKE_INSTALL_LOCALSTATEDIR:PATH=var
+
+//Man documentation (DATAROOTDIR/man)
+CMAKE_INSTALL_MANDIR:PATH=
+
+//Path to a program.
+CMAKE_INSTALL_NAME_TOOL:FILEPATH=/usr/bin/install_name_tool
+
+//C header files for non-gcc (/usr/include)
+CMAKE_INSTALL_OLDINCLUDEDIR:PATH=/usr/include
+
+//Install path prefix, prepended onto install directories.
+CMAKE_INSTALL_PREFIX:PATH=/usr/local
+
+//Run-time variable data (LOCALSTATEDIR/run)
+CMAKE_INSTALL_RUNSTATEDIR:PATH=
+
+//System admin executables (sbin)
+CMAKE_INSTALL_SBINDIR:PATH=sbin
+
+//Modifiable architecture-independent data (com)
+CMAKE_INSTALL_SHAREDSTATEDIR:PATH=com
+
+//Read-only single-machine data (etc)
+CMAKE_INSTALL_SYSCONFDIR:PATH=etc
+
+//Path to a program.
+CMAKE_LINKER:FILEPATH=/usr/bin/ld
+
+//Program used to build from build.ninja files.
+CMAKE_MAKE_PROGRAM:FILEPATH=/opt/homebrew/bin/ninja
+
+//Flags used by the linker during the creation of modules during
+// all build types.
+CMAKE_MODULE_LINKER_FLAGS:STRING=
+
+//Flags used by the linker during the creation of modules during
+// DEBUG builds.
+CMAKE_MODULE_LINKER_FLAGS_DEBUG:STRING=
+
+//Flags used by the linker during the creation of modules during
+// MINSIZEREL builds.
+CMAKE_MODULE_LINKER_FLAGS_MINSIZEREL:STRING=
+
+//Flags used by the linker during the creation of modules during
+// RELEASE builds.
+CMAKE_MODULE_LINKER_FLAGS_RELEASE:STRING=
+
+//Flags used by the linker during the creation of modules during
+// RELWITHDEBINFO builds.
+CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
+
+//Path to a program.
+CMAKE_NM:FILEPATH=/usr/bin/nm
+
+//Path to a program.
+CMAKE_OBJCOPY:FILEPATH=CMAKE_OBJCOPY-NOTFOUND
+
+//OBJCXX compiler
+CMAKE_OBJCXX_COMPILER:FILEPATH=/usr/bin/c++
+
+//Flags used by the Objective-C++ compiler during all build types.
+CMAKE_OBJCXX_FLAGS:STRING=
+
+//Flags used by the Objective-C++ compiler during DEBUG builds.
+CMAKE_OBJCXX_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the Objective-C++ compiler during MINSIZEREL builds.
+CMAKE_OBJCXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the Objective-C++ compiler during RELEASE builds.
+CMAKE_OBJCXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the Objective-C++ compiler during RELWITHDEBINFO
+// builds.
+CMAKE_OBJCXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//OBJC compiler
+CMAKE_OBJC_COMPILER:FILEPATH=/usr/bin/cc
+
+//Flags used by the Objective-C compiler during all build types.
+CMAKE_OBJC_FLAGS:STRING=
+
+//Flags used by the Objective-C compiler during DEBUG builds.
+CMAKE_OBJC_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the Objective-C compiler during MINSIZEREL builds.
+CMAKE_OBJC_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the Objective-C compiler during RELEASE builds.
+CMAKE_OBJC_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the Objective-C compiler during RELWITHDEBINFO
+// builds.
+CMAKE_OBJC_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//Path to a program.
+CMAKE_OBJDUMP:FILEPATH=/usr/bin/objdump
+
+//Build architectures for OSX
+CMAKE_OSX_ARCHITECTURES:STRING=
+
+//Minimum OS X version to target for deployment (at runtime); newer
+// APIs weak linked. Set to empty string for default value.
+CMAKE_OSX_DEPLOYMENT_TARGET:STRING=
+
+//The product will be built against the headers and libraries located
+// inside the indicated SDK.
+CMAKE_OSX_SYSROOT:STRING=
+
+//Build static libraries with -fPIC
+CMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON
+
+//Value Computed by CMake
+CMAKE_PROJECT_COMPAT_VERSION:STATIC=
+
+//Value Computed by CMake
+CMAKE_PROJECT_DESCRIPTION:STATIC=
+
+//Value Computed by CMake
+CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
+
+//Value Computed by CMake
+CMAKE_PROJECT_NAME:STATIC=LibertyRecomp-ALL
+
+//Value Computed by CMake
+CMAKE_PROJECT_SPDX_LICENSE:STATIC=
+
+//Value Computed by CMake
+CMAKE_PROJECT_VERSION:STATIC=1.3.0
+
+//Value Computed by CMake
+CMAKE_PROJECT_VERSION_MAJOR:STATIC=1
+
+//Value Computed by CMake
+CMAKE_PROJECT_VERSION_MINOR:STATIC=3
+
+//Value Computed by CMake
+CMAKE_PROJECT_VERSION_PATCH:STATIC=0
+
+//Value Computed by CMake
+CMAKE_PROJECT_VERSION_TWEAK:STATIC=
+
+//Path to a program.
+CMAKE_RANLIB:FILEPATH=/usr/bin/ranlib
+
+//Path to a program.
+CMAKE_READELF:FILEPATH=CMAKE_READELF-NOTFOUND
+
+//Flags used by the linker during the creation of shared libraries
+// during all build types.
+CMAKE_SHARED_LINKER_FLAGS:STRING=
+
+//Flags used by the linker during the creation of shared libraries
+// during DEBUG builds.
+CMAKE_SHARED_LINKER_FLAGS_DEBUG:STRING=
+
+//Flags used by the linker during the creation of shared libraries
+// during MINSIZEREL builds.
+CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL:STRING=
+
+//Flags used by the linker during the creation of shared libraries
+// during RELEASE builds.
+CMAKE_SHARED_LINKER_FLAGS_RELEASE:STRING=
+
+//Flags used by the linker during the creation of shared libraries
+// during RELWITHDEBINFO builds.
+CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO:STRING=
+
+//If set, runtime paths are not added when installing shared libraries,
+// but are added when building.
+CMAKE_SKIP_INSTALL_RPATH:BOOL=NO
+
+//If set, runtime paths are not added when using shared libraries.
+CMAKE_SKIP_RPATH:BOOL=NO
+
+//Flags used by the archiver during the creation of static libraries
+// during all build types.
+CMAKE_STATIC_LINKER_FLAGS:STRING=
+
+//Flags used by the archiver during the creation of static libraries
+// during DEBUG builds.
+CMAKE_STATIC_LINKER_FLAGS_DEBUG:STRING=
+
+//Flags used by the archiver during the creation of static libraries
+// during MINSIZEREL builds.
+CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL:STRING=
+
+//Flags used by the archiver during the creation of static libraries
+// during RELEASE builds.
+CMAKE_STATIC_LINKER_FLAGS_RELEASE:STRING=
+
+//Flags used by the archiver during the creation of static libraries
+// during RELWITHDEBINFO builds.
+CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
+
+//Path to a program.
+CMAKE_STRIP:FILEPATH=/usr/bin/strip
+
+//Path to a program.
+CMAKE_TAPI:FILEPATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/tapi
+
+//No help, variable specified on the command line.
+CMAKE_TOOLCHAIN_FILE:FILEPATH=/Users/Ozordi/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+//If this value is on, makefiles will be generated without the
+// .SILENT directive, and all commands will be echoed to the console
+// during the make.  This is useful for debugging only. With Visual
+// Studio IDE projects all commands are done without /nologo.
+CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
+
+//Path to a library.
+COREHAPTICS:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/CoreHaptics.framework
+
+//Enable to build OSX bundles
+CPACK_BINARY_BUNDLE:BOOL=OFF
+
+//Enable to build Debian packages
+CPACK_BINARY_DEB:BOOL=OFF
+
+//Enable to build OSX Drag And Drop package
+CPACK_BINARY_DRAGNDROP:BOOL=OFF
+
+//Enable to build FreeBSD packages
+CPACK_BINARY_FREEBSD:BOOL=OFF
+
+//Enable to build IFW packages
+CPACK_BINARY_IFW:BOOL=OFF
+
+//Enable to build NSIS packages
+CPACK_BINARY_NSIS:BOOL=OFF
+
+//Enable to build productbuild packages
+CPACK_BINARY_PRODUCTBUILD:BOOL=OFF
+
+//Enable to build RPM packages
+CPACK_BINARY_RPM:BOOL=OFF
+
+//Enable to build STGZ packages
+CPACK_BINARY_STGZ:BOOL=ON
+
+//Enable to build TBZ2 packages
+CPACK_BINARY_TBZ2:BOOL=OFF
+
+//Enable to build TGZ packages
+CPACK_BINARY_TGZ:BOOL=ON
+
+//Enable to build TXZ packages
+CPACK_BINARY_TXZ:BOOL=OFF
+
+//Enable to build RPM source packages
+CPACK_SOURCE_RPM:BOOL=OFF
+
+//Enable to build TBZ2 source packages
+CPACK_SOURCE_TBZ2:BOOL=ON
+
+//Enable to build TGZ source packages
+CPACK_SOURCE_TGZ:BOOL=ON
+
+//Enable to build TXZ source packages
+CPACK_SOURCE_TXZ:BOOL=ON
+
+//Enable to build TZ source packages
+CPACK_SOURCE_TZ:BOOL=ON
+
+//Enable to build ZIP source packages
+CPACK_SOURCE_ZIP:BOOL=OFF
+
+//Enable support for NAT-punched P2P connections using ICE protocol.
+//  Build native ICE client
+ENABLE_ICE:BOOL=ON
+
+//Value Computed by CMake
+FMT_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/thirdparty/fmt
+
+//Installation directory for cmake files, a relative path that
+// will be joined with /usr/local or an absolute path.
+FMT_CMAKE_DIR:STRING=lib/cmake/fmt
+
+//Generate the cuda-test target.
+FMT_CUDA_TEST:BOOL=OFF
+
+//Debug library postfix.
+FMT_DEBUG_POSTFIX:STRING=d
+
+//Generate the doc target.
+FMT_DOC:BOOL=OFF
+
+//Generate the fuzz target.
+FMT_FUZZ:BOOL=OFF
+
+//Installation directory for include files, a relative path that
+// will be joined with /usr/local or an absolute path.
+FMT_INC_DIR:STRING=include
+
+//Generate the install target.
+FMT_INSTALL:BOOL=ON
+
+//Value Computed by CMake
+FMT_IS_TOP_LEVEL:STATIC=OFF
+
+//Installation directory for libraries, a relative path that will
+// be joined to /usr/local or an absolute path.
+FMT_LIB_DIR:STRING=lib
+
+//Build a module instead of a traditional library.
+FMT_MODULE:BOOL=OFF
+
+//Include OS-specific APIs.
+FMT_OS:BOOL=ON
+
+//Enable extra warnings and expensive tests.
+FMT_PEDANTIC:BOOL=OFF
+
+//Installation directory for pkgconfig (.pc) files, a relative
+// path that will be joined with /usr/local or an absolute path.
+FMT_PKGCONFIG_DIR:STRING=lib/pkgconfig
+
+//Value Computed by CMake
+FMT_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/thirdparty/fmt
+
+//Expose headers with marking them as system.
+FMT_SYSTEM_HEADERS:BOOL=OFF
+
+//Generate the test target.
+FMT_TEST:BOOL=OFF
+
+//Enable Unicode support.
+FMT_UNICODE:BOOL=ON
+
+//Halt the compilation with an error on compiler warnings.
+FMT_WERROR:BOOL=OFF
+
+//Path to a library.
+FOUNDATION_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework
+
+//Path to a file.
+FREETYPE_INCLUDE_DIR_freetype2:PATH=/opt/homebrew/include/freetype2
+
+//Path to a file.
+FREETYPE_INCLUDE_DIR_ft2build:PATH=/opt/homebrew/include/freetype2
+
+//Path to a library.
+FREETYPE_LIBRARY_DEBUG:FILEPATH=FREETYPE_LIBRARY_DEBUG-NOTFOUND
+
+//Path to a library.
+FREETYPE_LIBRARY_RELEASE:FILEPATH=/opt/homebrew/lib/libfreetype.dylib
+
+//Path to a library.
+GAMECONTROLLER:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/GameController.framework
+
+//Git command line client
+GIT_EXECUTABLE:FILEPATH=/usr/bin/git
+
+//Value Computed by CMake
+GameNetworkingSockets_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/GameNetworkingSockets
+
+//Value Computed by CMake
+GameNetworkingSockets_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+GameNetworkingSockets_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/GameNetworkingSockets
+
+//Dependencies for the target
+GameNetworkingSockets_s_LIB_DEPENDS:STATIC=general;protobuf::libprotobuf;general;OpenSSL::Crypto;
+
+//Install documentation
+INSTALL_DOCS:BOOL=ON
+
+//Install ogg.pc file
+INSTALL_PKG_CONFIG_MODULE:BOOL=ON
+
+//Path to a library.
+IOKIT_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/IOKit.framework
+
+//Path to a library.
+IOSURFACE_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/IOSurface.framework
+
+//Apply compiler optimizations to build tools.
+LIBERTY_RECOMP_OPTIMIZE_TOOLS:BOOL=ON
+
+//Enable Link-Time Optimization
+LTO:BOOL=OFF
+
+//Value Computed by CMake
+LibertyRecomp-ALL_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build
+
+//Value Computed by CMake
+LibertyRecomp-ALL_IS_TOP_LEVEL:STATIC=ON
+
+//Value Computed by CMake
+LibertyRecomp-ALL_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp
+
+//Path to a library.
+METAL_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Metal.framework
+
+//Build the msdfgen standalone executable
+MSDFGEN_BUILD_STANDALONE:BOOL=OFF
+
+//Disable unused SVG functionality to minimize dependencies
+MSDFGEN_DISABLE_SVG:BOOL=ON
+
+//Link dynamic runtime library instead of static
+MSDF_ATLAS_DYNAMIC_RUNTIME:BOOL=OFF
+
+//Generate installation target
+MSDF_ATLAS_INSTALL:BOOL=OFF
+
+//Do not build the msdfgen submodule but find it as an external
+// package
+MSDF_ATLAS_MSDFGEN_EXTERNAL:BOOL=OFF
+
+//Use vcpkg package manager to link project dependencies
+MSDF_ATLAS_USE_VCPKG:BOOL=ON
+
+//Build SDL2 tests for nfd
+NFD_BUILD_SDL2_TESTS:BOOL=OFF
+
+//Build tests for nfd
+NFD_BUILD_TESTS:BOOL=OFF
+
+//Generate install target for nfd
+NFD_INSTALL:BOOL=OFF
+
+//Use defaultPath instead of recent folder on Windows
+NFD_OVERRIDE_RECENT_WITH_DEFAULT:BOOL=OFF
+
+//Use allowedContentTypes for filter lists on macOS >= 11.0
+NFD_USE_ALLOWEDCONTENTTYPES_IF_AVAILABLE:BOOL=ON
+
+//Path to a library.
+OPENSSL_CRYPTO_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.1/lib/libcrypto.dylib
+
+//Path to a file.
+OPENSSL_INCLUDE_DIR:PATH=/opt/homebrew/Cellar/openssl@3/3.6.1/include
+
+//Path to a library.
+OPENSSL_SSL_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.1/lib/libssl.dylib
+
+//Arguments to supply to pkg-config
+PKG_CONFIG_ARGN:STRING=
+
+//pkg-config executable
+PKG_CONFIG_EXECUTABLE:FILEPATH=/opt/homebrew/bin/pkg-config
+
+//Build example applications
+PLUME_BUILD_EXAMPLES:BOOL=OFF
+
+//Path to a file.
+Protobuf_INCLUDE_DIR:PATH=/opt/homebrew/include
+
+//No help, variable specified on the command line.
+Protobuf_LIBRARY:UNINITIALIZED=/opt/homebrew/lib/libprotobuf.dylib
+
+//Path to a library.
+Protobuf_LIBRARY_DEBUG:FILEPATH=Protobuf_LIBRARY_DEBUG-NOTFOUND
+
+//Path to a library.
+Protobuf_LIBRARY_RELEASE:FILEPATH=Protobuf_LIBRARY_RELEASE-NOTFOUND
+
+//Path to a library.
+Protobuf_LITE_LIBRARY_DEBUG:FILEPATH=Protobuf_LITE_LIBRARY_DEBUG-NOTFOUND
+
+//Path to a library.
+Protobuf_LITE_LIBRARY_RELEASE:FILEPATH=Protobuf_LITE_LIBRARY_RELEASE-NOTFOUND
+
+//The Google Protocol Buffers Compiler
+Protobuf_PROTOC_EXECUTABLE:FILEPATH=/opt/homebrew/bin/protoc
+
+//Path to a library.
+Protobuf_PROTOC_LIBRARY_DEBUG:FILEPATH=Protobuf_PROTOC_LIBRARY_DEBUG-NOTFOUND
+
+//Path to a library.
+Protobuf_PROTOC_LIBRARY_RELEASE:FILEPATH=Protobuf_PROTOC_LIBRARY_RELEASE-NOTFOUND
+
+//Link with protobuf statically
+Protobuf_USE_STATIC_LIBS:BOOL=ON
+
+//Path to a library.
+QUARTZCORE_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/QuartzCore.framework
+
+REXGLUE_BUILD_TESTS:BOOL=OFF
+
+//Enable AddressSanitizer for sanitized targets.
+SANITIZE_ADDRESS:BOOL=OFF
+
+//Try to link static against sanitizers.
+SANITIZE_LINK_STATIC:BOOL=OFF
+
+//Enable MemorySanitizer for sanitized targets.
+SANITIZE_MEMORY:BOOL=OFF
+
+//Enable ThreadSanitizer for sanitized targets.
+SANITIZE_THREAD:BOOL=OFF
+
+//Enable UndefinedBehaviorSanitizer for sanitized targets.
+SANITIZE_UNDEFINED:BOOL=OFF
+
+//Dependencies for the target
+SDL2-static_LIB_DEPENDS:STATIC=general;m;
+
+//Support an external music player
+SDL2MIXER_CMD:BOOL=OFF
+
+//Name suffix for debug builds
+SDL2MIXER_DEBUG_POSTFIX:STRING=d
+
+//Support loading GME music via game-music-emu
+SDL2MIXER_GME:BOOL=OFF
+
+//Dynamically load libgme
+SDL2MIXER_GME_SHARED:BOOL=OFF
+
+//Build the SDL2_mixer sample program(s)
+SDL2MIXER_SAMPLES:BOOL=OFF
+
+//Enable OGG Vorbis music
+SDL2MIXER_VORBIS:STRING=STB
+
+//Dynamically load vorbisfile library
+SDL2MIXER_VORBIS_VORBISFILE_SHARED:BOOL=OFF
+
+//Enable streaming WAVE music
+SDL2MIXER_WAVE:BOOL=ON
+
+//Value Computed by CMake
+SDL2_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/SDL
+
+//Disable installation of SDL2
+SDL2_DISABLE_INSTALL:BOOL=ON
+
+//Disable building/installation of SDL2main
+SDL2_DISABLE_SDL2MAIN:BOOL=OFF
+
+//Disable uninstallation of SDL2
+SDL2_DISABLE_UNINSTALL:BOOL=OFF
+
+//Value Computed by CMake
+SDL2_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+SDL2_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/SDL
+
+//Value Computed by CMake
+SDL2_mixer_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/SDL_mixer
+
+//Value Computed by CMake
+SDL2_mixer_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+SDL2_mixer_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/SDL_mixer
+
+//Support the ALSA audio API
+SDL_ALSA:BOOL=OFF
+
+//Use Altivec assembly routines
+SDL_ALTIVEC:BOOL=ON
+
+//Support the Analog Real Time Synthesizer
+SDL_ARTS:BOOL=OFF
+
+//Use AddressSanitizer to detect memory errors
+SDL_ASAN:BOOL=OFF
+
+//Enable assembly routines
+SDL_ASSEMBLY:BOOL=ON
+
+//Enable internal sanity checks (auto/disabled/release/enabled/paranoid)
+SDL_ASSERTIONS:STRING=auto
+
+//Enable the Atomic subsystem
+SDL_ATOMIC:BOOL=ON
+
+//Enable the Audio subsystem
+SDL_AUDIO:BOOL=ON
+
+//number to use for magic backgrounding signal or 'OFF'
+SDL_BACKGROUNDING_SIGNAL:STRING=OFF
+
+//Use Ccache to speed up build
+SDL_CCACHE:BOOL=ON
+
+//Use clock_gettime() instead of gettimeofday()
+SDL_CLOCK_GETTIME:BOOL=OFF
+
+//Name suffix for debug builds
+SDL_CMAKE_DEBUG_POSTFIX:STRING=d
+
+//Use Cocoa video driver
+SDL_COCOA:BOOL=ON
+
+//Enable the CPUinfo subsystem
+SDL_CPUINFO:BOOL=ON
+
+//Use DirectFB video driver
+SDL_DIRECTFB:BOOL=OFF
+
+//Use DirectX for Windows audio/video
+SDL_DIRECTX:BOOL=OFF
+
+//Support the disk writer audio driver
+SDL_DISKAUDIO:BOOL=ON
+
+//Support the dummy audio driver
+SDL_DUMMYAUDIO:BOOL=ON
+
+//Use dummy video driver
+SDL_DUMMYVIDEO:BOOL=ON
+
+//Support the Enlightened Sound Daemon
+SDL_ESD:BOOL=OFF
+
+//Enable the Events subsystem
+SDL_EVENTS:BOOL=ON
+
+//Enable the File subsystem
+SDL_FILE:BOOL=ON
+
+//Enable the Filesystem subsystem
+SDL_FILESYSTEM:BOOL=ON
+
+//number to use for magic foregrounding signal or 'OFF'
+SDL_FOREGROUNDING_SIGNAL:STRING=OFF
+
+//Use FusionSound audio driver
+SDL_FUSIONSOUND:BOOL=OFF
+
+//Use gcc builtin atomics
+SDL_GCC_ATOMICS:BOOL=ON
+
+//Enable the Haptic subsystem
+SDL_HAPTIC:BOOL=ON
+
+//Enable the HIDAPI subsystem
+SDL_HIDAPI:BOOL=ON
+
+//Use HIDAPI for low level joystick drivers
+SDL_HIDAPI_JOYSTICK:BOOL=ON
+
+//Use libusb for low level joystick drivers
+SDL_HIDAPI_LIBUSB:BOOL=OFF
+
+//Install test-cases
+SDL_INSTALL_TESTS:BOOL=OFF
+
+//Support the JACK audio API
+SDL_JACK:BOOL=OFF
+
+//Enable the Joystick subsystem
+SDL_JOYSTICK:BOOL=ON
+
+//Use KMS DRM video driver
+SDL_KMSDRM:BOOL=OFF
+
+//Use the system C library
+SDL_LIBC:BOOL=ON
+
+//Prefer iconv() from libiconv, if available, over libc version
+SDL_LIBICONV:BOOL=OFF
+
+//Use libsamplerate for audio rate conversion
+SDL_LIBSAMPLERATE:BOOL=OFF
+
+//Enable libudev support
+SDL_LIBUDEV:BOOL=ON
+
+//Enable the Loadso subsystem
+SDL_LOADSO:BOOL=ON
+
+//Enable the Locale subsystem
+SDL_LOCALE:BOOL=ON
+
+//Enable Metal support
+SDL_METAL:BOOL=ON
+
+//Enable the Misc subsystem
+SDL_MISC:BOOL=ON
+
+//Support the NAS audio API
+SDL_NAS:BOOL=OFF
+
+//Use offscreen video driver
+SDL_OFFSCREEN:BOOL=ON
+
+//Include OpenGL support
+SDL_OPENGL:BOOL=ON
+
+//Include OpenGL ES support
+SDL_OPENGLES:BOOL=ON
+
+//Use Pipewire audio
+SDL_PIPEWIRE:BOOL=OFF
+
+//Enable the Power subsystem
+SDL_POWER:BOOL=ON
+
+//Use POSIX threads for multi-threading
+SDL_PTHREADS:BOOL=ON
+
+//Use pthread semaphores
+SDL_PTHREADS_SEM:BOOL=ON
+
+//Use PulseAudio
+SDL_PULSEAUDIO:BOOL=OFF
+
+//Enable the Render subsystem
+SDL_RENDER:BOOL=ON
+
+//Enable the Direct3D render driver
+SDL_RENDER_D3D:BOOL=OFF
+
+//Enable the Metal render driver
+SDL_RENDER_METAL:BOOL=ON
+
+//Use an rpath when linking SDL
+SDL_RPATH:BOOL=OFF
+
+//Use Raspberry Pi 0-3 video driver
+SDL_RPI:BOOL=OFF
+
+//Enable the Sensor subsystem
+SDL_SENSOR:BOOL=ON
+
+//Build a shared version of the library
+SDL_SHARED:BOOL=OFF
+
+//Support the sndio audio API
+SDL_SNDIO:BOOL=OFF
+
+//Build a static version of the library
+SDL_STATIC:BOOL=ON
+
+//Static version of the library should be built with Position Independent
+// Code
+SDL_STATIC_PIC:BOOL=OFF
+
+//Use iconv() from system-installed libraries
+SDL_SYSTEM_ICONV:BOOL=OFF
+
+//Build the SDL2_test library
+SDL_TEST:BOOL=ON
+
+//Build the test directory
+SDL_TESTS:BOOL=OFF
+
+//Enable the Threads subsystem
+SDL_THREADS:BOOL=ON
+
+//Enable the Timers subsystem
+SDL_TIMERS:BOOL=ON
+
+//Vendor name and/or version to add to SDL_REVISION
+SDL_VENDOR_INFO:STRING=
+
+//Enable the Video subsystem
+SDL_VIDEO:BOOL=ON
+
+//Enable the virtual-joystick driver
+SDL_VIRTUAL_JOYSTICK:BOOL=ON
+
+//Use Vivante EGL video driver
+SDL_VIVANTE:BOOL=OFF
+
+//Enable Vulkan support
+SDL_VULKAN:BOOL=ON
+
+//Use the Windows WASAPI audio driver
+SDL_WASAPI:BOOL=OFF
+
+//Use Wayland video driver
+SDL_WAYLAND:BOOL=OFF
+
+//Enable -Werror
+SDL_WERROR:BOOL=OFF
+
+//Use X11 video driver
+SDL_X11:BOOL=OFF
+
+//Use Xinput for Windows
+SDL_XINPUT:BOOL=OFF
+
+//Value Computed by CMake
+SPIRV-Cross_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/MoltenVK/SPIRV-Cross
+
+//Value Computed by CMake
+SPIRV-Cross_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+SPIRV-Cross_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/MoltenVK/SPIRV-Cross
+
+//Build the CLI binary. Requires SPIRV_CROSS_STATIC.
+SPIRV_CROSS_CLI:BOOL=OFF
+
+//Enable C++ target support.
+SPIRV_CROSS_ENABLE_CPP:BOOL=OFF
+
+//Enable C API wrapper support in static library.
+SPIRV_CROSS_ENABLE_C_API:BOOL=ON
+
+//Enable GLSL support.
+SPIRV_CROSS_ENABLE_GLSL:BOOL=ON
+
+//Enable HLSL target support.
+SPIRV_CROSS_ENABLE_HLSL:BOOL=OFF
+
+//Enable MSL target support.
+SPIRV_CROSS_ENABLE_MSL:BOOL=ON
+
+//Enable JSON reflection target support.
+SPIRV_CROSS_ENABLE_REFLECT:BOOL=ON
+
+//Enable SPIRV-Cross tests.
+SPIRV_CROSS_ENABLE_TESTS:BOOL=OFF
+
+//Enable util module support.
+SPIRV_CROSS_ENABLE_UTIL:BOOL=ON
+
+//Instead of throwing exceptions assert
+SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS:BOOL=OFF
+
+//Force position-independent code for all targets.
+SPIRV_CROSS_FORCE_PIC:BOOL=OFF
+
+//Force use of STL types instead of STL replacements in certain
+// places. Might reduce performance.
+SPIRV_CROSS_FORCE_STL_TYPES:BOOL=OFF
+
+//Misc warnings useful for Travis runs.
+SPIRV_CROSS_MISC_WARNINGS:BOOL=OFF
+
+SPIRV_CROSS_NAMESPACE_OVERRIDE:BOOL=OFF
+
+//Sanitize address
+SPIRV_CROSS_SANITIZE_ADDRESS:BOOL=OFF
+
+//Sanitize memory
+SPIRV_CROSS_SANITIZE_MEMORY:BOOL=OFF
+
+//Sanitize threads
+SPIRV_CROSS_SANITIZE_THREADS:BOOL=OFF
+
+//Sanitize undefined
+SPIRV_CROSS_SANITIZE_UNDEFINED:BOOL=OFF
+
+//Build the C API as a single shared library.
+SPIRV_CROSS_SHARED:BOOL=OFF
+
+//Skips installation targets.
+SPIRV_CROSS_SKIP_INSTALL:BOOL=ON
+
+SPIRV_CROSS_SPV_HEADER_NAMESPACE_OVERRIDE:BOOL=OFF
+
+//Build the C and C++ API as static libraries.
+SPIRV_CROSS_STATIC:BOOL=ON
+
+//Fail build on warnings.
+SPIRV_CROSS_WERROR:BOOL=OFF
+
+//Path to a library.
+UNIFORMTYPEIDENTIFIERS_LIBRARY:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/UniformTypeIdentifiers.framework
+
+//Crypto library to use for AES/SHA256
+USE_CRYPTO:STRING=OpenSSL
+
+//Use RexGlue SDK for runtime infrastructure
+USE_REXGLUE_RUNTIME:BOOL=ON
+
+//Build Google's WebRTC library to get ICE support for P2P
+USE_STEAMWEBRTC:BOOL=OFF
+
+//Generate Metal AIR shader cache
+XENOS_RECOMP_AIR:BOOL=ON
+
+//Build the xxhsum binary
+XXHASH_BUILD_XXHSUM:BOOL=ON
+
+XXHASH_BUNDLED_MODE:BOOL=ON
+
+//Value Computed by CMake
+XenonAnalyse_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/XenonAnalyse
+
+//Value Computed by CMake
+XenonAnalyse_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenonAnalyse_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/XenonAnalyse
+
+//Value Computed by CMake
+XenonRecomp-ALL_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp
+
+//Value Computed by CMake
+XenonRecomp-ALL_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenonRecomp-ALL_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp
+
+//Value Computed by CMake
+XenonRecomp_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/XenonRecomp
+
+//Value Computed by CMake
+XenonRecomp_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenonRecomp_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/XenonRecomp
+
+//Value Computed by CMake
+XenonUtils_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/XenonUtils
+
+//Value Computed by CMake
+XenonUtils_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenonUtils_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/XenonUtils
+
+//Value Computed by CMake
+XenosRecomp-ALL_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp
+
+//Value Computed by CMake
+XenosRecomp-ALL_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenosRecomp-ALL_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp
+
+//Value Computed by CMake
+XenosRecomp_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp/XenosRecomp
+
+//Value Computed by CMake
+XenosRecomp_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+XenosRecomp_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/XenosRecomp
+
+//Visibility for ZDICTLIB_STATIC_API API
+ZDICTLIB_STATIC_API:STRING=
+
+//Visibility for ZDICTLIB_VISIBLE API
+ZDICTLIB_VISIBLE:STRING=
+
+//Path to a file.
+ZLIB_INCLUDE_DIR:PATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
+
+//Path to a library.
+ZLIB_LIBRARY_DEBUG:FILEPATH=ZLIB_LIBRARY_DEBUG-NOTFOUND
+
+//Path to a library.
+ZLIB_LIBRARY_RELEASE:FILEPATH=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libz.tbd
+
+//Visibility for ZSTDERRORLIB_VISIBLE API
+ZSTDERRORLIB_VISIBLE:STRING=
+
+//Visibility for ZSTDLIB_STATIC_API API
+ZSTDLIB_STATIC_API:STRING=
+
+//Visibility for ZSTDLIB API
+ZSTDLIB_VISIBLE:STRING=
+
+//BUILD COMPRESSION MODULE
+ZSTD_BUILD_COMPRESSION:BOOL=ON
+
+//BUILD CONTRIB
+ZSTD_BUILD_CONTRIB:BOOL=OFF
+
+//BUILD DECOMPRESSION MODULE
+ZSTD_BUILD_DECOMPRESSION:BOOL=ON
+
+//BUILD DEPRECATED MODULE
+ZSTD_BUILD_DEPRECATED:BOOL=OFF
+
+//BUILD DICTBUILDER MODULE
+ZSTD_BUILD_DICTBUILDER:BOOL=ON
+
+//BUILD PROGRAMS
+ZSTD_BUILD_PROGRAMS:BOOL=ON
+
+//BUILD SHARED LIBRARIES
+ZSTD_BUILD_SHARED:BOOL=ON
+
+//BUILD STATIC LIBRARIES
+ZSTD_BUILD_STATIC:BOOL=ON
+
+//BUILD TESTS
+ZSTD_BUILD_TESTS:BOOL=OFF
+
+ZSTD_LEGACY_LEVEL:STRING=5
+
+//LEGACY SUPPORT
+ZSTD_LEGACY_SUPPORT:BOOL=ON
+
+//LZ4 SUPPORT
+ZSTD_LZ4_SUPPORT:BOOL=OFF
+
+//LZMA SUPPORT
+ZSTD_LZMA_SUPPORT:BOOL=OFF
+
+//MULTITHREADING SUPPORT
+ZSTD_MULTITHREAD_SUPPORT:BOOL=ON
+
+//PROGRAMS LINK SHARED
+ZSTD_PROGRAMS_LINK_SHARED:BOOL=OFF
+
+//ZLIB SUPPORT
+ZSTD_ZLIB_SUPPORT:BOOL=OFF
+
+//Value Computed by CMake
+bc_diff_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/bc_diff
+
+//Value Computed by CMake
+bc_diff_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+bc_diff_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/bc_diff
+
+//Value Computed by CMake
+disasm_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/thirdparty/disasm
+
+//Value Computed by CMake
+disasm_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+disasm_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/thirdparty/disasm
+
+//Value Computed by CMake
+dxc-bin_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp/thirdparty/dxc-bin
+
+//Value Computed by CMake
+dxc-bin_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+dxc-bin_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/dxc-bin
+
+//Value Computed by CMake
+file_to_c_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/file_to_c
+
+//Value Computed by CMake
+file_to_c_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+file_to_c_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/file_to_c
+
+//Value Computed by CMake
+fshasher_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/fshasher
+
+//Value Computed by CMake
+fshasher_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+fshasher_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/fshasher
+
+//Value Computed by CMake
+liberty_debugger_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/liberty_debugger
+
+//Value Computed by CMake
+liberty_debugger_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+liberty_debugger_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/liberty_debugger
+
+//Value Computed by CMake
+libogg_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/SDL_mixer/external/ogg
+
+//Value Computed by CMake
+libogg_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+libogg_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/SDL_mixer/external/ogg
+
+//Value Computed by CMake
+libzstd_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp/thirdparty/zstd/build/cmake/lib
+
+//Value Computed by CMake
+libzstd_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+libzstd_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/zstd/build/cmake/lib
+
+//Value Computed by CMake
+msdf-atlas-gen_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/msdf-atlas-gen
+
+//Value Computed by CMake
+msdf-atlas-gen_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+msdf-atlas-gen_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/msdf-atlas-gen
+
+//Value Computed by CMake
+msdfgen_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/msdf-atlas-gen/msdfgen
+
+//Value Computed by CMake
+msdfgen_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+msdfgen_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/msdf-atlas-gen/msdfgen
+
+//Value Computed by CMake
+nativefiledialog-extended_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/nativefiledialog-extended
+
+//Value Computed by CMake
+nativefiledialog-extended_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+nativefiledialog-extended_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/nativefiledialog-extended
+
+//Dependencies for the target
+nfd_LIB_DEPENDS:STATIC=general;/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework;general;/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/UniformTypeIdentifiers.framework;
+
+//Value Computed by CMake
+o1heap_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/o1heap
+
+//Value Computed by CMake
+o1heap_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+o1heap_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/o1heap
+
+//Path to a library.
+pkgcfg_lib__OPENSSL_crypto:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.1/lib/libcrypto.dylib
+
+//Path to a library.
+pkgcfg_lib__OPENSSL_ssl:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.1/lib/libssl.dylib
+
+//Value Computed by CMake
+plume_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/plume
+
+//Value Computed by CMake
+plume_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+plume_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/plume
+
+//Value Computed by CMake
+programs_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp/thirdparty/zstd/build/cmake/programs
+
+//Value Computed by CMake
+programs_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+programs_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/zstd/build/cmake/programs
+
+//The directory containing a CMake configuration file for spdlog.
+spdlog_DIR:PATH=spdlog_DIR-NOTFOUND
+
+//Dependencies for the target
+spirv-cross-c_LIB_DEPENDS:STATIC=general;spirv-cross-glsl;general;spirv-cross-msl;general;spirv-cross-reflect;
+
+//Dependencies for the target
+spirv-cross-glsl_LIB_DEPENDS:STATIC=general;spirv-cross-core;
+
+//Dependencies for the target
+spirv-cross-msl_LIB_DEPENDS:STATIC=general;spirv-cross-glsl;
+
+//Dependencies for the target
+spirv-cross-util_LIB_DEPENDS:STATIC=general;spirv-cross-core;
+
+//Value Computed by CMake
+tomlplusplus_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/thirdparty/tomlplusplus
+
+//Use SYSTEM modifier for tomlplusplus's includes, disabling warnings
+tomlplusplus_INCLUDES_WITH_SYSTEM:BOOL=ON
+
+//Value Computed by CMake
+tomlplusplus_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+tomlplusplus_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/thirdparty/tomlplusplus
+
+//Value Computed by CMake
+u8extract_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/u8extract
+
+//Value Computed by CMake
+u8extract_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+u8extract_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/u8extract
+
+//Value Computed by CMake
+vorbis_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/thirdparty/SDL_mixer/external/vorbis
+
+//Value Computed by CMake
+vorbis_IS_TOP_LEVEL:STATIC=OFF
+
+//Dependencies for the target
+vorbis_LIB_DEPENDS:STATIC=general;Ogg::ogg;
+
+//Value Computed by CMake
+vorbis_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/thirdparty/SDL_mixer/external/vorbis
+
+//Dependencies for the target
+vorbisenc_LIB_DEPENDS:STATIC=general;vorbis;
+
+//Dependencies for the target
+vorbisfile_LIB_DEPENDS:STATIC=general;vorbis;
+
+//Value Computed by CMake
+x_decompress_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/x_decompress
+
+//Value Computed by CMake
+x_decompress_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+x_decompress_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/x_decompress
+
+//Value Computed by CMake
+xxHash_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenonRecomp/thirdparty/xxHash/cmake_unofficial
+
+//Value Computed by CMake
+xxHash_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+xxHash_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenonRecomp/thirdparty/xxHash/cmake_unofficial
+
+//Value Computed by CMake
+zstd_BINARY_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/build/tools/XenosRecomp/thirdparty/zstd/build/cmake
+
+//Value Computed by CMake
+zstd_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+zstd_SOURCE_DIR:STATIC=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/zstd/build/cmake
 
 
 ########################
 # INTERNAL cache entries
 ########################
 
+//Build shared libraries
+BUILD_SHARED_LIBS:INTERNAL=OFF
+//Test CHECK_CPU_ARCHITECTURE_ARM32
+CHECK_CPU_ARCHITECTURE_ARM32:INTERNAL=
+//Test CHECK_CPU_ARCHITECTURE_ARM64
+CHECK_CPU_ARCHITECTURE_ARM64:INTERNAL=1
+//Test CHECK_CPU_ARCHITECTURE_ARM64EC
+CHECK_CPU_ARCHITECTURE_ARM64EC:INTERNAL=
+//Test CHECK_CPU_ARCHITECTURE_LOONGARCH64
+CHECK_CPU_ARCHITECTURE_LOONGARCH64:INTERNAL=
+//Test CHECK_CPU_ARCHITECTURE_X64
+CHECK_CPU_ARCHITECTURE_X64:INTERNAL=
+//Test CHECK_CPU_ARCHITECTURE_X86
+CHECK_CPU_ARCHITECTURE_X86:INTERNAL=
+//ADVANCED property for variable: CMAKE_ADDR2LINE
+CMAKE_ADDR2LINE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_AR
+CMAKE_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_COMPILER
+CMAKE_ASM_COMPILER-ADVANCED:INTERNAL=1
+CMAKE_ASM_COMPILER_WORKS:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_FLAGS
+CMAKE_ASM_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_FLAGS_DEBUG
+CMAKE_ASM_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_FLAGS_MINSIZEREL
+CMAKE_ASM_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_FLAGS_RELEASE
+CMAKE_ASM_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_ASM_FLAGS_RELWITHDEBINFO
+CMAKE_ASM_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //This is the directory where this CMakeCache.txt was created
 CMAKE_CACHEFILE_DIR:INTERNAL=/Users/Ozordi/Downloads/LibertyRecomp/build
 //Major version of cmake used to create the current loaded cache
@@ -39,6 +1429,50 @@ CMAKE_COMMAND:INTERNAL=/opt/homebrew/bin/cmake
 CMAKE_CPACK_COMMAND:INTERNAL=/opt/homebrew/bin/cpack
 //Path to ctest program executable.
 CMAKE_CTEST_COMMAND:INTERNAL=/opt/homebrew/bin/ctest
+//ADVANCED property for variable: CMAKE_CXX_COMPILER
+CMAKE_CXX_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_FLAGS
+CMAKE_CXX_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_FLAGS_DEBUG
+CMAKE_CXX_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_FLAGS_MINSIZEREL
+CMAKE_CXX_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_FLAGS_RELEASE
+CMAKE_CXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_FLAGS_RELWITHDEBINFO
+CMAKE_CXX_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_COMPILER
+CMAKE_C_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS
+CMAKE_C_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_DEBUG
+CMAKE_C_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_MINSIZEREL
+CMAKE_C_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_RELEASE
+CMAKE_C_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_RELWITHDEBINFO
+CMAKE_C_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_DLLTOOL
+CMAKE_DLLTOOL-ADVANCED:INTERNAL=1
+//Path to cache edit program executable.
+CMAKE_EDIT_COMMAND:INTERNAL=/opt/homebrew/bin/ccmake
+//Executable file format
+CMAKE_EXECUTABLE_FORMAT:INTERNAL=MACHO
+//ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS
+CMAKE_EXE_LINKER_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_DEBUG
+CMAKE_EXE_LINKER_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_MINSIZEREL
+CMAKE_EXE_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_RELEASE
+CMAKE_EXE_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
+CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXPORT_BUILD_DATABASE
+CMAKE_EXPORT_BUILD_DATABASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXPORT_COMPILE_COMMANDS
+CMAKE_EXPORT_COMPILE_COMMANDS-ADVANCED:INTERNAL=1
 //Name of external makefile project generator.
 CMAKE_EXTRA_GENERATOR:INTERNAL=
 //Name of generator.
@@ -49,13 +1483,774 @@ CMAKE_GENERATOR_INSTANCE:INTERNAL=
 CMAKE_GENERATOR_PLATFORM:INTERNAL=
 //Name of generator toolset.
 CMAKE_GENERATOR_TOOLSET:INTERNAL=
+//Test CMAKE_HAVE_LIBC_PTHREAD
+CMAKE_HAVE_LIBC_PTHREAD:INTERNAL=1
 //Source directory with the top level CMakeLists.txt file for this
 // project
 CMAKE_HOME_DIRECTORY:INTERNAL=/Users/Ozordi/Downloads/LibertyRecomp
+//ADVANCED property for variable: CMAKE_INSTALL_BINDIR
+CMAKE_INSTALL_BINDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DATADIR
+CMAKE_INSTALL_DATADIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DATAROOTDIR
+CMAKE_INSTALL_DATAROOTDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_DOCDIR
+CMAKE_INSTALL_DOCDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_INCLUDEDIR
+CMAKE_INSTALL_INCLUDEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_INFODIR
+CMAKE_INSTALL_INFODIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LIBDIR
+CMAKE_INSTALL_LIBDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LIBEXECDIR
+CMAKE_INSTALL_LIBEXECDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LOCALEDIR
+CMAKE_INSTALL_LOCALEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_LOCALSTATEDIR
+CMAKE_INSTALL_LOCALSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_MANDIR
+CMAKE_INSTALL_MANDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_NAME_TOOL
+CMAKE_INSTALL_NAME_TOOL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_OLDINCLUDEDIR
+CMAKE_INSTALL_OLDINCLUDEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_RUNSTATEDIR
+CMAKE_INSTALL_RUNSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SBINDIR
+CMAKE_INSTALL_SBINDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SHAREDSTATEDIR
+CMAKE_INSTALL_SHAREDSTATEDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_INSTALL_SYSCONFDIR
+CMAKE_INSTALL_SYSCONFDIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_LINKER
+CMAKE_LINKER-ADVANCED:INTERNAL=1
 //Name of CMakeLists files to read
 CMAKE_LIST_FILE_NAME:INTERNAL=CMakeLists.txt
+//ADVANCED property for variable: CMAKE_MAKE_PROGRAM
+CMAKE_MAKE_PROGRAM-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_MODULE_LINKER_FLAGS
+CMAKE_MODULE_LINKER_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_MODULE_LINKER_FLAGS_DEBUG
+CMAKE_MODULE_LINKER_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_MODULE_LINKER_FLAGS_MINSIZEREL
+CMAKE_MODULE_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_MODULE_LINKER_FLAGS_RELEASE
+CMAKE_MODULE_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
+CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_NM
+CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=1
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=43
+//ADVANCED property for variable: CMAKE_OBJCOPY
+CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_COMPILER
+CMAKE_OBJCXX_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_FLAGS
+CMAKE_OBJCXX_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_FLAGS_DEBUG
+CMAKE_OBJCXX_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_FLAGS_MINSIZEREL
+CMAKE_OBJCXX_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_FLAGS_RELEASE
+CMAKE_OBJCXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJCXX_FLAGS_RELWITHDEBINFO
+CMAKE_OBJCXX_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_COMPILER
+CMAKE_OBJC_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_FLAGS
+CMAKE_OBJC_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_FLAGS_DEBUG
+CMAKE_OBJC_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_FLAGS_MINSIZEREL
+CMAKE_OBJC_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_FLAGS_RELEASE
+CMAKE_OBJC_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJC_FLAGS_RELWITHDEBINFO
+CMAKE_OBJC_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_OBJDUMP
+CMAKE_OBJDUMP-ADVANCED:INTERNAL=1
+//Platform information initialized
+CMAKE_PLATFORM_INFO_INITIALIZED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_RANLIB
+CMAKE_RANLIB-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_READELF
+CMAKE_READELF-ADVANCED:INTERNAL=1
 //Path to CMake installation.
 CMAKE_ROOT:INTERNAL=/opt/homebrew/share/cmake
+//ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS
+CMAKE_SHARED_LINKER_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS_DEBUG
+CMAKE_SHARED_LINKER_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL
+CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS_RELEASE
+CMAKE_SHARED_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO
+CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SKIP_INSTALL_RPATH
+CMAKE_SKIP_INSTALL_RPATH-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_SKIP_RPATH
+CMAKE_SKIP_RPATH-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STATIC_LINKER_FLAGS
+CMAKE_STATIC_LINKER_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STATIC_LINKER_FLAGS_DEBUG
+CMAKE_STATIC_LINKER_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL
+CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STATIC_LINKER_FLAGS_RELEASE
+CMAKE_STATIC_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_STRIP
+CMAKE_STRIP-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_TAPI
+CMAKE_TAPI-ADVANCED:INTERNAL=1
+//uname command
+CMAKE_UNAME:INTERNAL=/usr/bin/uname
+//ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
+CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
+//Test COMPILER_SUPPORTS_FOBJC_ARC
+COMPILER_SUPPORTS_FOBJC_ARC:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_BUNDLE
+CPACK_BINARY_BUNDLE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_DEB
+CPACK_BINARY_DEB-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_DRAGNDROP
+CPACK_BINARY_DRAGNDROP-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_FREEBSD
+CPACK_BINARY_FREEBSD-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_IFW
+CPACK_BINARY_IFW-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_NSIS
+CPACK_BINARY_NSIS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_PRODUCTBUILD
+CPACK_BINARY_PRODUCTBUILD-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_RPM
+CPACK_BINARY_RPM-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_STGZ
+CPACK_BINARY_STGZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_TBZ2
+CPACK_BINARY_TBZ2-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_TGZ
+CPACK_BINARY_TGZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_BINARY_TXZ
+CPACK_BINARY_TXZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_RPM
+CPACK_SOURCE_RPM-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_TBZ2
+CPACK_SOURCE_TBZ2-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_TGZ
+CPACK_SOURCE_TGZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_TXZ
+CPACK_SOURCE_TXZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_TZ
+CPACK_SOURCE_TZ-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CPACK_SOURCE_ZIP
+CPACK_SOURCE_ZIP-ADVANCED:INTERNAL=1
+//Test CPU_SUPPORTS_ALTIVEC
+CPU_SUPPORTS_ALTIVEC:INTERNAL=
+//Test CXX_FLAG_DDEBUGLEVEL_1
+CXX_FLAG_DDEBUGLEVEL_1:INTERNAL=1
+//Test CXX_FLAG_QUNUSED_ARGUMENTS
+CXX_FLAG_QUNUSED_ARGUMENTS:INTERNAL=1
+//Test CXX_FLAG_WALL
+CXX_FLAG_WALL:INTERNAL=1
+//Test CXX_FLAG_WA_NOEXECSTACK
+CXX_FLAG_WA_NOEXECSTACK:INTERNAL=1
+//Test CXX_FLAG_WCAST_ALIGN
+CXX_FLAG_WCAST_ALIGN:INTERNAL=1
+//Test CXX_FLAG_WCAST_QUAL
+CXX_FLAG_WCAST_QUAL:INTERNAL=1
+//Test CXX_FLAG_WEXTRA
+CXX_FLAG_WEXTRA:INTERNAL=1
+//Test CXX_FLAG_WSHADOW
+CXX_FLAG_WSHADOW:INTERNAL=1
+//Test CXX_FLAG_WUNDEF
+CXX_FLAG_WUNDEF:INTERNAL=1
+//Test C_FLAG_DDEBUGLEVEL_1
+C_FLAG_DDEBUGLEVEL_1:INTERNAL=1
+//Test C_FLAG_QUNUSED_ARGUMENTS
+C_FLAG_QUNUSED_ARGUMENTS:INTERNAL=1
+//Test C_FLAG_WALL
+C_FLAG_WALL:INTERNAL=1
+//Test C_FLAG_WA_NOEXECSTACK
+C_FLAG_WA_NOEXECSTACK:INTERNAL=1
+//Test C_FLAG_WCAST_ALIGN
+C_FLAG_WCAST_ALIGN:INTERNAL=1
+//Test C_FLAG_WCAST_QUAL
+C_FLAG_WCAST_QUAL:INTERNAL=1
+//Test C_FLAG_WEXTRA
+C_FLAG_WEXTRA:INTERNAL=1
+//Test C_FLAG_WSHADOW
+C_FLAG_WSHADOW:INTERNAL=1
+//Test C_FLAG_WSTRICT_PROTOTYPES
+C_FLAG_WSTRICT_PROTOTYPES:INTERNAL=1
+//Test C_FLAG_WUNDEF
+C_FLAG_WUNDEF:INTERNAL=1
+DIRECTX_DXC_TOOL:INTERNAL=DYLD_LIBRARY_PATH=/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/dxc-bin/lib/arm64;/Users/Ozordi/Downloads/LibertyRecomp/tools/XenosRecomp/thirdparty/dxc-bin/bin/arm64/dxc-macos
+//Details about finding Freetype
+FIND_PACKAGE_MESSAGE_DETAILS_Freetype:INTERNAL=[/opt/homebrew/lib/libfreetype.dylib][/opt/homebrew/include/freetype2][v2.14.1()]
+//Details about finding Git
+FIND_PACKAGE_MESSAGE_DETAILS_Git:INTERNAL=[/usr/bin/git][v2.50.1 (Apple Git-155)()]
+//Details about finding OpenSSL
+FIND_PACKAGE_MESSAGE_DETAILS_OpenSSL:INTERNAL=[/opt/homebrew/Cellar/openssl@3/3.6.1/lib/libcrypto.dylib][/opt/homebrew/Cellar/openssl@3/3.6.1/include][ ][v3.6.1()]
+//Details about finding PkgConfig
+FIND_PACKAGE_MESSAGE_DETAILS_PkgConfig:INTERNAL=[/opt/homebrew/bin/pkg-config][v2.5.1()]
+//Details about finding Protobuf
+FIND_PACKAGE_MESSAGE_DETAILS_Protobuf:INTERNAL=[/opt/homebrew/lib/libprotobuf.dylib][/opt/homebrew/include][v6.33.2()]
+//Details about finding Threads
+FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
+//Details about finding ZLIB
+FIND_PACKAGE_MESSAGE_DETAILS_ZLIB:INTERNAL=[/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libz.tbd][/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include][ ][v1.2.12()]
+//ADVANCED property for variable: FREETYPE_INCLUDE_DIR_freetype2
+FREETYPE_INCLUDE_DIR_freetype2-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: FREETYPE_INCLUDE_DIR_ft2build
+FREETYPE_INCLUDE_DIR_ft2build-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: FREETYPE_LIBRARY_DEBUG
+FREETYPE_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: FREETYPE_LIBRARY_RELEASE
+FREETYPE_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: GIT_EXECUTABLE
+GIT_EXECUTABLE-ADVANCED:INTERNAL=1
+//Test HAS_NULLPTR_WARNING
+HAS_NULLPTR_WARNING:INTERNAL=1
+//Have symbol abs
+HAVE_ABS:INTERNAL=1
+//Have symbol acos
+HAVE_ACOS:INTERNAL=1
+//Have symbol acosf
+HAVE_ACOSF:INTERNAL=1
+//Test HAVE_ALTIVEC_H_HDR
+HAVE_ALTIVEC_H_HDR:INTERNAL=
+//Have symbol asin
+HAVE_ASIN:INTERNAL=1
+//Have symbol asinf
+HAVE_ASINF:INTERNAL=1
+//Have symbol atan
+HAVE_ATAN:INTERNAL=1
+//Have symbol atan2
+HAVE_ATAN2:INTERNAL=1
+//Have symbol atan2f
+HAVE_ATAN2F:INTERNAL=1
+//Have symbol atanf
+HAVE_ATANF:INTERNAL=1
+//Have symbol atof
+HAVE_ATOF:INTERNAL=1
+//Have symbol atoi
+HAVE_ATOI:INTERNAL=1
+//Have symbol bcopy
+HAVE_BCOPY:INTERNAL=1
+//Have symbol bsearch
+HAVE_BSEARCH:INTERNAL=1
+//Have symbol calloc
+HAVE_CALLOC:INTERNAL=1
+//Have symbol ceil
+HAVE_CEIL:INTERNAL=1
+//Have symbol ceilf
+HAVE_CEILF:INTERNAL=1
+//Have symbol copysign
+HAVE_COPYSIGN:INTERNAL=1
+//Have symbol copysignf
+HAVE_COPYSIGNF:INTERNAL=1
+//Have symbol cos
+HAVE_COS:INTERNAL=1
+//Have symbol cosf
+HAVE_COSF:INTERNAL=1
+//Have include ctype.h
+HAVE_CTYPE_H:INTERNAL=1
+//Have symbol dlopen
+HAVE_DLOPEN_IN_LIBC:INTERNAL=1
+//Have symbol elf_aux_info
+HAVE_ELF_AUX_INFO:INTERNAL=
+//Have symbol exp
+HAVE_EXP:INTERNAL=1
+//Have symbol expf
+HAVE_EXPF:INTERNAL=1
+//Have symbol fabs
+HAVE_FABS:INTERNAL=1
+//Have symbol fabsf
+HAVE_FABSF:INTERNAL=1
+//Have include float.h
+HAVE_FLOAT_H:INTERNAL=1
+//Have symbol floor
+HAVE_FLOOR:INTERNAL=1
+//Have symbol floorf
+HAVE_FLOORF:INTERNAL=1
+//Have symbol fmod
+HAVE_FMOD:INTERNAL=1
+//Have symbol fmodf
+HAVE_FMODF:INTERNAL=1
+//Have symbol fopen64
+HAVE_FOPEN64:INTERNAL=
+//Test HAVE_FRAMEWORK_COREHAPTICS
+HAVE_FRAMEWORK_COREHAPTICS:INTERNAL=1
+//Test HAVE_FRAMEWORK_GAMECONTROLLER
+HAVE_FRAMEWORK_GAMECONTROLLER:INTERNAL=1
+//Test HAVE_FRAMEWORK_METAL
+HAVE_FRAMEWORK_METAL:INTERNAL=1
+//Have symbol free
+HAVE_FREE:INTERNAL=1
+//Have symbol fseeko
+HAVE_FSEEKO:INTERNAL=1
+//Have symbol fseeko64
+HAVE_FSEEKO64:INTERNAL=
+//Test HAVE_GCC_ATOMICS
+HAVE_GCC_ATOMICS:INTERNAL=1
+//Test HAVE_GCC_COMMENT_BLOCK_COMMANDS
+HAVE_GCC_COMMENT_BLOCK_COMMANDS:INTERNAL=1
+//Test HAVE_GCC_FVISIBILITY
+HAVE_GCC_FVISIBILITY:INTERNAL=1
+//Test HAVE_GCC_NO_STRICT_ALIASING
+HAVE_GCC_NO_STRICT_ALIASING:INTERNAL=1
+//Test HAVE_GCC_WALL
+HAVE_GCC_WALL:INTERNAL=1
+//Test HAVE_GCC_WDECLARATION_AFTER_STATEMENT
+HAVE_GCC_WDECLARATION_AFTER_STATEMENT:INTERNAL=1
+//Test HAVE_GCC_WDOCUMENTATION
+HAVE_GCC_WDOCUMENTATION:INTERNAL=1
+//Test HAVE_GCC_WDOCUMENTATION_UNKNOWN_COMMAND
+HAVE_GCC_WDOCUMENTATION_UNKNOWN_COMMAND:INTERNAL=1
+//Test HAVE_GCC_WSHADOW
+HAVE_GCC_WSHADOW:INTERNAL=1
+//Test HAVE_GCC_WUNDEF
+HAVE_GCC_WUNDEF:INTERNAL=1
+//Test HAVE_GCC_WUNUSED_LOCAL_TYPEDEFS
+HAVE_GCC_WUNUSED_LOCAL_TYPEDEFS:INTERNAL=1
+//Have symbol getauxval
+HAVE_GETAUXVAL:INTERNAL=
+//Have symbol getenv
+HAVE_GETENV:INTERNAL=1
+//Have include iconv.h
+HAVE_ICONV_H:INTERNAL=1
+//Have include immintrin.h
+HAVE_IMMINTRIN_H:INTERNAL=
+//Have symbol index
+HAVE_INDEX:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_INT16_SIZE:INTERNAL=TRUE
+//Result of TRY_COMPILE
+HAVE_INT32_SIZE:INTERNAL=TRUE
+//Result of TRY_COMPILE
+HAVE_INT64_SIZE:INTERNAL=TRUE
+//Have include inttypes.h
+HAVE_INTTYPES_H:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_INT_SIZE:INTERNAL=TRUE
+//Have symbol itoa
+HAVE_ITOA:INTERNAL=
+//Have library m
+HAVE_LIBM:INTERNAL=1
+//Have include limits.h
+HAVE_LIMITS_H:INTERNAL=1
+//Have symbol log
+HAVE_LOG:INTERNAL=1
+//Have symbol log10
+HAVE_LOG10:INTERNAL=1
+//Have symbol log10f
+HAVE_LOG10F:INTERNAL=1
+//Have symbol logf
+HAVE_LOGF:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_LONG_LONG_SIZE:INTERNAL=TRUE
+//Result of TRY_COMPILE
+HAVE_LONG_SIZE:INTERNAL=TRUE
+//Have symbol lround
+HAVE_LROUND:INTERNAL=1
+//Have symbol lroundf
+HAVE_LROUNDF:INTERNAL=1
+//Have symbol malloc
+HAVE_MALLOC:INTERNAL=1
+//Have include malloc.h
+HAVE_MALLOC_H:INTERNAL=
+//Have include math.h
+HAVE_MATH_H:INTERNAL=1
+//Have symbol memcmp
+HAVE_MEMCMP:INTERNAL=1
+//Have symbol memcpy
+HAVE_MEMCPY:INTERNAL=1
+//Have symbol memfd_create
+HAVE_MEMFD_CREATE:INTERNAL=
+//Have symbol memmove
+HAVE_MEMMOVE:INTERNAL=1
+//Have include memory.h
+HAVE_MEMORY_H:INTERNAL=1
+//Have symbol memset
+HAVE_MEMSET:INTERNAL=1
+//Test HAVE_MPROTECT
+HAVE_MPROTECT:INTERNAL=1
+//Have symbol M_PI
+HAVE_M_PI:INTERNAL=1
+//Have symbol nanosleep
+HAVE_NANOSLEEP:INTERNAL=1
+//Test HAVE_O_CLOEXEC
+HAVE_O_CLOEXEC:INTERNAL=1
+//Have symbol poll
+HAVE_POLL:INTERNAL=1
+//Have symbol posix_fallocate
+HAVE_POSIX_FALLOCATE:INTERNAL=
+//Have symbol pow
+HAVE_POW:INTERNAL=1
+//Have symbol powf
+HAVE_POWF:INTERNAL=1
+//Test HAVE_PTHREADS
+HAVE_PTHREADS:INTERNAL=1
+//Test HAVE_PTHREADS_SEM
+HAVE_PTHREADS_SEM:INTERNAL=1
+//Have include pthread.h
+HAVE_PTHREAD_H:INTERNAL=1
+//Have includes pthread_np.h
+HAVE_PTHREAD_NP_H:INTERNAL=
+//Test HAVE_PTHREAD_SETNAME_NP
+HAVE_PTHREAD_SETNAME_NP:INTERNAL=1
+//Have symbol putenv
+HAVE_PUTENV:INTERNAL=1
+//Have symbol qsort
+HAVE_QSORT:INTERNAL=1
+//Have symbol realloc
+HAVE_REALLOC:INTERNAL=1
+//Test HAVE_RECURSIVE_MUTEXES
+HAVE_RECURSIVE_MUTEXES:INTERNAL=1
+//Have symbol rindex
+HAVE_RINDEX:INTERNAL=1
+//Have symbol round
+HAVE_ROUND:INTERNAL=1
+//Have symbol roundf
+HAVE_ROUNDF:INTERNAL=1
+//Test HAVE_SA_SIGACTION
+HAVE_SA_SIGACTION:INTERNAL=1
+//Have symbol scalbn
+HAVE_SCALBN:INTERNAL=1
+//Have symbol scalbnf
+HAVE_SCALBNF:INTERNAL=1
+//Test HAVE_SEM_TIMEDWAIT
+HAVE_SEM_TIMEDWAIT:INTERNAL=
+//Have symbol setenv
+HAVE_SETENV:INTERNAL=1
+//Have symbol setjmp
+HAVE_SETJMP:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_SHORT_SIZE:INTERNAL=TRUE
+//Have symbol sigaction
+HAVE_SIGACTION:INTERNAL=1
+//Have include signal.h
+HAVE_SIGNAL_H:INTERNAL=1
+//Have symbol sin
+HAVE_SIN:INTERNAL=1
+//Have symbol sinf
+HAVE_SINF:INTERNAL=1
+//Have symbol sqrt
+HAVE_SQRT:INTERNAL=1
+//Have symbol sqrtf
+HAVE_SQRTF:INTERNAL=1
+//Have symbol sscanf
+HAVE_SSCANF:INTERNAL=1
+//Have include stdarg.h
+HAVE_STDARG_H:INTERNAL=1
+//Have include stddef.h
+HAVE_STDDEF_H:INTERNAL=1
+//Have include stdint.h
+HAVE_STDINT_H:INTERNAL=1
+//Have include stdio.h
+HAVE_STDIO_H:INTERNAL=1
+//Have include stdlib.h
+HAVE_STDLIB_H:INTERNAL=1
+//Have symbol strcasecmp
+HAVE_STRCASECMP:INTERNAL=1
+//Have symbol strcasestr
+HAVE_STRCASESTR:INTERNAL=1
+//Have symbol strchr
+HAVE_STRCHR:INTERNAL=1
+//Have symbol strcmp
+HAVE_STRCMP:INTERNAL=1
+//Have include strings.h
+HAVE_STRINGS_H:INTERNAL=1
+//Have include string.h
+HAVE_STRING_H:INTERNAL=1
+//Have symbol strlcat
+HAVE_STRLCAT:INTERNAL=1
+//Have symbol strlcpy
+HAVE_STRLCPY:INTERNAL=1
+//Have symbol strlen
+HAVE_STRLEN:INTERNAL=1
+//Have symbol strncasecmp
+HAVE_STRNCASECMP:INTERNAL=1
+//Have symbol strncmp
+HAVE_STRNCMP:INTERNAL=1
+//Have symbol strrchr
+HAVE_STRRCHR:INTERNAL=1
+//Have symbol strstr
+HAVE_STRSTR:INTERNAL=1
+//Have symbol strtod
+HAVE_STRTOD:INTERNAL=1
+//Have symbol strtok_r
+HAVE_STRTOK_R:INTERNAL=1
+//Have symbol strtol
+HAVE_STRTOL:INTERNAL=1
+//Have symbol strtoll
+HAVE_STRTOLL:INTERNAL=1
+//Have symbol strtoul
+HAVE_STRTOUL:INTERNAL=1
+//Have symbol strtoull
+HAVE_STRTOULL:INTERNAL=1
+//Have symbol sysconf
+HAVE_SYSCONF:INTERNAL=1
+//Have symbol sysctlbyname
+HAVE_SYSCTLBYNAME:INTERNAL=1
+//Have include sys/types.h
+HAVE_SYS_TYPES_H:INTERNAL=1
+//Have symbol tan
+HAVE_TAN:INTERNAL=1
+//Have symbol tanf
+HAVE_TANF:INTERNAL=1
+//Have symbol trunc
+HAVE_TRUNC:INTERNAL=1
+//Have symbol truncf
+HAVE_TRUNCF:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_UINT16_SIZE:INTERNAL=TRUE
+//Result of TRY_COMPILE
+HAVE_UINT32_SIZE:INTERNAL=TRUE
+//Have symbol unsetenv
+HAVE_UNSETENV:INTERNAL=1
+//Result of TRY_COMPILE
+HAVE_U_INT16_SIZE:INTERNAL=TRUE
+//Result of TRY_COMPILE
+HAVE_U_INT32_SIZE:INTERNAL=TRUE
+//Have symbol vsnprintf
+HAVE_VSNPRINTF:INTERNAL=1
+//Have symbol vsscanf
+HAVE_VSSCANF:INTERNAL=1
+//Have include wchar.h
+HAVE_WCHAR_H:INTERNAL=1
+//Have symbol wcscasecmp
+HAVE_WCSCASECMP:INTERNAL=1
+//Have symbol wcscmp
+HAVE_WCSCMP:INTERNAL=1
+//Have symbol wcsdup
+HAVE_WCSDUP:INTERNAL=1
+//Have symbol wcslcat
+HAVE_WCSLCAT:INTERNAL=1
+//Have symbol wcslcpy
+HAVE_WCSLCPY:INTERNAL=1
+//Have symbol wcslen
+HAVE_WCSLEN:INTERNAL=1
+//Have symbol wcsncasecmp
+HAVE_WCSNCASECMP:INTERNAL=1
+//Have symbol wcsncmp
+HAVE_WCSNCMP:INTERNAL=1
+//Have symbol wcsstr
+HAVE_WCSSTR:INTERNAL=1
+//Test HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS
+HAVE_WNO_ERROR_DEPRECATED_DECLARATIONS:INTERNAL=1
+//Have symbol _Exit
+HAVE__EXIT:INTERNAL=1
+//Have symbol _i64toa
+HAVE__I64TOA:INTERNAL=
+//Have symbol _ltoa
+HAVE__LTOA:INTERNAL=
+//Have symbol _stricmp
+HAVE__STRICMP:INTERNAL=
+//Have symbol _strlwr
+HAVE__STRLWR:INTERNAL=
+//Have symbol _strnicmp
+HAVE__STRNICMP:INTERNAL=
+//Have symbol _strrev
+HAVE__STRREV:INTERNAL=
+//Have symbol _strupr
+HAVE__STRUPR:INTERNAL=
+//Have symbol _ui64toa
+HAVE__UI64TOA:INTERNAL=
+//Have symbol _uitoa
+HAVE__UITOA:INTERNAL=
+//Have symbol _ultoa
+HAVE__ULTOA:INTERNAL=
+//Have symbol _wcsdup
+HAVE__WCSDUP:INTERNAL=
+//Have symbol _wcsicmp
+HAVE__WCSICMP:INTERNAL=
+//Have symbol _wcsnicmp
+HAVE__WCSNICMP:INTERNAL=
+//Have include inttypes.h
+INCLUDE_INTTYPES_H:INTERNAL=1
+//Have include stdint.h
+INCLUDE_STDINT_H:INTERNAL=1
+//Have include sys/types.h
+INCLUDE_SYS_TYPES_H:INTERNAL=1
+//CHECK_TYPE_SIZE: sizeof(int16_t)
+INT16_SIZE:INTERNAL=2
+//CHECK_TYPE_SIZE: sizeof(int32_t)
+INT32_SIZE:INTERNAL=4
+//CHECK_TYPE_SIZE: sizeof(int64_t)
+INT64_SIZE:INTERNAL=8
+//CHECK_TYPE_SIZE: sizeof(int)
+INT_SIZE:INTERNAL=4
+//Test LD_FLAG_Z_NOEXECSTACK
+LD_FLAG_Z_NOEXECSTACK:INTERNAL=
+//Have symbol __GLIBC__
+LIBC_IS_GLIBC:INTERNAL=
+//CHECK_TYPE_SIZE: sizeof(long long)
+LONG_LONG_SIZE:INTERNAL=8
+//CHECK_TYPE_SIZE: sizeof(long)
+LONG_SIZE:INTERNAL=8
+//Only build the core library with no dependencies
+MSDFGEN_CORE_ONLY:INTERNAL=OFF
+//Link dynamic runtime library instead of static
+MSDFGEN_DYNAMIC_RUNTIME:INTERNAL=OFF
+//Generate installation target
+MSDFGEN_INSTALL:INTERNAL=OFF
+//Build with C++11 enabled
+MSDFGEN_USE_CPP11:INTERNAL=ON
+//Build with OpenMP support for multithreaded code
+MSDFGEN_USE_OPENMP:INTERNAL=OFF
+//Build with the Skia library
+MSDFGEN_USE_SKIA:INTERNAL=OFF
+//Use vcpkg package manager to link project dependencies
+MSDFGEN_USE_VCPKG:INTERNAL=ON
+//Test NFD_USE_ALLOWEDCONTENTTYPES
+NFD_USE_ALLOWEDCONTENTTYPES:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_CRYPTO_LIBRARY
+OPENSSL_CRYPTO_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_INCLUDE_DIR
+OPENSSL_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//Have symbol EVP_MD_CTX_free
+OPENSSL_NEW_ENOUGH:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_SSL_LIBRARY
+OPENSSL_SSL_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_ARGN
+PKG_CONFIG_ARGN-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_EXECUTABLE
+PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_INCLUDE_DIR
+Protobuf_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_LIBRARY_DEBUG
+Protobuf_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_LIBRARY_RELEASE
+Protobuf_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_LITE_LIBRARY_DEBUG
+Protobuf_LITE_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_LITE_LIBRARY_RELEASE
+Protobuf_LITE_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_PROTOC_EXECUTABLE
+Protobuf_PROTOC_EXECUTABLE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_PROTOC_LIBRARY_DEBUG
+Protobuf_PROTOC_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Protobuf_PROTOC_LIBRARY_RELEASE
+Protobuf_PROTOC_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: SDL2MIXER_DEBUG_POSTFIX
+SDL2MIXER_DEBUG_POSTFIX-ADVANCED:INTERNAL=1
+//STRINGS property for variable: SDL2MIXER_VORBIS
+SDL2MIXER_VORBIS-STRINGS:INTERNAL=STB;TREMOR;VORBISFILE
+//ADVANCED property for variable: SDL_CMAKE_DEBUG_POSTFIX
+SDL_CMAKE_DEBUG_POSTFIX-ADVANCED:INTERNAL=1
+//CHECK_TYPE_SIZE: sizeof(short)
+SHORT_SIZE:INTERNAL=2
+//Have include stddef.h;stdarg.h;stdlib.h;string.h;stdio.h;wchar.h;float.h
+STDC_HEADERS:INTERNAL=1
+//CHECK_TYPE_SIZE: sizeof(uint16_t)
+UINT16_SIZE:INTERNAL=2
+//CHECK_TYPE_SIZE: sizeof(uint32_t)
+UINT32_SIZE:INTERNAL=4
+//STRINGS property for variable: USE_CRYPTO
+USE_CRYPTO-STRINGS:INTERNAL=OpenSSL;libsodium;BCrypt
+//CHECK_TYPE_SIZE: sizeof(u_int16_t)
+U_INT16_SIZE:INTERNAL=2
+//CHECK_TYPE_SIZE: sizeof(u_int32_t)
+U_INT32_SIZE:INTERNAL=4
+//ADVANCED property for variable: XXHASH_BUNDLED_MODE
+XXHASH_BUNDLED_MODE-ADVANCED:INTERNAL=1
+//STRINGS property for variable: ZDICTLIB_STATIC_API
+ZDICTLIB_STATIC_API-STRINGS:INTERNAL=;hidden;default;protected;internal
+//STRINGS property for variable: ZDICTLIB_VISIBLE
+ZDICTLIB_VISIBLE-STRINGS:INTERNAL=;hidden;default;protected;internal
+//ADVANCED property for variable: ZLIB_INCLUDE_DIR
+ZLIB_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: ZLIB_LIBRARY_DEBUG
+ZLIB_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: ZLIB_LIBRARY_RELEASE
+ZLIB_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
+//STRINGS property for variable: ZSTDERRORLIB_VISIBLE
+ZSTDERRORLIB_VISIBLE-STRINGS:INTERNAL=;hidden;default;protected;internal
+//STRINGS property for variable: ZSTDLIB_STATIC_API
+ZSTDLIB_STATIC_API-STRINGS:INTERNAL=;hidden;default;protected;internal
+//STRINGS property for variable: ZSTDLIB_VISIBLE
+ZSTDLIB_VISIBLE-STRINGS:INTERNAL=;hidden;default;protected;internal
+//CMAKE_INSTALL_PREFIX during last run
+_GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=/usr/local
+_OPENSSL_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.6.1/include
+_OPENSSL_CFLAGS_I:INTERNAL=
+_OPENSSL_CFLAGS_OTHER:INTERNAL=
+_OPENSSL_FOUND:INTERNAL=1
+_OPENSSL_INCLUDEDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/include
+_OPENSSL_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/include
+_OPENSSL_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.6.1/lib;-lssl;-lcrypto
+_OPENSSL_LDFLAGS_OTHER:INTERNAL=
+_OPENSSL_LIBDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/lib
+_OPENSSL_LIBRARIES:INTERNAL=ssl;crypto
+_OPENSSL_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/lib
+_OPENSSL_LIBS:INTERNAL=
+_OPENSSL_LIBS_L:INTERNAL=
+_OPENSSL_LIBS_OTHER:INTERNAL=
+_OPENSSL_LIBS_PATHS:INTERNAL=
+_OPENSSL_MODULE_NAME:INTERNAL=openssl
+_OPENSSL_PREFIX:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1
+_OPENSSL_STATIC_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.6.1/include
+_OPENSSL_STATIC_CFLAGS_I:INTERNAL=
+_OPENSSL_STATIC_CFLAGS_OTHER:INTERNAL=
+_OPENSSL_STATIC_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/include
+_OPENSSL_STATIC_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.6.1/lib;-lssl;-lcrypto
+_OPENSSL_STATIC_LDFLAGS_OTHER:INTERNAL=
+_OPENSSL_STATIC_LIBDIR:INTERNAL=
+_OPENSSL_STATIC_LIBRARIES:INTERNAL=ssl;crypto
+_OPENSSL_STATIC_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/lib
+_OPENSSL_STATIC_LIBS:INTERNAL=
+_OPENSSL_STATIC_LIBS_L:INTERNAL=
+_OPENSSL_STATIC_LIBS_OTHER:INTERNAL=
+_OPENSSL_STATIC_LIBS_PATHS:INTERNAL=
+_OPENSSL_VERSION:INTERNAL=3.6.1
+_OPENSSL_openssl_INCLUDEDIR:INTERNAL=
+_OPENSSL_openssl_LIBDIR:INTERNAL=
+_OPENSSL_openssl_PREFIX:INTERNAL=
+_OPENSSL_openssl_VERSION:INTERNAL=
+//Test _Wall_TEST
+_Wall_TEST:INTERNAL=1
+//Test _Wno_format_truncation_TEST
+_Wno_format_truncation_TEST:INTERNAL=1
+//Test _Wno_nested_anon_types_TEST
+_Wno_nested_anon_types_TEST:INTERNAL=1
+//Test _Wno_non_virtual_dtor_TEST
+_Wno_non_virtual_dtor_TEST:INTERNAL=1
+//Test _Wno_reorder_TEST
+_Wno_reorder_TEST:INTERNAL=1
+//Test _Wno_sign_compare_TEST
+_Wno_sign_compare_TEST:INTERNAL=1
+//Test _Wno_unknown_pragmas_TEST
+_Wno_unknown_pragmas_TEST:INTERNAL=1
+//Test _Wno_unused_const_variable_TEST
+_Wno_unused_const_variable_TEST:INTERNAL=1
+//Test _Wno_unused_local_typedef_TEST
+_Wno_unused_local_typedef_TEST:INTERNAL=1
+//Test _Wno_zero_as_null_pointer_constant_TEST
+_Wno_zero_as_null_pointer_constant_TEST:INTERNAL=1
+//Test _Wstrict_prototypes_TEST
+_Wstrict_prototypes_TEST:INTERNAL=1
+__pkg_config_arguments__OPENSSL:INTERNAL=QUIET;openssl
+__pkg_config_checked__OPENSSL:INTERNAL=1
+//Test _fno_exceptions_TEST
+_fno_exceptions_TEST:INTERNAL=1
+//Test _fno_rtti_TEST
+_fno_rtti_TEST:INTERNAL=1
+//Test _fno_strict_aliasing_TEST
+_fno_strict_aliasing_TEST:INTERNAL=1
+//Test _fvisibility_hidden_TEST
+_fvisibility_hidden_TEST:INTERNAL=1
+//Test _fvisibility_inlines_hidden_TEST
+_fvisibility_inlines_hidden_TEST:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib__OPENSSL_crypto
+pkgcfg_lib__OPENSSL_crypto-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib__OPENSSL_ssl
+pkgcfg_lib__OPENSSL_ssl-ADVANCED:INTERNAL=1
+prefix_result:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.1/lib
+//ADVANCED property for variable: tomlplusplus_INCLUDES_WITH_SYSTEM
+tomlplusplus_INCLUDES_WITH_SYSTEM-ADVANCED:INTERNAL=1
 

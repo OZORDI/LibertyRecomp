@@ -7,7 +7,7 @@
 #include <vector>
 #include <mutex>
 #include <memory>
-#include "mapped_file.h"
+// mapped_file.h removed — RexGlue handles file I/O
 
 /**
  * Virtual File System for GTA IV Recompilation
@@ -121,19 +121,4 @@ namespace VFS
     };
     Stats GetStats();
     
-    /**
-     * Open a file with memory mapping for efficient large file access.
-     * Files > 1MB use memory mapping, smaller files return nullptr.
-     * 
-     * @param guestPath Xbox 360 path to open
-     * @return Shared pointer to MappedFile, or nullptr if not suitable for mmap
-     */
-    std::shared_ptr<MappedFile> OpenMapped(const std::string& guestPath);
-    
-    /**
-     * Check if a file should use memory mapping.
-     * @param guestPath Xbox 360 path to check
-     * @return true if file is large enough for mmap
-     */
-    bool ShouldUseMmap(const std::string& guestPath);
 }

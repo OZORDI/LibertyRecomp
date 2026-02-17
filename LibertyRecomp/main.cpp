@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <execinfo.h>
 #include <unistd.h>
+#include <dlfcn.h>
 #endif
 #ifndef _WIN32
 #include <signal.h>
@@ -17,10 +18,7 @@
 #include <kernel/function.h>
 #include <kernel/memory.h>
 #include <kernel/heap.h>
-#include <kernel/xam.h>
 #include <kernel/save_system.h>
-#include <kernel/io/file_system.h>
-#include <kernel/vfs.h>
 #include <file.h>
 #include <vector>
 #include <image.h>
@@ -44,6 +42,18 @@
 #include <app.h>
 #include <debugger.h>
 
+#include <rex/exception_handler.h>
+#include <rex/logging.h>
+#include <rex/runtime.h>
+#include <rex/runtime/guest/exceptions.h>
+#include <rex/runtime/processor.h>
+#include <rex/kernel/kernel_state.h>
+#include <rex/kernel/xthread.h>
+#include <rex/kernel/xobject.h>
+#include <rex/kernel/user_module.h>
+#include <rex/filesystem/vfs.h>
+#include <rex/filesystem/devices/host_path_device.h>
+
 #ifdef _WIN32
 #include <timeapi.h>
 #endif
@@ -61,79 +71,120 @@ const size_t XMAIOBegin = 0x7FEA0000;
 const size_t XMAIOEnd = XMAIOBegin + 0x0000FFFF;
 
 Memory g_memory;
-Heap g_userHeap;
 XDBFWrapper g_xdbfWrapper;
 std::unordered_map<uint16_t, GuestTexture*> g_xdbfTextureCache;
 
 // ============================================================================
-// Crash Signal Handler for debugging
+// RexGlue Exception Handler
 // ============================================================================
-#ifndef _WIN32
-static void CrashSignalHandler(int sig, siginfo_t *info, void *ucontext) {
-    // Prevent recursive signals
-    static volatile sig_atomic_t crashed = 0;
-    if (crashed) _exit(128 + sig);
-    crashed = 1;
-    
-    const char* signame = "UNKNOWN";
-    switch (sig) {
-        case SIGSEGV: signame = "SIGSEGV (Segmentation Fault)"; break;
-        case SIGBUS:  signame = "SIGBUS (Bus Error)"; break;
-        case SIGABRT: signame = "SIGABRT (Abort)"; break;
-        case SIGFPE:  signame = "SIGFPE (Floating Point Exception)"; break;
-        case SIGILL:  signame = "SIGILL (Illegal Instruction)"; break;
+
+// Fallback exception handler: logs crash diagnostics when no other handler
+// (e.g., MMIOHandler) handles the fault. Installed last in the chain so it
+// only fires for truly unrecoverable faults.
+static bool RexFallbackCrashHandler(rex::arch::Exception* ex, void* /*data*/) {
+    if (!ex) return false;
+
+    // Only handle access violations and illegal instructions that
+    // weren't handled by prior handlers (MMIOHandler, etc.)
+    // We log diagnostics but return false to let the default crash path run.
+    const char* type_str = "UNKNOWN";
+    switch (ex->code()) {
+        case rex::arch::Exception::Code::kAccessViolation:
+            type_str = "ACCESS_VIOLATION";
+            break;
+        case rex::arch::Exception::Code::kIllegalInstruction:
+            type_str = "ILLEGAL_INSTRUCTION";
+            break;
+        default:
+            break;
     }
-    
+
     fprintf(stderr, "\n");
     fprintf(stderr, "============================================================\n");
-    fprintf(stderr, "CRASH DETECTED: %s (signal %d)\n", signame, sig);
+    fprintf(stderr, "CRASH DETECTED (RexGlue): %s\n", type_str);
     fprintf(stderr, "============================================================\n");
-    
-    if (info) {
-        fprintf(stderr, "Fault address: %p\n", info->si_addr);
-        fprintf(stderr, "Signal code:   %d\n", info->si_code);
+    fprintf(stderr, "Fault address: 0x%016llX\n",
+            (unsigned long long)ex->fault_address());
+    fprintf(stderr, "PC:            0x%016llX\n",
+            (unsigned long long)ex->pc());
+#ifndef _WIN32
+    {
+        Dl_info info;
+        if (dladdr((void*)ex->pc(), &info)) {
+            fprintf(stderr, "Symbol:        %s + 0x%lX\n",
+                    info.dli_sname ? info.dli_sname : "(unknown)",
+                    (unsigned long)((uintptr_t)ex->pc() - (uintptr_t)info.dli_saddr));
+            fprintf(stderr, "Image:         %s\n", info.dli_fname ? info.dli_fname : "(unknown)");
+        }
     }
-    
-#ifdef __APPLE__
-    // Print stack trace on macOS
-    void* callstack[128];
-    int frames = backtrace(callstack, 128);
-    fprintf(stderr, "\nStack trace (%d frames):\n", frames);
-    backtrace_symbols_fd(callstack, frames, STDERR_FILENO);
 #endif
-    
     fprintf(stderr, "\nHeap state at crash:\n");
-    fprintf(stderr, "  Normal heap:   %p\n", (void*)g_userHeap.heap);
-    fprintf(stderr, "  Physical heap: %p\n", (void*)g_userHeap.physicalHeap);
+    fprintf(stderr, "  Memory base:   %p\n", (void*)g_memory.base);
+
+#if defined(__aarch64__) || defined(__arm64__)
+    // Dump ARM64 register state from HostThreadContext
+    auto* tc = ex->thread_context();
+    if (tc) {
+        fprintf(stderr, "\nARM64 Registers:\n");
+        for (int i = 0; i < 31; i++) {
+            fprintf(stderr, "  x%-2d = 0x%016llX", i, (unsigned long long)tc->x[i]);
+            if (i % 3 == 2 || i == 30) fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "  sp  = 0x%016llX  pc  = 0x%016llX\n",
+                (unsigned long long)tc->sp, (unsigned long long)tc->pc);
+
+        // x0 and x1 in generated code are (PPCContext& ctx, uint8_t* base)
+        // Try to dump PPCContext guest registers
+        auto* ctx_ptr = reinterpret_cast<PPCContext*>(tc->x[0]);
+        uint8_t* base = reinterpret_cast<uint8_t*>(tc->x[1]);
+        if (ctx_ptr && base == g_memory.base) {
+            fprintf(stderr, "\nPPCContext (guest registers):\n");
+            fprintf(stderr, "  r0 =0x%08X  r1 =0x%08X  r2 =0x%08X  r3 =0x%08X\n",
+                    ctx_ptr->r0.u32, ctx_ptr->r1.u32, ctx_ptr->r2.u32, ctx_ptr->r3.u32);
+            fprintf(stderr, "  r4 =0x%08X  r5 =0x%08X  r6 =0x%08X  r7 =0x%08X\n",
+                    ctx_ptr->r4.u32, ctx_ptr->r5.u32, ctx_ptr->r6.u32, ctx_ptr->r7.u32);
+            fprintf(stderr, "  r8 =0x%08X  r9 =0x%08X  r10=0x%08X  r11=0x%08X\n",
+                    ctx_ptr->r8.u32, ctx_ptr->r9.u32, ctx_ptr->r10.u32, ctx_ptr->r11.u32);
+            fprintf(stderr, "  r12=0x%08X  r13=0x%08X  r14=0x%08X  lr =0x%08llX\n",
+                    ctx_ptr->r12.u32, ctx_ptr->r13.u32, ctx_ptr->r14.u32, (unsigned long long)ctx_ptr->lr);
+
+            // Check if fault address is base + something
+            uintptr_t fa = ex->fault_address();
+            uintptr_t b = (uintptr_t)base;
+            if (fa >= b && fa < b + 0x100000000ULL) {
+                fprintf(stderr, "\n  Fault is at guest addr: 0x%08X\n", (uint32_t)(fa - b));
+            } else {
+                fprintf(stderr, "\n  Fault address 0x%llX is OUTSIDE guest memory [0x%llX - 0x%llX]\n",
+                        (unsigned long long)fa, (unsigned long long)b,
+                        (unsigned long long)(b + 0x100000000ULL));
+            }
+        }
+    }
+#endif
+
     fprintf(stderr, "============================================================\n");
     fflush(stderr);
-    
-    // Re-raise the signal with default handler to generate core dump
-    signal(sig, SIG_DFL);
-    raise(sig);
+
+    // Return false: we didn't fix anything. The RexGlue exception system
+    // will restore the original signal handler and re-raise for a core dump.
+    return false;
 }
 
-static void InstallCrashHandlers() {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = CrashSignalHandler;
-    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-    sigemptyset(&sa.sa_mask);
-    
-    sigaction(SIGSEGV, &sa, nullptr);
-    sigaction(SIGBUS, &sa, nullptr);
-    sigaction(SIGABRT, &sa, nullptr);
-    sigaction(SIGFPE, &sa, nullptr);
-    sigaction(SIGILL, &sa, nullptr);
-    
-    fprintf(stderr, "[CrashHandler] Installed signal handlers for crash detection\n");
+// Phase 2a: Install the fallback crash handler early (before memory init).
+// This sets up RexGlue's signal handlers (SIGILL, SIGSEGV, SIGBUS) via
+// ExceptionHandler::Install() so any faults during startup are caught.
+// The fallback handler only logs diagnostics and returns false.
+static void InstallRexGlueExceptionHandlers() {
+    // Install the fallback crash handler. ExceptionHandler::Install() also
+    // registers SIGILL/SIGSEGV/SIGBUS signal handlers on first call, so
+    // any faults during early startup are caught and diagnosed.
+    // Memory::Initialize() installs its own MMIOHandler internally, so
+    // no separate MMIO handler installation is needed.
+    rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
+    fprintf(stderr, "[RexGlue] Fallback exception handler installed (signal handlers active)\n");
     fflush(stderr);
 }
-#else
-static void InstallCrashHandlers() {
-    // Windows would use SetUnhandledExceptionFilter
-}
-#endif
+
 // ============================================================================
 
 static void ShowVideoBackendErrorAndExit()
@@ -182,136 +233,33 @@ void KiSystemStartup()
     Debugger::Initialize();
     Debugger::StartCLIThread();
 
-    // CRITICAL: Initialize Xbox 360 Xenon memory regions BEFORE heap init
-    // The physical heap starts at 0x80000000, and we zero 0x82000000-0x831F0000
-    // which is inside that range. Must zero FIRST to avoid corrupting heap structures.
-    InitializeXenonMemoryRegions(g_memory.base);
+    // NOTE: InitializeXenonMemoryRegions removed — RexGlue's LoadXexImage
+    // handles PE section initialization (writes .data, zeroes BSS).
+    // The old call copied xex_header_data + zeroed BSS, but LoadXexImage
+    // overwrites ALL of that.  Removing eliminates redundant work.
 
     g_userHeap.Init();
-
 
     // Initialize save system early - creates directories and registers save content
     SaveSystem::Initialize();
 
-    const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
-    const std::string gamePath = (const char*)(GetGamePath() / "game").u8string().c_str();
-
-    BuildPathCache(gamePath);
-
-    // Also cache extracted assets living under "RPF DUMP" (nested RPFS, audio packs, etc.).
-    // This improves hit rate when the title requests files that are not present in game/.
-    const std::string rpfDumpPath = (const char*)(GetGamePath() / "RPF DUMP").u8string().c_str();
-    if (std::filesystem::exists(rpfDumpPath))
-        BuildPathCache(rpfDumpPath);
-
-    XamRegisterContent(gameContent, gamePath);
-
-    // Register and mount update content (CRITICAL for file override)
-    const auto updateContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Update");
-    const std::filesystem::path updateRoot = GetGamePath() / "update";
-    const std::string updatePath = (const char*)updateRoot.u8string().c_str();
-
-    if (std::filesystem::exists(updateRoot))
-    {
-        XamRegisterContent(updateContent, updatePath);
-        XamContentCreateEx(0, "update", &updateContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
-        
-        // Create root mappings for update paths (case variations)
-        XamRootCreate("update", updatePath);
-        XamRootCreate("Update", updatePath);
-        
-        LOGF_IMPL(Utility, "Main", "Registered update: -> {}", updatePath);
-    }
-    else
-    {
-        LOGF_IMPL(Utility, "Main", "No update directory found (this is normal if no Title Update installed)");
-    }
-
-    // Note: Save system initialization already handled by SaveSystem::Initialize() above
-    // This section is kept for backwards compatibility with old save file format
+    // Save file backwards compat — copy base save to modded save if missing
     const auto saveFilePath = GetSaveFilePath(true);
-    bool saveFileExists = std::filesystem::exists(saveFilePath);
-
-    if (!saveFileExists)
+    if (!std::filesystem::exists(saveFilePath))
     {
-        // Copy base save data to modded save as fallback.
         std::error_code ec;
         std::filesystem::create_directories(saveFilePath.parent_path(), ec);
-
         if (!ec)
-        {
             std::filesystem::copy_file(GetSaveFilePath(false), saveFilePath, ec);
-            saveFileExists = !ec;
-        }
     }
 
-    if (saveFileExists)
-    {
-        std::u8string savePathU8 = saveFilePath.parent_path().u8string();
-        XamRegisterContent(XamMakeContent(XCONTENTTYPE_SAVEDATA, "GTA4SaveData.bin"), (const char*)(savePathU8.c_str()));
-    }
-
-    // Mount game
-    XamContentCreateEx(0, "game", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
-
-    // OS mounts game data to D:
-    XamContentCreateEx(0, "D", &gameContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
-
-    // GTA IV uses "common:" and "platform:" root paths
-    // All game files are in: GetGamePath() / "game" / (common/, xbox360/, audio/)
-    // Structure: ~/Library/Application Support/LibertyRecomp/game/common/, etc.
-    const auto gameRoot = GetGamePath() / "game";
-    const std::string commonPath = (const char*)(gameRoot / "common").u8string().c_str();
-    const std::string platformPath = (const char*)(gameRoot / "xbox360").u8string().c_str();
-    const std::string audioPath = (const char*)(gameRoot / "audio").u8string().c_str();
-    
-    // Register main root paths
-    XamRootCreate("common", commonPath);
-    XamRootCreate("platform", platformPath);
-    XamRootCreate("audio", audioPath);
-    
-    // Also register alternate names the game might use
-    XamRootCreate("xbox360", platformPath);  // Some code uses xbox360: instead of platform:
-    
-    LOGF_IMPL(Utility, "Main", "Game root: {}", gameRoot.string());
-    LOGF_IMPL(Utility, "Main", "Registered common: -> {}", commonPath);
-    LOGF_IMPL(Utility, "Main", "Registered platform: -> {}", platformPath);
-    LOGF_IMPL(Utility, "Main", "Registered audio: -> {}", audioPath);
-
-    // Initialize Virtual File System for direct file serving
-    // This bypasses complex RPF offset-based reading that causes stream issues
-    VFS::Initialize(gameRoot);
-    LOGF_IMPL(Utility, "Main", "VFS initialized with root: {}", gameRoot.string());
-
-    std::error_code ec;
-    for (auto& file : std::filesystem::directory_iterator(GetGamePath() / "dlc", ec))
-    {
-        if (file.is_directory())
-        {
-            std::u8string fileNameU8 = file.path().filename().u8string();
-            std::u8string filePathU8 = file.path().u8string();
-            const char* fileName = (const char*)(fileNameU8.c_str());
-            const char* filePath = (const char*)(filePathU8.c_str());
-            
-            // Register DLC content
-            XamRegisterContent(XamMakeContent(XCONTENTTYPE_DLC, fileName), filePath);
-            
-            // Mount DLC to virtual path
-            auto dlcContent = XamMakeContent(XCONTENTTYPE_DLC, fileName);
-            XamContentCreateEx(0, fileName, &dlcContent, OPEN_EXISTING, nullptr, nullptr, 0, 0, nullptr);
-            
-            // Create root mapping for DLC-specific paths
-            XamRootCreate(fileName, filePath);
-            
-            LOGF_IMPL(Utility, "Main", "Registered DLC: {} -> {}", fileName, filePath);
-        }
-    }
-
-    // NOTE: Startup notifications (including XN_LIVE_CONNECTIONCHANGED) are now sent
-    // directly to listeners when they register, following Xenia's pattern.
-    // See XamNotifyCreateListener() in xam.cpp for the implementation.
-    // This solves the timing problem where notifications sent here would be lost
-    // because the content enumeration listener doesn't exist yet.
+    // ---------------------------------------------------------------
+    // REMOVED: Liberty's VFS, content registration, path cache, root
+    // mappings.  RexGlue's VFS handles ALL file I/O now.
+    // RexGlue mounts game: → \Device\Harddisk0\Partition1 and the
+    // GTA IV symlinks (common:, platform:, audio:, etc.) are
+    // registered in main() after rex::Runtime::Setup().
+    // ---------------------------------------------------------------
 
     XAudioInitializeSystem();
 }
@@ -327,77 +275,16 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
 
     const auto image = Image::ParseImage(loadResult.data(), loadResult.size());
 
+    // Write PE to guest memory so we can extract XDBF from guest addresses.
+    // LoadXexImage will overwrite this with its own PE decompression later,
+    // but we need the image in memory now for the XDBF wrapper.
     memcpy(g_memory.Translate(image.base), image.data.get(), image.size);
     g_xdbfWrapper = XDBFWrapper(static_cast<uint8_t*>(g_memory.Translate(image.resource_offset)), image.resource_size);
 
-    // Option B: Protect .rdata section from writes to catch corruption source
-    // DISABLED: Some global constructors may legitimately modify .rdata
-    // The hardcoded vtable fix handles the worker thread issue
-#if 0  // Temporarily disabled
-#ifdef __APPLE__
-    {
-        constexpr uint32_t RDATA_START = 0x82090000;
-        constexpr uint32_t RDATA_END   = 0x82270000;
-        constexpr size_t   RDATA_SIZE  = RDATA_END - RDATA_START;
-        
-        void* rdataPtr = g_memory.Translate(RDATA_START);
-        
-        // Align to page boundary (4KB pages)
-        uintptr_t addr = reinterpret_cast<uintptr_t>(rdataPtr);
-        uintptr_t pageStart = addr & ~0xFFFUL;
-        size_t protectSize = RDATA_SIZE + (addr - pageStart);
-        
-        int result = mprotect(reinterpret_cast<void*>(pageStart), protectSize, PROT_READ);
-        if (result == 0) {
-            printf("[MPROTECT] .rdata section 0x%08X-0x%08X marked READ-ONLY\n", RDATA_START, RDATA_END);
-            printf("[MPROTECT] Host addr %p, size 0x%zX\n", reinterpret_cast<void*>(pageStart), protectSize);
-        } else {
-            printf("[MPROTECT] FAILED to protect .rdata: errno=%d\n", errno);
-        }
-    }
-#endif
-#endif
-
-    // GTA IV Memory Layout Collision Fix
-    // Address 0x82003890 aliases with "common.rpf" string in image .rdata section.
-    // The game expects this to be heap-backed stream object storage.
-    // Xbox 360 kept these regions separate, but native recompilation does not.
-    // Fix: Zero the collision range and fully initialize stream struct.
-    {
-        uint8_t* collisionBase = static_cast<uint8_t*>(g_memory.Translate(0x82003880));
-        memset(collisionBase, 0, 0x80);  // Zero 0x82003880 - 0x82003900
-        
-        // Fully initialize stream struct at 0x82003890
-        // Stream struct layout (28 bytes / 7 dwords):
-        //   [0] = Object pointer (vtable holder)
-        //   [1] = Context/parameter
-        //   [2] = Buffer pointer
-        //   [3] = File position
-        //   [4] = Buffer cursor
-        //   [5] = Buffer end/limit
-        //   [6] = Buffer capacity
-        be<uint32_t>* streamPtr = reinterpret_cast<be<uint32_t>*>(g_memory.Translate(0x82003890));
-        streamPtr[0] = 0;  // Null object - stream ops will return early gracefully
-        streamPtr[1] = 0;           // Context (null is safe)
-        streamPtr[2] = 0;           // Buffer (null = no buffer)
-        streamPtr[3] = 0;           // File position
-        streamPtr[4] = 0;           // Buffer cursor
-        streamPtr[5] = 0;           // Buffer end (0 = empty)
-        streamPtr[6] = 0;           // Capacity (0 = no buffer)
-    }
-    
-    // Worker Thread Global Memory Initialization
-    // Address range 0x830F5000-0x830F8000 contains worker-related global structures.
-    // Workers read semaphore handles from this region (e.g., 0x830F7684 = base+9860).
-    // Without zeroing, workers read stale data from previous runs causing infinite polling.
-    // Fix: Zero worker globals so uninitialized handles read as NULL.
-    {
-        uint8_t* workerGlobals = static_cast<uint8_t*>(g_memory.Translate(0x830F5000));
-        if (workerGlobals) {
-            memset(workerGlobals, 0, 0x3000);  // Zero 12KB of worker globals
-            printf("[LdrLoadModule] Zeroed worker globals 0x830F5000-0x830F8000\n");
-        }
-    }
+    // NOTE: Collision fix, worker globals zeroing, .rdata protection all
+    // removed — RexGlue's LoadXexImage overwrites guest memory with the
+    // correct PE data and handles BSS zeroing.  Those patches were
+    // overwritten anyway and are no longer needed.
 
     return image.entry_point;
 }
@@ -427,8 +314,9 @@ void init()
 
 int main(int argc, char *argv[])
 {
-    // Install crash handlers FIRST for better debugging
-    InstallCrashHandlers();
+    // Install RexGlue's signal handlers + fallback crash handler early.
+    // MMIOHandler is installed later after g_memory.base is valid.
+    InstallRexGlueExceptionHandlers();
     
 #ifdef _WIN32
     timeBeginPeriod(1);
@@ -477,6 +365,151 @@ int main(int argc, char *argv[])
     }
 
     Config::Load();
+
+    // Initialize RexGlue logging before anything else that might use it.
+    // Guest threads call kernel exports (RtlNtStatusToDosError etc.) that log
+    // via REXKRNL_IMPORT_INFO; the lazy auto-init in GetLogger() has a
+    // thread-safety issue on ARM64 (plain bool without memory barrier).
+    rex::InitLogging();
+
+    // Initialize RexGlue memory system EARLY — before any video/SDL/shader
+    // allocations. Memory::Initialize() uses mmap(MAP_FIXED) to place a 4.5GB
+    // mapping; doing this before large host allocations avoids address conflicts.
+    printf("[Main] Initializing RexGlue memory system...\n"); fflush(stdout);
+    g_memory.InitializeFromRexGlue();
+    printf("[Main] RexGlue memory: base=%p\n", (void*)g_memory.base); fflush(stdout);
+
+    // Create rex::Runtime with pre-existing Memory.
+    // Runtime creates: ExportResolver, Processor, KernelState.
+    // KernelState constructor sets shared_kernel_state_ singleton, enabling
+    // kernel_state() to work in RexGlue's xboxkrnl export implementations.
+    // Under REX_HEADLESS: GPU, audio, input drivers are skipped.
+    // content_root = game directory so RexGlue's VFS handles all file I/O.
+    // RexGlue mounts this as \Device\Harddisk0\Partition1 with game: and d: symlinks.
+    // GTA IV-specific symlinks (common:, platform:, audio:) are added after Setup().
+    fprintf(stderr, "[Main] Getting game path...\n");
+    const auto gamePath = GetGamePath();
+    fprintf(stderr, "[Main] Game path: %s\n", gamePath.string().c_str());
+    const auto rexContentRoot = gamePath / "game";
+    fprintf(stderr, "[Main] Content root: %s\n", rexContentRoot.string().c_str());
+    fprintf(stderr, "[Main] Content root exists: %d\n", (int)std::filesystem::exists(rexContentRoot));
+
+    // Bridge extracted audio.rpf content to where the RAGE relative device expects it.
+    // The packfile device at audio:/ has an AES-encrypted TOC that fails to decrypt in
+    // the recompiled env. The fallback relative device uses root game:/xbox360/audio/,
+    // but extracted config files live at audio/config/. Symlink bridges this gap.
+    {
+        auto linkPath   = rexContentRoot / "xbox360" / "audio" / "config";
+        auto targetPath = std::filesystem::path("../../audio/config");
+        std::error_code ec;
+        if (!std::filesystem::exists(linkPath, ec)) {
+            std::filesystem::create_directories(linkPath.parent_path(), ec);
+            std::filesystem::create_directory_symlink(targetPath, linkPath, ec);
+            if (!ec) {
+                fprintf(stderr, "[Main] Created symlink: xbox360/audio/config -> ../../audio/config\n");
+            } else {
+                fprintf(stderr, "[Main] WARN: Could not create audio config symlink: %s\n", ec.message().c_str());
+            }
+        }
+    }
+
+    {
+        static std::unique_ptr<rex::Runtime> s_rexRuntime;
+        fprintf(stderr, "[Main] Constructing rex::Runtime...\n");
+        s_rexRuntime = std::make_unique<rex::Runtime>(
+            std::filesystem::path{} /* storage_root */,
+            rexContentRoot /* content_root - RexGlue VFS */);
+        fprintf(stderr, "[Main] Runtime constructed, setting memory...\n");
+        s_rexRuntime->set_memory(g_memory.TakeRexMemory());
+        fprintf(stderr, "[Main] Memory set, calling Setup()...\n");
+
+        // Let guest::initialize() (called inside Setup) install its SEH
+        // signal handler normally.  After Setup(), we re-install
+        // ExceptionHandler on top so the chain becomes:
+        //   ExceptionHandler (NULL-PC, MMIO) → SEH (data faults in __try)
+        // This matches standalone: ExceptionHandler saves SEH as its
+        // "previous handler" and falls back to it for unhandled faults.
+        uint32_t rt_status = s_rexRuntime->Setup();
+        fprintf(stderr, "[Main] Setup() returned 0x%08X\n", rt_status);
+        if (rt_status != 0 /* X_STATUS_SUCCESS */) {
+            fprintf(stderr, "[Main] FATAL: rex::Runtime::Setup() failed with 0x%08X\n", rt_status);
+            std::_Exit(1);
+        }
+        s_rexRuntime->set_instance();
+        printf("[Main] rex::Runtime created (kernel_state=%p)\n",
+               (void*)s_rexRuntime->kernel_state()); fflush(stdout);
+
+        // Register GTA IV-specific symbolic links in RexGlue's VFS.
+        // RexGlue already registered game: and d: -> \Device\Harddisk0\Partition1
+        // GTA IV uses common:, platform:, audio: prefixes for file access.
+        // These map to subdirectories of the content_root (game/).
+        auto* fs = s_rexRuntime->file_system();
+        if (fs) {
+            // common:\path -> \Device\Harddisk0\Partition1\common\path
+            fs->RegisterSymbolicLink("common:", "\\Device\\Harddisk0\\Partition1\\common");
+            // platform:\path -> \Device\Harddisk0\Partition1\xbox360\path
+            fs->RegisterSymbolicLink("platform:", "\\Device\\Harddisk0\\Partition1\\xbox360");
+            // audio:\path -> \Device\Harddisk0\Partition1\audio\path
+            fs->RegisterSymbolicLink("audio:", "\\Device\\Harddisk0\\Partition1\\audio");
+            // Some code uses xbox360: instead of platform:
+            fs->RegisterSymbolicLink("xbox360:", "\\Device\\Harddisk0\\Partition1\\xbox360");
+            // X: drive prefix used by some game code
+            fs->RegisterSymbolicLink("x:", "\\Device\\Harddisk0\\Partition1");
+            // Register writable cache device for Xbox 360 temp/scratch storage
+            auto cachePath = GetUserPath() / "cache";
+            std::filesystem::create_directories(cachePath);
+            auto cacheDevice = std::make_unique<rex::filesystem::HostPathDevice>(
+                "\\Device\\CachePartition", cachePath, /*read_only=*/false);
+            if (cacheDevice->Initialize()) {
+                fs->RegisterDevice(std::move(cacheDevice));
+                fs->RegisterSymbolicLink("cache:", "\\Device\\CachePartition");
+                fs->RegisterSymbolicLink("cache1:", "\\Device\\CachePartition");
+                printf("[Main] Registered cache: device at %s\n", cachePath.string().c_str());
+            } else {
+                printf("[Main] WARNING: Failed to initialize cache device\n");
+            }
+
+            printf("[Main] Registered GTA IV VFS symlinks: common:, platform:, audio:, xbox360:, x:, cache:, cache1:\n");
+            fflush(stdout);
+        }
+
+        // Populate Processor function table for XThread::Execute().
+        // Memory's function table was populated during InitializeFromRexGlue(),
+        // but the Processor has its own hash map used by processor->GetFunction().
+        // InitializeFunctionTable adopts the existing memory table (no double-init).
+        auto* proc = s_rexRuntime->processor();
+        proc->InitializeFunctionTable(
+            static_cast<uint32_t>(PPC_CODE_BASE),
+            static_cast<uint32_t>(PPC_CODE_SIZE),
+            static_cast<uint32_t>(PPC_IMAGE_BASE),
+            static_cast<uint32_t>(PPC_IMAGE_SIZE));
+        {
+            int funcCount = 0;
+            for (size_t i = 0; PPCFuncMappings[i].guest != 0; i++) {
+                if (PPCFuncMappings[i].host != nullptr) {
+                    proc->SetFunction(
+                        static_cast<uint32_t>(PPCFuncMappings[i].guest),
+                        PPCFuncMappings[i].host);
+                    funcCount++;
+                }
+            }
+            fprintf(stderr, "[Main] Processor function table: %d functions registered\n",
+                   funcCount);
+        }
+    }
+
+    // Memory::Initialize() installed its own MMIOHandler internally.
+    // Move fallback crash handler to end of chain so MMIOHandler runs first.
+    rex::arch::ExceptionHandler::Uninstall(RexFallbackCrashHandler, nullptr);
+    rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
+
+    // Runtime::Setup() → guest::initialize() installed SEH's signal handler
+    // on top of ExceptionHandler.  Re-install ExceptionHandler so it runs
+    // first.  The chain becomes:
+    //   ExceptionHandler (MMIO, NULL-PC, fallback) → SEH (SehException)
+    rex::arch::ExceptionHandler::ReinstallSignalHandlers();
+    fprintf(stderr, "[RexGlue] Exception handler chain: ExceptionHandler -> SEH -> (fallback)\n");
+    fflush(stderr);
 
     if (forceInstallationCheck)
     {
@@ -616,15 +649,109 @@ int main(int argc, char *argv[])
         printf("[Main] Video device created\n"); fflush(stdout);
     }
 
+    // ------------------------------------------------------------------
+    // Step 1: Normal Liberty initialization.
+    // KiSystemStartup copies xex_header_data (function pointers, delegate
+    // table) and zeroes BSS.  This sets up Liberty's expected layout.
+    // ------------------------------------------------------------------
     printf("[Main] Calling KiSystemStartup...\n"); fflush(stdout);
     KiSystemStartup();
     printf("[Main] KiSystemStartup done\n"); fflush(stdout);
 
-    printf("[Main] Loading module: %s\n", modulePath.string().c_str()); fflush(stdout);
-    uint32_t entry = LdrLoadModule(modulePath);
-    printf("[Main] Module loaded, entry=0x%08X\n", entry); fflush(stdout);
+    printf("[Main] Loading module (Liberty): %s\n", modulePath.string().c_str()); fflush(stdout);
+    LdrLoadModule(modulePath);
+    printf("[Main] Liberty module prep done\n"); fflush(stdout);
 
-    // Check the time since the last time an update was checked. Store the new time if the difference is more than six hours.
+    // ------------------------------------------------------------------
+    // Step 2: Load the XEX through RexGlue.
+    // ReadImage decompresses the FULL PE into guest memory, overwriting
+    // Liberty's header + BSS.  This gives us correct .data/.rdata section
+    // initial values that the CRT and game code require.
+    // ------------------------------------------------------------------
+    {
+        auto* rt = rex::Runtime::instance();
+
+        auto gameDir = modulePath.parent_path();
+        printf("[Main] Setting up RexGlue VFS: %s\n", gameDir.string().c_str()); fflush(stdout);
+
+        auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+            "\\Device\\Harddisk0\\Partition1", gameDir, /*read_only=*/true);
+        if (!device->Initialize()) {
+            printf("[Main] FATAL: Failed to initialize VFS host device\n");
+            fflush(stdout);
+            std::_Exit(1);
+        }
+        rt->file_system()->RegisterDevice(std::move(device));
+        rt->file_system()->RegisterSymbolicLink("game:", "\\Device\\Harddisk0\\Partition1");
+        rt->file_system()->RegisterSymbolicLink("d:", "\\Device\\Harddisk0\\Partition1");
+        printf("[Main] RexGlue VFS ready\n"); fflush(stdout);
+
+        rex::X_STATUS xst = rt->LoadXexImage("game:\\default.xex");
+        if (xst != 0) {
+            printf("[Main] FATAL: LoadXexImage failed: 0x%08X\n", xst);
+            fflush(stdout);
+            std::_Exit(1);
+        }
+
+        // Unprotect so we can re-apply Liberty's header patches.
+        auto* heap = rt->memory()->LookupHeap(PPC_IMAGE_BASE);
+        if (heap) {
+            heap->Protect(PPC_IMAGE_BASE, PPC_IMAGE_SIZE,
+                          rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
+        }
+        printf("[Main] XEX loaded — PE data sections now authoritative\n");
+        fflush(stdout);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 3: Diagnostic — compare xex_header_data against RexGlue's PE.
+    // The function dispatch table lives at base+0x831F0000+ (PPC_LOOKUP_FUNC),
+    // completely independent of this region.  RexGlue's LoadXexImage already
+    // wrote the correct PE data here AND resolved variable imports.
+    // We no longer overwrite with xex_header_data — that was destroying
+    // RexGlue's import resolution and potentially corrupting .data values.
+    // ------------------------------------------------------------------
+    {
+        #include <kernel/xex_header_data.h>
+        const uint8_t* rexPE = reinterpret_cast<const uint8_t*>(g_memory.base + 0x82000000);
+        int diffCount = 0;
+        int importDiffs = 0;   // diffs in 0x700-0x950 (import slot range)
+        int dataDiffs = 0;     // diffs elsewhere
+        for (size_t i = 0; i < sizeof(xex_header_data); i++) {
+            if (rexPE[i] != xex_header_data[i]) {
+                diffCount++;
+                bool inImportRange = (i >= 0x700 && i < 0x950);
+                if (inImportRange) importDiffs++;
+                else dataDiffs++;
+                if (diffCount <= 20) {
+                    printf("[HeaderDiff] offset=0x%05zX rex=0x%02X hdr=0x%02X %s\n",
+                           i, rexPE[i], xex_header_data[i],
+                           inImportRange ? "(IMPORT)" : "(DATA)");
+                }
+            }
+        }
+        printf("[Main] Header comparison: %d diffs (%d import, %d data) out of %zu bytes\n",
+               diffCount, importDiffs, dataDiffs, sizeof(xex_header_data));
+        printf("[Main] RexGlue PE is authoritative — NOT overwriting with xex_header_data\n");
+        fflush(stdout);
+
+        // GPU context GOT entry — keep this patch.
+        // RexGlue may not resolve this specific import (ordinal 446).
+        constexpr uint32_t GOT_GPU_CONTEXT = 0x82000768;
+        constexpr uint32_t GPU_CONTEXT_GLOBAL = 0x83124900;
+        uint32_t currentGOT = __builtin_bswap32(*reinterpret_cast<uint32_t*>(g_memory.base + GOT_GPU_CONTEXT));
+        if (currentGOT != GPU_CONTEXT_GLOBAL) {
+            uint32_t* gotEntry = reinterpret_cast<uint32_t*>(g_memory.base + GOT_GPU_CONTEXT);
+            *gotEntry = __builtin_bswap32(GPU_CONTEXT_GLOBAL);
+            printf("[Main] GPU GOT 0x%08X -> 0x%08X (was 0x%08X)\n",
+                   GOT_GPU_CONTEXT, GPU_CONTEXT_GLOBAL, currentGOT);
+        } else {
+            printf("[Main] GPU GOT already correct (0x%08X)\n", GPU_CONTEXT_GLOBAL);
+        }
+        fflush(stdout);
+    }
+
+    // Check the time since the last time an update was checked.
     constexpr double TimeBetweenUpdateChecksInSeconds = 6 * 60 * 60;
     time_t timeNow = std::time(nullptr);
     double timeDifferenceSeconds = difftime(timeNow, Config::LastChecked);
@@ -635,20 +762,72 @@ int main(int argc, char *argv[])
         Config::LastChecked = timeNow;
         Config::Save();
     }
+
+    // Install a terminate handler to diagnose uncaught exceptions.
+    std::set_terminate([]() {
+        fprintf(stderr, "[TERMINATE] std::terminate() called\n");
+        auto eptr = std::current_exception();
+        if (eptr) {
+            try { std::rethrow_exception(eptr); }
+            catch (const rex::runtime::guest::SehException& e) {
+                fprintf(stderr, "[TERMINATE] SEH: %s  code=0x%08X addr=0x%016llX\n",
+                        e.what(), (unsigned)e.code(),
+                        (unsigned long long)e.address());
+            }
+            catch (const std::exception& e) {
+                fprintf(stderr, "[TERMINATE] exception: %s\n", e.what());
+            }
+            catch (...) {
+                fprintf(stderr, "[TERMINATE] unknown exception\n");
+            }
+        } else {
+            fprintf(stderr, "[TERMINATE] no current exception\n");
+        }
+        fflush(stderr);
+        std::_Exit(99);
+    });
+
+    // ------------------------------------------------------------------
+    // Launch the game via RexGlue's LaunchModule — creates the main
+    // XThread with entry point, stack size, and TLS from the XEX header.
+    // This is exactly how standalone RexGlue works.
+    // ------------------------------------------------------------------
     LOGN_WARNING("Start Guest Thread");
     LOGN_WARNING(modulePath.string());
-    // Video::StartPipelinePrecompilation();
 
-    GuestThread::Start({ entry, 0, 0, 0 });
+    auto* rt = rex::Runtime::instance();
+    auto main_xthread = rt->LaunchModule();
+    if (!main_xthread) {
+        printf("[Main] FATAL: LaunchModule() returned null\n");
+        fflush(stdout);
+        std::_Exit(1);
+    }
+    printf("[Main] Main XThread launched via RexGlue (handle=0x%08X)\n",
+           main_xthread->handle()); fflush(stdout);
 
+    // Wait for the XThread to actually begin executing.
+    for (int i = 0; i < 5000 && !main_xthread->is_running(); ++i) {
+        SDL_Delay(1);
+        if (i == 100 || i == 1000 || i == 3000) {
+            printf("[Main] Still waiting for XThread (i=%d, running=%d)\n",
+                   i, (int)main_xthread->is_running()); fflush(stdout);
+        }
+    }
+    if (!main_xthread->is_running()) {
+        printf("[Main] WARNING: XThread did not start within 5 seconds\n");
+        fflush(stdout);
+    }
+
+    // Main thread: pump SDL events while game runs on XThread.
+    // SDL requires event pumping on the main thread (macOS Cocoa requirement).
+    while (main_xthread->is_running()) {
+        SDL_PumpEvents();
+        SDL_Delay(1);
+    }
+
+    printf("[Main] Main XThread finished\n");
+    fflush(stdout);
     return 0;
 }
 
-GUEST_FUNCTION_STUB(__imp__vsprintf);
-GUEST_FUNCTION_STUB(__imp___vsnprintf);
-GUEST_FUNCTION_STUB(__imp__sprintf);
-GUEST_FUNCTION_STUB(__imp___snprintf);
-GUEST_FUNCTION_STUB(__imp___snwprintf);
-GUEST_FUNCTION_STUB(__imp__vswprintf);
-GUEST_FUNCTION_STUB(__imp___vscwprintf);
-GUEST_FUNCTION_STUB(__imp__swprintf);
+// String function stubs removed — RexGlue (xboxkrnl_strings) handles these.

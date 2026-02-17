@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/xdm.h>
+#include "ppc_context.h"
 
 // Use pthreads directly on macOS to be able to increase default stack size.
 #ifdef __APPLE__
@@ -20,14 +21,14 @@
 // Based on Xenia's X_KPCR and X_KTHREAD definitions.
 // 
 // Memory layout per thread:
-//   [PCR: 0xAB0 bytes] [TLS: 0x100 bytes] [TEB: 0x2E0 bytes] [Stack: 0x80000 bytes]
+//   [PCR: 0xAB0 bytes] [TLS: 0x700 bytes] [TEB: 0x2E0 bytes] [Stack: 0x80000 bytes]
 //
 // Register r13 points to the start of PCR (the thread context base).
 // =============================================================================
 
 // Thread context sizes
 constexpr size_t X360_PCR_SIZE   = 0xAB0;   // Processor Control Region
-constexpr size_t X360_TLS_SIZE   = 0x100;   // Thread Local Storage slots
+constexpr size_t X360_TLS_SIZE   = 0x700;   // Thread Local Storage slots (RAGE uses offsets up to 1680)
 constexpr size_t X360_TEB_SIZE   = 0x2E0;   // Thread Environment Block
 constexpr size_t X360_STACK_SIZE = 0x80000; // 512KB stack per thread
 constexpr size_t X360_THREAD_CONTEXT_TOTAL = X360_PCR_SIZE + X360_TLS_SIZE + X360_TEB_SIZE + X360_STACK_SIZE;
@@ -72,7 +73,7 @@ static_assert(sizeof(X360_PCR) == X360_PCR_SIZE, "X360_PCR size mismatch");
 struct X360_TLS {
     uint8_t      _reserved_00[0x10];   // 0x00
     be<uint32_t> quirky_slot;          // 0x10 - Special TLS slot (init to 0xFFFFFFFF)
-    uint8_t      _reserved_14[0xEC];   // 0x14 - Remaining TLS slots
+    uint8_t      _reserved_14[0x6EC];  // 0x14 - Remaining TLS slots (extended for RAGE allocator offsets)
 };
 static_assert(sizeof(X360_TLS) == X360_TLS_SIZE, "X360_TLS size mismatch");
 #pragma pack(pop)

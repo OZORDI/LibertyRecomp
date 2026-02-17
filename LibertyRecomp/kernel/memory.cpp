@@ -1,6 +1,9 @@
 #include <stdafx.h>
 #include "memory.h"
 
+#include <rex/kernel/xmemory.h>
+#include <rex/logging.h>
+
 // Include pre-generated vtable data from GTA IV XEX
 // This pre-populates vtables with valid function pointers before game starts
 #include "../../gta_iv/vtable_prepopulate.h"
@@ -20,41 +23,56 @@ static constexpr size_t AlignUp(size_t value, size_t alignment) noexcept
     return (value + (alignment - 1)) & ~(alignment - 1);
 }
 
+Memory::~Memory() = default;
+
 Memory::Memory()
 {
-#ifdef _WIN32
-    base = (uint8_t*)VirtualAlloc((void*)0x100000000ull, PPC_MEMORY_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    // Defer initialization to InitializeFromRexGlue().
+    // base remains nullptr until then — KiSystemStartup() checks for this.
+}
 
-    if (base == nullptr)
-        base = (uint8_t*)VirtualAlloc(nullptr, PPC_MEMORY_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-
-    if (base == nullptr)
-        return;
-
-    // Some titles (e.g., GTA IV) legitimately touch low memory (including address 0).
-    // Do not install a null-page guard in that case.
-#else
-    base = (uint8_t*)mmap((void*)0x100000000ull, PPC_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-
-    if (base == (uint8_t*)MAP_FAILED)
-        base = (uint8_t*)mmap(NULL, PPC_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-
-    if (base == (uint8_t*)MAP_FAILED)
-    {
+void Memory::InitializeFromRexGlue()
+{
+    // Create RexGlue's file-backed 4GB memory system
+    rex_memory_ = std::make_unique<rex::memory::Memory>();
+    if (!rex_memory_->Initialize()) {
+        fprintf(stderr, "[Memory] FATAL: Failed to initialize RexGlue memory system\n");
+        rex_memory_.reset();
         base = nullptr;
         return;
     }
 
-    // Some titles (e.g., GTA IV) legitimately touch low memory (including address 0).
-    // Do not install a null-page guard in that case.
-#endif
+    base = rex_memory_->virtual_membase();
+    fprintf(stderr, "[Memory] RexGlue memory initialized: base=%p\n", (void*)base);
 
-    for (size_t i = 0; PPCFuncMappings[i].guest != 0; i++)
-    {
-        if (PPCFuncMappings[i].host != nullptr)
-            InsertFunction(PPCFuncMappings[i].guest, PPCFuncMappings[i].host);
+    // Initialize the function table in guest memory for PPC_LOOKUP_FUNC
+    if (!rex_memory_->InitializeFunctionTable(PPC_CODE_BASE, PPC_CODE_SIZE,
+                                               PPC_IMAGE_BASE, PPC_IMAGE_SIZE)) {
+        fprintf(stderr, "[Memory] FATAL: Failed to initialize RexGlue function table\n");
+        return;
     }
 
+    // Register all recompiled functions from the mapping table
+    // Uses RexGlue's SetFunction which writes to guest memory (PPC_LOOKUP_FUNC compatible)
+    int count = 0;
+    for (size_t i = 0; PPCFuncMappings[i].guest != 0; i++)
+    {
+        if (PPCFuncMappings[i].host != nullptr) {
+            rex_memory_->SetFunction(
+                static_cast<uint32_t>(PPCFuncMappings[i].guest),
+                PPCFuncMappings[i].host);
+            count++;
+        }
+    }
+    fprintf(stderr, "[Memory] Registered %d recompiled functions via RexGlue\n", count);
+
+    // Shared init: manual stubs, vtable pre-population
+    PopulateFunctionTableAndVtables();
+}
+
+void Memory::PopulateFunctionTableAndVtables()
+{
+    fprintf(stderr, "[Memory] PopulateFunctionTableAndVtables() ENTER\n");
     // RMPTFX worker thread hook - patches PPC_LOOKUP_FUNC table (used by indirect calls)
     // PatchFuncMapping only patches PPCFuncMappings[] which is NOT consulted by
     // PPC_CALL_INDIRECT_FUNC in thread trampolines (sub_827DAE40)
@@ -71,9 +89,11 @@ Memory::Memory()
         ctx.r3.u32 = 0; // Return success
     });
 
+    fprintf(stderr, "[Memory] InsertFunction stubs done, calling PrePopulateVtables...\n");
     // Pre-populate vtables with function pointers extracted from XEX
     // This ensures vtables have valid entries before game code runs
     PrePopulateVtables(base);
+    fprintf(stderr, "[Memory] PrePopulateVtables done, writing manual vtables...\n");
     
     // Additional vtables not in the pre-generated file (0x8207xxxx range)
     // These vtables are in XEX zero-fill blocks and need manual initialization
@@ -126,6 +146,7 @@ Memory::Memory()
     PPC_STORE_U32(0x8207BB9C, 0x8280D3A8);
     PPC_STORE_U32(0x8207BBA0, 0x826F26B8);
 
+    fprintf(stderr, "[Memory] Manual vtables done\n");
     // NOTE: Function table protection DISABLED
     // The region 0x831F0000+ overlaps with texture buffer addresses that the game
     // legitimately writes to during texture tiling/swizzling operations (sub_829E4970).

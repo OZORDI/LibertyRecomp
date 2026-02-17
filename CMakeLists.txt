@@ -6,7 +6,7 @@ endif()
 
 set(LIBERTY_RECOMP_THIRDPARTY_ROOT ${CMAKE_SOURCE_DIR}/thirdparty)
 set(LIBERTY_RECOMP_TOOLS_ROOT ${CMAKE_SOURCE_DIR}/tools)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(BUILD_SHARED_LIBS OFF)
 
 # Enable Hot Reload for MSVC compilers if supported.
@@ -47,6 +47,12 @@ endif()
 
 add_subdirectory(${LIBERTY_RECOMP_THIRDPARTY_ROOT})
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT})
+
+# RexGlue SDK integration (core/filesystem/runtime/kernel only)
+option(USE_REXGLUE_RUNTIME "Use RexGlue SDK for runtime infrastructure" ON)
+if(USE_REXGLUE_RUNTIME)
+    add_subdirectory("glue")
+endif()
 
 # Include sub-projects.
 add_subdirectory("LibertyRecompLib")
