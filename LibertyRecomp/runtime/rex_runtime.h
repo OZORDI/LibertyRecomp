@@ -21,7 +21,7 @@ inline rex::memory::Memory* GetMemory() {
     return g_memory.GetRexMemory();
 }
 
-inline rex::kernel::KernelState* GetKernelState() {
+inline rex::system::KernelState* GetKernelState() {
     return rex::Runtime::instance()->kernel_state();
 }
 

@@ -1,6 +1,7 @@
 #include "gta4_init.h"
 
-__attribute__((alias("__imp__sub_8250B5D8"))) PPC_WEAK_FUNC(sub_8250B5D8);
+PPC_FUNC_IMPL(__imp__sub_8250B5D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250B5D8) { __imp__sub_8250B5D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250B5D8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -171,7 +172,8 @@ loc_8250B6F0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250B708"))) PPC_WEAK_FUNC(sub_8250B708);
+PPC_FUNC_IMPL(__imp__sub_8250B708);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250B708) { __imp__sub_8250B708(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250B708) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -605,7 +607,8 @@ loc_8250B9D8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250B9F0"))) PPC_WEAK_FUNC(sub_8250B9F0);
+PPC_FUNC_IMPL(__imp__sub_8250B9F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250B9F0) { __imp__sub_8250B9F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250B9F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -1322,7 +1325,8 @@ loc_8250BE6C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250BE90"))) PPC_WEAK_FUNC(sub_8250BE90);
+PPC_FUNC_IMPL(__imp__sub_8250BE90);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250BE90) { __imp__sub_8250BE90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250BE90) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -2148,7 +2152,8 @@ loc_8250C404:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250C418"))) PPC_WEAK_FUNC(sub_8250C418);
+PPC_FUNC_IMPL(__imp__sub_8250C418);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250C418) { __imp__sub_8250C418(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250C418) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -2593,7 +2598,8 @@ loc_8250C700:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250C710"))) PPC_WEAK_FUNC(sub_8250C710);
+PPC_FUNC_IMPL(__imp__sub_8250C710);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250C710) { __imp__sub_8250C710(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250C710) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -2784,7 +2790,8 @@ loc_8250C858:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250C860"))) PPC_WEAK_FUNC(sub_8250C860);
+PPC_FUNC_IMPL(__imp__sub_8250C860);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250C860) { __imp__sub_8250C860(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250C860) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -2818,7 +2825,8 @@ loc_8250C874:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250C898"))) PPC_WEAK_FUNC(sub_8250C898);
+PPC_FUNC_IMPL(__imp__sub_8250C898);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250C898) { __imp__sub_8250C898(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250C898) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -2983,7 +2991,8 @@ loc_8250C8F8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250C9A8"))) PPC_WEAK_FUNC(sub_8250C9A8);
+PPC_FUNC_IMPL(__imp__sub_8250C9A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250C9A8) { __imp__sub_8250C9A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250C9A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -3930,7 +3939,8 @@ loc_8250CFEC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D018"))) PPC_WEAK_FUNC(sub_8250D018);
+PPC_FUNC_IMPL(__imp__sub_8250D018);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D018) { __imp__sub_8250D018(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D018) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -4350,7 +4360,8 @@ loc_8250D2B4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D2C8"))) PPC_WEAK_FUNC(sub_8250D2C8);
+PPC_FUNC_IMPL(__imp__sub_8250D2C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D2C8) { __imp__sub_8250D2C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D2C8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -4439,7 +4450,8 @@ loc_8250D340:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D358"))) PPC_WEAK_FUNC(sub_8250D358);
+PPC_FUNC_IMPL(__imp__sub_8250D358);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D358) { __imp__sub_8250D358(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D358) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -4642,7 +4654,8 @@ loc_8250D48C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D498"))) PPC_WEAK_FUNC(sub_8250D498);
+PPC_FUNC_IMPL(__imp__sub_8250D498);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D498) { __imp__sub_8250D498(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D498) {
 	PPC_FUNC_PROLOGUE();
 	// std r31,-8(r1)
@@ -4895,7 +4908,8 @@ loc_8250D654:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D660"))) PPC_WEAK_FUNC(sub_8250D660);
+PPC_FUNC_IMPL(__imp__sub_8250D660);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D660) { __imp__sub_8250D660(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D660) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,4,0,27
@@ -4979,7 +4993,8 @@ loc_8250D690:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D700"))) PPC_WEAK_FUNC(sub_8250D700);
+PPC_FUNC_IMPL(__imp__sub_8250D700);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D700) { __imp__sub_8250D700(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D700) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,4,0,27
@@ -5063,7 +5078,8 @@ loc_8250D730:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D7A0"))) PPC_WEAK_FUNC(sub_8250D7A0);
+PPC_FUNC_IMPL(__imp__sub_8250D7A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D7A0) { __imp__sub_8250D7A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D7A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -5196,7 +5212,8 @@ loc_8250D874:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D880"))) PPC_WEAK_FUNC(sub_8250D880);
+PPC_FUNC_IMPL(__imp__sub_8250D880);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D880) { __imp__sub_8250D880(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D880) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -5371,7 +5388,8 @@ loc_8250D990:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250D998"))) PPC_WEAK_FUNC(sub_8250D998);
+PPC_FUNC_IMPL(__imp__sub_8250D998);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250D998) { __imp__sub_8250D998(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250D998) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -5777,7 +5795,8 @@ loc_8250DC18:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250DC30"))) PPC_WEAK_FUNC(sub_8250DC30);
+PPC_FUNC_IMPL(__imp__sub_8250DC30);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250DC30) { __imp__sub_8250DC30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250DC30) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -6297,7 +6316,8 @@ loc_8250DFA0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250DFA8"))) PPC_WEAK_FUNC(sub_8250DFA8);
+PPC_FUNC_IMPL(__imp__sub_8250DFA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250DFA8) { __imp__sub_8250DFA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250DFA8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -6426,7 +6446,8 @@ loc_8250E070:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250E078"))) PPC_WEAK_FUNC(sub_8250E078);
+PPC_FUNC_IMPL(__imp__sub_8250E078);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250E078) { __imp__sub_8250E078(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250E078) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -7802,7 +7823,8 @@ loc_8250E9E8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250EA10"))) PPC_WEAK_FUNC(sub_8250EA10);
+PPC_FUNC_IMPL(__imp__sub_8250EA10);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250EA10) { __imp__sub_8250EA10(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250EA10) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -8180,7 +8202,8 @@ loc_8250ECB4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250ECC0"))) PPC_WEAK_FUNC(sub_8250ECC0);
+PPC_FUNC_IMPL(__imp__sub_8250ECC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250ECC0) { __imp__sub_8250ECC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250ECC0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -8680,7 +8703,8 @@ loc_8250F020:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F038"))) PPC_WEAK_FUNC(sub_8250F038);
+PPC_FUNC_IMPL(__imp__sub_8250F038);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F038) { __imp__sub_8250F038(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F038) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -8703,7 +8727,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F038) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F058"))) PPC_WEAK_FUNC(sub_8250F058);
+PPC_FUNC_IMPL(__imp__sub_8250F058);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F058) { __imp__sub_8250F058(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F058) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -8875,7 +8900,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F058) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F168"))) PPC_WEAK_FUNC(sub_8250F168);
+PPC_FUNC_IMPL(__imp__sub_8250F168);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F168) { __imp__sub_8250F168(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F168) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r11,4(r3)
@@ -8931,7 +8957,8 @@ loc_8250F1BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F1C8"))) PPC_WEAK_FUNC(sub_8250F1C8);
+PPC_FUNC_IMPL(__imp__sub_8250F1C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F1C8) { __imp__sub_8250F1C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F1C8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9037,7 +9064,8 @@ loc_8250F25C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F270"))) PPC_WEAK_FUNC(sub_8250F270);
+PPC_FUNC_IMPL(__imp__sub_8250F270);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F270) { __imp__sub_8250F270(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F270) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9151,7 +9179,8 @@ loc_8250F318:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F330"))) PPC_WEAK_FUNC(sub_8250F330);
+PPC_FUNC_IMPL(__imp__sub_8250F330);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F330) { __imp__sub_8250F330(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F330) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32085
@@ -9178,7 +9207,8 @@ loc_8250F350:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F358"))) PPC_WEAK_FUNC(sub_8250F358);
+PPC_FUNC_IMPL(__imp__sub_8250F358);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F358) { __imp__sub_8250F358(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F358) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9329,7 +9359,8 @@ loc_8250F424:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F460"))) PPC_WEAK_FUNC(sub_8250F460);
+PPC_FUNC_IMPL(__imp__sub_8250F460);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F460) { __imp__sub_8250F460(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F460) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9372,7 +9403,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F460) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F4A8"))) PPC_WEAK_FUNC(sub_8250F4A8);
+PPC_FUNC_IMPL(__imp__sub_8250F4A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F4A8) { __imp__sub_8250F4A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F4A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -9680,7 +9712,8 @@ loc_8250F698:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F6A8"))) PPC_WEAK_FUNC(sub_8250F6A8);
+PPC_FUNC_IMPL(__imp__sub_8250F6A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F6A8) { __imp__sub_8250F6A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F6A8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9829,7 +9862,8 @@ loc_8250F7A0:
 	goto loc_8250F75C;
 }
 
-__attribute__((alias("__imp__sub_8250F7B0"))) PPC_WEAK_FUNC(sub_8250F7B0);
+PPC_FUNC_IMPL(__imp__sub_8250F7B0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F7B0) { __imp__sub_8250F7B0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F7B0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9875,7 +9909,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F7B0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F7F8"))) PPC_WEAK_FUNC(sub_8250F7F8);
+PPC_FUNC_IMPL(__imp__sub_8250F7F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F7F8) { __imp__sub_8250F7F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F7F8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -9946,7 +9981,8 @@ loc_8250F860:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F870"))) PPC_WEAK_FUNC(sub_8250F870);
+PPC_FUNC_IMPL(__imp__sub_8250F870);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F870) { __imp__sub_8250F870(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F870) {
 	PPC_FUNC_PROLOGUE();
 	// li r3,207
@@ -9955,7 +9991,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F870) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F878"))) PPC_WEAK_FUNC(sub_8250F878);
+PPC_FUNC_IMPL(__imp__sub_8250F878);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F878) { __imp__sub_8250F878(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F878) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -10004,7 +10041,8 @@ loc_8250F8B0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F8C8"))) PPC_WEAK_FUNC(sub_8250F8C8);
+PPC_FUNC_IMPL(__imp__sub_8250F8C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F8C8) { __imp__sub_8250F8C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F8C8) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -10015,7 +10053,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F8C8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F8D8"))) PPC_WEAK_FUNC(sub_8250F8D8);
+PPC_FUNC_IMPL(__imp__sub_8250F8D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F8D8) { __imp__sub_8250F8D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F8D8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -10096,7 +10135,8 @@ loc_8250F94C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F958"))) PPC_WEAK_FUNC(sub_8250F958);
+PPC_FUNC_IMPL(__imp__sub_8250F958);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F958) { __imp__sub_8250F958(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F958) {
 	PPC_FUNC_PROLOGUE();
 	// li r3,205
@@ -10105,7 +10145,8 @@ PPC_FUNC_IMPL(__imp__sub_8250F958) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250F960"))) PPC_WEAK_FUNC(sub_8250F960);
+PPC_FUNC_IMPL(__imp__sub_8250F960);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250F960) { __imp__sub_8250F960(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250F960) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -10323,7 +10364,8 @@ loc_8250FACC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FAD8"))) PPC_WEAK_FUNC(sub_8250FAD8);
+PPC_FUNC_IMPL(__imp__sub_8250FAD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FAD8) { __imp__sub_8250FAD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FAD8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -10455,7 +10497,8 @@ loc_8250FB98:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FBB0"))) PPC_WEAK_FUNC(sub_8250FBB0);
+PPC_FUNC_IMPL(__imp__sub_8250FBB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FBB0) { __imp__sub_8250FBB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FBB0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -10504,7 +10547,8 @@ PPC_FUNC_IMPL(__imp__sub_8250FBB0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FC00"))) PPC_WEAK_FUNC(sub_8250FC00);
+PPC_FUNC_IMPL(__imp__sub_8250FC00);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FC00) { __imp__sub_8250FC00(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FC00) {
 	PPC_FUNC_PROLOGUE();
 	// li r3,208
@@ -10513,7 +10557,8 @@ PPC_FUNC_IMPL(__imp__sub_8250FC00) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FC08"))) PPC_WEAK_FUNC(sub_8250FC08);
+PPC_FUNC_IMPL(__imp__sub_8250FC08);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FC08) { __imp__sub_8250FC08(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FC08) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,44
@@ -10577,7 +10622,8 @@ loc_8250FC64:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FC70"))) PPC_WEAK_FUNC(sub_8250FC70);
+PPC_FUNC_IMPL(__imp__sub_8250FC70);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FC70) { __imp__sub_8250FC70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FC70) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -10616,7 +10662,8 @@ PPC_FUNC_IMPL(__imp__sub_8250FC70) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FCB0"))) PPC_WEAK_FUNC(sub_8250FCB0);
+PPC_FUNC_IMPL(__imp__sub_8250FCB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FCB0) { __imp__sub_8250FCB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FCB0) {
 	PPC_FUNC_PROLOGUE();
 	// li r3,206
@@ -10625,7 +10672,8 @@ PPC_FUNC_IMPL(__imp__sub_8250FCB0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FCB8"))) PPC_WEAK_FUNC(sub_8250FCB8);
+PPC_FUNC_IMPL(__imp__sub_8250FCB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FCB8) { __imp__sub_8250FCB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FCB8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -10878,7 +10926,8 @@ loc_8250FE4C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FE60"))) PPC_WEAK_FUNC(sub_8250FE60);
+PPC_FUNC_IMPL(__imp__sub_8250FE60);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FE60) { __imp__sub_8250FE60(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FE60) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -10981,7 +11030,8 @@ loc_8250FEF4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FF08"))) PPC_WEAK_FUNC(sub_8250FF08);
+PPC_FUNC_IMPL(__imp__sub_8250FF08);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FF08) { __imp__sub_8250FF08(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FF08) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -11094,7 +11144,8 @@ loc_8250FFAC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8250FFC0"))) PPC_WEAK_FUNC(sub_8250FFC0);
+PPC_FUNC_IMPL(__imp__sub_8250FFC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8250FFC0) { __imp__sub_8250FFC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8250FFC0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -11155,7 +11206,8 @@ loc_8251000C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510028"))) PPC_WEAK_FUNC(sub_82510028);
+PPC_FUNC_IMPL(__imp__sub_82510028);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510028) { __imp__sub_82510028(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510028) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -11216,7 +11268,8 @@ loc_82510074:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510090"))) PPC_WEAK_FUNC(sub_82510090);
+PPC_FUNC_IMPL(__imp__sub_82510090);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510090) { __imp__sub_82510090(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510090) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -11286,7 +11339,8 @@ loc_825100F4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510100"))) PPC_WEAK_FUNC(sub_82510100);
+PPC_FUNC_IMPL(__imp__sub_82510100);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510100) { __imp__sub_82510100(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510100) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -11349,7 +11403,8 @@ loc_82510150:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510168"))) PPC_WEAK_FUNC(sub_82510168);
+PPC_FUNC_IMPL(__imp__sub_82510168);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510168) { __imp__sub_82510168(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510168) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -11947,7 +12002,8 @@ loc_82510558:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510578"))) PPC_WEAK_FUNC(sub_82510578);
+PPC_FUNC_IMPL(__imp__sub_82510578);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510578) { __imp__sub_82510578(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510578) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -12008,7 +12064,8 @@ loc_825105C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825105E0"))) PPC_WEAK_FUNC(sub_825105E0);
+PPC_FUNC_IMPL(__imp__sub_825105E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825105E0) { __imp__sub_825105E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825105E0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -12138,7 +12195,8 @@ loc_8251065C:
 	goto loc_8251061C;
 }
 
-__attribute__((alias("__imp__sub_825106C0"))) PPC_WEAK_FUNC(sub_825106C0);
+PPC_FUNC_IMPL(__imp__sub_825106C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825106C0) { __imp__sub_825106C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825106C0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -12265,7 +12323,8 @@ loc_82510780:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825107A0"))) PPC_WEAK_FUNC(sub_825107A0);
+PPC_FUNC_IMPL(__imp__sub_825107A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825107A0) { __imp__sub_825107A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825107A0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -12362,7 +12421,8 @@ loc_82510830:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510850"))) PPC_WEAK_FUNC(sub_82510850);
+PPC_FUNC_IMPL(__imp__sub_82510850);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510850) { __imp__sub_82510850(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510850) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -12587,7 +12647,8 @@ loc_825109C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825109D0"))) PPC_WEAK_FUNC(sub_825109D0);
+PPC_FUNC_IMPL(__imp__sub_825109D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825109D0) { __imp__sub_825109D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825109D0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -12684,7 +12745,8 @@ loc_82510A60:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510A80"))) PPC_WEAK_FUNC(sub_82510A80);
+PPC_FUNC_IMPL(__imp__sub_82510A80);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510A80) { __imp__sub_82510A80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510A80) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -12755,7 +12817,8 @@ loc_82510ADC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510AF8"))) PPC_WEAK_FUNC(sub_82510AF8);
+PPC_FUNC_IMPL(__imp__sub_82510AF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510AF8) { __imp__sub_82510AF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510AF8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -12852,7 +12915,8 @@ loc_82510B88:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510BA8"))) PPC_WEAK_FUNC(sub_82510BA8);
+PPC_FUNC_IMPL(__imp__sub_82510BA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510BA8) { __imp__sub_82510BA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510BA8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -12951,7 +13015,8 @@ loc_82510C34:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510C50"))) PPC_WEAK_FUNC(sub_82510C50);
+PPC_FUNC_IMPL(__imp__sub_82510C50);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510C50) { __imp__sub_82510C50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510C50) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -13044,7 +13109,8 @@ loc_82510CD4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82510CF0"))) PPC_WEAK_FUNC(sub_82510CF0);
+PPC_FUNC_IMPL(__imp__sub_82510CF0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82510CF0) { __imp__sub_82510CF0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82510CF0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -13691,7 +13757,8 @@ loc_82511118:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511140"))) PPC_WEAK_FUNC(sub_82511140);
+PPC_FUNC_IMPL(__imp__sub_82511140);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511140) { __imp__sub_82511140(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511140) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -13740,7 +13807,8 @@ loc_82511178:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511190"))) PPC_WEAK_FUNC(sub_82511190);
+PPC_FUNC_IMPL(__imp__sub_82511190);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511190) { __imp__sub_82511190(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511190) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -13817,7 +13885,8 @@ loc_825111F0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511208"))) PPC_WEAK_FUNC(sub_82511208);
+PPC_FUNC_IMPL(__imp__sub_82511208);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511208) { __imp__sub_82511208(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511208) {
 	PPC_FUNC_PROLOGUE();
 	// stw r4,0(r3)
@@ -13856,7 +13925,8 @@ PPC_FUNC_IMPL(__imp__sub_82511208) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511250"))) PPC_WEAK_FUNC(sub_82511250);
+PPC_FUNC_IMPL(__imp__sub_82511250);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511250) { __imp__sub_82511250(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511250) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14163,7 +14233,8 @@ loc_8251142C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511440"))) PPC_WEAK_FUNC(sub_82511440);
+PPC_FUNC_IMPL(__imp__sub_82511440);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511440) { __imp__sub_82511440(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511440) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,4(r3)
@@ -14172,7 +14243,8 @@ PPC_FUNC_IMPL(__imp__sub_82511440) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511448"))) PPC_WEAK_FUNC(sub_82511448);
+PPC_FUNC_IMPL(__imp__sub_82511448);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511448) { __imp__sub_82511448(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511448) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,12(r3)
@@ -14181,7 +14253,8 @@ PPC_FUNC_IMPL(__imp__sub_82511448) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511450"))) PPC_WEAK_FUNC(sub_82511450);
+PPC_FUNC_IMPL(__imp__sub_82511450);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511450) { __imp__sub_82511450(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511450) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,16(r3)
@@ -14190,7 +14263,8 @@ PPC_FUNC_IMPL(__imp__sub_82511450) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511458"))) PPC_WEAK_FUNC(sub_82511458);
+PPC_FUNC_IMPL(__imp__sub_82511458);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511458) { __imp__sub_82511458(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511458) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14202,7 +14276,8 @@ PPC_FUNC_IMPL(__imp__sub_82511458) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511460"))) PPC_WEAK_FUNC(sub_82511460);
+PPC_FUNC_IMPL(__imp__sub_82511460);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511460) { __imp__sub_82511460(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511460) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14214,7 +14289,8 @@ PPC_FUNC_IMPL(__imp__sub_82511460) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511468"))) PPC_WEAK_FUNC(sub_82511468);
+PPC_FUNC_IMPL(__imp__sub_82511468);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511468) { __imp__sub_82511468(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511468) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14226,7 +14302,8 @@ PPC_FUNC_IMPL(__imp__sub_82511468) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511470"))) PPC_WEAK_FUNC(sub_82511470);
+PPC_FUNC_IMPL(__imp__sub_82511470);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511470) { __imp__sub_82511470(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511470) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14238,7 +14315,8 @@ PPC_FUNC_IMPL(__imp__sub_82511470) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511478"))) PPC_WEAK_FUNC(sub_82511478);
+PPC_FUNC_IMPL(__imp__sub_82511478);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511478) { __imp__sub_82511478(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511478) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14250,7 +14328,8 @@ PPC_FUNC_IMPL(__imp__sub_82511478) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511480"))) PPC_WEAK_FUNC(sub_82511480);
+PPC_FUNC_IMPL(__imp__sub_82511480);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511480) { __imp__sub_82511480(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511480) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,44(r3)
@@ -14259,7 +14338,8 @@ PPC_FUNC_IMPL(__imp__sub_82511480) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511488"))) PPC_WEAK_FUNC(sub_82511488);
+PPC_FUNC_IMPL(__imp__sub_82511488);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511488) { __imp__sub_82511488(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511488) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,45(r3)
@@ -14268,7 +14348,8 @@ PPC_FUNC_IMPL(__imp__sub_82511488) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511490"))) PPC_WEAK_FUNC(sub_82511490);
+PPC_FUNC_IMPL(__imp__sub_82511490);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511490) { __imp__sub_82511490(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511490) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,46(r3)
@@ -14277,7 +14358,8 @@ PPC_FUNC_IMPL(__imp__sub_82511490) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511498"))) PPC_WEAK_FUNC(sub_82511498);
+PPC_FUNC_IMPL(__imp__sub_82511498);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511498) { __imp__sub_82511498(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511498) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,80(r3)
@@ -14286,7 +14368,8 @@ PPC_FUNC_IMPL(__imp__sub_82511498) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114A0"))) PPC_WEAK_FUNC(sub_825114A0);
+PPC_FUNC_IMPL(__imp__sub_825114A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114A0) { __imp__sub_825114A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14298,7 +14381,8 @@ PPC_FUNC_IMPL(__imp__sub_825114A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114A8"))) PPC_WEAK_FUNC(sub_825114A8);
+PPC_FUNC_IMPL(__imp__sub_825114A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114A8) { __imp__sub_825114A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114A8) {
 	PPC_FUNC_PROLOGUE();
 	// addi r11,r4,88
@@ -14325,7 +14409,8 @@ loc_825114B8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114D0"))) PPC_WEAK_FUNC(sub_825114D0);
+PPC_FUNC_IMPL(__imp__sub_825114D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114D0) { __imp__sub_825114D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114D0) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,116(r3)
@@ -14334,7 +14419,8 @@ PPC_FUNC_IMPL(__imp__sub_825114D0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114D8"))) PPC_WEAK_FUNC(sub_825114D8);
+PPC_FUNC_IMPL(__imp__sub_825114D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114D8) { __imp__sub_825114D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114D8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14346,7 +14432,8 @@ PPC_FUNC_IMPL(__imp__sub_825114D8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114E0"))) PPC_WEAK_FUNC(sub_825114E0);
+PPC_FUNC_IMPL(__imp__sub_825114E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114E0) { __imp__sub_825114E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114E0) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,124(r3)
@@ -14355,7 +14442,8 @@ PPC_FUNC_IMPL(__imp__sub_825114E0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114E8"))) PPC_WEAK_FUNC(sub_825114E8);
+PPC_FUNC_IMPL(__imp__sub_825114E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114E8) { __imp__sub_825114E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114E8) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,125(r3)
@@ -14364,7 +14452,8 @@ PPC_FUNC_IMPL(__imp__sub_825114E8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114F0"))) PPC_WEAK_FUNC(sub_825114F0);
+PPC_FUNC_IMPL(__imp__sub_825114F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114F0) { __imp__sub_825114F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14376,7 +14465,8 @@ PPC_FUNC_IMPL(__imp__sub_825114F0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825114F8"))) PPC_WEAK_FUNC(sub_825114F8);
+PPC_FUNC_IMPL(__imp__sub_825114F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825114F8) { __imp__sub_825114F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825114F8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14388,7 +14478,8 @@ PPC_FUNC_IMPL(__imp__sub_825114F8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511500"))) PPC_WEAK_FUNC(sub_82511500);
+PPC_FUNC_IMPL(__imp__sub_82511500);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511500) { __imp__sub_82511500(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511500) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14400,7 +14491,8 @@ PPC_FUNC_IMPL(__imp__sub_82511500) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511508"))) PPC_WEAK_FUNC(sub_82511508);
+PPC_FUNC_IMPL(__imp__sub_82511508);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511508) { __imp__sub_82511508(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511508) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,140(r3)
@@ -14409,7 +14501,8 @@ PPC_FUNC_IMPL(__imp__sub_82511508) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511510"))) PPC_WEAK_FUNC(sub_82511510);
+PPC_FUNC_IMPL(__imp__sub_82511510);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511510) { __imp__sub_82511510(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511510) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,144(r3)
@@ -14418,7 +14511,8 @@ PPC_FUNC_IMPL(__imp__sub_82511510) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511518"))) PPC_WEAK_FUNC(sub_82511518);
+PPC_FUNC_IMPL(__imp__sub_82511518);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511518) { __imp__sub_82511518(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511518) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,4,0,27
@@ -14431,7 +14525,8 @@ PPC_FUNC_IMPL(__imp__sub_82511518) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511528"))) PPC_WEAK_FUNC(sub_82511528);
+PPC_FUNC_IMPL(__imp__sub_82511528);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511528) { __imp__sub_82511528(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511528) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,4,0,27
@@ -14444,7 +14539,8 @@ PPC_FUNC_IMPL(__imp__sub_82511528) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511538"))) PPC_WEAK_FUNC(sub_82511538);
+PPC_FUNC_IMPL(__imp__sub_82511538);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511538) { __imp__sub_82511538(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511538) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14460,7 +14556,8 @@ PPC_FUNC_IMPL(__imp__sub_82511538) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511548"))) PPC_WEAK_FUNC(sub_82511548);
+PPC_FUNC_IMPL(__imp__sub_82511548);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511548) { __imp__sub_82511548(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511548) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14476,7 +14573,8 @@ PPC_FUNC_IMPL(__imp__sub_82511548) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511558"))) PPC_WEAK_FUNC(sub_82511558);
+PPC_FUNC_IMPL(__imp__sub_82511558);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511558) { __imp__sub_82511558(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511558) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,1,0,30
@@ -14493,7 +14591,8 @@ PPC_FUNC_IMPL(__imp__sub_82511558) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511570"))) PPC_WEAK_FUNC(sub_82511570);
+PPC_FUNC_IMPL(__imp__sub_82511570);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511570) { __imp__sub_82511570(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511570) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,1,0,30
@@ -14510,7 +14609,8 @@ PPC_FUNC_IMPL(__imp__sub_82511570) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511588"))) PPC_WEAK_FUNC(sub_82511588);
+PPC_FUNC_IMPL(__imp__sub_82511588);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511588) { __imp__sub_82511588(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511588) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -14530,7 +14630,8 @@ PPC_FUNC_IMPL(__imp__sub_82511588) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825115A0"))) PPC_WEAK_FUNC(sub_825115A0);
+PPC_FUNC_IMPL(__imp__sub_825115A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825115A0) { __imp__sub_825115A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825115A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -15661,7 +15762,8 @@ loc_82511DA0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DB8"))) PPC_WEAK_FUNC(sub_82511DB8);
+PPC_FUNC_IMPL(__imp__sub_82511DB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DB8) { __imp__sub_82511DB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DB8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,204(r3)
@@ -15670,7 +15772,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DB8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DC0"))) PPC_WEAK_FUNC(sub_82511DC0);
+PPC_FUNC_IMPL(__imp__sub_82511DC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DC0) { __imp__sub_82511DC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DC0) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,0(r3)
@@ -15679,7 +15782,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DC0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DC8"))) PPC_WEAK_FUNC(sub_82511DC8);
+PPC_FUNC_IMPL(__imp__sub_82511DC8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DC8) { __imp__sub_82511DC8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DC8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,200(r3)
@@ -15688,7 +15792,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DC8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DD0"))) PPC_WEAK_FUNC(sub_82511DD0);
+PPC_FUNC_IMPL(__imp__sub_82511DD0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DD0) { __imp__sub_82511DD0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DD0) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,208(r3)
@@ -15697,7 +15802,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DD0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DD8"))) PPC_WEAK_FUNC(sub_82511DD8);
+PPC_FUNC_IMPL(__imp__sub_82511DD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DD8) { __imp__sub_82511DD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DD8) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r3,20(r3)
@@ -15706,7 +15812,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DD8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DE0"))) PPC_WEAK_FUNC(sub_82511DE0);
+PPC_FUNC_IMPL(__imp__sub_82511DE0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DE0) { __imp__sub_82511DE0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DE0) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r11,0(r3)
@@ -15723,7 +15830,8 @@ PPC_FUNC_IMPL(__imp__sub_82511DE0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82511DF8"))) PPC_WEAK_FUNC(sub_82511DF8);
+PPC_FUNC_IMPL(__imp__sub_82511DF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82511DF8) { __imp__sub_82511DF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82511DF8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -16072,7 +16180,8 @@ loc_82512044:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512060"))) PPC_WEAK_FUNC(sub_82512060);
+PPC_FUNC_IMPL(__imp__sub_82512060);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512060) { __imp__sub_82512060(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512060) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -16194,7 +16303,8 @@ loc_82512114:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512130"))) PPC_WEAK_FUNC(sub_82512130);
+PPC_FUNC_IMPL(__imp__sub_82512130);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512130) { __imp__sub_82512130(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512130) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -16564,7 +16674,8 @@ loc_825123A4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825123C0"))) PPC_WEAK_FUNC(sub_825123C0);
+PPC_FUNC_IMPL(__imp__sub_825123C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825123C0) { __imp__sub_825123C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825123C0) {
 	PPC_FUNC_PROLOGUE();
 	// cmplwi cr6,r3,3
@@ -16626,7 +16737,8 @@ loc_8251241C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512428"))) PPC_WEAK_FUNC(sub_82512428);
+PPC_FUNC_IMPL(__imp__sub_82512428);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512428) { __imp__sub_82512428(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512428) {
 	PPC_FUNC_PROLOGUE();
 	// cmplwi cr6,r4,0
@@ -16743,7 +16855,8 @@ loc_825124F0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825124F8"))) PPC_WEAK_FUNC(sub_825124F8);
+PPC_FUNC_IMPL(__imp__sub_825124F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825124F8) { __imp__sub_825124F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825124F8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -17450,7 +17563,8 @@ loc_825128E8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825128F8"))) PPC_WEAK_FUNC(sub_825128F8);
+PPC_FUNC_IMPL(__imp__sub_825128F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825128F8) { __imp__sub_825128F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825128F8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -17653,7 +17767,8 @@ loc_82512A2C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512A50"))) PPC_WEAK_FUNC(sub_82512A50);
+PPC_FUNC_IMPL(__imp__sub_82512A50);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512A50) { __imp__sub_82512A50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512A50) {
 	PPC_FUNC_PROLOGUE();
 	// std r30,-16(r1)
@@ -17829,7 +17944,8 @@ loc_82512B78:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512B88"))) PPC_WEAK_FUNC(sub_82512B88);
+PPC_FUNC_IMPL(__imp__sub_82512B88);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512B88) { __imp__sub_82512B88(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512B88) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -18074,7 +18190,8 @@ loc_82512D30:
 	goto loc_82512D08;
 }
 
-__attribute__((alias("__imp__sub_82512D38"))) PPC_WEAK_FUNC(sub_82512D38);
+PPC_FUNC_IMPL(__imp__sub_82512D38);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512D38) { __imp__sub_82512D38(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512D38) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -18319,7 +18436,8 @@ loc_82512EE0:
 	goto loc_82512EB8;
 }
 
-__attribute__((alias("__imp__sub_82512EE8"))) PPC_WEAK_FUNC(sub_82512EE8);
+PPC_FUNC_IMPL(__imp__sub_82512EE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512EE8) { __imp__sub_82512EE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512EE8) {
 	PPC_FUNC_PROLOGUE();
 	// addi r11,r4,48
@@ -18356,7 +18474,8 @@ loc_82512F0C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82512F28"))) PPC_WEAK_FUNC(sub_82512F28);
+PPC_FUNC_IMPL(__imp__sub_82512F28);  /* forward decl */
+PPC_WEAK_FUNC(sub_82512F28) { __imp__sub_82512F28(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82512F28) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -18882,7 +19001,8 @@ loc_825132B8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825132D0"))) PPC_WEAK_FUNC(sub_825132D0);
+PPC_FUNC_IMPL(__imp__sub_825132D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825132D0) { __imp__sub_825132D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825132D0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -20057,7 +20177,8 @@ loc_82513AE4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513AF0"))) PPC_WEAK_FUNC(sub_82513AF0);
+PPC_FUNC_IMPL(__imp__sub_82513AF0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513AF0) { __imp__sub_82513AF0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513AF0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -20341,7 +20462,8 @@ loc_82513C88:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513CD8"))) PPC_WEAK_FUNC(sub_82513CD8);
+PPC_FUNC_IMPL(__imp__sub_82513CD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513CD8) { __imp__sub_82513CD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513CD8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -20600,7 +20722,8 @@ loc_82513E94:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513EA0"))) PPC_WEAK_FUNC(sub_82513EA0);
+PPC_FUNC_IMPL(__imp__sub_82513EA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513EA0) { __imp__sub_82513EA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513EA0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -20701,7 +20824,8 @@ loc_82513F34:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513F50"))) PPC_WEAK_FUNC(sub_82513F50);
+PPC_FUNC_IMPL(__imp__sub_82513F50);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513F50) { __imp__sub_82513F50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513F50) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r9,60(r3)
@@ -20741,7 +20865,8 @@ loc_82513F88:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513F90"))) PPC_WEAK_FUNC(sub_82513F90);
+PPC_FUNC_IMPL(__imp__sub_82513F90);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513F90) { __imp__sub_82513F90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513F90) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r9,84(r3)
@@ -20799,7 +20924,8 @@ loc_82513FE0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82513FF0"))) PPC_WEAK_FUNC(sub_82513FF0);
+PPC_FUNC_IMPL(__imp__sub_82513FF0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82513FF0) { __imp__sub_82513FF0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82513FF0) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r9,92(r3)
@@ -20845,7 +20971,8 @@ loc_82514030:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514040"))) PPC_WEAK_FUNC(sub_82514040);
+PPC_FUNC_IMPL(__imp__sub_82514040);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514040) { __imp__sub_82514040(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514040) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r9,100(r3)
@@ -20891,7 +21018,8 @@ loc_82514080:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514090"))) PPC_WEAK_FUNC(sub_82514090);
+PPC_FUNC_IMPL(__imp__sub_82514090);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514090) { __imp__sub_82514090(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514090) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32070
@@ -20945,7 +21073,8 @@ loc_825140DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825140F0"))) PPC_WEAK_FUNC(sub_825140F0);
+PPC_FUNC_IMPL(__imp__sub_825140F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825140F0) { __imp__sub_825140F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825140F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -21236,7 +21365,8 @@ loc_825142C0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825142E0"))) PPC_WEAK_FUNC(sub_825142E0);
+PPC_FUNC_IMPL(__imp__sub_825142E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825142E0) { __imp__sub_825142E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825142E0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -21457,7 +21587,8 @@ loc_82514438:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514440"))) PPC_WEAK_FUNC(sub_82514440);
+PPC_FUNC_IMPL(__imp__sub_82514440);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514440) { __imp__sub_82514440(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514440) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -21517,7 +21648,8 @@ loc_8251448C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825144A0"))) PPC_WEAK_FUNC(sub_825144A0);
+PPC_FUNC_IMPL(__imp__sub_825144A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825144A0) { __imp__sub_825144A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825144A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -22263,7 +22395,8 @@ loc_825149A8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825149C0"))) PPC_WEAK_FUNC(sub_825149C0);
+PPC_FUNC_IMPL(__imp__sub_825149C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825149C0) { __imp__sub_825149C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825149C0) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -22436,7 +22569,8 @@ loc_82514AEC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514B08"))) PPC_WEAK_FUNC(sub_82514B08);
+PPC_FUNC_IMPL(__imp__sub_82514B08);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514B08) { __imp__sub_82514B08(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514B08) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -22670,7 +22804,8 @@ loc_82514C78:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514CA0"))) PPC_WEAK_FUNC(sub_82514CA0);
+PPC_FUNC_IMPL(__imp__sub_82514CA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514CA0) { __imp__sub_82514CA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514CA0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -23107,7 +23242,8 @@ loc_82514F94:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82514FA8"))) PPC_WEAK_FUNC(sub_82514FA8);
+PPC_FUNC_IMPL(__imp__sub_82514FA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82514FA8) { __imp__sub_82514FA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82514FA8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -23288,7 +23424,8 @@ loc_825150D4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825150E0"))) PPC_WEAK_FUNC(sub_825150E0);
+PPC_FUNC_IMPL(__imp__sub_825150E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825150E0) { __imp__sub_825150E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825150E0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -23725,7 +23862,8 @@ loc_825153D4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825153E8"))) PPC_WEAK_FUNC(sub_825153E8);
+PPC_FUNC_IMPL(__imp__sub_825153E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825153E8) { __imp__sub_825153E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825153E8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -23906,7 +24044,8 @@ loc_82515514:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82515520"))) PPC_WEAK_FUNC(sub_82515520);
+PPC_FUNC_IMPL(__imp__sub_82515520);  /* forward decl */
+PPC_WEAK_FUNC(sub_82515520) { __imp__sub_82515520(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82515520) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -23996,7 +24135,8 @@ loc_8251559C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825155B8"))) PPC_WEAK_FUNC(sub_825155B8);
+PPC_FUNC_IMPL(__imp__sub_825155B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825155B8) { __imp__sub_825155B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825155B8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -24799,7 +24939,8 @@ loc_82515AC4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82515AD8"))) PPC_WEAK_FUNC(sub_82515AD8);
+PPC_FUNC_IMPL(__imp__sub_82515AD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82515AD8) { __imp__sub_82515AD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82515AD8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -24908,7 +25049,8 @@ loc_82515B68:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82515B98"))) PPC_WEAK_FUNC(sub_82515B98);
+PPC_FUNC_IMPL(__imp__sub_82515B98);  /* forward decl */
+PPC_WEAK_FUNC(sub_82515B98) { __imp__sub_82515B98(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82515B98) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -25423,7 +25565,8 @@ loc_82515ECC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82515ED8"))) PPC_WEAK_FUNC(sub_82515ED8);
+PPC_FUNC_IMPL(__imp__sub_82515ED8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82515ED8) { __imp__sub_82515ED8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82515ED8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -25769,7 +25912,8 @@ loc_825160CC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825160F0"))) PPC_WEAK_FUNC(sub_825160F0);
+PPC_FUNC_IMPL(__imp__sub_825160F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825160F0) { __imp__sub_825160F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825160F0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -25837,7 +25981,8 @@ loc_82516150:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82516160"))) PPC_WEAK_FUNC(sub_82516160);
+PPC_FUNC_IMPL(__imp__sub_82516160);  /* forward decl */
+PPC_WEAK_FUNC(sub_82516160) { __imp__sub_82516160(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82516160) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -26315,7 +26460,8 @@ loc_825164BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825164C8"))) PPC_WEAK_FUNC(sub_825164C8);
+PPC_FUNC_IMPL(__imp__sub_825164C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825164C8) { __imp__sub_825164C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825164C8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -26444,7 +26590,8 @@ loc_82516584:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825165A0"))) PPC_WEAK_FUNC(sub_825165A0);
+PPC_FUNC_IMPL(__imp__sub_825165A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825165A0) { __imp__sub_825165A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825165A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -29262,7 +29409,8 @@ loc_825178A8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825178C8"))) PPC_WEAK_FUNC(sub_825178C8);
+PPC_FUNC_IMPL(__imp__sub_825178C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825178C8) { __imp__sub_825178C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825178C8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -29619,7 +29767,8 @@ loc_82517B28:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82517B38"))) PPC_WEAK_FUNC(sub_82517B38);
+PPC_FUNC_IMPL(__imp__sub_82517B38);  /* forward decl */
+PPC_WEAK_FUNC(sub_82517B38) { __imp__sub_82517B38(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82517B38) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -29788,7 +29937,8 @@ loc_82517C04:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82517C60"))) PPC_WEAK_FUNC(sub_82517C60);
+PPC_FUNC_IMPL(__imp__sub_82517C60);  /* forward decl */
+PPC_WEAK_FUNC(sub_82517C60) { __imp__sub_82517C60(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82517C60) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -29963,7 +30113,8 @@ loc_82517D68:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82517D80"))) PPC_WEAK_FUNC(sub_82517D80);
+PPC_FUNC_IMPL(__imp__sub_82517D80);  /* forward decl */
+PPC_WEAK_FUNC(sub_82517D80) { __imp__sub_82517D80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82517D80) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -30277,7 +30428,8 @@ loc_82517FA0:
 	goto loc_82517EF4;
 }
 
-__attribute__((alias("__imp__sub_82517FB0"))) PPC_WEAK_FUNC(sub_82517FB0);
+PPC_FUNC_IMPL(__imp__sub_82517FB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82517FB0) { __imp__sub_82517FB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82517FB0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31554,7 +31706,8 @@ loc_825188D0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825188E0"))) PPC_WEAK_FUNC(sub_825188E0);
+PPC_FUNC_IMPL(__imp__sub_825188E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825188E0) { __imp__sub_825188E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825188E0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31707,7 +31860,8 @@ loc_825189DC:
 	goto loc_825189B8;
 }
 
-__attribute__((alias("__imp__sub_825189E8"))) PPC_WEAK_FUNC(sub_825189E8);
+PPC_FUNC_IMPL(__imp__sub_825189E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825189E8) { __imp__sub_825189E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825189E8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31743,7 +31897,8 @@ PPC_FUNC_IMPL(__imp__sub_825189E8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A20"))) PPC_WEAK_FUNC(sub_82518A20);
+PPC_FUNC_IMPL(__imp__sub_82518A20);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A20) { __imp__sub_82518A20(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A20) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -31754,7 +31909,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A20) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A30"))) PPC_WEAK_FUNC(sub_82518A30);
+PPC_FUNC_IMPL(__imp__sub_82518A30);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A30) { __imp__sub_82518A30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A30) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -31773,7 +31929,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A30) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A48"))) PPC_WEAK_FUNC(sub_82518A48);
+PPC_FUNC_IMPL(__imp__sub_82518A48);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A48) { __imp__sub_82518A48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A48) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -31787,7 +31944,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A48) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A58"))) PPC_WEAK_FUNC(sub_82518A58);
+PPC_FUNC_IMPL(__imp__sub_82518A58);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A58) { __imp__sub_82518A58(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A58) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31805,7 +31963,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A58) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A70"))) PPC_WEAK_FUNC(sub_82518A70);
+PPC_FUNC_IMPL(__imp__sub_82518A70);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A70) { __imp__sub_82518A70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A70) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r11,0(r13)
@@ -31827,7 +31986,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A70) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518A90"))) PPC_WEAK_FUNC(sub_82518A90);
+PPC_FUNC_IMPL(__imp__sub_82518A90);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518A90) { __imp__sub_82518A90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518A90) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r10,r4,3,0,28
@@ -31848,7 +32008,8 @@ PPC_FUNC_IMPL(__imp__sub_82518A90) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518AB0"))) PPC_WEAK_FUNC(sub_82518AB0);
+PPC_FUNC_IMPL(__imp__sub_82518AB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518AB0) { __imp__sub_82518AB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518AB0) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r11,r4,3,0,28
@@ -31861,7 +32022,8 @@ PPC_FUNC_IMPL(__imp__sub_82518AB0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518AC0"))) PPC_WEAK_FUNC(sub_82518AC0);
+PPC_FUNC_IMPL(__imp__sub_82518AC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518AC0) { __imp__sub_82518AC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518AC0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31915,7 +32077,8 @@ loc_82518AE0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518B18"))) PPC_WEAK_FUNC(sub_82518B18);
+PPC_FUNC_IMPL(__imp__sub_82518B18);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518B18) { __imp__sub_82518B18(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518B18) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -31969,7 +32132,8 @@ loc_82518B38:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518B70"))) PPC_WEAK_FUNC(sub_82518B70);
+PPC_FUNC_IMPL(__imp__sub_82518B70);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518B70) { __imp__sub_82518B70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518B70) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r10,r3,1,0,30
@@ -31988,7 +32152,8 @@ PPC_FUNC_IMPL(__imp__sub_82518B70) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518B90"))) PPC_WEAK_FUNC(sub_82518B90);
+PPC_FUNC_IMPL(__imp__sub_82518B90);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518B90) { __imp__sub_82518B90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518B90) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32092
@@ -32049,7 +32214,8 @@ loc_82518BF0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518BF8"))) PPC_WEAK_FUNC(sub_82518BF8);
+PPC_FUNC_IMPL(__imp__sub_82518BF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518BF8) { __imp__sub_82518BF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518BF8) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -32088,7 +32254,8 @@ PPC_FUNC_IMPL(__imp__sub_82518BF8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518C40"))) PPC_WEAK_FUNC(sub_82518C40);
+PPC_FUNC_IMPL(__imp__sub_82518C40);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518C40) { __imp__sub_82518C40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518C40) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r10,r4,1,0,30
@@ -32113,7 +32280,8 @@ PPC_FUNC_IMPL(__imp__sub_82518C40) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518C68"))) PPC_WEAK_FUNC(sub_82518C68);
+PPC_FUNC_IMPL(__imp__sub_82518C68);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518C68) { __imp__sub_82518C68(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518C68) {
 	PPC_FUNC_PROLOGUE();
 	// extsw r10,r5
@@ -32152,7 +32320,8 @@ PPC_FUNC_IMPL(__imp__sub_82518C68) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518CB0"))) PPC_WEAK_FUNC(sub_82518CB0);
+PPC_FUNC_IMPL(__imp__sub_82518CB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518CB0) { __imp__sub_82518CB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518CB0) {
 	PPC_FUNC_PROLOGUE();
 	// rlwinm r10,r4,3,0,28
@@ -32274,7 +32443,8 @@ loc_82518D6C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518D90"))) PPC_WEAK_FUNC(sub_82518D90);
+PPC_FUNC_IMPL(__imp__sub_82518D90);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518D90) { __imp__sub_82518D90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518D90) {
 	PPC_FUNC_PROLOGUE();
 	// lis r9,-32256
@@ -32298,7 +32468,8 @@ PPC_FUNC_IMPL(__imp__sub_82518D90) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82518DB8"))) PPC_WEAK_FUNC(sub_82518DB8);
+PPC_FUNC_IMPL(__imp__sub_82518DB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82518DB8) { __imp__sub_82518DB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82518DB8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -32753,7 +32924,8 @@ loc_825190C8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825190D8"))) PPC_WEAK_FUNC(sub_825190D8);
+PPC_FUNC_IMPL(__imp__sub_825190D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825190D8) { __imp__sub_825190D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825190D8) {
 	PPC_FUNC_PROLOGUE();
 	// extsw r9,r5
@@ -32783,7 +32955,8 @@ PPC_FUNC_IMPL(__imp__sub_825190D8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519108"))) PPC_WEAK_FUNC(sub_82519108);
+PPC_FUNC_IMPL(__imp__sub_82519108);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519108) { __imp__sub_82519108(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519108) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -32917,7 +33090,8 @@ loc_825191DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825191F8"))) PPC_WEAK_FUNC(sub_825191F8);
+PPC_FUNC_IMPL(__imp__sub_825191F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825191F8) { __imp__sub_825191F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825191F8) {
 	PPC_FUNC_PROLOGUE();
 	// mr r11,r3
@@ -32971,7 +33145,8 @@ loc_82519210:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519258"))) PPC_WEAK_FUNC(sub_82519258);
+PPC_FUNC_IMPL(__imp__sub_82519258);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519258) { __imp__sub_82519258(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519258) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r5,748(r3)
@@ -33038,7 +33213,8 @@ loc_825192B8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825192C8"))) PPC_WEAK_FUNC(sub_825192C8);
+PPC_FUNC_IMPL(__imp__sub_825192C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825192C8) { __imp__sub_825192C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825192C8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r5,748(r3)
@@ -33107,7 +33283,8 @@ loc_82519328:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519340"))) PPC_WEAK_FUNC(sub_82519340);
+PPC_FUNC_IMPL(__imp__sub_82519340);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519340) { __imp__sub_82519340(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519340) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -34057,7 +34234,8 @@ loc_82519A28:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519A30"))) PPC_WEAK_FUNC(sub_82519A30);
+PPC_FUNC_IMPL(__imp__sub_82519A30);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519A30) { __imp__sub_82519A30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519A30) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -34068,7 +34246,8 @@ PPC_FUNC_IMPL(__imp__sub_82519A30) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519A40"))) PPC_WEAK_FUNC(sub_82519A40);
+PPC_FUNC_IMPL(__imp__sub_82519A40);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519A40) { __imp__sub_82519A40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519A40) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,101
@@ -34079,7 +34258,8 @@ PPC_FUNC_IMPL(__imp__sub_82519A40) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519A50"))) PPC_WEAK_FUNC(sub_82519A50);
+PPC_FUNC_IMPL(__imp__sub_82519A50);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519A50) { __imp__sub_82519A50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519A50) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -34219,7 +34399,8 @@ loc_82519AFC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519B40"))) PPC_WEAK_FUNC(sub_82519B40);
+PPC_FUNC_IMPL(__imp__sub_82519B40);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519B40) { __imp__sub_82519B40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519B40) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -34285,7 +34466,8 @@ loc_82519B98:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519BB8"))) PPC_WEAK_FUNC(sub_82519BB8);
+PPC_FUNC_IMPL(__imp__sub_82519BB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519BB8) { __imp__sub_82519BB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519BB8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -34592,7 +34774,8 @@ loc_82519DA8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519DC0"))) PPC_WEAK_FUNC(sub_82519DC0);
+PPC_FUNC_IMPL(__imp__sub_82519DC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519DC0) { __imp__sub_82519DC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519DC0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -34681,7 +34864,8 @@ loc_82519E38:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519E48"))) PPC_WEAK_FUNC(sub_82519E48);
+PPC_FUNC_IMPL(__imp__sub_82519E48);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519E48) { __imp__sub_82519E48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519E48) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -34786,7 +34970,8 @@ loc_82519EE0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519EF8"))) PPC_WEAK_FUNC(sub_82519EF8);
+PPC_FUNC_IMPL(__imp__sub_82519EF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519EF8) { __imp__sub_82519EF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519EF8) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32048
@@ -34833,7 +35018,8 @@ loc_82519F3C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519F48"))) PPC_WEAK_FUNC(sub_82519F48);
+PPC_FUNC_IMPL(__imp__sub_82519F48);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519F48) { __imp__sub_82519F48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519F48) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -34888,7 +35074,8 @@ loc_82519F78:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82519FA8"))) PPC_WEAK_FUNC(sub_82519FA8);
+PPC_FUNC_IMPL(__imp__sub_82519FA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82519FA8) { __imp__sub_82519FA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82519FA8) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32007
@@ -34954,7 +35141,8 @@ loc_82519FF8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A020"))) PPC_WEAK_FUNC(sub_8251A020);
+PPC_FUNC_IMPL(__imp__sub_8251A020);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A020) { __imp__sub_8251A020(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A020) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -35037,7 +35225,8 @@ loc_8251A074:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A0B0"))) PPC_WEAK_FUNC(sub_8251A0B0);
+PPC_FUNC_IMPL(__imp__sub_8251A0B0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A0B0) { __imp__sub_8251A0B0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A0B0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -35120,7 +35309,8 @@ loc_8251A104:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A140"))) PPC_WEAK_FUNC(sub_8251A140);
+PPC_FUNC_IMPL(__imp__sub_8251A140);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A140) { __imp__sub_8251A140(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A140) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -35529,7 +35719,8 @@ loc_8251A3D4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A3F0"))) PPC_WEAK_FUNC(sub_8251A3F0);
+PPC_FUNC_IMPL(__imp__sub_8251A3F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A3F0) { __imp__sub_8251A3F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A3F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -35972,7 +36163,8 @@ loc_8251A688:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A6A8"))) PPC_WEAK_FUNC(sub_8251A6A8);
+PPC_FUNC_IMPL(__imp__sub_8251A6A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A6A8) { __imp__sub_8251A6A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A6A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -36350,7 +36542,8 @@ loc_8251A91C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251A950"))) PPC_WEAK_FUNC(sub_8251A950);
+PPC_FUNC_IMPL(__imp__sub_8251A950);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251A950) { __imp__sub_8251A950(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251A950) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -36485,7 +36678,8 @@ loc_8251AA10:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251AA28"))) PPC_WEAK_FUNC(sub_8251AA28);
+PPC_FUNC_IMPL(__imp__sub_8251AA28);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251AA28) { __imp__sub_8251AA28(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251AA28) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -36783,7 +36977,8 @@ loc_8251AC00:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251AC18"))) PPC_WEAK_FUNC(sub_8251AC18);
+PPC_FUNC_IMPL(__imp__sub_8251AC18);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251AC18) { __imp__sub_8251AC18(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251AC18) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -37073,7 +37268,8 @@ loc_8251AD48:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251AE20"))) PPC_WEAK_FUNC(sub_8251AE20);
+PPC_FUNC_IMPL(__imp__sub_8251AE20);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251AE20) { __imp__sub_8251AE20(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251AE20) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -37254,7 +37450,8 @@ loc_8251AF48:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251AF58"))) PPC_WEAK_FUNC(sub_8251AF58);
+PPC_FUNC_IMPL(__imp__sub_8251AF58);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251AF58) { __imp__sub_8251AF58(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251AF58) {
 	PPC_FUNC_PROLOGUE();
 	// lis r9,-32256
@@ -37278,7 +37475,8 @@ PPC_FUNC_IMPL(__imp__sub_8251AF58) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251AF80"))) PPC_WEAK_FUNC(sub_8251AF80);
+PPC_FUNC_IMPL(__imp__sub_8251AF80);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251AF80) { __imp__sub_8251AF80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251AF80) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -38992,7 +39190,8 @@ loc_8251BB78:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251BB90"))) PPC_WEAK_FUNC(sub_8251BB90);
+PPC_FUNC_IMPL(__imp__sub_8251BB90);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251BB90) { __imp__sub_8251BB90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251BB90) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -39170,7 +39369,8 @@ loc_8251BCC0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251BCD8"))) PPC_WEAK_FUNC(sub_8251BCD8);
+PPC_FUNC_IMPL(__imp__sub_8251BCD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251BCD8) { __imp__sub_8251BCD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251BCD8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -39337,7 +39537,8 @@ loc_8251BDE8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251BE00"))) PPC_WEAK_FUNC(sub_8251BE00);
+PPC_FUNC_IMPL(__imp__sub_8251BE00);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251BE00) { __imp__sub_8251BE00(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251BE00) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -39430,7 +39631,8 @@ loc_8251BE70:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251BEA0"))) PPC_WEAK_FUNC(sub_8251BEA0);
+PPC_FUNC_IMPL(__imp__sub_8251BEA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251BEA0) { __imp__sub_8251BEA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251BEA0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -39695,7 +39897,8 @@ loc_8251C058:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C068"))) PPC_WEAK_FUNC(sub_8251C068);
+PPC_FUNC_IMPL(__imp__sub_8251C068);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C068) { __imp__sub_8251C068(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C068) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -39746,7 +39949,8 @@ loc_8251C0A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C0B8"))) PPC_WEAK_FUNC(sub_8251C0B8);
+PPC_FUNC_IMPL(__imp__sub_8251C0B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C0B8) { __imp__sub_8251C0B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C0B8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -39815,7 +40019,8 @@ PPC_FUNC_IMPL(__imp__sub_8251C0B8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C130"))) PPC_WEAK_FUNC(sub_8251C130);
+PPC_FUNC_IMPL(__imp__sub_8251C130);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C130) { __imp__sub_8251C130(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C130) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -39884,7 +40089,8 @@ PPC_FUNC_IMPL(__imp__sub_8251C130) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C1A8"))) PPC_WEAK_FUNC(sub_8251C1A8);
+PPC_FUNC_IMPL(__imp__sub_8251C1A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C1A8) { __imp__sub_8251C1A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C1A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -40673,7 +40879,8 @@ loc_8251C6A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C6C0"))) PPC_WEAK_FUNC(sub_8251C6C0);
+PPC_FUNC_IMPL(__imp__sub_8251C6C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C6C0) { __imp__sub_8251C6C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C6C0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -41017,7 +41224,8 @@ PPC_FUNC_IMPL(__imp__sub_8251C6C0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251C8D0"))) PPC_WEAK_FUNC(sub_8251C8D0);
+PPC_FUNC_IMPL(__imp__sub_8251C8D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251C8D0) { __imp__sub_8251C8D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251C8D0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -41255,7 +41463,8 @@ PPC_FUNC_IMPL(__imp__sub_8251C8D0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CA38"))) PPC_WEAK_FUNC(sub_8251CA38);
+PPC_FUNC_IMPL(__imp__sub_8251CA38);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CA38) { __imp__sub_8251CA38(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CA38) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -41354,7 +41563,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CA38) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CAC8"))) PPC_WEAK_FUNC(sub_8251CAC8);
+PPC_FUNC_IMPL(__imp__sub_8251CAC8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CAC8) { __imp__sub_8251CAC8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CAC8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -41416,7 +41626,8 @@ loc_8251CB14:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CB30"))) PPC_WEAK_FUNC(sub_8251CB30);
+PPC_FUNC_IMPL(__imp__sub_8251CB30);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CB30) { __imp__sub_8251CB30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CB30) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-31985
@@ -41427,7 +41638,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CB30) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CB40"))) PPC_WEAK_FUNC(sub_8251CB40);
+PPC_FUNC_IMPL(__imp__sub_8251CB40);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CB40) { __imp__sub_8251CB40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CB40) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -41475,7 +41687,8 @@ loc_8251CB74:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CB90"))) PPC_WEAK_FUNC(sub_8251CB90);
+PPC_FUNC_IMPL(__imp__sub_8251CB90);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CB90) { __imp__sub_8251CB90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CB90) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -41605,7 +41818,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CB90) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CC68"))) PPC_WEAK_FUNC(sub_8251CC68);
+PPC_FUNC_IMPL(__imp__sub_8251CC68);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CC68) { __imp__sub_8251CC68(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CC68) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -41691,7 +41905,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CC68) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CD00"))) PPC_WEAK_FUNC(sub_8251CD00);
+PPC_FUNC_IMPL(__imp__sub_8251CD00);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CD00) { __imp__sub_8251CD00(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CD00) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -41739,7 +41954,8 @@ loc_8251CD1C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CD50"))) PPC_WEAK_FUNC(sub_8251CD50);
+PPC_FUNC_IMPL(__imp__sub_8251CD50);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CD50) { __imp__sub_8251CD50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CD50) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -41770,7 +41986,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CD50) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CD80"))) PPC_WEAK_FUNC(sub_8251CD80);
+PPC_FUNC_IMPL(__imp__sub_8251CD80);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CD80) { __imp__sub_8251CD80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CD80) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -41969,7 +42186,8 @@ loc_8251CE80:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CEB8"))) PPC_WEAK_FUNC(sub_8251CEB8);
+PPC_FUNC_IMPL(__imp__sub_8251CEB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CEB8) { __imp__sub_8251CEB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CEB8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -42020,7 +42238,8 @@ loc_8251CEF0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CF08"))) PPC_WEAK_FUNC(sub_8251CF08);
+PPC_FUNC_IMPL(__imp__sub_8251CF08);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CF08) { __imp__sub_8251CF08(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CF08) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -42118,7 +42337,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CF08) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251CF98"))) PPC_WEAK_FUNC(sub_8251CF98);
+PPC_FUNC_IMPL(__imp__sub_8251CF98);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251CF98) { __imp__sub_8251CF98(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251CF98) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -42258,7 +42478,8 @@ PPC_FUNC_IMPL(__imp__sub_8251CF98) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251D070"))) PPC_WEAK_FUNC(sub_8251D070);
+PPC_FUNC_IMPL(__imp__sub_8251D070);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251D070) { __imp__sub_8251D070(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251D070) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -42407,7 +42628,8 @@ loc_8251D150:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251D168"))) PPC_WEAK_FUNC(sub_8251D168);
+PPC_FUNC_IMPL(__imp__sub_8251D168);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251D168) { __imp__sub_8251D168(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251D168) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -42614,7 +42836,8 @@ loc_8251D2A4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251D2B0"))) PPC_WEAK_FUNC(sub_8251D2B0);
+PPC_FUNC_IMPL(__imp__sub_8251D2B0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251D2B0) { __imp__sub_8251D2B0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251D2B0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -43491,7 +43714,8 @@ loc_8251D7BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251D890"))) PPC_WEAK_FUNC(sub_8251D890);
+PPC_FUNC_IMPL(__imp__sub_8251D890);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251D890) { __imp__sub_8251D890(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251D890) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -43949,7 +44173,8 @@ loc_8251DB70:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251DB80"))) PPC_WEAK_FUNC(sub_8251DB80);
+PPC_FUNC_IMPL(__imp__sub_8251DB80);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251DB80) { __imp__sub_8251DB80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251DB80) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -44216,7 +44441,8 @@ loc_8251DD1C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251DD40"))) PPC_WEAK_FUNC(sub_8251DD40);
+PPC_FUNC_IMPL(__imp__sub_8251DD40);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251DD40) { __imp__sub_8251DD40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251DD40) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32006
@@ -44240,7 +44466,8 @@ PPC_FUNC_IMPL(__imp__sub_8251DD40) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251DD68"))) PPC_WEAK_FUNC(sub_8251DD68);
+PPC_FUNC_IMPL(__imp__sub_8251DD68);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251DD68) { __imp__sub_8251DD68(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251DD68) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -45161,7 +45388,8 @@ loc_8251E364:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E380"))) PPC_WEAK_FUNC(sub_8251E380);
+PPC_FUNC_IMPL(__imp__sub_8251E380);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E380) { __imp__sub_8251E380(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E380) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -45688,7 +45916,8 @@ loc_8251E4B4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E6D0"))) PPC_WEAK_FUNC(sub_8251E6D0);
+PPC_FUNC_IMPL(__imp__sub_8251E6D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E6D0) { __imp__sub_8251E6D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E6D0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -45778,7 +46007,8 @@ loc_8251E748:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E760"))) PPC_WEAK_FUNC(sub_8251E760);
+PPC_FUNC_IMPL(__imp__sub_8251E760);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E760) { __imp__sub_8251E760(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E760) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-31985
@@ -45789,7 +46019,8 @@ PPC_FUNC_IMPL(__imp__sub_8251E760) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E770"))) PPC_WEAK_FUNC(sub_8251E770);
+PPC_FUNC_IMPL(__imp__sub_8251E770);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E770) { __imp__sub_8251E770(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E770) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -45876,7 +46107,8 @@ loc_8251E7F8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E800"))) PPC_WEAK_FUNC(sub_8251E800);
+PPC_FUNC_IMPL(__imp__sub_8251E800);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E800) { __imp__sub_8251E800(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E800) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -46065,7 +46297,8 @@ PPC_FUNC_IMPL(__imp__sub_8251E800) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E920"))) PPC_WEAK_FUNC(sub_8251E920);
+PPC_FUNC_IMPL(__imp__sub_8251E920);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E920) { __imp__sub_8251E920(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E920) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-31985
@@ -46076,7 +46309,8 @@ PPC_FUNC_IMPL(__imp__sub_8251E920) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251E930"))) PPC_WEAK_FUNC(sub_8251E930);
+PPC_FUNC_IMPL(__imp__sub_8251E930);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251E930) { __imp__sub_8251E930(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251E930) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -47146,7 +47380,8 @@ PPC_FUNC_IMPL(__imp__sub_8251E930) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251F110"))) PPC_WEAK_FUNC(sub_8251F110);
+PPC_FUNC_IMPL(__imp__sub_8251F110);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251F110) { __imp__sub_8251F110(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251F110) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -47187,7 +47422,8 @@ PPC_FUNC_IMPL(__imp__sub_8251F110) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251F150"))) PPC_WEAK_FUNC(sub_8251F150);
+PPC_FUNC_IMPL(__imp__sub_8251F150);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251F150) { __imp__sub_8251F150(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251F150) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -47235,7 +47471,8 @@ loc_8251F188:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251F1A0"))) PPC_WEAK_FUNC(sub_8251F1A0);
+PPC_FUNC_IMPL(__imp__sub_8251F1A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251F1A0) { __imp__sub_8251F1A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251F1A0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -47380,7 +47617,8 @@ PPC_FUNC_IMPL(__imp__sub_8251F1A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251F2A0"))) PPC_WEAK_FUNC(sub_8251F2A0);
+PPC_FUNC_IMPL(__imp__sub_8251F2A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251F2A0) { __imp__sub_8251F2A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251F2A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -47568,7 +47806,8 @@ PPC_FUNC_IMPL(__imp__sub_8251F2A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251F3E8"))) PPC_WEAK_FUNC(sub_8251F3E8);
+PPC_FUNC_IMPL(__imp__sub_8251F3E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251F3E8) { __imp__sub_8251F3E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251F3E8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -49186,7 +49425,8 @@ loc_8251FE4C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251FE90"))) PPC_WEAK_FUNC(sub_8251FE90);
+PPC_FUNC_IMPL(__imp__sub_8251FE90);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251FE90) { __imp__sub_8251FE90(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251FE90) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -49285,7 +49525,8 @@ loc_8251FF10:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251FF30"))) PPC_WEAK_FUNC(sub_8251FF30);
+PPC_FUNC_IMPL(__imp__sub_8251FF30);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251FF30) { __imp__sub_8251FF30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251FF30) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -49336,7 +49577,8 @@ loc_8251FF68:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8251FF80"))) PPC_WEAK_FUNC(sub_8251FF80);
+PPC_FUNC_IMPL(__imp__sub_8251FF80);  /* forward decl */
+PPC_WEAK_FUNC(sub_8251FF80) { __imp__sub_8251FF80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8251FF80) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -49454,7 +49696,8 @@ PPC_FUNC_IMPL(__imp__sub_8251FF80) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520048"))) PPC_WEAK_FUNC(sub_82520048);
+PPC_FUNC_IMPL(__imp__sub_82520048);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520048) { __imp__sub_82520048(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520048) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -49505,7 +49748,8 @@ loc_82520080:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520098"))) PPC_WEAK_FUNC(sub_82520098);
+PPC_FUNC_IMPL(__imp__sub_82520098);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520098) { __imp__sub_82520098(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520098) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -49745,7 +49989,8 @@ loc_82520144:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520238"))) PPC_WEAK_FUNC(sub_82520238);
+PPC_FUNC_IMPL(__imp__sub_82520238);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520238) { __imp__sub_82520238(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520238) {
 	PPC_FUNC_PROLOGUE();
 	// mulli r11,r4,42
@@ -49762,7 +50007,8 @@ PPC_FUNC_IMPL(__imp__sub_82520238) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520250"))) PPC_WEAK_FUNC(sub_82520250);
+PPC_FUNC_IMPL(__imp__sub_82520250);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520250) { __imp__sub_82520250(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520250) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r10,46(r4)
@@ -49785,7 +50031,8 @@ PPC_FUNC_IMPL(__imp__sub_82520250) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520278"))) PPC_WEAK_FUNC(sub_82520278);
+PPC_FUNC_IMPL(__imp__sub_82520278);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520278) { __imp__sub_82520278(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520278) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r10,46(r4)
@@ -49808,7 +50055,8 @@ PPC_FUNC_IMPL(__imp__sub_82520278) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825202A0"))) PPC_WEAK_FUNC(sub_825202A0);
+PPC_FUNC_IMPL(__imp__sub_825202A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825202A0) { __imp__sub_825202A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825202A0) {
 	PPC_FUNC_PROLOGUE();
 	// lhz r10,46(r4)
@@ -49831,7 +50079,8 @@ PPC_FUNC_IMPL(__imp__sub_825202A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825202C8"))) PPC_WEAK_FUNC(sub_825202C8);
+PPC_FUNC_IMPL(__imp__sub_825202C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825202C8) { __imp__sub_825202C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825202C8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -50636,7 +50885,8 @@ loc_82520808:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520820"))) PPC_WEAK_FUNC(sub_82520820);
+PPC_FUNC_IMPL(__imp__sub_82520820);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520820) { __imp__sub_82520820(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520820) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -51406,7 +51656,8 @@ loc_82520D2C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82520D40"))) PPC_WEAK_FUNC(sub_82520D40);
+PPC_FUNC_IMPL(__imp__sub_82520D40);  /* forward decl */
+PPC_WEAK_FUNC(sub_82520D40) { __imp__sub_82520D40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82520D40) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -51977,7 +52228,8 @@ loc_825210FC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82521108"))) PPC_WEAK_FUNC(sub_82521108);
+PPC_FUNC_IMPL(__imp__sub_82521108);  /* forward decl */
+PPC_WEAK_FUNC(sub_82521108) { __imp__sub_82521108(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82521108) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -52262,7 +52514,8 @@ loc_825212D0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825212E8"))) PPC_WEAK_FUNC(sub_825212E8);
+PPC_FUNC_IMPL(__imp__sub_825212E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825212E8) { __imp__sub_825212E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825212E8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -52690,7 +52943,8 @@ loc_825215A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825215B8"))) PPC_WEAK_FUNC(sub_825215B8);
+PPC_FUNC_IMPL(__imp__sub_825215B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825215B8) { __imp__sub_825215B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825215B8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -53003,7 +53257,8 @@ loc_825217C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825217D0"))) PPC_WEAK_FUNC(sub_825217D0);
+PPC_FUNC_IMPL(__imp__sub_825217D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825217D0) { __imp__sub_825217D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825217D0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -53309,7 +53564,8 @@ loc_825219C0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825219D0"))) PPC_WEAK_FUNC(sub_825219D0);
+PPC_FUNC_IMPL(__imp__sub_825219D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825219D0) { __imp__sub_825219D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825219D0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -53735,7 +53991,8 @@ loc_82521C98:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82521CA8"))) PPC_WEAK_FUNC(sub_82521CA8);
+PPC_FUNC_IMPL(__imp__sub_82521CA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82521CA8) { __imp__sub_82521CA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82521CA8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -53892,7 +54149,8 @@ loc_82521DA8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82521DB0"))) PPC_WEAK_FUNC(sub_82521DB0);
+PPC_FUNC_IMPL(__imp__sub_82521DB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82521DB0) { __imp__sub_82521DB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82521DB0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -54133,7 +54391,8 @@ loc_82521F34:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82521F48"))) PPC_WEAK_FUNC(sub_82521F48);
+PPC_FUNC_IMPL(__imp__sub_82521F48);  /* forward decl */
+PPC_WEAK_FUNC(sub_82521F48) { __imp__sub_82521F48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82521F48) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -54406,7 +54665,8 @@ loc_82522108:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522118"))) PPC_WEAK_FUNC(sub_82522118);
+PPC_FUNC_IMPL(__imp__sub_82522118);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522118) { __imp__sub_82522118(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522118) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -54611,7 +54871,8 @@ loc_82522260:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522270"))) PPC_WEAK_FUNC(sub_82522270);
+PPC_FUNC_IMPL(__imp__sub_82522270);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522270) { __imp__sub_82522270(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522270) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -54920,7 +55181,8 @@ loc_82522450:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522460"))) PPC_WEAK_FUNC(sub_82522460);
+PPC_FUNC_IMPL(__imp__sub_82522460);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522460) { __imp__sub_82522460(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522460) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -55284,7 +55546,8 @@ loc_825226C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825226D8"))) PPC_WEAK_FUNC(sub_825226D8);
+PPC_FUNC_IMPL(__imp__sub_825226D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825226D8) { __imp__sub_825226D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825226D8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -55648,7 +55911,8 @@ loc_8252293C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522950"))) PPC_WEAK_FUNC(sub_82522950);
+PPC_FUNC_IMPL(__imp__sub_82522950);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522950) { __imp__sub_82522950(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522950) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -55970,7 +56234,8 @@ loc_82522B68:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522B78"))) PPC_WEAK_FUNC(sub_82522B78);
+PPC_FUNC_IMPL(__imp__sub_82522B78);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522B78) { __imp__sub_82522B78(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522B78) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -56180,7 +56445,8 @@ loc_82522CC8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82522CD8"))) PPC_WEAK_FUNC(sub_82522CD8);
+PPC_FUNC_IMPL(__imp__sub_82522CD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82522CD8) { __imp__sub_82522CD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82522CD8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -57240,7 +57506,8 @@ loc_825233D4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825233F0"))) PPC_WEAK_FUNC(sub_825233F0);
+PPC_FUNC_IMPL(__imp__sub_825233F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825233F0) { __imp__sub_825233F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825233F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -57628,7 +57895,8 @@ loc_82523674:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82523680"))) PPC_WEAK_FUNC(sub_82523680);
+PPC_FUNC_IMPL(__imp__sub_82523680);  /* forward decl */
+PPC_WEAK_FUNC(sub_82523680) { __imp__sub_82523680(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82523680) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -57873,7 +58141,8 @@ loc_8252381C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82523828"))) PPC_WEAK_FUNC(sub_82523828);
+PPC_FUNC_IMPL(__imp__sub_82523828);  /* forward decl */
+PPC_WEAK_FUNC(sub_82523828) { __imp__sub_82523828(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82523828) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -59205,7 +59474,8 @@ loc_82524100:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82524170"))) PPC_WEAK_FUNC(sub_82524170);
+PPC_FUNC_IMPL(__imp__sub_82524170);  /* forward decl */
+PPC_WEAK_FUNC(sub_82524170) { __imp__sub_82524170(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82524170) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -59485,7 +59755,8 @@ loc_8252435C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82524368"))) PPC_WEAK_FUNC(sub_82524368);
+PPC_FUNC_IMPL(__imp__sub_82524368);  /* forward decl */
+PPC_WEAK_FUNC(sub_82524368) { __imp__sub_82524368(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82524368) {
 	PPC_FUNC_PROLOGUE();
 	// mulli r11,r4,104
@@ -59498,7 +59769,8 @@ PPC_FUNC_IMPL(__imp__sub_82524368) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82524378"))) PPC_WEAK_FUNC(sub_82524378);
+PPC_FUNC_IMPL(__imp__sub_82524378);  /* forward decl */
+PPC_WEAK_FUNC(sub_82524378) { __imp__sub_82524378(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82524378) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -59863,7 +60135,8 @@ loc_825245E4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825245F0"))) PPC_WEAK_FUNC(sub_825245F0);
+PPC_FUNC_IMPL(__imp__sub_825245F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825245F0) { __imp__sub_825245F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825245F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -59992,7 +60265,8 @@ loc_825246BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825246C8"))) PPC_WEAK_FUNC(sub_825246C8);
+PPC_FUNC_IMPL(__imp__sub_825246C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825246C8) { __imp__sub_825246C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825246C8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -60234,7 +60508,8 @@ loc_82524850:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82524860"))) PPC_WEAK_FUNC(sub_82524860);
+PPC_FUNC_IMPL(__imp__sub_82524860);  /* forward decl */
+PPC_WEAK_FUNC(sub_82524860) { __imp__sub_82524860(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82524860) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -61716,7 +61991,8 @@ loc_825252BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825252C8"))) PPC_WEAK_FUNC(sub_825252C8);
+PPC_FUNC_IMPL(__imp__sub_825252C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825252C8) { __imp__sub_825252C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825252C8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -62169,7 +62445,8 @@ loc_825255FC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82525608"))) PPC_WEAK_FUNC(sub_82525608);
+PPC_FUNC_IMPL(__imp__sub_82525608);  /* forward decl */
+PPC_WEAK_FUNC(sub_82525608) { __imp__sub_82525608(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82525608) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r9,4700(r3)
@@ -62217,7 +62494,8 @@ loc_82525640:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82525658"))) PPC_WEAK_FUNC(sub_82525658);
+PPC_FUNC_IMPL(__imp__sub_82525658);  /* forward decl */
+PPC_WEAK_FUNC(sub_82525658) { __imp__sub_82525658(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82525658) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r9,4924(r3)
@@ -62265,7 +62543,8 @@ loc_82525690:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825256A8"))) PPC_WEAK_FUNC(sub_825256A8);
+PPC_FUNC_IMPL(__imp__sub_825256A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825256A8) { __imp__sub_825256A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825256A8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r9,5012(r3)
@@ -62313,7 +62592,8 @@ loc_825256E0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825256F8"))) PPC_WEAK_FUNC(sub_825256F8);
+PPC_FUNC_IMPL(__imp__sub_825256F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825256F8) { __imp__sub_825256F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825256F8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r9,5268(r3)
@@ -62361,7 +62641,8 @@ loc_82525730:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82525748"))) PPC_WEAK_FUNC(sub_82525748);
+PPC_FUNC_IMPL(__imp__sub_82525748);  /* forward decl */
+PPC_WEAK_FUNC(sub_82525748) { __imp__sub_82525748(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82525748) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r9,5872(r3)
@@ -62409,7 +62690,8 @@ loc_82525780:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82525798"))) PPC_WEAK_FUNC(sub_82525798);
+PPC_FUNC_IMPL(__imp__sub_82525798);  /* forward decl */
+PPC_WEAK_FUNC(sub_82525798) { __imp__sub_82525798(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82525798) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -63929,7 +64211,8 @@ loc_82526220:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82526238"))) PPC_WEAK_FUNC(sub_82526238);
+PPC_FUNC_IMPL(__imp__sub_82526238);  /* forward decl */
+PPC_WEAK_FUNC(sub_82526238) { __imp__sub_82526238(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82526238) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -64048,7 +64331,8 @@ loc_825262C0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82526300"))) PPC_WEAK_FUNC(sub_82526300);
+PPC_FUNC_IMPL(__imp__sub_82526300);  /* forward decl */
+PPC_WEAK_FUNC(sub_82526300) { __imp__sub_82526300(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82526300) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -64178,7 +64462,8 @@ loc_825263BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825263D8"))) PPC_WEAK_FUNC(sub_825263D8);
+PPC_FUNC_IMPL(__imp__sub_825263D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825263D8) { __imp__sub_825263D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825263D8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -65439,7 +65724,8 @@ loc_82526C18:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82526C30"))) PPC_WEAK_FUNC(sub_82526C30);
+PPC_FUNC_IMPL(__imp__sub_82526C30);  /* forward decl */
+PPC_WEAK_FUNC(sub_82526C30) { __imp__sub_82526C30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82526C30) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -66381,7 +66667,8 @@ loc_8252724C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82527268"))) PPC_WEAK_FUNC(sub_82527268);
+PPC_FUNC_IMPL(__imp__sub_82527268);  /* forward decl */
+PPC_WEAK_FUNC(sub_82527268) { __imp__sub_82527268(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82527268) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -67254,7 +67541,8 @@ loc_82527824:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82527830"))) PPC_WEAK_FUNC(sub_82527830);
+PPC_FUNC_IMPL(__imp__sub_82527830);  /* forward decl */
+PPC_WEAK_FUNC(sub_82527830) { __imp__sub_82527830(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82527830) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -67749,7 +68037,8 @@ loc_82527B68:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82527B70"))) PPC_WEAK_FUNC(sub_82527B70);
+PPC_FUNC_IMPL(__imp__sub_82527B70);  /* forward decl */
+PPC_WEAK_FUNC(sub_82527B70) { __imp__sub_82527B70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82527B70) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -68162,7 +68451,8 @@ loc_82527E1C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82527E28"))) PPC_WEAK_FUNC(sub_82527E28);
+PPC_FUNC_IMPL(__imp__sub_82527E28);  /* forward decl */
+PPC_WEAK_FUNC(sub_82527E28) { __imp__sub_82527E28(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82527E28) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -68675,7 +68965,8 @@ loc_8252817C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528188"))) PPC_WEAK_FUNC(sub_82528188);
+PPC_FUNC_IMPL(__imp__sub_82528188);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528188) { __imp__sub_82528188(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528188) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -69164,7 +69455,8 @@ loc_825284BC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825284C8"))) PPC_WEAK_FUNC(sub_825284C8);
+PPC_FUNC_IMPL(__imp__sub_825284C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825284C8) { __imp__sub_825284C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825284C8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -69217,7 +69509,8 @@ PPC_FUNC_IMPL(__imp__sub_825284C8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528520"))) PPC_WEAK_FUNC(sub_82528520);
+PPC_FUNC_IMPL(__imp__sub_82528520);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528520) { __imp__sub_82528520(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528520) {
 	PPC_FUNC_PROLOGUE();
 	// b 0x823f3430
@@ -69225,7 +69518,8 @@ PPC_FUNC_IMPL(__imp__sub_82528520) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528528"))) PPC_WEAK_FUNC(sub_82528528);
+PPC_FUNC_IMPL(__imp__sub_82528528);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528528) { __imp__sub_82528528(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528528) {
 	PPC_FUNC_PROLOGUE();
 	// b 0x823f54b8
@@ -69233,7 +69527,8 @@ PPC_FUNC_IMPL(__imp__sub_82528528) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528530"))) PPC_WEAK_FUNC(sub_82528530);
+PPC_FUNC_IMPL(__imp__sub_82528530);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528530) { __imp__sub_82528530(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528530) {
 	PPC_FUNC_PROLOGUE();
 	// b 0x823f5528
@@ -69241,7 +69536,8 @@ PPC_FUNC_IMPL(__imp__sub_82528530) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528538"))) PPC_WEAK_FUNC(sub_82528538);
+PPC_FUNC_IMPL(__imp__sub_82528538);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528538) { __imp__sub_82528538(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528538) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -69277,7 +69573,8 @@ PPC_FUNC_IMPL(__imp__sub_82528538) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528570"))) PPC_WEAK_FUNC(sub_82528570);
+PPC_FUNC_IMPL(__imp__sub_82528570);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528570) { __imp__sub_82528570(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528570) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -69412,7 +69709,8 @@ loc_82528640:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528658"))) PPC_WEAK_FUNC(sub_82528658);
+PPC_FUNC_IMPL(__imp__sub_82528658);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528658) { __imp__sub_82528658(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528658) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -69473,7 +69771,8 @@ loc_825286A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825286C0"))) PPC_WEAK_FUNC(sub_825286C0);
+PPC_FUNC_IMPL(__imp__sub_825286C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825286C0) { __imp__sub_825286C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825286C0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -69564,7 +69863,8 @@ loc_82528744:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528760"))) PPC_WEAK_FUNC(sub_82528760);
+PPC_FUNC_IMPL(__imp__sub_82528760);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528760) { __imp__sub_82528760(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528760) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -69672,7 +69972,8 @@ PPC_FUNC_IMPL(__imp__sub_82528760) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825287F8"))) PPC_WEAK_FUNC(sub_825287F8);
+PPC_FUNC_IMPL(__imp__sub_825287F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825287F8) { __imp__sub_825287F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825287F8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -70018,7 +70319,8 @@ PPC_FUNC_IMPL(__imp__sub_825287F8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528A50"))) PPC_WEAK_FUNC(sub_82528A50);
+PPC_FUNC_IMPL(__imp__sub_82528A50);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528A50) { __imp__sub_82528A50(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528A50) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -70264,7 +70566,8 @@ loc_82528B70:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528BD8"))) PPC_WEAK_FUNC(sub_82528BD8);
+PPC_FUNC_IMPL(__imp__sub_82528BD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528BD8) { __imp__sub_82528BD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528BD8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -70426,7 +70729,8 @@ loc_82528C20:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528CC8"))) PPC_WEAK_FUNC(sub_82528CC8);
+PPC_FUNC_IMPL(__imp__sub_82528CC8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528CC8) { __imp__sub_82528CC8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528CC8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -70667,7 +70971,8 @@ loc_82528E2C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528E40"))) PPC_WEAK_FUNC(sub_82528E40);
+PPC_FUNC_IMPL(__imp__sub_82528E40);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528E40) { __imp__sub_82528E40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528E40) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -70873,7 +71178,8 @@ loc_82528F6C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528F88"))) PPC_WEAK_FUNC(sub_82528F88);
+PPC_FUNC_IMPL(__imp__sub_82528F88);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528F88) { __imp__sub_82528F88(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528F88) {
 	PPC_FUNC_PROLOGUE();
 	// lis r10,-32006
@@ -70892,7 +71198,8 @@ PPC_FUNC_IMPL(__imp__sub_82528F88) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528FA8"))) PPC_WEAK_FUNC(sub_82528FA8);
+PPC_FUNC_IMPL(__imp__sub_82528FA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528FA8) { __imp__sub_82528FA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528FA8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -70942,7 +71249,8 @@ PPC_FUNC_IMPL(__imp__sub_82528FA8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82528FF8"))) PPC_WEAK_FUNC(sub_82528FF8);
+PPC_FUNC_IMPL(__imp__sub_82528FF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82528FF8) { __imp__sub_82528FF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82528FF8) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,1
@@ -70954,7 +71262,8 @@ PPC_FUNC_IMPL(__imp__sub_82528FF8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529008"))) PPC_WEAK_FUNC(sub_82529008);
+PPC_FUNC_IMPL(__imp__sub_82529008);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529008) { __imp__sub_82529008(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529008) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71065,7 +71374,8 @@ loc_825290B8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825290C0"))) PPC_WEAK_FUNC(sub_825290C0);
+PPC_FUNC_IMPL(__imp__sub_825290C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825290C0) { __imp__sub_825290C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825290C0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71155,7 +71465,8 @@ loc_82529144:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529158"))) PPC_WEAK_FUNC(sub_82529158);
+PPC_FUNC_IMPL(__imp__sub_82529158);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529158) { __imp__sub_82529158(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529158) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -71310,7 +71621,8 @@ loc_82529248:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529250"))) PPC_WEAK_FUNC(sub_82529250);
+PPC_FUNC_IMPL(__imp__sub_82529250);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529250) { __imp__sub_82529250(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529250) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -71465,7 +71777,8 @@ loc_82529344:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529358"))) PPC_WEAK_FUNC(sub_82529358);
+PPC_FUNC_IMPL(__imp__sub_82529358);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529358) { __imp__sub_82529358(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529358) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71610,7 +71923,8 @@ loc_8252944C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529458"))) PPC_WEAK_FUNC(sub_82529458);
+PPC_FUNC_IMPL(__imp__sub_82529458);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529458) { __imp__sub_82529458(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529458) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71683,7 +71997,8 @@ loc_825294C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825294D0"))) PPC_WEAK_FUNC(sub_825294D0);
+PPC_FUNC_IMPL(__imp__sub_825294D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825294D0) { __imp__sub_825294D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825294D0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71756,7 +72071,8 @@ loc_8252953C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529548"))) PPC_WEAK_FUNC(sub_82529548);
+PPC_FUNC_IMPL(__imp__sub_82529548);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529548) { __imp__sub_82529548(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529548) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71828,7 +72144,8 @@ loc_825295B0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825295C8"))) PPC_WEAK_FUNC(sub_825295C8);
+PPC_FUNC_IMPL(__imp__sub_825295C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825295C8) { __imp__sub_825295C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825295C8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -71937,7 +72254,8 @@ loc_8252966C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529688"))) PPC_WEAK_FUNC(sub_82529688);
+PPC_FUNC_IMPL(__imp__sub_82529688);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529688) { __imp__sub_82529688(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529688) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -72020,7 +72338,8 @@ loc_825296E0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529708"))) PPC_WEAK_FUNC(sub_82529708);
+PPC_FUNC_IMPL(__imp__sub_82529708);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529708) { __imp__sub_82529708(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529708) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -72034,7 +72353,8 @@ PPC_FUNC_IMPL(__imp__sub_82529708) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529718"))) PPC_WEAK_FUNC(sub_82529718);
+PPC_FUNC_IMPL(__imp__sub_82529718);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529718) { __imp__sub_82529718(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529718) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -72633,7 +72953,8 @@ loc_82529B00:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529B10"))) PPC_WEAK_FUNC(sub_82529B10);
+PPC_FUNC_IMPL(__imp__sub_82529B10);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529B10) { __imp__sub_82529B10(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529B10) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -72720,7 +73041,8 @@ loc_82529B84:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529BA0"))) PPC_WEAK_FUNC(sub_82529BA0);
+PPC_FUNC_IMPL(__imp__sub_82529BA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529BA0) { __imp__sub_82529BA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529BA0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -72804,7 +73126,8 @@ loc_82529C1C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529C30"))) PPC_WEAK_FUNC(sub_82529C30);
+PPC_FUNC_IMPL(__imp__sub_82529C30);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529C30) { __imp__sub_82529C30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529C30) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -73118,7 +73441,8 @@ loc_82529E40:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529E48"))) PPC_WEAK_FUNC(sub_82529E48);
+PPC_FUNC_IMPL(__imp__sub_82529E48);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529E48) { __imp__sub_82529E48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529E48) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -73196,14 +73520,16 @@ loc_82529EB4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529ECC"))) PPC_WEAK_FUNC(sub_82529ECC);
+PPC_FUNC_IMPL(__imp__sub_82529ECC);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529ECC) { __imp__sub_82529ECC(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529ECC) {
 	PPC_FUNC_PROLOGUE();
 	// blr 
 	return;
 }
 
-__attribute__((alias("__imp__sub_82529ED0"))) PPC_WEAK_FUNC(sub_82529ED0);
+PPC_FUNC_IMPL(__imp__sub_82529ED0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82529ED0) { __imp__sub_82529ED0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82529ED0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -73701,7 +74027,8 @@ loc_8252A23C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252A248"))) PPC_WEAK_FUNC(sub_8252A248);
+PPC_FUNC_IMPL(__imp__sub_8252A248);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252A248) { __imp__sub_8252A248(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252A248) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -74137,7 +74464,8 @@ loc_8252A500:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252A518"))) PPC_WEAK_FUNC(sub_8252A518);
+PPC_FUNC_IMPL(__imp__sub_8252A518);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252A518) { __imp__sub_8252A518(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252A518) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -74464,7 +74792,8 @@ loc_8252A5D0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252A740"))) PPC_WEAK_FUNC(sub_8252A740);
+PPC_FUNC_IMPL(__imp__sub_8252A740);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252A740) { __imp__sub_8252A740(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252A740) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -74730,7 +75059,8 @@ loc_8252A8DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252A8F8"))) PPC_WEAK_FUNC(sub_8252A8F8);
+PPC_FUNC_IMPL(__imp__sub_8252A8F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252A8F8) { __imp__sub_8252A8F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252A8F8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -74788,7 +75118,8 @@ loc_8252A930:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252A958"))) PPC_WEAK_FUNC(sub_8252A958);
+PPC_FUNC_IMPL(__imp__sub_8252A958);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252A958) { __imp__sub_8252A958(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252A958) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -76349,7 +76680,8 @@ loc_8252B348:
 	goto loc_8252ADF4;
 }
 
-__attribute__((alias("__imp__sub_8252B418"))) PPC_WEAK_FUNC(sub_8252B418);
+PPC_FUNC_IMPL(__imp__sub_8252B418);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252B418) { __imp__sub_8252B418(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252B418) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -76427,7 +76759,8 @@ PPC_FUNC_IMPL(__imp__sub_8252B418) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252B490"))) PPC_WEAK_FUNC(sub_8252B490);
+PPC_FUNC_IMPL(__imp__sub_8252B490);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252B490) { __imp__sub_8252B490(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252B490) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -76560,7 +76893,8 @@ loc_8252B560:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252B570"))) PPC_WEAK_FUNC(sub_8252B570);
+PPC_FUNC_IMPL(__imp__sub_8252B570);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252B570) { __imp__sub_8252B570(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252B570) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -77054,7 +77388,8 @@ loc_8252B8D0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252B8E0"))) PPC_WEAK_FUNC(sub_8252B8E0);
+PPC_FUNC_IMPL(__imp__sub_8252B8E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252B8E0) { __imp__sub_8252B8E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252B8E0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -77352,7 +77687,8 @@ loc_8252BAC8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252BAE8"))) PPC_WEAK_FUNC(sub_8252BAE8);
+PPC_FUNC_IMPL(__imp__sub_8252BAE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252BAE8) { __imp__sub_8252BAE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252BAE8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -77469,7 +77805,8 @@ loc_8252BBA4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252BBB0"))) PPC_WEAK_FUNC(sub_8252BBB0);
+PPC_FUNC_IMPL(__imp__sub_8252BBB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252BBB0) { __imp__sub_8252BBB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252BBB0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -77640,7 +77977,8 @@ loc_8252BC84:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252BCD0"))) PPC_WEAK_FUNC(sub_8252BCD0);
+PPC_FUNC_IMPL(__imp__sub_8252BCD0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252BCD0) { __imp__sub_8252BCD0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252BCD0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -77778,7 +78116,8 @@ loc_8252BD90:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252BDB0"))) PPC_WEAK_FUNC(sub_8252BDB0);
+PPC_FUNC_IMPL(__imp__sub_8252BDB0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252BDB0) { __imp__sub_8252BDB0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252BDB0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -77907,7 +78246,8 @@ PPC_FUNC_IMPL(__imp__sub_8252BDB0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252BE70"))) PPC_WEAK_FUNC(sub_8252BE70);
+PPC_FUNC_IMPL(__imp__sub_8252BE70);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252BE70) { __imp__sub_8252BE70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252BE70) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -78660,7 +79000,8 @@ loc_8252C32C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252C370"))) PPC_WEAK_FUNC(sub_8252C370);
+PPC_FUNC_IMPL(__imp__sub_8252C370);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252C370) { __imp__sub_8252C370(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252C370) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -79936,7 +80277,8 @@ loc_8252CC44:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252CC58"))) PPC_WEAK_FUNC(sub_8252CC58);
+PPC_FUNC_IMPL(__imp__sub_8252CC58);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252CC58) { __imp__sub_8252CC58(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252CC58) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -80136,7 +80478,8 @@ loc_8252CDAC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252CDB8"))) PPC_WEAK_FUNC(sub_8252CDB8);
+PPC_FUNC_IMPL(__imp__sub_8252CDB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252CDB8) { __imp__sub_8252CDB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252CDB8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -80294,7 +80637,8 @@ loc_8252CEB8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252CEC0"))) PPC_WEAK_FUNC(sub_8252CEC0);
+PPC_FUNC_IMPL(__imp__sub_8252CEC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252CEC0) { __imp__sub_8252CEC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252CEC0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -80510,7 +80854,8 @@ loc_8252D024:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D030"))) PPC_WEAK_FUNC(sub_8252D030);
+PPC_FUNC_IMPL(__imp__sub_8252D030);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D030) { __imp__sub_8252D030(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D030) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -80602,7 +80947,8 @@ loc_8252D06C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D0D0"))) PPC_WEAK_FUNC(sub_8252D0D0);
+PPC_FUNC_IMPL(__imp__sub_8252D0D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D0D0) { __imp__sub_8252D0D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D0D0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -80740,7 +81086,8 @@ PPC_FUNC_IMPL(__imp__sub_8252D0D0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D1C0"))) PPC_WEAK_FUNC(sub_8252D1C0);
+PPC_FUNC_IMPL(__imp__sub_8252D1C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D1C0) { __imp__sub_8252D1C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D1C0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -80777,7 +81124,8 @@ PPC_FUNC_IMPL(__imp__sub_8252D1C0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D1F8"))) PPC_WEAK_FUNC(sub_8252D1F8);
+PPC_FUNC_IMPL(__imp__sub_8252D1F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D1F8) { __imp__sub_8252D1F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D1F8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -80826,7 +81174,8 @@ loc_8252D228:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D240"))) PPC_WEAK_FUNC(sub_8252D240);
+PPC_FUNC_IMPL(__imp__sub_8252D240);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D240) { __imp__sub_8252D240(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D240) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -80842,7 +81191,8 @@ PPC_FUNC_IMPL(__imp__sub_8252D240) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D250"))) PPC_WEAK_FUNC(sub_8252D250);
+PPC_FUNC_IMPL(__imp__sub_8252D250);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D250) { __imp__sub_8252D250(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D250) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81077,7 +81427,8 @@ loc_8252D3D0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D3D8"))) PPC_WEAK_FUNC(sub_8252D3D8);
+PPC_FUNC_IMPL(__imp__sub_8252D3D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D3D8) { __imp__sub_8252D3D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D3D8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81252,7 +81603,8 @@ loc_8252D4DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D4F8"))) PPC_WEAK_FUNC(sub_8252D4F8);
+PPC_FUNC_IMPL(__imp__sub_8252D4F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D4F8) { __imp__sub_8252D4F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D4F8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81283,7 +81635,8 @@ loc_8252D518:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D520"))) PPC_WEAK_FUNC(sub_8252D520);
+PPC_FUNC_IMPL(__imp__sub_8252D520);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D520) { __imp__sub_8252D520(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D520) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81295,7 +81648,8 @@ PPC_FUNC_IMPL(__imp__sub_8252D520) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D528"))) PPC_WEAK_FUNC(sub_8252D528);
+PPC_FUNC_IMPL(__imp__sub_8252D528);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D528) { __imp__sub_8252D528(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D528) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81332,7 +81686,8 @@ loc_8252D554:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D560"))) PPC_WEAK_FUNC(sub_8252D560);
+PPC_FUNC_IMPL(__imp__sub_8252D560);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D560) { __imp__sub_8252D560(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D560) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -81447,7 +81802,8 @@ loc_8252D614:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D628"))) PPC_WEAK_FUNC(sub_8252D628);
+PPC_FUNC_IMPL(__imp__sub_8252D628);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D628) { __imp__sub_8252D628(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D628) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -81848,7 +82204,8 @@ loc_8252D890:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252D8C8"))) PPC_WEAK_FUNC(sub_8252D8C8);
+PPC_FUNC_IMPL(__imp__sub_8252D8C8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252D8C8) { __imp__sub_8252D8C8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252D8C8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -82321,7 +82678,8 @@ loc_8252DBC8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DBE8"))) PPC_WEAK_FUNC(sub_8252DBE8);
+PPC_FUNC_IMPL(__imp__sub_8252DBE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DBE8) { __imp__sub_8252DBE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DBE8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -82350,7 +82708,8 @@ PPC_FUNC_IMPL(__imp__sub_8252DBE8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DC10"))) PPC_WEAK_FUNC(sub_8252DC10);
+PPC_FUNC_IMPL(__imp__sub_8252DC10);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DC10) { __imp__sub_8252DC10(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DC10) {
 	PPC_FUNC_PROLOGUE();
 	// lbz r11,4712(r3)
@@ -82374,7 +82733,8 @@ loc_8252DC2C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DC38"))) PPC_WEAK_FUNC(sub_8252DC38);
+PPC_FUNC_IMPL(__imp__sub_8252DC38);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DC38) { __imp__sub_8252DC38(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DC38) {
 	PPC_FUNC_PROLOGUE();
 	// mr r9,r3
@@ -82435,7 +82795,8 @@ loc_8252DC7C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DCA0"))) PPC_WEAK_FUNC(sub_8252DCA0);
+PPC_FUNC_IMPL(__imp__sub_8252DCA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DCA0) { __imp__sub_8252DCA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DCA0) {
 	PPC_FUNC_PROLOGUE();
 	// clrlwi r10,r4,27
@@ -82461,7 +82822,8 @@ PPC_FUNC_IMPL(__imp__sub_8252DCA0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DCC8"))) PPC_WEAK_FUNC(sub_8252DCC8);
+PPC_FUNC_IMPL(__imp__sub_8252DCC8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DCC8) { __imp__sub_8252DCC8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DCC8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -82645,7 +83007,8 @@ loc_8252DDF8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DE00"))) PPC_WEAK_FUNC(sub_8252DE00);
+PPC_FUNC_IMPL(__imp__sub_8252DE00);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DE00) { __imp__sub_8252DE00(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DE00) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -82821,7 +83184,8 @@ loc_8252DEEC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DF30"))) PPC_WEAK_FUNC(sub_8252DF30);
+PPC_FUNC_IMPL(__imp__sub_8252DF30);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DF30) { __imp__sub_8252DF30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DF30) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -82915,7 +83279,8 @@ loc_8252DFA8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252DFC8"))) PPC_WEAK_FUNC(sub_8252DFC8);
+PPC_FUNC_IMPL(__imp__sub_8252DFC8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252DFC8) { __imp__sub_8252DFC8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252DFC8) {
 	PPC_FUNC_PROLOGUE();
 	// li r10,0
@@ -83041,7 +83406,8 @@ loc_8252E0A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252E0A8"))) PPC_WEAK_FUNC(sub_8252E0A8);
+PPC_FUNC_IMPL(__imp__sub_8252E0A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252E0A8) { __imp__sub_8252E0A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252E0A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -83823,7 +84189,8 @@ loc_8252E5AC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252E5B8"))) PPC_WEAK_FUNC(sub_8252E5B8);
+PPC_FUNC_IMPL(__imp__sub_8252E5B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252E5B8) { __imp__sub_8252E5B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252E5B8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -85801,7 +86168,8 @@ loc_8252F020:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252F2E8"))) PPC_WEAK_FUNC(sub_8252F2E8);
+PPC_FUNC_IMPL(__imp__sub_8252F2E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252F2E8) { __imp__sub_8252F2E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252F2E8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -86264,7 +86632,8 @@ loc_8252F5B0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252F5D0"))) PPC_WEAK_FUNC(sub_8252F5D0);
+PPC_FUNC_IMPL(__imp__sub_8252F5D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252F5D0) { __imp__sub_8252F5D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252F5D0) {
 	PPC_FUNC_PROLOGUE();
 	// li r10,0
@@ -86320,7 +86689,8 @@ loc_8252F60C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252F630"))) PPC_WEAK_FUNC(sub_8252F630);
+PPC_FUNC_IMPL(__imp__sub_8252F630);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252F630) { __imp__sub_8252F630(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252F630) {
 	PPC_FUNC_PROLOGUE();
 	// cmplwi cr6,r4,0
@@ -86365,7 +86735,8 @@ loc_8252F670:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252F678"))) PPC_WEAK_FUNC(sub_8252F678);
+PPC_FUNC_IMPL(__imp__sub_8252F678);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252F678) { __imp__sub_8252F678(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252F678) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -86854,7 +87225,8 @@ loc_8252F90C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252F9A8"))) PPC_WEAK_FUNC(sub_8252F9A8);
+PPC_FUNC_IMPL(__imp__sub_8252F9A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252F9A8) { __imp__sub_8252F9A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252F9A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -86961,7 +87333,8 @@ PPC_FUNC_IMPL(__imp__sub_8252F9A8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FA58"))) PPC_WEAK_FUNC(sub_8252FA58);
+PPC_FUNC_IMPL(__imp__sub_8252FA58);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FA58) { __imp__sub_8252FA58(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FA58) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -87178,7 +87551,8 @@ loc_8252FB84:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FBC0"))) PPC_WEAK_FUNC(sub_8252FBC0);
+PPC_FUNC_IMPL(__imp__sub_8252FBC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FBC0) { __imp__sub_8252FBC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FBC0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -87232,7 +87606,8 @@ loc_8252FBD8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FC10"))) PPC_WEAK_FUNC(sub_8252FC10);
+PPC_FUNC_IMPL(__imp__sub_8252FC10);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FC10) { __imp__sub_8252FC10(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FC10) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -87561,7 +87936,8 @@ loc_8252FE24:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FE48"))) PPC_WEAK_FUNC(sub_8252FE48);
+PPC_FUNC_IMPL(__imp__sub_8252FE48);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FE48) { __imp__sub_8252FE48(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FE48) {
 	PPC_FUNC_PROLOGUE();
 	// lis r10,-32006
@@ -87596,7 +87972,8 @@ loc_8252FE78:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FE80"))) PPC_WEAK_FUNC(sub_8252FE80);
+PPC_FUNC_IMPL(__imp__sub_8252FE80);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FE80) { __imp__sub_8252FE80(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FE80) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -87672,7 +88049,8 @@ loc_8252FEEC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FF08"))) PPC_WEAK_FUNC(sub_8252FF08);
+PPC_FUNC_IMPL(__imp__sub_8252FF08);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FF08) { __imp__sub_8252FF08(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FF08) {
 	PPC_FUNC_PROLOGUE();
 	// mr r11,r3
@@ -87706,7 +88084,8 @@ loc_8252FF20:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FF40"))) PPC_WEAK_FUNC(sub_8252FF40);
+PPC_FUNC_IMPL(__imp__sub_8252FF40);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FF40) { __imp__sub_8252FF40(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FF40) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -87770,7 +88149,8 @@ loc_8252FF9C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FFA8"))) PPC_WEAK_FUNC(sub_8252FFA8);
+PPC_FUNC_IMPL(__imp__sub_8252FFA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FFA8) { __imp__sub_8252FFA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FFA8) {
 	PPC_FUNC_PROLOGUE();
 	// clrlwi r11,r4,24
@@ -87806,14 +88186,16 @@ PPC_FUNC_IMPL(__imp__sub_8252FFA8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FFE4"))) PPC_WEAK_FUNC(sub_8252FFE4);
+PPC_FUNC_IMPL(__imp__sub_8252FFE4);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FFE4) { __imp__sub_8252FFE4(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FFE4) {
 	PPC_FUNC_PROLOGUE();
 	// blr 
 	return;
 }
 
-__attribute__((alias("__imp__sub_8252FFE8"))) PPC_WEAK_FUNC(sub_8252FFE8);
+PPC_FUNC_IMPL(__imp__sub_8252FFE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8252FFE8) { __imp__sub_8252FFE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8252FFE8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -87867,7 +88249,8 @@ loc_8253002C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530040"))) PPC_WEAK_FUNC(sub_82530040);
+PPC_FUNC_IMPL(__imp__sub_82530040);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530040) { __imp__sub_82530040(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530040) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -87927,7 +88310,8 @@ PPC_FUNC_IMPL(__imp__sub_82530040) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825300A0"))) PPC_WEAK_FUNC(sub_825300A0);
+PPC_FUNC_IMPL(__imp__sub_825300A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825300A0) { __imp__sub_825300A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825300A0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -87947,7 +88331,8 @@ PPC_FUNC_IMPL(__imp__sub_825300A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825300B8"))) PPC_WEAK_FUNC(sub_825300B8);
+PPC_FUNC_IMPL(__imp__sub_825300B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825300B8) { __imp__sub_825300B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825300B8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -88004,7 +88389,8 @@ PPC_FUNC_IMPL(__imp__sub_825300B8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530110"))) PPC_WEAK_FUNC(sub_82530110);
+PPC_FUNC_IMPL(__imp__sub_82530110);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530110) { __imp__sub_82530110(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530110) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -88015,7 +88401,8 @@ PPC_FUNC_IMPL(__imp__sub_82530110) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530120"))) PPC_WEAK_FUNC(sub_82530120);
+PPC_FUNC_IMPL(__imp__sub_82530120);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530120) { __imp__sub_82530120(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530120) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -88073,7 +88460,8 @@ PPC_FUNC_IMPL(__imp__sub_82530120) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530178"))) PPC_WEAK_FUNC(sub_82530178);
+PPC_FUNC_IMPL(__imp__sub_82530178);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530178) { __imp__sub_82530178(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530178) {
 	PPC_FUNC_PROLOGUE();
 	// stb r4,12022(r3)
@@ -88082,7 +88470,8 @@ PPC_FUNC_IMPL(__imp__sub_82530178) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530180"))) PPC_WEAK_FUNC(sub_82530180);
+PPC_FUNC_IMPL(__imp__sub_82530180);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530180) { __imp__sub_82530180(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530180) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -88392,7 +88781,8 @@ PPC_FUNC_IMPL(__imp__sub_82530180) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530378"))) PPC_WEAK_FUNC(sub_82530378);
+PPC_FUNC_IMPL(__imp__sub_82530378);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530378) { __imp__sub_82530378(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530378) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -88618,7 +89008,8 @@ PPC_FUNC_IMPL(__imp__sub_82530378) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825304E0"))) PPC_WEAK_FUNC(sub_825304E0);
+PPC_FUNC_IMPL(__imp__sub_825304E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825304E0) { __imp__sub_825304E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825304E0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -88702,7 +89093,8 @@ loc_82530558:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530570"))) PPC_WEAK_FUNC(sub_82530570);
+PPC_FUNC_IMPL(__imp__sub_82530570);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530570) { __imp__sub_82530570(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530570) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -90155,7 +90547,8 @@ loc_82530E50:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530EE0"))) PPC_WEAK_FUNC(sub_82530EE0);
+PPC_FUNC_IMPL(__imp__sub_82530EE0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530EE0) { __imp__sub_82530EE0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530EE0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -90272,7 +90665,8 @@ loc_82530F44:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82530F98"))) PPC_WEAK_FUNC(sub_82530F98);
+PPC_FUNC_IMPL(__imp__sub_82530F98);  /* forward decl */
+PPC_WEAK_FUNC(sub_82530F98) { __imp__sub_82530F98(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82530F98) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -91166,7 +91560,8 @@ loc_82531548:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82531558"))) PPC_WEAK_FUNC(sub_82531558);
+PPC_FUNC_IMPL(__imp__sub_82531558);  /* forward decl */
+PPC_WEAK_FUNC(sub_82531558) { __imp__sub_82531558(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82531558) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -91293,7 +91688,8 @@ loc_82531624:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82531640"))) PPC_WEAK_FUNC(sub_82531640);
+PPC_FUNC_IMPL(__imp__sub_82531640);  /* forward decl */
+PPC_WEAK_FUNC(sub_82531640) { __imp__sub_82531640(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82531640) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -91416,7 +91812,8 @@ loc_825316EC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82531700"))) PPC_WEAK_FUNC(sub_82531700);
+PPC_FUNC_IMPL(__imp__sub_82531700);  /* forward decl */
+PPC_WEAK_FUNC(sub_82531700) { __imp__sub_82531700(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82531700) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -91841,7 +92238,8 @@ loc_825319A4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825319B8"))) PPC_WEAK_FUNC(sub_825319B8);
+PPC_FUNC_IMPL(__imp__sub_825319B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825319B8) { __imp__sub_825319B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825319B8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -92048,7 +92446,8 @@ loc_82531B0C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82531B18"))) PPC_WEAK_FUNC(sub_82531B18);
+PPC_FUNC_IMPL(__imp__sub_82531B18);  /* forward decl */
+PPC_WEAK_FUNC(sub_82531B18) { __imp__sub_82531B18(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82531B18) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -92466,7 +92865,8 @@ loc_82531D50:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82531DD8"))) PPC_WEAK_FUNC(sub_82531DD8);
+PPC_FUNC_IMPL(__imp__sub_82531DD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82531DD8) { __imp__sub_82531DD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82531DD8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -93873,7 +94273,8 @@ loc_825326DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825326F0"))) PPC_WEAK_FUNC(sub_825326F0);
+PPC_FUNC_IMPL(__imp__sub_825326F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825326F0) { __imp__sub_825326F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825326F0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -94311,7 +94712,8 @@ loc_82532990:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825329B0"))) PPC_WEAK_FUNC(sub_825329B0);
+PPC_FUNC_IMPL(__imp__sub_825329B0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825329B0) { __imp__sub_825329B0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825329B0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -94500,7 +94902,8 @@ loc_82532ADC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82532AF0"))) PPC_WEAK_FUNC(sub_82532AF0);
+PPC_FUNC_IMPL(__imp__sub_82532AF0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82532AF0) { __imp__sub_82532AF0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82532AF0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -94844,7 +95247,8 @@ loc_82532D08:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82532D28"))) PPC_WEAK_FUNC(sub_82532D28);
+PPC_FUNC_IMPL(__imp__sub_82532D28);  /* forward decl */
+PPC_WEAK_FUNC(sub_82532D28) { __imp__sub_82532D28(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82532D28) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -95125,7 +95529,8 @@ loc_82532ED4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82532EE8"))) PPC_WEAK_FUNC(sub_82532EE8);
+PPC_FUNC_IMPL(__imp__sub_82532EE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82532EE8) { __imp__sub_82532EE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82532EE8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -95454,7 +95859,8 @@ loc_825330E0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825330F0"))) PPC_WEAK_FUNC(sub_825330F0);
+PPC_FUNC_IMPL(__imp__sub_825330F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825330F0) { __imp__sub_825330F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825330F0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -95692,7 +96098,8 @@ loc_8253328C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82533298"))) PPC_WEAK_FUNC(sub_82533298);
+PPC_FUNC_IMPL(__imp__sub_82533298);  /* forward decl */
+PPC_WEAK_FUNC(sub_82533298) { __imp__sub_82533298(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82533298) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -95879,7 +96286,8 @@ loc_825333D4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825333E0"))) PPC_WEAK_FUNC(sub_825333E0);
+PPC_FUNC_IMPL(__imp__sub_825333E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825333E0) { __imp__sub_825333E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825333E0) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r11,9008(r3)
@@ -96063,7 +96471,8 @@ loc_8253351C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82533530"))) PPC_WEAK_FUNC(sub_82533530);
+PPC_FUNC_IMPL(__imp__sub_82533530);  /* forward decl */
+PPC_WEAK_FUNC(sub_82533530) { __imp__sub_82533530(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82533530) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -96960,7 +97369,8 @@ loc_82533848:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82533AE0"))) PPC_WEAK_FUNC(sub_82533AE0);
+PPC_FUNC_IMPL(__imp__sub_82533AE0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82533AE0) { __imp__sub_82533AE0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82533AE0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -97773,7 +98183,8 @@ loc_82533FD8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82534040"))) PPC_WEAK_FUNC(sub_82534040);
+PPC_FUNC_IMPL(__imp__sub_82534040);  /* forward decl */
+PPC_WEAK_FUNC(sub_82534040) { __imp__sub_82534040(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82534040) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -98355,7 +98766,8 @@ loc_825342A0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825343E8"))) PPC_WEAK_FUNC(sub_825343E8);
+PPC_FUNC_IMPL(__imp__sub_825343E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825343E8) { __imp__sub_825343E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825343E8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -98809,7 +99221,8 @@ loc_82534530:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825346A0"))) PPC_WEAK_FUNC(sub_825346A0);
+PPC_FUNC_IMPL(__imp__sub_825346A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825346A0) { __imp__sub_825346A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825346A0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -100878,7 +101291,8 @@ loc_82535410:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82535428"))) PPC_WEAK_FUNC(sub_82535428);
+PPC_FUNC_IMPL(__imp__sub_82535428);  /* forward decl */
+PPC_WEAK_FUNC(sub_82535428) { __imp__sub_82535428(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82535428) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -100947,7 +101361,8 @@ loc_82535480:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82535498"))) PPC_WEAK_FUNC(sub_82535498);
+PPC_FUNC_IMPL(__imp__sub_82535498);  /* forward decl */
+PPC_WEAK_FUNC(sub_82535498) { __imp__sub_82535498(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82535498) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -102422,7 +102837,8 @@ loc_82535E34:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82535EA8"))) PPC_WEAK_FUNC(sub_82535EA8);
+PPC_FUNC_IMPL(__imp__sub_82535EA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82535EA8) { __imp__sub_82535EA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82535EA8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -103223,7 +103639,8 @@ loc_825363E4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536408"))) PPC_WEAK_FUNC(sub_82536408);
+PPC_FUNC_IMPL(__imp__sub_82536408);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536408) { __imp__sub_82536408(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536408) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -103306,7 +103723,8 @@ loc_82536434:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536498"))) PPC_WEAK_FUNC(sub_82536498);
+PPC_FUNC_IMPL(__imp__sub_82536498);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536498) { __imp__sub_82536498(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536498) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -103376,7 +103794,8 @@ loc_825364C4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536510"))) PPC_WEAK_FUNC(sub_82536510);
+PPC_FUNC_IMPL(__imp__sub_82536510);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536510) { __imp__sub_82536510(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536510) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -103446,7 +103865,8 @@ loc_8253653C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536588"))) PPC_WEAK_FUNC(sub_82536588);
+PPC_FUNC_IMPL(__imp__sub_82536588);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536588) { __imp__sub_82536588(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536588) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -103841,7 +104261,8 @@ loc_82536840:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536848"))) PPC_WEAK_FUNC(sub_82536848);
+PPC_FUNC_IMPL(__imp__sub_82536848);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536848) { __imp__sub_82536848(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536848) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -104966,7 +105387,8 @@ loc_82536FA4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82536FC0"))) PPC_WEAK_FUNC(sub_82536FC0);
+PPC_FUNC_IMPL(__imp__sub_82536FC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82536FC0) { __imp__sub_82536FC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82536FC0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -105948,7 +106370,8 @@ loc_82537598:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537608"))) PPC_WEAK_FUNC(sub_82537608);
+PPC_FUNC_IMPL(__imp__sub_82537608);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537608) { __imp__sub_82537608(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537608) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -106416,7 +106839,8 @@ loc_8253791C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537930"))) PPC_WEAK_FUNC(sub_82537930);
+PPC_FUNC_IMPL(__imp__sub_82537930);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537930) { __imp__sub_82537930(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537930) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -106467,7 +106891,8 @@ loc_82537960:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537980"))) PPC_WEAK_FUNC(sub_82537980);
+PPC_FUNC_IMPL(__imp__sub_82537980);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537980) { __imp__sub_82537980(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537980) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -106478,7 +106903,8 @@ PPC_FUNC_IMPL(__imp__sub_82537980) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537990"))) PPC_WEAK_FUNC(sub_82537990);
+PPC_FUNC_IMPL(__imp__sub_82537990);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537990) { __imp__sub_82537990(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537990) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -106489,7 +106915,8 @@ PPC_FUNC_IMPL(__imp__sub_82537990) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825379A0"))) PPC_WEAK_FUNC(sub_825379A0);
+PPC_FUNC_IMPL(__imp__sub_825379A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825379A0) { __imp__sub_825379A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825379A0) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -106500,7 +106927,8 @@ PPC_FUNC_IMPL(__imp__sub_825379A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825379B0"))) PPC_WEAK_FUNC(sub_825379B0);
+PPC_FUNC_IMPL(__imp__sub_825379B0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825379B0) { __imp__sub_825379B0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825379B0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -106575,7 +107003,8 @@ loc_82537A18:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537A30"))) PPC_WEAK_FUNC(sub_82537A30);
+PPC_FUNC_IMPL(__imp__sub_82537A30);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537A30) { __imp__sub_82537A30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537A30) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -107122,7 +107551,8 @@ loc_82537D88:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537DA0"))) PPC_WEAK_FUNC(sub_82537DA0);
+PPC_FUNC_IMPL(__imp__sub_82537DA0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537DA0) { __imp__sub_82537DA0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537DA0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -107359,7 +107789,8 @@ loc_82537F1C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82537F28"))) PPC_WEAK_FUNC(sub_82537F28);
+PPC_FUNC_IMPL(__imp__sub_82537F28);  /* forward decl */
+PPC_WEAK_FUNC(sub_82537F28) { __imp__sub_82537F28(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82537F28) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -107642,7 +108073,8 @@ loc_825380F8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538100"))) PPC_WEAK_FUNC(sub_82538100);
+PPC_FUNC_IMPL(__imp__sub_82538100);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538100) { __imp__sub_82538100(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538100) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -107749,7 +108181,8 @@ loc_825381A4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825381C0"))) PPC_WEAK_FUNC(sub_825381C0);
+PPC_FUNC_IMPL(__imp__sub_825381C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825381C0) { __imp__sub_825381C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825381C0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -108019,7 +108452,8 @@ loc_82538364:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538378"))) PPC_WEAK_FUNC(sub_82538378);
+PPC_FUNC_IMPL(__imp__sub_82538378);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538378) { __imp__sub_82538378(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538378) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r3,2448(r3)
@@ -108028,7 +108462,8 @@ PPC_FUNC_IMPL(__imp__sub_82538378) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538380"))) PPC_WEAK_FUNC(sub_82538380);
+PPC_FUNC_IMPL(__imp__sub_82538380);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538380) { __imp__sub_82538380(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538380) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108039,7 +108474,8 @@ PPC_FUNC_IMPL(__imp__sub_82538380) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538390"))) PPC_WEAK_FUNC(sub_82538390);
+PPC_FUNC_IMPL(__imp__sub_82538390);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538390) { __imp__sub_82538390(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538390) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108066,7 +108502,8 @@ loc_825383B0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825383B8"))) PPC_WEAK_FUNC(sub_825383B8);
+PPC_FUNC_IMPL(__imp__sub_825383B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825383B8) { __imp__sub_825383B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825383B8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -108247,7 +108684,8 @@ loc_825384C8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825384E0"))) PPC_WEAK_FUNC(sub_825384E0);
+PPC_FUNC_IMPL(__imp__sub_825384E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825384E0) { __imp__sub_825384E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825384E0) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108337,7 +108775,8 @@ loc_82538578:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538580"))) PPC_WEAK_FUNC(sub_82538580);
+PPC_FUNC_IMPL(__imp__sub_82538580);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538580) { __imp__sub_82538580(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538580) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108415,7 +108854,8 @@ loc_82538604:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538610"))) PPC_WEAK_FUNC(sub_82538610);
+PPC_FUNC_IMPL(__imp__sub_82538610);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538610) { __imp__sub_82538610(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538610) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -108632,7 +109072,8 @@ loc_82538788:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538790"))) PPC_WEAK_FUNC(sub_82538790);
+PPC_FUNC_IMPL(__imp__sub_82538790);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538790) { __imp__sub_82538790(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538790) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108661,7 +109102,8 @@ loc_825387AC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825387C0"))) PPC_WEAK_FUNC(sub_825387C0);
+PPC_FUNC_IMPL(__imp__sub_825387C0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825387C0) { __imp__sub_825387C0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825387C0) {
 	PPC_FUNC_PROLOGUE();
 	// add r10,r3,r4
@@ -108678,7 +109120,8 @@ PPC_FUNC_IMPL(__imp__sub_825387C0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825387D8"))) PPC_WEAK_FUNC(sub_825387D8);
+PPC_FUNC_IMPL(__imp__sub_825387D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825387D8) { __imp__sub_825387D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825387D8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -108777,7 +109220,8 @@ loc_8253886C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538888"))) PPC_WEAK_FUNC(sub_82538888);
+PPC_FUNC_IMPL(__imp__sub_82538888);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538888) { __imp__sub_82538888(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538888) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -108872,7 +109316,8 @@ loc_82538914:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538928"))) PPC_WEAK_FUNC(sub_82538928);
+PPC_FUNC_IMPL(__imp__sub_82538928);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538928) { __imp__sub_82538928(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538928) {
 	PPC_FUNC_PROLOGUE();
 	// lis r11,-32005
@@ -108903,7 +109348,8 @@ loc_82538954:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538958"))) PPC_WEAK_FUNC(sub_82538958);
+PPC_FUNC_IMPL(__imp__sub_82538958);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538958) { __imp__sub_82538958(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538958) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -109354,7 +109800,8 @@ loc_82538C4C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538C60"))) PPC_WEAK_FUNC(sub_82538C60);
+PPC_FUNC_IMPL(__imp__sub_82538C60);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538C60) { __imp__sub_82538C60(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538C60) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -109516,7 +109963,8 @@ loc_82538D54:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538D70"))) PPC_WEAK_FUNC(sub_82538D70);
+PPC_FUNC_IMPL(__imp__sub_82538D70);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538D70) { __imp__sub_82538D70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538D70) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -109566,7 +110014,8 @@ loc_82538DAC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538DC0"))) PPC_WEAK_FUNC(sub_82538DC0);
+PPC_FUNC_IMPL(__imp__sub_82538DC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538DC0) { __imp__sub_82538DC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538DC0) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r11,0(r3)
@@ -109619,7 +110068,8 @@ loc_82538E04:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538E20"))) PPC_WEAK_FUNC(sub_82538E20);
+PPC_FUNC_IMPL(__imp__sub_82538E20);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538E20) { __imp__sub_82538E20(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538E20) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -109668,7 +110118,8 @@ loc_82538E58:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538E70"))) PPC_WEAK_FUNC(sub_82538E70);
+PPC_FUNC_IMPL(__imp__sub_82538E70);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538E70) { __imp__sub_82538E70(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538E70) {
 	PPC_FUNC_PROLOGUE();
 	// mr r11,r3
@@ -109738,7 +110189,8 @@ loc_82538E88:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82538EF0"))) PPC_WEAK_FUNC(sub_82538EF0);
+PPC_FUNC_IMPL(__imp__sub_82538EF0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538EF0) { __imp__sub_82538EF0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538EF0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -109872,7 +110324,8 @@ loc_82538FB4:
 	goto loc_82538F9C;
 }
 
-__attribute__((alias("__imp__sub_82538FD8"))) PPC_WEAK_FUNC(sub_82538FD8);
+PPC_FUNC_IMPL(__imp__sub_82538FD8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82538FD8) { __imp__sub_82538FD8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82538FD8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -109943,7 +110396,8 @@ loc_82539038:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539050"))) PPC_WEAK_FUNC(sub_82539050);
+PPC_FUNC_IMPL(__imp__sub_82539050);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539050) { __imp__sub_82539050(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539050) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -109992,7 +110446,8 @@ PPC_FUNC_IMPL(__imp__sub_82539050) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_825390A0"))) PPC_WEAK_FUNC(sub_825390A0);
+PPC_FUNC_IMPL(__imp__sub_825390A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_825390A0) { __imp__sub_825390A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825390A0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -110144,7 +110599,8 @@ loc_82539190:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825391A8"))) PPC_WEAK_FUNC(sub_825391A8);
+PPC_FUNC_IMPL(__imp__sub_825391A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825391A8) { __imp__sub_825391A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825391A8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -110343,7 +110799,8 @@ loc_825392F8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539308"))) PPC_WEAK_FUNC(sub_82539308);
+PPC_FUNC_IMPL(__imp__sub_82539308);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539308) { __imp__sub_82539308(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539308) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -110585,7 +111042,8 @@ loc_825394AC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825394B8"))) PPC_WEAK_FUNC(sub_825394B8);
+PPC_FUNC_IMPL(__imp__sub_825394B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825394B8) { __imp__sub_825394B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825394B8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -110988,7 +111446,8 @@ loc_82539784:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539790"))) PPC_WEAK_FUNC(sub_82539790);
+PPC_FUNC_IMPL(__imp__sub_82539790);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539790) { __imp__sub_82539790(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539790) {
 	PPC_FUNC_PROLOGUE();
 	// li r6,-1
@@ -111036,7 +111495,8 @@ loc_825397A8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825397E8"))) PPC_WEAK_FUNC(sub_825397E8);
+PPC_FUNC_IMPL(__imp__sub_825397E8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825397E8) { __imp__sub_825397E8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825397E8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -111293,7 +111753,8 @@ loc_82539974:
 	return;
 }
 
-__attribute__((alias("__imp__sub_825399B8"))) PPC_WEAK_FUNC(sub_825399B8);
+PPC_FUNC_IMPL(__imp__sub_825399B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_825399B8) { __imp__sub_825399B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_825399B8) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -111349,7 +111810,8 @@ loc_82539A0C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539A18"))) PPC_WEAK_FUNC(sub_82539A18);
+PPC_FUNC_IMPL(__imp__sub_82539A18);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539A18) { __imp__sub_82539A18(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539A18) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -111747,7 +112209,8 @@ loc_82539CE0:
 	goto loc_82539CA4;
 }
 
-__attribute__((alias("__imp__sub_82539CE8"))) PPC_WEAK_FUNC(sub_82539CE8);
+PPC_FUNC_IMPL(__imp__sub_82539CE8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539CE8) { __imp__sub_82539CE8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539CE8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r8,84(r4)
@@ -111826,7 +112289,8 @@ loc_82539D44:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539D78"))) PPC_WEAK_FUNC(sub_82539D78);
+PPC_FUNC_IMPL(__imp__sub_82539D78);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539D78) { __imp__sub_82539D78(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539D78) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -111922,7 +112386,8 @@ loc_82539DF0:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539E18"))) PPC_WEAK_FUNC(sub_82539E18);
+PPC_FUNC_IMPL(__imp__sub_82539E18);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539E18) { __imp__sub_82539E18(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539E18) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -112026,7 +112491,8 @@ loc_82539EB8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539EC0"))) PPC_WEAK_FUNC(sub_82539EC0);
+PPC_FUNC_IMPL(__imp__sub_82539EC0);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539EC0) { __imp__sub_82539EC0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539EC0) {
 	PPC_FUNC_PROLOGUE();
 	// cmpwi cr6,r4,-2
@@ -112061,7 +112527,8 @@ loc_82539EE8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539EF8"))) PPC_WEAK_FUNC(sub_82539EF8);
+PPC_FUNC_IMPL(__imp__sub_82539EF8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539EF8) { __imp__sub_82539EF8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539EF8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -112116,7 +112583,8 @@ PPC_FUNC_IMPL(__imp__sub_82539EF8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539F58"))) PPC_WEAK_FUNC(sub_82539F58);
+PPC_FUNC_IMPL(__imp__sub_82539F58);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539F58) { __imp__sub_82539F58(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539F58) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -112171,7 +112639,8 @@ PPC_FUNC_IMPL(__imp__sub_82539F58) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_82539FB8"))) PPC_WEAK_FUNC(sub_82539FB8);
+PPC_FUNC_IMPL(__imp__sub_82539FB8);  /* forward decl */
+PPC_WEAK_FUNC(sub_82539FB8) { __imp__sub_82539FB8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_82539FB8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -112230,7 +112699,8 @@ loc_8253A000:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A018"))) PPC_WEAK_FUNC(sub_8253A018);
+PPC_FUNC_IMPL(__imp__sub_8253A018);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A018) { __imp__sub_8253A018(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A018) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -112336,7 +112806,8 @@ loc_8253A0C0:
 	goto loc_8253A08C;
 }
 
-__attribute__((alias("__imp__sub_8253A0D0"))) PPC_WEAK_FUNC(sub_8253A0D0);
+PPC_FUNC_IMPL(__imp__sub_8253A0D0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A0D0) { __imp__sub_8253A0D0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A0D0) {
 	PPC_FUNC_PROLOGUE();
 	// li r11,0
@@ -112400,7 +112871,8 @@ loc_8253A134:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A140"))) PPC_WEAK_FUNC(sub_8253A140);
+PPC_FUNC_IMPL(__imp__sub_8253A140);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A140) { __imp__sub_8253A140(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A140) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -112458,7 +112930,8 @@ loc_8253A15C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A1A0"))) PPC_WEAK_FUNC(sub_8253A1A0);
+PPC_FUNC_IMPL(__imp__sub_8253A1A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A1A0) { __imp__sub_8253A1A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A1A0) {
 	PPC_FUNC_PROLOGUE();
 	// b 0x82539790
@@ -112466,7 +112939,8 @@ PPC_FUNC_IMPL(__imp__sub_8253A1A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A1A8"))) PPC_WEAK_FUNC(sub_8253A1A8);
+PPC_FUNC_IMPL(__imp__sub_8253A1A8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A1A8) { __imp__sub_8253A1A8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A1A8) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -112880,7 +113354,8 @@ loc_8253A474:
 	goto loc_8253A394;
 }
 
-__attribute__((alias("__imp__sub_8253A480"))) PPC_WEAK_FUNC(sub_8253A480);
+PPC_FUNC_IMPL(__imp__sub_8253A480);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A480) { __imp__sub_8253A480(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A480) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -113094,7 +113569,8 @@ loc_8253A5F0:
 	goto loc_8253A510;
 }
 
-__attribute__((alias("__imp__sub_8253A5F8"))) PPC_WEAK_FUNC(sub_8253A5F8);
+PPC_FUNC_IMPL(__imp__sub_8253A5F8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A5F8) { __imp__sub_8253A5F8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A5F8) {
 	PPC_FUNC_PROLOGUE();
 	// lwz r11,540(r4)
@@ -113112,7 +113588,8 @@ PPC_FUNC_IMPL(__imp__sub_8253A5F8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A610"))) PPC_WEAK_FUNC(sub_8253A610);
+PPC_FUNC_IMPL(__imp__sub_8253A610);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A610) { __imp__sub_8253A610(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A610) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -113274,7 +113751,8 @@ loc_8253A720:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A728"))) PPC_WEAK_FUNC(sub_8253A728);
+PPC_FUNC_IMPL(__imp__sub_8253A728);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A728) { __imp__sub_8253A728(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A728) {
 	PPC_FUNC_PROLOGUE();
 	// mulli r11,r4,2300
@@ -113318,7 +113796,8 @@ loc_8253A75C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A770"))) PPC_WEAK_FUNC(sub_8253A770);
+PPC_FUNC_IMPL(__imp__sub_8253A770);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A770) { __imp__sub_8253A770(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A770) {
 	PPC_FUNC_PROLOGUE();
 	// mr r11,r4
@@ -113344,7 +113823,8 @@ PPC_FUNC_IMPL(__imp__sub_8253A770) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253A798"))) PPC_WEAK_FUNC(sub_8253A798);
+PPC_FUNC_IMPL(__imp__sub_8253A798);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A798) { __imp__sub_8253A798(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A798) {
 	PPC_FUNC_PROLOGUE();
 	// mr r11,r4
@@ -113395,7 +113875,8 @@ loc_8253A7E0:
 	goto loc_8253A7D4;
 }
 
-__attribute__((alias("__imp__sub_8253A7F0"))) PPC_WEAK_FUNC(sub_8253A7F0);
+PPC_FUNC_IMPL(__imp__sub_8253A7F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253A7F0) { __imp__sub_8253A7F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253A7F0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -115795,7 +116276,8 @@ loc_8253B9E4:
 	goto loc_8253B9AC;
 }
 
-__attribute__((alias("__imp__sub_8253B9F0"))) PPC_WEAK_FUNC(sub_8253B9F0);
+PPC_FUNC_IMPL(__imp__sub_8253B9F0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253B9F0) { __imp__sub_8253B9F0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253B9F0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -115875,7 +116357,8 @@ loc_8253BA60:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253BA78"))) PPC_WEAK_FUNC(sub_8253BA78);
+PPC_FUNC_IMPL(__imp__sub_8253BA78);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253BA78) { __imp__sub_8253BA78(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253BA78) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -115979,7 +116462,8 @@ loc_8253BB14:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253BB30"))) PPC_WEAK_FUNC(sub_8253BB30);
+PPC_FUNC_IMPL(__imp__sub_8253BB30);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253BB30) { __imp__sub_8253BB30(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253BB30) {
 	PPC_FUNC_PROLOGUE();
 	// cmpwi cr6,r4,-1
@@ -116016,7 +116500,8 @@ loc_8253BB54:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253BB68"))) PPC_WEAK_FUNC(sub_8253BB68);
+PPC_FUNC_IMPL(__imp__sub_8253BB68);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253BB68) { __imp__sub_8253BB68(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253BB68) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -116515,7 +117000,8 @@ loc_8253BEB4:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253BED0"))) PPC_WEAK_FUNC(sub_8253BED0);
+PPC_FUNC_IMPL(__imp__sub_8253BED0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253BED0) { __imp__sub_8253BED0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253BED0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -116817,7 +117303,8 @@ loc_8253C0C8:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253C0E0"))) PPC_WEAK_FUNC(sub_8253C0E0);
+PPC_FUNC_IMPL(__imp__sub_8253C0E0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253C0E0) { __imp__sub_8253C0E0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253C0E0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -116885,7 +117372,8 @@ loc_8253C12C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253C150"))) PPC_WEAK_FUNC(sub_8253C150);
+PPC_FUNC_IMPL(__imp__sub_8253C150);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253C150) { __imp__sub_8253C150(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253C150) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119039,7 +119527,8 @@ loc_8253CF8C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253CFA8"))) PPC_WEAK_FUNC(sub_8253CFA8);
+PPC_FUNC_IMPL(__imp__sub_8253CFA8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253CFA8) { __imp__sub_8253CFA8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253CFA8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119076,7 +119565,8 @@ PPC_FUNC_IMPL(__imp__sub_8253CFA8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253CFE0"))) PPC_WEAK_FUNC(sub_8253CFE0);
+PPC_FUNC_IMPL(__imp__sub_8253CFE0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253CFE0) { __imp__sub_8253CFE0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253CFE0) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -119329,7 +119819,8 @@ loc_8253D150:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D178"))) PPC_WEAK_FUNC(sub_8253D178);
+PPC_FUNC_IMPL(__imp__sub_8253D178);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D178) { __imp__sub_8253D178(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D178) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -119576,7 +120067,8 @@ loc_8253D2DC:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D308"))) PPC_WEAK_FUNC(sub_8253D308);
+PPC_FUNC_IMPL(__imp__sub_8253D308);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D308) { __imp__sub_8253D308(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D308) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -119643,7 +120135,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D308) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D370"))) PPC_WEAK_FUNC(sub_8253D370);
+PPC_FUNC_IMPL(__imp__sub_8253D370);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D370) { __imp__sub_8253D370(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D370) {
 	PPC_FUNC_PROLOGUE();
 	PPCRegister temp{};
@@ -119710,7 +120203,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D370) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D3D8"))) PPC_WEAK_FUNC(sub_8253D3D8);
+PPC_FUNC_IMPL(__imp__sub_8253D3D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D3D8) { __imp__sub_8253D3D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D3D8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119765,7 +120259,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D3D8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D430"))) PPC_WEAK_FUNC(sub_8253D430);
+PPC_FUNC_IMPL(__imp__sub_8253D430);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D430) { __imp__sub_8253D430(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D430) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119844,7 +120339,8 @@ loc_8253D47C:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D4B8"))) PPC_WEAK_FUNC(sub_8253D4B8);
+PPC_FUNC_IMPL(__imp__sub_8253D4B8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D4B8) { __imp__sub_8253D4B8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D4B8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119927,7 +120423,8 @@ loc_8253D528:
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D540"))) PPC_WEAK_FUNC(sub_8253D540);
+PPC_FUNC_IMPL(__imp__sub_8253D540);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D540) { __imp__sub_8253D540(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D540) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -119983,7 +120480,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D540) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D5A0"))) PPC_WEAK_FUNC(sub_8253D5A0);
+PPC_FUNC_IMPL(__imp__sub_8253D5A0);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D5A0) { __imp__sub_8253D5A0(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D5A0) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -120020,7 +120518,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D5A0) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D5D8"))) PPC_WEAK_FUNC(sub_8253D5D8);
+PPC_FUNC_IMPL(__imp__sub_8253D5D8);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D5D8) { __imp__sub_8253D5D8(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D5D8) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};
@@ -120057,7 +120556,8 @@ PPC_FUNC_IMPL(__imp__sub_8253D5D8) {
 	return;
 }
 
-__attribute__((alias("__imp__sub_8253D610"))) PPC_WEAK_FUNC(sub_8253D610);
+PPC_FUNC_IMPL(__imp__sub_8253D610);  /* forward decl */
+PPC_WEAK_FUNC(sub_8253D610) { __imp__sub_8253D610(ctx, base); } /* macOS: alias→wrapper */
 PPC_FUNC_IMPL(__imp__sub_8253D610) {
 	PPC_FUNC_PROLOGUE();
 	uint32_t ea{};

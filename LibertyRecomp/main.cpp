@@ -372,12 +372,9 @@ int main(int argc, char *argv[])
     // thread-safety issue on ARM64 (plain bool without memory barrier).
     rex::InitLogging();
 
-    // Initialize RexGlue memory system EARLY — before any video/SDL/shader
-    // allocations. Memory::Initialize() uses mmap(MAP_FIXED) to place a 4.5GB
-    // mapping; doing this before large host allocations avoids address conflicts.
-    printf("[Main] Initializing RexGlue memory system...\n"); fflush(stdout);
-    g_memory.InitializeFromRexGlue();
-    printf("[Main] RexGlue memory: base=%p\n", (void*)g_memory.base); fflush(stdout);
+    // SDK v0.2.1: Memory is now created and owned internally by rex::Runtime.
+    // g_memory.base is set from runtime->virtual_membase() after Setup() succeeds.
+    // No separate InitializeFromRexGlue() call needed.
 
     // Create rex::Runtime with pre-existing Memory.
     // Runtime creates: ExportResolver, Processor, KernelState.
@@ -417,11 +414,8 @@ int main(int argc, char *argv[])
         static std::unique_ptr<rex::Runtime> s_rexRuntime;
         fprintf(stderr, "[Main] Constructing rex::Runtime...\n");
         s_rexRuntime = std::make_unique<rex::Runtime>(
-            std::filesystem::path{} /* storage_root */,
-            rexContentRoot /* content_root - RexGlue VFS */);
-        fprintf(stderr, "[Main] Runtime constructed, setting memory...\n");
-        s_rexRuntime->set_memory(g_memory.TakeRexMemory());
-        fprintf(stderr, "[Main] Memory set, calling Setup()...\n");
+            rexContentRoot /* game_data_root - SDK v0.2.1 first arg */);
+        fprintf(stderr, "[Main] Runtime constructed, calling Setup() with func mappings...\n");
 
         // Let guest::initialize() (called inside Setup) install its SEH
         // signal handler normally.  After Setup(), we re-install
@@ -429,13 +423,23 @@ int main(int argc, char *argv[])
         //   ExceptionHandler (NULL-PC, MMIO) → SEH (data faults in __try)
         // This matches standalone: ExceptionHandler saves SEH as its
         // "previous handler" and falls back to it for unhandled faults.
-        uint32_t rt_status = s_rexRuntime->Setup();
+        uint32_t rt_status = s_rexRuntime->Setup(
+            static_cast<uint32_t>(PPC_CODE_BASE),
+            static_cast<uint32_t>(PPC_CODE_SIZE),
+            static_cast<uint32_t>(PPC_IMAGE_BASE),
+            static_cast<uint32_t>(PPC_IMAGE_SIZE),
+            PPCFuncMappings);
         fprintf(stderr, "[Main] Setup() returned 0x%08X\n", rt_status);
         if (rt_status != 0 /* X_STATUS_SUCCESS */) {
             fprintf(stderr, "[Main] FATAL: rex::Runtime::Setup() failed with 0x%08X\n", rt_status);
             std::_Exit(1);
         }
-        s_rexRuntime->set_instance();
+        // SDK v0.2.1: set_instance() is automatic after Setup().
+        // Get memory base from the Runtime's internally-managed Memory object.
+        g_memory.base = s_rexRuntime->virtual_membase();
+        fprintf(stderr, "[Main] RexGlue memory: base=%p\n", (void*)g_memory.base);
+        // Populate vtables and install function stubs into guest memory.
+        g_memory.PopulateFunctionTableAndVtables();
         printf("[Main] rex::Runtime created (kernel_state=%p)\n",
                (void*)s_rexRuntime->kernel_state()); fflush(stdout);
 
@@ -507,8 +511,8 @@ int main(int argc, char *argv[])
     // on top of ExceptionHandler.  Re-install ExceptionHandler so it runs
     // first.  The chain becomes:
     //   ExceptionHandler (MMIO, NULL-PC, fallback) → SEH (SehException)
-    rex::arch::ExceptionHandler::ReinstallSignalHandlers();
-    fprintf(stderr, "[RexGlue] Exception handler chain: ExceptionHandler -> SEH -> (fallback)\n");
+    // SDK v0.2.1: ReinstallSignalHandlers() removed; SDK manages handler chain internally.
+    fprintf(stderr, "[RexGlue] Exception handlers active (SDK v0.2.1 automatic chain)\n");
     fflush(stderr);
 
     if (forceInstallationCheck)
@@ -769,7 +773,7 @@ int main(int argc, char *argv[])
         auto eptr = std::current_exception();
         if (eptr) {
             try { std::rethrow_exception(eptr); }
-            catch (const rex::runtime::guest::SehException& e) {
+            catch (const rex::SehException& e) {
                 fprintf(stderr, "[TERMINATE] SEH: %s  code=0x%08X addr=0x%016llX\n",
                         e.what(), (unsigned)e.code(),
                         (unsigned long long)e.address());

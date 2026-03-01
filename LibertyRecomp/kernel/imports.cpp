@@ -78,7 +78,7 @@ void KernelPhase_EnterRuntime() {
     g_kernelPhase.store(KernelPhase::Runtime, std::memory_order_release);
     LOGF_WARNING("[KERNEL_PHASE] {} -> Runtime",
                  phase == KernelPhase::Boot ? "Boot" : "Init");
-    rex::kernel::g_headless_wait_cap_enabled.store(false, std::memory_order_release);
+    /* g_headless_wait_cap_enabled removed in SDK v0.2.1 */
     printf("[KERNEL_PHASE] Disabled headless wait cap (GPU active)\n");
   }
 }
@@ -126,20 +126,20 @@ void PumpSdlEventsIfNeeded() {
 // REXGLUE SYNC SIGNALING HELPERS
 // =============================================================================
 static void SignalEventByGuestAddr(uint32_t guestAddr) {
-  auto* ks = rex::kernel::kernel_state();
+  auto* ks = rex::system::kernel_state();
   if (!ks) return;
   void* ptr = g_memory.Translate(guestAddr);
   if (!ptr) return;
-  auto ev = rex::kernel::XObject::GetNativeObject<rex::kernel::XEvent>(ks, ptr);
+  auto ev = rex::system::XObject::GetNativeObject<rex::system::XEvent>(ks, ptr);
   if (ev) { ev->Set(0, false); }
 }
 
 static void SignalSemaphoreByGuestAddr(uint32_t guestAddr, int32_t count) {
-  auto* ks = rex::kernel::kernel_state();
+  auto* ks = rex::system::kernel_state();
   if (!ks) return;
   void* ptr = g_memory.Translate(guestAddr);
   if (!ptr) return;
-  auto sem = rex::kernel::XObject::GetNativeObject<rex::kernel::XSemaphore>(ks, ptr);
+  auto sem = rex::system::XObject::GetNativeObject<rex::system::XSemaphore>(ks, ptr);
   if (sem) { sem->ReleaseSemaphore(count); }
 }
 
@@ -327,7 +327,7 @@ uint32_t VdInitializeEngines() {
     // Register GPU MMIO range so PPC_MM_LOAD_U32 reads return valid values.
     // Without this, the VBlank interrupt status register (0x7FC86544) reads 0
     // and the VBlank dispatch never fires, causing all worker threads to hang.
-    auto* ks = rex::kernel::kernel_state();
+    auto* ks = rex::system::kernel_state();
     if (ks && ks->memory()) {
         ks->memory()->AddVirtualMappedRange(
             0x7FC80000, 0xFFFF0000, 0x10000,
@@ -767,7 +767,7 @@ PPC_FUNC(sub_8218BE28) {
     if (!IsValidAllocator(memMgr)) {
         // Allocator chain is broken — use RexGlue's system heap as fallback
         uint32_t size = ctx.r3.u32;
-        auto* ks = rex::kernel::kernel_state();
+        auto* ks = rex::system::kernel_state();
         auto* mem = ks ? ks->memory() : nullptr;
         if (mem) {
             uint32_t guest = mem->SystemHeapAlloc(size);
@@ -808,7 +808,7 @@ PPC_FUNC(sub_8218BE50) {
         if (align < 16) align = 16;
         // Round size up to alignment so the block satisfies the request
         uint32_t allocSize = (size + align - 1) & ~(align - 1);
-        auto* ks = rex::kernel::kernel_state();
+        auto* ks = rex::system::kernel_state();
         auto* mem = ks ? ks->memory() : nullptr;
         if (mem) {
             uint32_t guest = mem->SystemHeapAlloc(allocSize);

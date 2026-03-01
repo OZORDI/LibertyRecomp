@@ -719,12 +719,18 @@ ppc_u32_result_t XamSessionRefObjByHandle_entry(ppc_u32_t handle, ppc_pu32_t obj
 }  // namespace rex
 
 PPC_HOOK(__imp__XamUserGetXUID, rex::kernel::xam::XamUserGetXUID_entry)
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__XamUserGetSigninState, rex::kernel::xam::XamUserGetSigninState_entry)
+#endif
 PPC_HOOK(__imp__XamUserGetSigninInfo, rex::kernel::xam::XamUserGetSigninInfo_entry)
 PPC_HOOK(__imp__XamUserGetName, rex::kernel::xam::XamUserGetName_entry)
 PPC_HOOK(__imp__XamUserGetGamerTag, rex::kernel::xam::XamUserGetGamerTag_entry)
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__XamUserReadProfileSettings, rex::kernel::xam::XamUserReadProfileSettings_entry)
+#endif
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__XamUserReadProfileSettingsEx, rex::kernel::xam::XamUserReadProfileSettingsEx_entry)
+#endif
 PPC_HOOK(__imp__XamUserWriteProfileSettings, rex::kernel::xam::XamUserWriteProfileSettings_entry)
 PPC_HOOK(__imp__XamUserCheckPrivilege, rex::kernel::xam::XamUserCheckPrivilege_entry)
 PPC_HOOK(__imp__XamUserContentRestrictionGetFlags,
@@ -742,5 +748,9 @@ PPC_HOOK(__imp__XamUserCreateAchievementEnumerator,
 PPC_HOOK(__imp__XamParseGamerTileKey, rex::kernel::xam::XamParseGamerTileKey_entry)
 PPC_HOOK(__imp__XamReadTileToTexture, rex::kernel::xam::XamReadTileToTexture_entry)
 PPC_HOOK(__imp__XamWriteGamerTile, rex::kernel::xam::XamWriteGamerTile_entry)
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__XamSessionCreateHandle, rex::kernel::xam::XamSessionCreateHandle_entry)
+#endif
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__XamSessionRefObjByHandle, rex::kernel::xam::XamSessionRefObjByHandle_entry)
+#endif

@@ -63,6 +63,7 @@ else()
 endif()
 
 add_compile_definitions(
+    LIBERTY_RECOMP_OVERRIDES
     SDL_MAIN_HANDLED
     _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR # Microsoft wtf?
     _CRT_SECURE_NO_WARNINGS)
@@ -171,7 +172,8 @@ endif()
 
 # ── Embedded assets compile definition ──────────────────────────────────────
 if (LIBERTY_RECOMP_EMBEDDED_ASSETS)
-    add_compile_definitions(LIBERTY_RECOMP_EMBEDDED_ASSETS)
+    add_compile_definitions(
+    LIBERTY_RECOMP_OVERRIDESLIBERTY_RECOMP_EMBEDDED_ASSETS)
     message(STATUS "Building with embedded game assets (no installer wizard)")
 endif()
 
@@ -553,9 +555,11 @@ target_link_libraries(LibertyRecomp PRIVATE ffmpeg)
 # RexGlue SDK runtime libraries
 if(USE_REXGLUE_RUNTIME)
     target_compile_definitions(LibertyRecomp PRIVATE REX_USE_FULL_SDK)
+    # Suppress rexkernels Vd*/Xam* PPC_HOOKs - Liberty owns those directly
+    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_OVERRIDES)
     target_link_libraries(LibertyRecomp PRIVATE
         rexcore
-        rexruntime
+        rexsystem
         rexkernel
     )
     # Ensure vcpkg fmt headers are found before XenonRecomp's vendored fmt.

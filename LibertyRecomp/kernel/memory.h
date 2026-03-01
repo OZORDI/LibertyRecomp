@@ -29,11 +29,11 @@ struct Memory
     // as long as the caller keeps the returned unique_ptr alive.
     std::unique_ptr<rex::memory::Memory> TakeRexMemory() noexcept { return std::move(rex_memory_); }
 
+    // SDK v0.2.1: now public - called from main.cpp after Runtime::Setup() sets base.
+    void PopulateFunctionTableAndVtables();
+
 private:
     std::unique_ptr<rex::memory::Memory> rex_memory_;
-
-    // Shared init logic: manual stubs, vtable pre-population.
-    void PopulateFunctionTableAndVtables();
 
 public:
 
@@ -65,7 +65,7 @@ public:
 
     void InsertFunction(uint32_t guest, PPCFunc* host)
     {
-        PPC_LOOKUP_FUNC_RAW(base, guest) = host;
+        PPC_LOOKUP_FUNC(base, guest) = host;
     }
 };
 

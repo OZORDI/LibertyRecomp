@@ -23,7 +23,7 @@ Heap g_userHeap;
 
 // Helper: get RexGlue Memory* — returns nullptr before RexGlue is up.
 static rex::memory::Memory* rexmem() {
-  auto* ks = rex::kernel::kernel_state();
+  auto* ks = rex::system::kernel_state();
   return ks ? ks->memory() : nullptr;
 }
 

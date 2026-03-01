@@ -444,6 +444,7 @@ void RegisterVideoExports(rex::runtime::ExportResolver* export_resolver,
 
 }  // namespace rex::kernel::xboxkrnl
 
+#ifndef LIBERTY_RECOMP_OVERRIDES
 PPC_HOOK(__imp__VdGetCurrentDisplayGamma, rex::kernel::xboxkrnl::VdGetCurrentDisplayGamma_entry)
 PPC_HOOK(__imp__VdGetCurrentDisplayInformation,
          rex::kernel::xboxkrnl::VdGetCurrentDisplayInformation_entry)
@@ -472,3 +473,5 @@ PPC_HOOK(__imp__VdPersistDisplay, rex::kernel::xboxkrnl::VdPersistDisplay_entry)
 PPC_HOOK(__imp__VdRetrainEDRAMWorker, rex::kernel::xboxkrnl::VdRetrainEDRAMWorker_entry)
 PPC_HOOK(__imp__VdRetrainEDRAM, rex::kernel::xboxkrnl::VdRetrainEDRAM_entry)
 PPC_HOOK(__imp__VdSwap, rex::kernel::xboxkrnl::VdSwap_entry)
+
+#endif  // LIBERTY_RECOMP_OVERRIDES

@@ -462,6 +462,35 @@ void* MapFileView(FileMappingHandle handle, void* base_address, size_t length, P
   // The emulator reserves address space first, then maps file views into it.
   // MAP_FIXED_NOREPLACE would fail with EEXIST in this case.
   if (base_address) {
+#ifdef __APPLE__
+    // On macOS, MAP_FIXED silently replaces *any* existing mapping, including
+    // the binary's own code pages.  The scan loop in Memory::Initialize()
+    // probes 1<<32, 1<<33, ... looking for a completely free window.  The
+    // binary is loaded near 0x100000000 but offset by an ASLR slide, so the
+    // start of that 1GB window appears unmapped even though the binary sits
+    // inside it.  Use vm_region_64 to detect ANY overlap with the requested
+    // range and bail out so the loop can try the next candidate.
+    {
+      vm_address_t check_addr = reinterpret_cast<vm_address_t>(base_address);
+      vm_size_t    region_sz  = 0;
+      struct vm_region_basic_info_64 vr_info;
+      mach_msg_type_number_t         vr_cnt = VM_REGION_BASIC_INFO_COUNT_64;
+      memory_object_name_t           vr_obj;
+      kern_return_t kr = vm_region_64(mach_task_self(), &check_addr, &region_sz,
+                                      VM_REGION_BASIC_INFO_64,
+                                      reinterpret_cast<vm_region_info_t>(&vr_info),
+                                      &vr_cnt, &vr_obj);
+      if (kr == KERN_SUCCESS) {
+        // A mapping was found at or after base_address.  If it starts before
+        // the end of our requested range it overlaps → refuse to MAP_FIXED.
+        vm_address_t range_end =
+            reinterpret_cast<vm_address_t>(base_address) + length;
+        if (check_addr < range_end) {
+          return nullptr;
+        }
+      }
+    }
+#endif
     flags |= MAP_FIXED;
   }
 

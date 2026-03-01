@@ -6,7 +6,7 @@
  * cpu/ppc_context.h forwards to RexGlue's guest/context.h.
  *
  * RexGlue headers are included directly:
- *   - rex::Runtime, rex::memory::Memory, rex::kernel::* types are available
+ *   - rex::Runtime, rex::memory::Memory, rex::system::* types are available
  *   - LibertyRecomp's own kernel primitives remain for game-specific code
  */
 
@@ -44,15 +44,15 @@ namespace adapter {
 using Processor = rex::runtime::Processor;
 using ThreadState = rex::runtime::ThreadState;
 using Memory = rex::memory::Memory;
-using KernelState = rex::kernel::KernelState;
-using XObject = rex::kernel::XObject;
-using XEvent = rex::kernel::XEvent;
-using XSemaphore = rex::kernel::XSemaphore;
-using XMutant = rex::kernel::XMutant;
-using XThread = rex::kernel::XThread;
-using XHostThread = rex::kernel::XHostThread;
+using KernelState = rex::system::KernelState;
+using XObject = rex::system::XObject;
+using XEvent = rex::system::XEvent;
+using XSemaphore = rex::system::XSemaphore;
+using XMutant = rex::system::XMutant;
+using XThread = rex::system::XThread;
+using XHostThread = rex::system::XHostThread;
 template <typename T>
-using object_ref = rex::kernel::object_ref<T>;
+using object_ref = rex::system::object_ref<T>;
 
 } // namespace adapter
 } // namespace rex

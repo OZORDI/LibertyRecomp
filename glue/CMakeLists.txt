@@ -13,6 +13,7 @@
 include(GNUInstallDirs)
 
 set(REXGLUE_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-sdk-main")
+set(REXGLUE_ROOT "${REXGLUE_SDK_ROOT}")
 
 # --- Configuration -----------------------------------------------------------
 
@@ -35,7 +36,15 @@ set(REXGLUE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(date CONFIG REQUIRED)
-find_package(utf8cpp CONFIG REQUIRED)
+# utf8cpp: use SDK's vendored copy so rexcore's unnamespaced 'utf8cpp' target resolves.
+# vcpkg provides utf8cpp::utf8cpp (namespaced) which rexcore doesn't use.
+if(NOT TARGET utf8cpp)
+    add_subdirectory(
+        "${REXGLUE_SDK_ROOT}/thirdparty/utfcpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/rexglue-utfcpp"
+        EXCLUDE_FROM_ALL
+    )
+endif()
 
 # --- RexGlue vendored thirdparty (selective) ---------------------------------
 # Only build the targets needed by rexcore/rexruntime/rexkernel.
@@ -117,7 +126,99 @@ add_subdirectory(
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-runtime"
 )
 
+# --- Pre-built rexui from SDK (provides ImGuiDialog, WindowedAppContext etc.)
+# The SDK ships librexui.a for macOS ARM64. rexkernel/xam_ui.cpp needs it.
+set(_REXGLUE_PREBUILT "${REXGLUE_SDK_ROOT}/out/macos-arm64/Release")
+if(EXISTS "${_REXGLUE_PREBUILT}/librexui.a")
+    add_library(rexui STATIC IMPORTED)
+    set_target_properties(rexui PROPERTIES
+        IMPORTED_LOCATION "${_REXGLUE_PREBUILT}/librexui.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${REXGLUE_SDK_ROOT}/include"
+    )
+    add_library(rex::ui ALIAS rexui)
+    message(STATUS "RexGlue: Using pre-built librexui.a for UI symbols")
+else()
+    message(WARNING "RexGlue: Pre-built librexui.a not found at ${_REXGLUE_PREBUILT}")
+endif()
+
+# Also need libimgui.a from pre-built SDK (used by rexui)
+if(EXISTS "${_REXGLUE_PREBUILT}/libimgui.a")
+    add_library(imgui_prebuilt STATIC IMPORTED)
+    set_target_properties(imgui_prebuilt PROPERTIES
+        IMPORTED_LOCATION "${_REXGLUE_PREBUILT}/libimgui.a")
+    message(STATUS "RexGlue: Using pre-built libimgui.a")
+endif()
+
+# --- Headless stubs for rexgraphics / rexinput / rexaudio ------------------
+# In headless mode, LibertyRecomp provides its own GPU/audio/input.
+# rexkernel links PRIVATE against these, so we need stub targets to satisfy
+# CMake dependency resolution without pulling in the full GPU stack.
+# The SDK headers (rex/graphics/, rex/input/) are already in the include path
+# via rexcore's PUBLIC include directory.
+if(NOT TARGET rexgraphics)
+    add_library(rexgraphics INTERFACE)
+    add_library(rex::graphics ALIAS rexgraphics)
+    message(STATUS "RexGlue: Using headless stub for rexgraphics")
+endif()
+if(NOT TARGET rexinput)
+    add_library(rexinput INTERFACE)
+    add_library(rex::input ALIAS rexinput)
+    message(STATUS "RexGlue: Using headless stub for rexinput")
+endif()
+if(NOT TARGET rexaudio)
+    add_library(rexaudio INTERFACE)
+    add_library(rex::audio ALIAS rexaudio)
+    message(STATUS "RexGlue: Using headless stub for rexaudio")
+endif()
+
 add_subdirectory(
     "${REXGLUE_SDK_ROOT}/src/kernel"
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-kernel"
 )
+
+# --- Tell rexkernel that LibertyRecomp overrides certain PPC hooks (avoids duplicate symbols)
+# This must be set BEFORE rexkernel sources are compiled.
+target_compile_definitions(rexkernel PRIVATE LIBERTY_RECOMP_OVERRIDES)
+
+# --- Link pre-built rexui into rexkernel (provides ImGuiDialog etc.)
+if(TARGET rexui AND TARGET rexkernel)
+    target_link_libraries(rexkernel PUBLIC rexui)
+    if(TARGET imgui_prebuilt)
+        target_link_libraries(rexkernel PUBLIC imgui_prebuilt)
+    endif()
+    message(STATUS "RexGlue: Linked pre-built rexui into rexkernel")
+endif()
+
+# --- Fix: inject vcpkg fmt headers into rexcore so spdlog finds the right fmt
+# XenonRecomp is added to the build before glue/ and registers fmt::fmt pointing
+# to its own vendored copy (which removed basic_format_string). rexcore links
+# fmt::fmt and includes spdlog headers that need basic_format_string. Fix by
+# injecting the copied vcpkg fmt headers (with the alias) as a high-priority
+# include dir directly on rexcore and its dependents.
+if(DEFINED _REXFMT_INC AND EXISTS "${_REXFMT_INC}/fmt")
+    foreach(_rexlib rexcore rexfilesystem rexsystem rexkernel)
+        if(TARGET ${_rexlib})
+            target_include_directories(${_rexlib} BEFORE PUBLIC "${_REXFMT_INC}")
+        endif()
+    endforeach()
+    message(STATUS "RexGlue: Injected vcpkg fmt headers into rexcore/filesystem/runtime/kernel")
+endif()
+
+# --- Fix: utf8cpp include path
+# vcpkg utf8cpp installs headers under include/utf8cpp/ but the SDK includes
+# them as <utf8.h>. Inject the SDK's own vendored utfcpp source path so
+# #include <utf8.h> resolves correctly without modifying SDK source.
+if(TARGET rexcore)
+    target_include_directories(rexcore PRIVATE
+        "${REXGLUE_SDK_ROOT}/thirdparty/utfcpp/source")
+    message(STATUS "RexGlue: Injected SDK utfcpp include path into rexcore")
+endif()
+
+# --- Fix: add thirdparty/imgui to rexkernel include path
+# xam_ui.cpp uses #include <imgui.h> which needs thirdparty/imgui/ specifically
+# (thirdparty/ alone doesn't resolve imgui.h since it lives in the imgui subdir).
+if(TARGET rexkernel)
+    target_include_directories(rexkernel PRIVATE
+        "${REXGLUE_SDK_ROOT}/thirdparty/imgui")
+    message(STATUS "RexGlue: Injected imgui include path into rexkernel")
+endif()
