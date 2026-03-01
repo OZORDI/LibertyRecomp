@@ -131,11 +131,7 @@ using PPCFunc = void(PPCContext& ctx, uint8_t* base);
                           _icf_addr <  uint32_t(PPC_CODE_BASE) + uint32_t(PPC_CODE_SIZE)); \
     PPCFunc* _icf_fn = _icf_in_range ? PPC_LOOKUP_FUNC(base, _icf_addr) : nullptr;      \
     if (_icf_fn) {                                                                       \
-      fprintf(stderr, "[INDIRECT-CALL] calling %08X\n", _icf_addr);                     \
-      fflush(stderr);                                                                    \
       _icf_fn(ctx, base);                                                                \
-      fprintf(stderr, "[INDIRECT-CALL] returned from %08X\n", _icf_addr);               \
-      fflush(stderr);                                                                    \
     } else {                                                                             \
       fprintf(stderr, "[MISSING-FUNC] indirect call to %08X (in_range=%d)\n",           \
               _icf_addr, (int)_icf_in_range);                                            \

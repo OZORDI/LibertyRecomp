@@ -289,9 +289,9 @@ private:
 // ============================================================================
 
 // Winsock layer
-uint32_t WSAStartup(uint16_t version, XWSADATA* wsaData);
-int WSACleanup();
-int WSAGetLastError();
+uint32_t WSAStartup(uint32_t caller, uint16_t version, XWSADATA* wsaData);
+int WSACleanup(uint32_t caller);
+int WSAGetLastError(uint32_t caller);
 
 // BSD socket layer
 uint32_t Socket(uint32_t caller, uint32_t af, uint32_t type, uint32_t protocol);

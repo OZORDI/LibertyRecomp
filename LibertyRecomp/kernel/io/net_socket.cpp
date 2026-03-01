@@ -731,7 +731,7 @@ void SocketManager::SetLastError(int error) { lastError_ = error; }
 // API Function Implementations
 // ============================================================================
 
-uint32_t WSAStartup(uint16_t version, XWSADATA *wsaData) {
+uint32_t WSAStartup(uint32_t caller, uint16_t version, XWSADATA *wsaData) {
   static int s_count = 0;
   ++s_count;
   LOGF_WARNING("[Net] WSAStartup #{} version=0x{:04X}", s_count, version);
@@ -751,13 +751,13 @@ uint32_t WSAStartup(uint16_t version, XWSADATA *wsaData) {
   return 0;
 }
 
-int WSACleanup() {
+int WSACleanup(uint32_t caller) {
   LOG_WARNING("[Net] WSACleanup");
   SocketManager::Instance().Cleanup();
   return 0;
 }
 
-int WSAGetLastError() { return SocketManager::Instance().GetLastError(); }
+int WSAGetLastError(uint32_t caller) { return SocketManager::Instance().GetLastError(); }
 
 uint32_t Socket(uint32_t caller, uint32_t af, uint32_t type,
                 uint32_t protocol) {

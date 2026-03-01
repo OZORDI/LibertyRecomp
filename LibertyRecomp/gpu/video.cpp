@@ -6339,27 +6339,6 @@ static void SetStreamSource(GuestDevice* device, uint32_t index, GuestBuffer* bu
     g_renderQueue.enqueue(cmd);
 }
 
-// =============================================================================
-// GTA IV Slot-Specific SetStreamSource Wrappers
-// GTA IV has separate D3D functions for each vertex buffer slot (sub_829C9070-sub_829C9280)
-// Each function handles a specific slot, so we create wrappers that pass the correct index
-// =============================================================================
-static void SetStreamSource0(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
-    SetStreamSource(device, 0, buffer, offset, stride);
-}
-
-static void SetStreamSource1(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
-    SetStreamSource(device, 1, buffer, offset, stride);
-}
-
-static void SetStreamSource2(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
-    SetStreamSource(device, 2, buffer, offset, stride);
-}
-
-static void SetStreamSource3(GuestDevice* device, GuestBuffer* buffer, uint32_t offset, uint32_t stride) {
-    SetStreamSource(device, 3, buffer, offset, stride);
-}
-
 static void ProcSetStreamSource(const RenderCommand& cmd)
 {
     const auto& args = cmd.setStreamSource;
@@ -9467,12 +9446,13 @@ GUEST_FUNCTION_HOOK(sub_829CD350, SetVertexShader);       // SetVertexShader (al
 GUEST_FUNCTION_HOOK(sub_829D6690, SetPixelShader);        // SetPixelShader (sets both VS+PS, device+10936)
 
 // --- Priority 3: Resource Binding ---
-// GTA IV has separate functions for each vertex buffer slot - use slot-specific wrappers
-GUEST_FUNCTION_HOOK(sub_829C9070, SetStreamSource0);      // SetStreamSource slot 0 (device+12020)
-GUEST_FUNCTION_HOOK(sub_829C9120, SetStreamSource1);      // SetStreamSource slot 1 (device+12024)
-GUEST_FUNCTION_HOOK(sub_829C91D0, SetStreamSource2);      // SetStreamSource slot 2 (device+12028)
-GUEST_FUNCTION_HOOK(sub_829C9280, SetStreamSource3);      // SetStreamSource slot 3 (device+12032)
-GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);            // SetIndices (device+13580)
+// NOTE: sub_829C9070/9120/91D0/9280 are NOT SetStreamSource variants.
+// They are vertex stream normalization state setters from GTA IV's property table (at 0x82A9E2xx).
+// r4 = boolean normalization flag (0 or 1), NOT a buffer pointer. Do NOT hook these.
+// The real SetStreamSource is sub_82543918 (hooked below as SetStreamSource).
+// REMOVED: sub_829C96D0 is flush-only applier called with stale 0x12 from XEX BSS → SIGBUS at 0x400000012.
+// It is never called by game code as SetIndices. TODO: find actual GTA IV SetIndices entry point.
+// GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);
 GUEST_FUNCTION_HOOK(sub_829D3728, SetTexture);            // SetTexture (device+12536)
 
 // --- Priority 3: Render Target and Viewport ---
