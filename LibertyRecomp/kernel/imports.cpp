@@ -282,10 +282,32 @@ void StartVBlankTimer() {
           // r3 = 0 only triggers sub_829D4C48 (spinlock only, no events signaled)
           //   causing deadlock in the init wait chain (sub_829A3178 waits forever).
           PPCContext vblankCtx{};
-          vblankCtx.r3.u32 = 1;   // VBlank interrupt type
+          vblankCtx.r3.u32 = 1;   // VBlank interrupt type (sub_829D7368 r3=1 path)
           vblankCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
           vblankCtx.r1.u64 = 0x80080000;
           vblankCtx.r13.u64 = 0x80000D20;
+
+          // Diagnostic: dump device struct vtable ptr before firing VBlank.
+          // sub_829D7368 reads: r11 = *(r4+10900), r31 = *(r11+16) (frame_done cb).
+          // If r11 == 0, the indirect call is skipped and no events are signaled.
+          if (vblankCount <= 5 && g_memory.base) {
+            uint32_t userData = g_gpuRingBuffer.interruptUserData;
+            uint32_t vtable_slot_addr = userData + 10900;
+            uint32_t vtable_ptr = 0;
+            uint32_t frame_done_ptr = 0;
+            // Safe read: only if within mapped guest range
+            if (userData >= 0x40000000 && userData < 0x90000000) {
+              vtable_ptr = *reinterpret_cast<const uint32_t*>(g_memory.base + vtable_slot_addr);
+              vtable_ptr = __builtin_bswap32(vtable_ptr); // PPC big-endian
+              if (vtable_ptr >= 0x40000000 && vtable_ptr < 0x90000000) {
+                frame_done_ptr = *reinterpret_cast<const uint32_t*>(g_memory.base + vtable_ptr + 16);
+                frame_done_ptr = __builtin_bswap32(frame_done_ptr);
+              }
+            }
+            printf("[VBlank#%u] userData=0x%08X *(+10900)=0x%08X frame_done=0x%08X\n",
+                   vblankCount, userData, vtable_ptr, frame_done_ptr);
+          }
+
           SetPPCContext(vblankCtx);
           callback(vblankCtx, g_memory.base);
         }
