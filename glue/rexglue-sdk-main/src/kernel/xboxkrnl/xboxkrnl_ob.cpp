@@ -100,14 +100,22 @@ ppc_u32_result_t ObReferenceObjectByHandle_entry(ppc_u32_t handle, ppc_u32_t obj
   uint32_t native_ptr = object->guest_object();
   auto object_type = object_types.find(object->type());
   if (object_type != object_types.end()) {
-    if (object_type_ptr && object_type_ptr != object_type->second) {
-      REXKRNL_WARN("ObReferenceObjectByHandle: type mismatch handle={:#x} expected={:#x} got={:#x}",
-                   (uint32_t)handle, (uint32_t)object_type_ptr, object_type->second);
-      return X_STATUS_OBJECT_TYPE_MISMATCH;
+    if (object_type_ptr) {
+      // Accept both Xenia-style magic (0xD###BEEF) and real kernel OBJECT_TYPE*
+      // addresses (< 0x80000000). The game sometimes passes the raw guest address
+      // of PsThreadType/PsEventType etc. instead of the magic numbers.
+      bool is_kernel_type_ptr = (object_type_ptr < 0x80000000u);
+      bool is_magic_match = (object_type_ptr == object_type->second);
+      if (!is_kernel_type_ptr && !is_magic_match) {
+        REXKRNL_WARN("ObReferenceObjectByHandle: type mismatch handle={:#x} expected={:#x} got={:#x}",
+                     (uint32_t)handle, (uint32_t)object_type_ptr, object_type->second);
+        return X_STATUS_OBJECT_TYPE_MISMATCH;
+      }
     }
   } else {
-    assert_unhandled_case(object->type());
-    native_ptr = 0xDEADF00D;
+    // Unknown type — not fatal, just log and continue with native_ptr
+    REXKRNL_WARN("ObReferenceObjectByHandle: unhandled object type {} for handle={:#x}",
+                 (int)object->type(), (uint32_t)handle);
   }
   // Caller takes the reference.
   // It's released in ObDereferenceObject.

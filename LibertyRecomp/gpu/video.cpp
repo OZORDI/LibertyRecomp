@@ -9514,14 +9514,15 @@ GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 // Creates a GPU texture/render-target by allocating memory (sub_821B3608),
 // then writing inline PM4 commands to set up texture descriptors.
 // Since we render natively (no GPU emulation), skip the PM4 commands.
-// Just call the allocator so the game gets a valid guest pointer back.
+// Allocate the guest memory AND create a host GuestTexture so that
+// SetTexture can look it up by the returned physical address.
 extern "C" void __imp__sub_821B3608(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_82A55DC0)
 {
     // r3 = first param (saved as r18), r4 = width, r5 = height,
     // r9 = rect descriptor ptr (or 0 to use r4/r5), r10 = format (→ r31)
-    uint32_t width = ctx.r4.u32;
-    uint32_t height = ctx.r5.u32;
+    uint32_t width  = std::max(1u, ctx.r4.u32);
+    uint32_t height = std::max(1u, ctx.r5.u32);
     uint32_t format = ctx.r10.u32;
 
     // Align dimensions to 32, compute size, align to 4096
@@ -9535,7 +9536,51 @@ PPC_FUNC_HOOK(sub_82A55DC0)
     // Call the game's memory allocator to get a real guest pointer
     ctx.r3.u32 = size;
     __imp__sub_821B3608(ctx, base);
-    // r3 now holds the allocated pointer — just return it
+    uint32_t physAddr = ctx.r3.u32; // physical address the game will use as handle
+
+    if (physAddr && !GTAIV::LookupTexture(physAddr)) {
+        // Create a host GuestTexture so SetTexture can find it by physical address
+        auto* tex = g_userHeap.AllocPhysical<GuestTexture>(ResourceType::Texture);
+        if (tex) {
+            RenderTextureDesc desc{};
+            desc.dimension  = RenderTextureDimension::TEXTURE_2D;
+            desc.width      = width;
+            desc.height     = height;
+            desc.depth      = 1;
+            desc.mipLevels  = 1;
+            desc.arraySize  = 1;
+            desc.multisampling.sampleCount = RenderSampleCount::COUNT_1;
+            desc.format     = (format != 0) ? ConvertFormat(format) : RenderFormat::B8G8R8A8_UNORM;
+            desc.flags      = RenderTextureFlag::NONE;
+
+            tex->textureHolder  = g_device->createTexture(desc);
+            tex->texture        = tex->textureHolder.get();
+            tex->width          = desc.width;
+            tex->height         = desc.height;
+            tex->depth          = 1;
+            tex->mipLevels      = 1;
+            tex->format         = desc.format;
+
+            RenderTextureViewDesc vd{};
+            vd.dimension    = RenderTextureViewDimension::TEXTURE_2D;
+            vd.format       = desc.format;
+            vd.mipLevels    = 1;
+            tex->textureView    = tex->texture->createTextureView(vd);
+            tex->viewDimension  = vd.dimension;
+            tex->descriptorIndex = g_textureDescriptorAllocator.allocate();
+            g_textureDescriptorSet->setTexture(tex->descriptorIndex, tex->texture,
+                RenderTextureLayout::SHADER_READ, tex->textureView.get());
+
+            // Register under the physical address the game will pass to SetTexture
+            GTAIV::RegisterTexture(physAddr, tex);
+            // Also register under our virtual address for any internal lookups
+            uint32_t virtAddr = g_memory.MapVirtual(tex);
+            if (virtAddr && virtAddr != physAddr)
+                GTAIV::RegisterTexture(virtAddr, tex);
+        }
+    }
+    // Restore the physical address as the return value for the game
+    ctx.r3.u32 = physAddr;
 }
 
 // Thin wrapper around sub_82A55DC0 — sub_82A56560
