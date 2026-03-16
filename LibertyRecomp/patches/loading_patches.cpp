@@ -3,7 +3,7 @@
 
 // Sonicteam::HUDLoading::Update
 PPC_FUNC_IMPL(__imp__sub_824D7340);
-PPC_FUNC(sub_824D7340)
+PPC_FUNC_HOOK(sub_824D7340)
 {
     auto pHUDLoading = (Sonicteam::HUDLoading*)(base + ctx.r3.u32);
 

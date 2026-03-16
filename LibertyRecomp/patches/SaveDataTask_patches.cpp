@@ -5,7 +5,7 @@ static Sonicteam::SaveDataTaskXENON::SaveDataOperation g_currentAlert{};
 
 // Sonicteam::SaveDataTaskXENON::RunOperation (speculatory)
 PPC_FUNC_IMPL(__imp__sub_8238CB18);
-PPC_FUNC(sub_8238CB18)
+PPC_FUNC_HOOK(sub_8238CB18)
 {
     // Redirect storage device lost alert to load failed alert.
     // The user should never see this alert, but if they do, it should make a bit more sense.

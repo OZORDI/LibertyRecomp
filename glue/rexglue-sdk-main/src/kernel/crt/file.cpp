@@ -9,6 +9,7 @@
  */
 
 #include <cstring>
+#include <exception>
 #include <memory>
 
 #include <rex/filesystem.h>
@@ -21,6 +22,7 @@
 #include <rex/ppc/types.h>
 #include <rex/string.h>
 #include <rex/system/kernel_state.h>
+#include <rex/kernel/xevent.h>
 #include <rex/system/xfile.h>
 #include <rex/system/xtypes.h>
 
@@ -73,9 +75,18 @@ ppc_u32_result_t CreateFileA_entry(ppc_pchar_t lpFileName, ppc_u32_t dwDesiredAc
 
   rex::filesystem::File* vfs_file = nullptr;
   rex::filesystem::FileAction action;
-  X_STATUS status = ks->file_system()->OpenFile(nullptr, path, disposition,
-                                                static_cast<uint32_t>(dwDesiredAccess), false, true,
-                                                &vfs_file, &action);
+  X_STATUS status;
+  try {
+    status = ks->file_system()->OpenFile(nullptr, path, disposition,
+                                         static_cast<uint32_t>(dwDesiredAccess), false, true,
+                                         &vfs_file, &action);
+  } catch (const std::exception& e) {
+    REXKRNL_WARN("rexcrt_CreateFileA: exception for path: {}", e.what());
+    return kInvalidHandleValue;
+  } catch (...) {
+    REXKRNL_WARN("rexcrt_CreateFileA: unknown exception for path");
+    return kInvalidHandleValue;
+  }
 
   if (XFAILED(status) || !vfs_file) {
     REXKRNL_DEBUG("rexcrt_CreateFileA: FAILED path='{}' status={:#x}", path, status);
@@ -114,9 +125,19 @@ ppc_u32_result_t ReadFile_entry(ppc_u32_t hFile, ppc_pvoid_t lpBuffer,
   if (lpOverlapped) {
     auto* ov = reinterpret_cast<rex::be<uint32_t>*>(
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
-    ov[0] = 0;
-    ov[1] = bytes_read;
-  } else if (lpNumberOfBytesRead) {
+    ov[0] = 0;           // Internal (status)
+    ov[1] = bytes_read;  // InternalHigh (bytes transferred)
+    // Signal the hEvent in the OVERLAPPED structure (ov[4]) so the
+    // game's I/O completion code knows the read finished.
+    uint32_t event_handle = static_cast<uint32_t>(ov[4]);
+    if (event_handle) {
+      auto ev = KS()->object_table()->LookupObject<rex::system::XEvent>(event_handle);
+      if (ev) {
+        ev->Set(0, false);
+      }
+    }
+  }
+  if (lpNumberOfBytesRead) {
     *lpNumberOfBytesRead = bytes_read;
   }
 
@@ -151,7 +172,15 @@ ppc_u32_result_t WriteFile_entry(ppc_u32_t hFile, ppc_pvoid_t lpBuffer,
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
     ov[0] = 0;
     ov[1] = bytes_written;
-  } else if (lpNumberOfBytesWritten) {
+    uint32_t event_handle = static_cast<uint32_t>(ov[4]);
+    if (event_handle) {
+      auto ev = KS()->object_table()->LookupObject<rex::system::XEvent>(event_handle);
+      if (ev) {
+        ev->Set(0, false);
+      }
+    }
+  }
+  if (lpNumberOfBytesWritten) {
     *lpNumberOfBytesWritten = bytes_written;
   }
 

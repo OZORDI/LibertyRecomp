@@ -276,19 +276,19 @@ class PosixConditionBase {
       };
     }
 
-    // TODO(bwrsandman, Triang3l) This is controversial, see issue #1677
-    // This will probably cause a deadlock on the next thread doing any waiting
-    // if the thread is suspended between locking and waiting
-    std::unique_lock<std::mutex> lock(PosixConditionBase::mutex_);
+    // Use the global mutex for WaitMultiple — required because multiple objects
+    // must be checked atomically.  Per-instance mutexes are used for Wait/Signal
+    // to avoid the deadlock described in Xenia issue #1677.
+    std::unique_lock<std::mutex> lock(PosixConditionBase::global_mutex_);
 
     bool wait_success = true;
     // If the timeout is infinite, wait without timeout.
     // The predicate will be checked before beginning the wait
     if (timeout == std::chrono::milliseconds::max()) {
-      PosixConditionBase::cond_.wait(lock, predicate);
+      PosixConditionBase::global_cond_.wait(lock, predicate);
     } else {
       // Wait with timeout.
-      wait_success = PosixConditionBase::cond_.wait_for(lock, timeout, predicate);
+      wait_success = PosixConditionBase::global_cond_.wait_for(lock, timeout, predicate);
     }
     if (wait_success) {
       auto first_signaled = std::numeric_limits<size_t>::max();
@@ -311,15 +311,28 @@ class PosixConditionBase {
 
   virtual void* native_handle() const { return cond_.native_handle(); }
 
+  // Notify global condition variable (for WaitMultiple observers)
+  void notify_global() {
+    {
+      std::lock_guard<std::mutex> g(global_mutex_);
+    }
+    global_cond_.notify_all();
+  }
+
  protected:
   inline virtual bool signaled() const = 0;
   inline virtual void post_execution() = 0;
-  static std::condition_variable cond_;
-  static std::mutex mutex_;
+  // Per-instance mutex/cond to avoid Xenia issue #1677 deadlock.
+  // Signal() and Wait() use these so they don't contend across objects.
+  mutable std::condition_variable cond_;
+  mutable std::mutex mutex_;
+  // Global mutex/cond used only by WaitMultiple for cross-object atomicity.
+  static std::condition_variable global_cond_;
+  static std::mutex global_mutex_;
 };
 
-std::condition_variable PosixConditionBase::cond_;
-std::mutex PosixConditionBase::mutex_;
+std::condition_variable PosixConditionBase::global_cond_;
+std::mutex PosixConditionBase::global_mutex_;
 
 // There really is no native POSIX handle for a single wait/signal construct
 // pthreads is at a lower level with more handles for such a mechanism.
@@ -336,9 +349,12 @@ class PosixCondition<Event> : public PosixConditionBase {
   virtual ~PosixCondition() = default;
 
   bool Signal() override {
-    auto lock = std::unique_lock<std::mutex>(mutex_);
-    signal_ = true;
-    cond_.notify_all();
+    {
+      auto lock = std::unique_lock<std::mutex>(mutex_);
+      signal_ = true;
+      cond_.notify_all();
+    }
+    notify_global();
     return true;
   }
 
@@ -368,11 +384,14 @@ class PosixCondition<Semaphore> : public PosixConditionBase {
 
   bool Release(uint32_t release_count, int* out_previous_count) {
     if (maximum_count_ - count_ >= release_count) {
-      auto lock = std::unique_lock<std::mutex>(mutex_);
-      if (out_previous_count)
-        *out_previous_count = count_;
-      count_ += release_count;
-      cond_.notify_all();
+      {
+        auto lock = std::unique_lock<std::mutex>(mutex_);
+        if (out_previous_count)
+          *out_previous_count = count_;
+        count_ += release_count;
+        cond_.notify_all();
+      }
+      notify_global();
       return true;
     }
     return false;
@@ -402,12 +421,16 @@ class PosixCondition<Mutant> : public PosixConditionBase {
 
   bool Release() {
     if (owner_ == std::this_thread::get_id() && count_ > 0) {
-      auto lock = std::unique_lock<std::mutex>(mutex_);
-      --count_;
-      // Free to be acquired by another thread
-      if (count_ == 0) {
-        cond_.notify_all();
+      bool became_free;
+      {
+        auto lock = std::unique_lock<std::mutex>(mutex_);
+        --count_;
+        became_free = (count_ == 0);
+        if (became_free) {
+          cond_.notify_all();
+        }
       }
+      if (became_free) notify_global();
       return true;
     }
     return false;
@@ -436,9 +459,12 @@ class PosixCondition<Timer> : public PosixConditionBase {
   virtual ~PosixCondition() { Cancel(); }
 
   bool Signal() override {
-    std::lock_guard<std::mutex> lock(mutex_);
-    signal_ = true;
-    cond_.notify_all();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      signal_ = true;
+      cond_.notify_all();
+    }
+    notify_global();
     return true;
   }
 
@@ -1175,10 +1201,13 @@ void* PosixCondition<Thread>::ThreadStartRoutine(void* parameter) {
     thread->handle_.state_ = State::kFinished;
   }
 
-  std::unique_lock<std::mutex> lock(mutex_);
-  thread->handle_.exit_code_ = 0;
-  thread->handle_.signaled_ = true;
-  cond_.notify_all();
+  {
+    std::unique_lock<std::mutex> lock(thread->handle_.mutex_);
+    thread->handle_.exit_code_ = 0;
+    thread->handle_.signaled_ = true;
+    thread->handle_.cond_.notify_all();
+  }
+  thread->handle_.notify_global();
 
   current_thread_ = nullptr;
   return nullptr;

@@ -68,6 +68,7 @@ namespace DeviceOffset {
     constexpr uint32_t DisplayHeightPacked = 13596;   // +13596: Display height info
     constexpr uint32_t GpuContextPtr       = 14888;   // +14888: GPU context reference
     constexpr uint32_t FrameCounter        = 16544;   // +16544: Frames presented
+    constexpr uint32_t FrameSubmitted       = 16552;   // +16552: Frames submitted to GPU ring (GPU completion counter)
     constexpr uint32_t FrameBufferIndex    = 19480;   // +19480: Current backbuffer
 }
 

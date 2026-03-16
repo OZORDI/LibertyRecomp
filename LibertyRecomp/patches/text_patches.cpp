@@ -7,7 +7,7 @@
 
 // Load text card.
 PPC_FUNC_IMPL(__imp__sub_825ECB48);
-PPC_FUNC(sub_825ECB48)
+PPC_FUNC_HOOK(sub_825ECB48)
 {
     auto* pMessage = (const char*)(base + ctx.r5.u32);
     void* pNewMessage = nullptr;
@@ -34,7 +34,7 @@ PPC_FUNC(sub_825ECB48)
 
 // Load text book.
 PPC_FUNC_IMPL(__imp__sub_821735B8);
-PPC_FUNC(sub_821735B8)
+PPC_FUNC_HOOK(sub_821735B8)
 {
     auto* pTextBookPath = (const char*)(base + ctx.r5.u32);
     void* pNewTextBookPath = nullptr;
@@ -63,7 +63,7 @@ PPC_FUNC(sub_821735B8)
 
 // Sonicteam::GameImp::OpenHintWindow (speculatory)
 PPC_FUNC_IMPL(__imp__sub_82173838);
-PPC_FUNC(sub_82173838)
+PPC_FUNC_HOOK(sub_82173838)
 {
     if (!Config::Hints)
     {

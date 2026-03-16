@@ -177,9 +177,14 @@ if(NOT TARGET rexinput)
     message(STATUS "RexGlue: Using headless stub for rexinput")
 endif()
 if(NOT TARGET rexaudio)
-    add_library(rexaudio INTERFACE)
-    add_library(rex::audio ALIAS rexaudio)
-    message(STATUS "RexGlue: Using headless stub for rexaudio")
+    # Build real rexaudio with SDL backend so RexGlue's XAudio/XMA kernel
+    # exports (XAudioRegisterRenderDriverClient, XAudioSubmitRenderDriverFrame,
+    # etc.) have a backing AudioSystem implementation.
+    add_subdirectory(
+        "${REXGLUE_SDK_ROOT}/src/audio"
+        "${CMAKE_CURRENT_BINARY_DIR}/rexglue-audio"
+    )
+    message(STATUS "RexGlue: Building real rexaudio (SDL backend)")
 endif()
 
 add_subdirectory(

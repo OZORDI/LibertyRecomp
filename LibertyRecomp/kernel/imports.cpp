@@ -50,6 +50,8 @@
 #include <rex/kernel/xobject.h>
 #include <rex/kernel/util/object_table.h>
 #include <rex/kernel/xmemory.h>
+#include <rex/system/xthread.h>
+#include <rex/system/processor.h>
 
 // Forward declarations
 static void SignalEventByGuestAddr(uint32_t guestAddr);
@@ -248,78 +250,78 @@ void VdGetCurrentDisplayInformation() { LOG_UTILITY("!!! STUB !!!"); }
 void VdSetDisplayMode() { LOG_UTILITY("!!! STUB !!!"); }
 
 // =============================================================================
-// VBLANK TIMER
+// VBLANK TIMER — uses RexGlue XHostThread for proper kernel context
+// =============================================================================
+// The VBlank callback dispatches into PPC code that uses kernel primitives
+// (critical sections, events, semaphores). This REQUIRES a proper XHostThread
+// with TLS, kernel state, and CPU context — a bare std::thread will crash
+// because the PPC code tries to use RexGlue threading infrastructure that
+// doesn't exist on a raw thread.
 // =============================================================================
 static std::atomic<bool> g_vblankThreadRunning{false};
-static std::thread g_vblankThread;
+static rex::system::object_ref<rex::system::XHostThread> g_vblankThread;
 
 void StartVBlankTimer() {
   if (g_vblankThreadRunning) return;
+
+  auto* ks = rex::system::kernel_state();
+  if (!ks || !ks->processor()) {
+    printf("[StartVBlankTimer] ERROR: kernel_state or processor not ready\n");
+    return;
+  }
+
   g_vblankThreadRunning = true;
-  printf("[StartVBlankTimer] Starting VBlank thread...\n");
-  g_vblankThread = std::thread([]() {
-    using namespace std::chrono;
-    auto nextVBlank = steady_clock::now();
-    constexpr auto VBLANK_INTERVAL = nanoseconds(16666667);
-    uint32_t vblankCount = 0;
-    while (g_vblankThreadRunning) {
-      nextVBlank += VBLANK_INTERVAL;
-      std::this_thread::sleep_until(nextVBlank);
-      ++vblankCount;
+  printf("[StartVBlankTimer] Starting VBlank XHostThread...\n");
 
-      // Set frame-ready flag
-      constexpr uint32_t GUEST_FRAME_READY_FLAG = 0x83128A80;
-      if (g_memory.base) {
-        *(g_memory.base + GUEST_FRAME_READY_FLAG) = 1;
-      }
+  g_vblankThread = rex::system::object_ref<rex::system::XHostThread>(
+      new rex::system::XHostThread(ks, 128 * 1024, 0, [ks]() {
+        using namespace std::chrono;
+        auto nextVBlank = steady_clock::now();
+        constexpr auto VBLANK_INTERVAL = nanoseconds(16666667); // 60Hz
+        uint32_t vblankCount = 0;
 
-      if (g_gpuRingBuffer.interruptCallback != 0) {
-        PPCFunc *callback = g_memory.FindFunction(g_gpuRingBuffer.interruptCallback);
-        if (callback) {
-          // Fresh context every call — never share state between VBlanks.
-          // r3 = 1 → VBlank interrupt type (triggers frame-done vtable path in
-          //   sub_829D7368 which calls device+10900+16 and clears interrupt bits).
-          // r3 = 0 only triggers sub_829D4C48 (spinlock only, no events signaled)
-          //   causing deadlock in the init wait chain (sub_829A3178 waits forever).
-          PPCContext vblankCtx{};
-          vblankCtx.r3.u32 = 1;   // VBlank interrupt type (sub_829D7368 r3=1 path)
-          vblankCtx.r4.u32 = g_gpuRingBuffer.interruptUserData;
-          vblankCtx.r1.u64 = 0x80080000;
-          vblankCtx.r13.u64 = 0x80000D20;
+        while (g_vblankThreadRunning) {
+          nextVBlank += VBLANK_INTERVAL;
+          std::this_thread::sleep_until(nextVBlank);
+          ++vblankCount;
 
-          // Diagnostic: dump device struct vtable ptr before firing VBlank.
-          // sub_829D7368 reads: r11 = *(r4+10900), r31 = *(r11+16) (frame_done cb).
-          // If r11 == 0, the indirect call is skipped and no events are signaled.
-          if (vblankCount <= 20 && g_memory.base) {
-            uint32_t userData = g_gpuRingBuffer.interruptUserData;
-            uint32_t vtable_slot_addr = userData + 10900;
-            uint32_t vtable_ptr = 0;
-            uint32_t frame_done_ptr = 0;
-            // Safe read: only if within mapped guest range
-            if (userData >= 0x10000 && userData < 0x83300000) {
-              vtable_ptr = *reinterpret_cast<const uint32_t*>(g_memory.base + vtable_slot_addr);
-              vtable_ptr = __builtin_bswap32(vtable_ptr); // PPC big-endian
-              if (vtable_ptr >= 0x40000000 && vtable_ptr < 0x90000000) {
-                frame_done_ptr = *reinterpret_cast<const uint32_t*>(g_memory.base + vtable_ptr + 16);
-                frame_done_ptr = __builtin_bswap32(frame_done_ptr);
-              }
-            }
-            printf("[VBlank#%u] userData=0x%08X *(+10900)=0x%08X frame_done=0x%08X\n",
-                   vblankCount, userData, vtable_ptr, frame_done_ptr);
+          // Set frame-ready flag in guest memory
+          constexpr uint32_t GUEST_FRAME_READY_FLAG = 0x83128A80;
+          if (g_memory.base) {
+            *(g_memory.base + GUEST_FRAME_READY_FLAG) = 1;
           }
 
-          SetPPCContext(vblankCtx);
-          callback(vblankCtx, g_memory.base);
+          // Dispatch interrupt callback through RexGlue's processor
+          // This properly saves/restores TLS, acquires the global interrupt
+          // lock, and sets up r3/r4 for the PPC callback — exactly like
+          // GraphicsSystem::DispatchInterruptCallback() does.
+          if (g_gpuRingBuffer.interruptCallback != 0) {
+            auto* thread = rex::system::XThread::GetCurrentThread();
+            if (thread) {
+              thread->SetActiveCpu(2); // GPU interrupts go to CPU 2
+
+              // r3=0: VBlank/frame-done path (sub_82A46098 increments
+              //   FrameSubmitted counter and clears frame-done fence).
+              // r3=1: CPU interrupt/error path — NOT what we want.
+              uint64_t args[] = {0, g_gpuRingBuffer.interruptUserData};
+              ks->processor()->ExecuteInterrupt(
+                  thread->thread_state(),
+                  g_gpuRingBuffer.interruptCallback,
+                  args, 2);
+            }
+          }
         }
-      }
-    }
-  });
+        return 0;
+      }));
+
+  g_vblankThread->set_name("GPU VSync");
+  g_vblankThread->Create();
 }
 
 void StopVBlankTimer() {
   if (g_vblankThreadRunning) {
     g_vblankThreadRunning = false;
-    if (g_vblankThread.joinable()) g_vblankThread.join();
+    // XHostThread is ref-counted, will clean up when released
   }
 }
 
@@ -397,21 +399,26 @@ void VdGetOverlayInformation() { LOG_UTILITY("!!! STUB !!!"); }
 void NetDll___WSAFDIsSet() { LOG_UTILITY("!!! STUB !!!"); }
 
 // =============================================================================
-// AUDIO STUBS (Liberty's audio pipeline handles these)
+// AUDIO — handled by RexGlue SDL AudioSystem (hooks removed, RexGlue owns these)
 // =============================================================================
-void XAudioGetVoiceCategoryVolume() { LOG_UTILITY("!!! STUB !!!"); }
-
-uint32_t XAudioGetVoiceCategoryVolumeChangeMask(uint32_t Driver, be<uint32_t> *Mask) {
-  *Mask = 0;
-  return 0;
+// XAudioRegisterRenderDriverClient, XAudioSubmitRenderDriverFrame, etc. are
+// exported by RexGlue's XBOXKRNL layer with full implementations.
+//
+// XMACreateContext / XMAReleaseContext: on macOS, xboxkrnl_audio_xma.cpp is
+// compiled out (REX_NO_XMA_DECODER=1) because FFmpeg XMA support is Apple-only.
+// The generated PPCFuncMappings still references these __imp__ symbols, so we
+// provide minimal forwarding stubs here that satisfy the linker.  The game's
+// XMA path would be a no-op on macOS anyway without a real XMA decoder.
+extern "C" void __imp__XMACreateContext(PPCContext& ctx, uint8_t* base) {
+    // macOS: XMA decoder not available — return null context pointer.
+    if (ctx.r3.u32 != 0) {
+        PPC_STORE_U32(ctx.r3.u32, 0);
+    }
+    ctx.r3.u32 = 0x8007000E; // STATUS_NOT_IMPLEMENTED
 }
-
-void XMAReleaseContext() { LOG_UTILITY("!!! STUB !!!"); }
-void XMACreateContext() { LOG_UTILITY("!!! STUB !!!"); }
-
-uint32_t XAudioGetSpeakerConfig(void *config) {
-  LOG_UTILITY("!!! STUB !!!");
-  return 0;
+extern "C" void __imp__XMAReleaseContext(PPCContext& ctx, uint8_t* base) {
+    // macOS: no-op release.
+    ctx.r3.u32 = 0;
 }
 
 // =============================================================================
@@ -530,7 +537,7 @@ uint32_t XamUserReadProfileSettings(uint32_t titleId, uint32_t userIndex,
 // =============================================================================
 
 // sub_829DD978 - GPU Command Buffer drain (no Xbox GPU hardware)
-extern "C" PPC_FUNC(sub_82A4EDC8) {
+PPC_FUNC_HOOK(sub_82A4EDC8) {
   uint32_t ctx_addr = ctx.r3.u32;
   uint32_t write_ptr = PPC_LOAD_U32(ctx_addr + 56);
   PPC_STORE_U32(ctx_addr + 60, write_ptr);
@@ -538,17 +545,17 @@ extern "C" PPC_FUNC(sub_82A4EDC8) {
 }
 
 // sub_829D72A0 - GPU Atomic Sync (no Xbox GPU hardware)
-extern "C" PPC_FUNC(sub_82A486F0) { /* r3 already contains result */ }
+PPC_FUNC_HOOK(sub_82A486F0) { /* r3 already contains result */ }
 
 // sub_829D87E8 - GPU Sync bypass (no Xbox GPU spin loop)
-extern "C" PPC_FUNC(sub_82A49C38) {
+PPC_FUNC_HOOK(sub_82A49C38) {
   uint32_t deviceCtx = ctx.r3.u32;
   if (deviceCtx != 0) { PPC_STORE_U32(deviceCtx + 11000, 0); }
 }
 
 // sub_829CFED0 - GPU fence completion (force done after tight loop)
 extern "C" void __imp__sub_82A41320(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A41320) {
+PPC_FUNC_HOOK(sub_82A41320) {
   static int s_consecutiveCalls = 0;
   ++s_consecutiveCalls;
   if (s_consecutiveCalls > 50) {
@@ -562,7 +569,7 @@ extern "C" PPC_FUNC(sub_82A41320) {
 
 // sub_828507F8 - Frame presentation (fix throttle check)
 extern "C" void __imp__sub_828507F8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_828507F8) {
+PPC_FUNC_HOOK(sub_828507F8) {
   // Do NOT zero 0x83124CCC here. That wiped the submitted-frame counter before the
   // pacing check, causing submitted(0) - presented(N) < 2 to never trigger and
   // blocking VdSwap after frame 2. The sync is now done in sub_82A467D8 (video.cpp).
@@ -571,11 +578,11 @@ extern "C" PPC_FUNC(sub_828507F8) {
 
 // sub_829A0678 - HDCP bypass (PC has no HDCP)
 extern "C" void __imp__sub_829A0678(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_829A0678) { ctx.r3.u32 = 0; }
+PPC_FUNC_HOOK(sub_829A0678) { ctx.r3.u32 = 0; }
 
 // sub_829D4C48 - Frame swap stub (would SIGBUS without GPU context)
 extern "C" void __imp__sub_82A46098(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A46098) { return; }
+PPC_FUNC_HOOK(sub_82A46098) { return; }
 
 // sub_829D7368 - VBlank callback (skip Xbox GPU fence queue)
 extern "C" void __imp__sub_82A487B8(PPCContext &ctx, uint8_t *base);
@@ -591,7 +598,7 @@ extern "C" void __imp__sub_82A487B8(PPCContext &ctx, uint8_t *base);
 //
 static uint32_t s_vblankStubAddr = 0;  // guest addr of the zero-filled stub
 
-extern "C" PPC_FUNC(sub_82A487B8) {
+PPC_FUNC_HOOK(sub_82A487B8) {
   // Ensure device[+10900] is non-zero so the recomp code doesn't crash
   uint32_t userData = ctx.r4.u32;
   if (userData >= 0x10000 && userData < 0x83300000 && base) {
@@ -627,7 +634,7 @@ extern "C" PPC_FUNC(sub_82A487B8) {
 // sub_82871180 - GPU render state submission (accesses D3D device context at
 // dword_83124AF4 which contains uncommitted GPU command buffer pointers in the
 // 0x70xxxxxx range, causing SIGBUS). Pure hardware-bound Xbox 360 D3D code.
-extern "C" PPC_FUNC(sub_82871180) { ctx.r3.u32 = 0; }
+PPC_FUNC_HOOK(sub_82871180) { ctx.r3.u32 = 0; }
 
 // sub_8284CFD8 — Streaming ring-buffer worker pool init
 //
@@ -646,7 +653,7 @@ extern "C" PPC_FUNC(sub_82871180) { ctx.r3.u32 = 0; }
 // normally, then post-seed the semaphore handles via rex::system::XSemaphore
 // C++ API — no guest call needed, guaranteed valid kernel object handles.
 extern "C" void __imp__sub_8284CFD8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_8284CFD8) {
+PPC_FUNC_HOOK(sub_8284CFD8) {
     __imp__sub_8284CFD8(ctx, base);  // run original worker init
 
     constexpr uint32_t RINGBUF_BASE  = 0x8319F2F8;
@@ -705,7 +712,7 @@ extern "C" PPC_FUNC(sub_8284CFD8) {
 // creation, and all streaming work is processed inline on the calling thread
 // via sub_827DE1C0, which correctly decrements v8[3].
 extern "C" void __imp__sub_827DF248(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_827DF248) {
+PPC_FUNC_HOOK(sub_827DF248) {
     // Force synchronous streaming mode — no worker threads
     constexpr uint32_t SYNC_FLAG_ADDR = 0x830F589C;
     *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(SYNC_FLAG_ADDR)) = 1;
@@ -728,7 +735,7 @@ extern "C" PPC_FUNC(sub_827DF248) {
 // flooding the log via RtlSetLastNTError -> RtlNtStatusToDosError on 3 worker
 // threads. Guard: skip when handle is clearly invalid.
 extern "C" void __imp__sub_829A2540(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_829A2540) {
+PPC_FUNC_HOOK(sub_829A2540) {
   uint32_t handle = ctx.r3.u32;
   if (handle == 0 || handle == 0xCDCDCDCD) {
     ctx.r3.u32 = 0;
@@ -743,7 +750,7 @@ extern "C" PPC_FUNC(sub_829A2540) {
 
 // sub_82168C08 - Audio init: signal events to unblock workers
 extern "C" void __imp__sub_82168C08(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82168C08) {
+PPC_FUNC_HOOK(sub_82168C08) {
   __imp__sub_82168C08(ctx, base);
   SignalEventByGuestAddr(0x83130044);
   SignalEventByGuestAddr(0x83137B80);
@@ -751,10 +758,10 @@ extern "C" PPC_FUNC(sub_82168C08) {
 }
 
 // sub_82169B00 - Audio thread sync (Xbox worker model not needed on PC)
-extern "C" PPC_FUNC(sub_82169B00) { ctx.r3.u32 = 0; }
+PPC_FUNC_HOOK(sub_82169B00) { ctx.r3.u32 = 0; }
 
 // sub_82169400 - Audio worker thread (not needed on PC, SDL handles audio)
-extern "C" PPC_FUNC(sub_82169400) { ctx.r3.u32 = 0; }
+PPC_FUNC_HOOK(sub_82169400) { ctx.r3.u32 = 0; }
 
 // =============================================================================
 // RAGE ALLOCATOR FIX — Phases 2 & 3
@@ -821,7 +828,7 @@ static bool IsValidAllocator(uint32_t memMgr) {
 // Fix: if TLS[1680] == 0 AND cur != 0, skip the push entirely.
 //      The allocator stays alive with its current value.
 // ---------------------------------------------------------------------------
-extern "C" PPC_FUNC(sub_827D85E0) {
+PPC_FUNC_HOOK(sub_827D85E0) {
     uint32_t r13 = ctx.r13.u32;
     uint32_t cur    = ReadTLS(r13, 1676);
     uint32_t target = ReadTLS(r13, 1680);
@@ -854,7 +861,7 @@ extern "C" PPC_FUNC(sub_827D85E0) {
 // Fix: if refcount == 0 AND TLS[1672] == 0 AND TLS[1676] != 0,
 //      skip the pop entirely.  The allocator stays alive.
 // ---------------------------------------------------------------------------
-extern "C" PPC_FUNC(sub_827D8620) {
+PPC_FUNC_HOOK(sub_827D8620) {
     uint32_t r13 = ctx.r13.u32;
     uint32_t refcnt = ReadTLS(r13, 1668);
     uint32_t saved  = ReadTLS(r13, 1672);
@@ -885,7 +892,7 @@ extern "C" PPC_FUNC(sub_827D8620) {
 // initialized on this thread, or a code path we didn't anticipate zeroed it),
 // route through RexGlue's SystemHeapAlloc so the allocation succeeds.
 // ---------------------------------------------------------------------------
-extern "C" PPC_FUNC(sub_8218BE28) {
+PPC_FUNC_HOOK(sub_8218BE28) {
     uint32_t r13 = ctx.r13.u32;
     uint32_t memMgr = ReadTLS(r13, 1676);
 
@@ -923,7 +930,7 @@ extern "C" PPC_FUNC(sub_8218BE28) {
 // (sub_827EF2F8) calls sub_8218BE50(tocSize, 128) and hangs when this
 // returns 0 because dev+8 becomes NULL.
 // ---------------------------------------------------------------------------
-extern "C" PPC_FUNC(sub_8218BE50) {
+PPC_FUNC_HOOK(sub_8218BE50) {
     uint32_t r13 = ctx.r13.u32;
     uint32_t memMgr = ReadTLS(r13, 1676);
 
@@ -968,7 +975,7 @@ extern "C" PPC_FUNC(sub_8218BE50) {
 extern "C" void __imp__sub_8284C290(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_tlsGuardCount{0};
 
-extern "C" PPC_FUNC(sub_8284C290) {
+PPC_FUNC_HOOK(sub_8284C290) {
     __imp__sub_8284C290(ctx, base);
     uint32_t r13 = ctx.r13.u32;
     uint32_t val = ReadTLS(r13, 1676);
@@ -988,7 +995,7 @@ extern "C" PPC_FUNC(sub_8284C290) {
 // DIAGNOSTIC: sub_82A50890 — GPU CreateDevice (top-level GPU init)
 // =============================================================================
 extern "C" void __imp__sub_82A50890(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A50890) {
+PPC_FUNC_HOOK(sub_82A50890) {
     printf("[GPU-CREATE] sub_82A50890 ENTER r3=0x%08X r4=0x%08X\n",
            ctx.r3.u32, ctx.r4.u32);
     fflush(stdout);
@@ -999,7 +1006,7 @@ extern "C" PPC_FUNC(sub_82A50890) {
 
 // DIAGNOSTIC: sub_82A416B8 — D3D device setup (caller of sub_82A50890)
 extern "C" void __imp__sub_82A416B8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A416B8) {
+PPC_FUNC_HOOK(sub_82A416B8) {
     printf("[D3D-SETUP] sub_82A416B8 ENTER r3=0x%08X r4=0x%08X r5=0x%08X\n",
            ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
     fflush(stdout);
@@ -1013,7 +1020,7 @@ extern "C" PPC_FUNC(sub_82A416B8) {
 //   r3 = device ptr, r4 = config ptr (if 0 → cleanup path, skips allocations)
 // =============================================================================
 extern "C" void __imp__sub_82A49D08(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A49D08) {
+PPC_FUNC_HOOK(sub_82A49D08) {
     uint32_t device = ctx.r3.u32;
     uint32_t config = ctx.r4.u32;
     printf("[GPU-INIT] sub_82A49D08 ENTER device=0x%08X config=0x%08X\n",
@@ -1036,7 +1043,7 @@ extern "C" PPC_FUNC(sub_82A49D08) {
 // DIAGNOSTIC: sub_821B3608 — RAGE memory allocator dispatch
 extern "C" void __imp__sub_821B3608(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_allocDispatchCount{0};
-extern "C" PPC_FUNC(sub_821B3608) {
+PPC_FUNC_HOOK(sub_821B3608) {
     uint32_t size  = ctx.r3.u32;
     uint32_t flags = ctx.r4.u32;
     int n = s_allocDispatchCount.fetch_add(1, std::memory_order_relaxed);
@@ -1069,7 +1076,7 @@ extern "C" PPC_FUNC(sub_821B3608) {
 extern "C" void __imp__sub_82A10EB0(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_rageAllocCount{0};
 
-extern "C" PPC_FUNC(sub_82A10EB0) {
+PPC_FUNC_HOOK(sub_82A10EB0) {
     uint32_t size  = ctx.r3.u32;
     uint32_t flags = ctx.r4.u32;
     if (size == 0 || size >= 0x4000000u) {
@@ -1121,7 +1128,7 @@ extern "C" PPC_FUNC(sub_82A10EB0) {
 // Fix: return 0 (not found) when dict is null.  This covers all callers at once.
 extern "C" void __imp__sub_827A9A20(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_827A9A20_nullDict{0};
-extern "C" PPC_FUNC(sub_827A9A20) {
+PPC_FUNC_HOOK(sub_827A9A20) {
     if (ctx.r3.u32 == 0) {
         int n = s_827A9A20_nullDict.fetch_add(1, std::memory_order_relaxed);
         if (n < 10) {
@@ -1137,7 +1144,7 @@ extern "C" PPC_FUNC(sub_827A9A20) {
 
 extern "C" void __imp__sub_8285D018(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_gpuSubmitCount{0};
-extern "C" PPC_FUNC(sub_8285D018) {
+PPC_FUNC_HOOK(sub_8285D018) {
     // Ring buffer submit+wait: skip all GPU command submission and fence machinery.
     // High-level D3D hooks in video.cpp capture actual rendering.
     int n = s_gpuSubmitCount.fetch_add(1, std::memory_order_relaxed);
@@ -1149,22 +1156,80 @@ extern "C" PPC_FUNC(sub_8285D018) {
 }
 
 extern "C" void __imp__sub_8285C648(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_8285C648) {
+PPC_FUNC_HOOK(sub_8285C648) {
     // GPU fence wait: immediately signal completion — no GPU hardware to wait on.
     ctx.r3.u32 = 1; // return 1 = fence signaled
 }
 
 extern "C" void __imp__sub_8285CF98(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_8285CF98) {
+PPC_FUNC_HOOK(sub_8285CF98) {
     // Fence create+wait wrapper: return 1 (success) without waiting.
     ctx.r3.u32 = 1;
 }
 
 extern "C" void __imp__sub_828497D8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_828497D8) {
+PPC_FUNC_HOOK(sub_828497D8) {
     // NtWait dispatcher: pass through to original so non-GPU waits still work.
     // Only the higher-level sub_8285D018/sub_8285C648 stubs short-circuit GPU fences.
     __imp__sub_828497D8(ctx, base);
+}
+
+
+// =============================================================================
+// GPU SHADER COMPILER / DEVICE INIT STUBS
+//
+// sub_82852FB0 — "ShaderFinalise": called after each shader is registered.
+//   Internally calls sub_8285B088 which dispatches through a GPU device vtable
+//   slot 40 (some Xenos "compile/link shader" command). Without a real GPU this
+//   vtable call routes into the PM4 command buffer and blocks forever.
+//   Since we handle shaders via our own cache (CreateShaderFromBytecode), the
+//   game-side finalise step is a no-op for us — just return r3=1 (success).
+//
+// sub_82852B78 — "ShaderBind": binds a shader name → shader object pair.
+//   Also invokes sub_8285B088 after sub_82852A50. Same rationale: no-op OK.
+//   Returns the bound shader object ptr in r3; callers check for null.
+//   We return 1 (truthy/non-null) so callers proceed.
+//
+// sub_82299500 — "sub_82299500 renderer subsystem init" — calls sub_82902AF8 →
+//   sub_829029A0 → sub_82920060 → sub_8291DC80 → sub_82852FB0/B78 chain above.
+//   The entire subsystem init is the Xenos GPU renderer pipeline setup.
+//   We stub it to return 1 (success) — our high-level D3D hooks in video.cpp
+//   already handle all actual rendering.
+// =============================================================================
+
+extern "C" void __imp__sub_8285B088(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8285B088) {
+    // "Consume pending shader registration request."
+    // r3 = shader-slot struct { ptr@+0, status@+4, cond1@+16(unused), cond2@+20 }
+    //
+    // Original flow:
+    //   1. if (*(r3+20)==0 && *(r3+16)!=0) → call sub_8285A8B0 (GPU buffer flush — HANGS)
+    //   2. vtable slot 10 → sub_8285F428 → sub_8285EC98 (shader slot registration, pure memory)
+    //   3. stw -1 → slot+4  (mark consumed)
+    //   4. stw  0 → slot+0  (clear ptr)
+    //
+    // We let the original run BUT sub_8285A8B0 is now stubbed (see below) so the GPU
+    // buffer flush is skipped. The vtable slot 10 path is pure memory and runs fine.
+    __imp__sub_8285B088(ctx, base);
+}
+
+// sub_8285A8B0 — GPU buffer flush called from sub_8285B088.
+// Dispatches two GPU device vtable calls (slot 9 and slot 13) to "submit shader bytecode
+// to the Xenos command ring". Both spin-wait on GPU fence completion → hang forever.
+// Since we bypass the Xenos GPU entirely, this flush is a no-op for us.
+extern "C" void __imp__sub_8285A8B0(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8285A8B0) {
+    // Skip GPU shader bytecode submission — no Xenos hardware to submit to.
+    // The caller (sub_8285B088) will still do the slot cleanup writes afterwards.
+}
+
+extern "C" void __imp__sub_82852B78(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82852B78) {
+    // ShaderBind(context, shaderNamePtr, flags) — resolves name to shader object.
+    // We let the original run (it does cache lookup + file path resolution which
+    // are pure host memory ops). Only sub_8285B088 inside it is the GPU blocker,
+    // and that's now stubbed above — so the original completes without blocking.
+    __imp__sub_82852B78(ctx, base);
 }
 
 // =============================================================================
@@ -1180,7 +1245,7 @@ extern "C" void __imp__sub_825EE000(PPCContext &ctx, uint8_t *base);
 // Pool pointer global address used by sub_822054F8
 static constexpr uint32_t POOL_PTR_GLOBAL = 0x82B9C1B0;
 
-extern "C" PPC_FUNC(sub_825EE000) {
+PPC_FUNC_HOOK(sub_825EE000) {
     // r3=pool_ptr, r4=count, r5=name_str, r6=stride
     uint32_t poolPtr  = ctx.r3.u32;
     uint32_t count    = ctx.r4.u32;
@@ -1226,7 +1291,7 @@ extern "C" PPC_FUNC(sub_825EE000) {
     fflush(stdout);
 }
 
-extern "C" PPC_FUNC(sub_822054F8) {
+PPC_FUNC_HOOK(sub_822054F8) {
     uint32_t tls1676 = ReadTLS(ctx.r13.u32, 1676);
     printf("[POOL-DIAG] sub_822054F8 ENTER TLS[1676]=0x%08X caller=0x%08X\n",
            tls1676, static_cast<uint32_t>(ctx.lr));
@@ -1274,7 +1339,7 @@ static const uint8_t s_rageAesKey[32] = {
 };
 #endif
 
-extern "C" PPC_FUNC(sub_827FC7F0) {
+PPC_FUNC_HOOK(sub_827FC7F0) {
     uint32_t dataAddr = ctx.r4.u32;
     uint32_t size = ctx.r5.u32 & 0xFFFFFFF0u;
 
@@ -1312,7 +1377,7 @@ extern "C" PPC_FUNC(sub_827FC7F0) {
 // =============================================================================
 extern "C" void __imp__sub_827E0898(PPCContext &ctx, uint8_t *base);
 
-extern "C" PPC_FUNC(sub_827E0898) {
+PPC_FUNC_HOOK(sub_827E0898) {
     // r3 = device manager, r4 = path string (guest addr), r5 = mode string
     uint32_t pathAddr = ctx.r4.u32;
     if (pathAddr != 0) {
@@ -1364,7 +1429,7 @@ extern "C" PPC_FUNC(xstart) {
 
 // sub_82A18BE0 — first function called by xstart (firmware/init check)
 extern "C" void __imp__sub_82A18BE0(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A18BE0) {
+PPC_FUNC_HOOK(sub_82A18BE0) {
     printf("[DIAG] sub_82A18BE0 ENTER (firmware check) caller=0x%08X\n",
            static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
@@ -1375,7 +1440,7 @@ extern "C" PPC_FUNC(sub_82A18BE0) {
 
 // sub_82A18B08 — called by sub_82A18BE0, determines if HalReturnToFirmware fires
 extern "C" void __imp__sub_82A18B08(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A18B08) {
+PPC_FUNC_HOOK(sub_82A18B08) {
     printf("[DIAG] sub_82A18B08 ENTER (firmware init check)\n");
     fflush(stdout);
     __imp__sub_82A18B08(ctx, base);
@@ -1387,7 +1452,7 @@ extern "C" PPC_FUNC(sub_82A18B08) {
 
 // sub_82A18620 — second function in xstart (notification callbacks with critical section)
 extern "C" void __imp__sub_82A18620(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A18620) {
+PPC_FUNC_HOOK(sub_82A18620) {
     printf("[DIAG] sub_82A18620 ENTER (notification callbacks) arg=0x%08X\n", ctx.r3.u32);
     fflush(stdout);
     __imp__sub_82A18620(ctx, base);
@@ -1397,7 +1462,7 @@ extern "C" PPC_FUNC(sub_82A18620) {
 
 // sub_82A110A8 — XEX privilege/AV pack check (called from xstart before anything)
 extern "C" void __imp__sub_82A110A8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82A110A8) {
+PPC_FUNC_HOOK(sub_82A110A8) {
     printf("[DIAG] sub_82A110A8 ENTER (XEX privilege check) caller=0x%08X\n",
            static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
@@ -1410,22 +1475,43 @@ extern "C" PPC_FUNC(sub_82A110A8) {
 
 
 
-// sub_82140000 — GATE: calls sub_821B3CE8 (RAGE init), returns 0 or 1
+// sub_82140000 — RAGE init gate.
+// Calls sub_821B3CE8 (full RAGE engine init) and returns 1 on success, 0 on failure.
+// CRITICAL: sub_821B3CE8 is NOT idempotent — calling it a second time hangs inside
+// sub_821B49E8/sub_8285DD10 waiting on a streaming event that's already consumed.
+// This function gets called TWICE:
+//   1st call: from the main init path (sub_821B3CE8 runs OK, sets up all subsystems)
+//   2nd call: from sub_821B3598 (per-frame tick) — must short-circuit to avoid re-init hang
+// Fix: guard with a static flag; on subsequent calls return 1 immediately.
 extern "C" void __imp__sub_82140000(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82140000) {
+static std::atomic<bool> s_rageInitDone{false};
+PPC_FUNC_HOOK(sub_82140000) {
     printf("[DIAG] sub_82140000 ENTER (RAGE init gate) caller=0x%08X\n",
            static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
+
+    if (s_rageInitDone.load(std::memory_order_acquire)) {
+        // Already initialized — return 1 without re-running sub_821B3CE8
+        printf("[DIAG] sub_82140000: already initialized, returning 1 (skip re-init)\n");
+        fflush(stdout);
+        ctx.r3.u32 = 1;
+        return;
+    }
+
     __imp__sub_82140000(ctx, base);
     uint32_t result = ctx.r3.u32 & 0xFF;
     printf("[DIAG] sub_82140000 RETURN = %u (%s)\n",
-           result, result ? "SUCCESS → game loop will run" : "FAIL → game loop SKIPPED");
+           result, result ? "SUCCESS" : "FAIL");
     fflush(stdout);
+
+    if (result) {
+        s_rageInitDone.store(true, std::memory_order_release);
+    }
 }
 
 // sub_82140088 — MAIN GAME LOOP
 extern "C" void __imp__sub_82140088(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_82140088) {
+PPC_FUNC_HOOK(sub_82140088) {
     printf("[DIAG] sub_82140088 ENTER (main game loop!) caller=0x%08X\n",
            static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
@@ -1437,7 +1523,7 @@ extern "C" PPC_FUNC(sub_82140088) {
 // sub_821458B8 — INIT GATE: returns 0 = "not ready", non-zero = "ready"
 extern "C" void __imp__sub_821458B8(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_initGateCount{0};
-extern "C" PPC_FUNC(sub_821458B8) {
+PPC_FUNC_HOOK(sub_821458B8) {
     __imp__sub_821458B8(ctx, base);
     int n = s_initGateCount.fetch_add(1, std::memory_order_relaxed);
     uint32_t result = ctx.r3.u32 & 0xFF;
@@ -1451,7 +1537,7 @@ extern "C" PPC_FUNC(sub_821458B8) {
 // sub_821B39A8 — QUIT FLAG: returns 0 = "keep running", non-zero = "exit"
 extern "C" void __imp__sub_821B39A8(PPCContext &ctx, uint8_t *base);
 static std::atomic<int> s_quitCheckCount{0};
-extern "C" PPC_FUNC(sub_821B39A8) {
+PPC_FUNC_HOOK(sub_821B39A8) {
     __imp__sub_821B39A8(ctx, base);
     int n = s_quitCheckCount.fetch_add(1, std::memory_order_relaxed);
     uint32_t result = ctx.r3.u32 & 0xFF;
@@ -1464,7 +1550,7 @@ extern "C" PPC_FUNC(sub_821B39A8) {
 
 // sub_821B3CE8 — RAGE ENGINE INIT (the big one)
 extern "C" void __imp__sub_821B3CE8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_821B3CE8) {
+PPC_FUNC_HOOK(sub_821B3CE8) {
     printf("[DIAG] sub_821B3CE8 ENTER (RAGE engine init) arg=0x%08X caller=0x%08X\n",
            ctx.r3.u32, static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
@@ -1477,7 +1563,7 @@ extern "C" PPC_FUNC(sub_821B3CE8) {
 
 // sub_821411D8 — game systems init (only called if sub_821B3CE8 succeeds)
 extern "C" void __imp__sub_821411D8(PPCContext &ctx, uint8_t *base);
-extern "C" PPC_FUNC(sub_821411D8) {
+PPC_FUNC_HOOK(sub_821411D8) {
     printf("[DIAG] sub_821411D8 ENTER (game systems init) caller=0x%08X\n",
            static_cast<uint32_t>(ctx.lr));
     fflush(stdout);
@@ -1492,7 +1578,7 @@ extern "C" PPC_FUNC(sub_821411D8) {
 extern "C" void __imp__sub_8218BEA8(PPCContext &ctx, uint8_t *base);
 extern "C" void __imp__sub_82856F08(PPCContext &ctx, uint8_t *base);
 
-extern "C" PPC_FUNC(sub_8218BEA8) {
+PPC_FUNC_HOOK(sub_8218BEA8) {
   static bool s_initDone = false;
 
   if (!s_initDone) {
@@ -1603,15 +1689,7 @@ GUEST_FUNCTION_HOOK(__imp__XamInputGetState, XamInputGetState);
 GUEST_FUNCTION_HOOK(__imp__XamInputSetState, XamInputSetState);
 GUEST_FUNCTION_HOOK(__imp__XamInputGetKeystrokeEx, XamInputGetKeystrokeEx);
 
-// --- Audio ---
-GUEST_FUNCTION_HOOK(__imp__XAudioGetVoiceCategoryVolume, XAudioGetVoiceCategoryVolume);
-GUEST_FUNCTION_HOOK(__imp__XAudioGetVoiceCategoryVolumeChangeMask, XAudioGetVoiceCategoryVolumeChangeMask);
-GUEST_FUNCTION_HOOK(__imp__XMAReleaseContext, XMAReleaseContext);
-GUEST_FUNCTION_HOOK(__imp__XMACreateContext, XMACreateContext);
-GUEST_FUNCTION_HOOK(__imp__XAudioRegisterRenderDriverClient, XAudioRegisterRenderDriverClient);
-GUEST_FUNCTION_HOOK(__imp__XAudioUnregisterRenderDriverClient, XAudioUnregisterRenderDriverClient);
-GUEST_FUNCTION_HOOK(__imp__XAudioSubmitRenderDriverFrame, XAudioSubmitRenderDriverFrame);
-GUEST_FUNCTION_HOOK(__imp__XAudioGetSpeakerConfig, XAudioGetSpeakerConfig);
+// --- Audio --- (RexGlue SDL AudioSystem handles all audio exports natively)
 
 // --- Networking ---
 GUEST_FUNCTION_HOOK(__imp__NetDll_WSAStartup, Net::WSAStartup);

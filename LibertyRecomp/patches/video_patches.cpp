@@ -23,7 +23,7 @@ void BeginBlockGetName(PPCRegister& r3)
 
 // EndBlock
 PPC_FUNC_IMPL(__imp__sub_826078D8);
-PPC_FUNC(sub_826078D8)
+PPC_FUNC_HOOK(sub_826078D8)
 {
 #if _DEBUG
     if (g_pBlockName)
@@ -52,7 +52,7 @@ float ReflectionScaleFactor(EReflectionResolution ref) {
 
 // CreateTexture
 PPC_FUNC_IMPL(__imp__sub_82619D00);
-PPC_FUNC(sub_82619D00)
+PPC_FUNC_HOOK(sub_82619D00)
 {
     auto pName = (stdx::string*)g_memory.Translate(ctx.r4.u32);
 
@@ -91,7 +91,7 @@ PPC_FUNC(sub_82619D00)
 
 // CreateDepthStencilSurface
 PPC_FUNC_IMPL(__imp__sub_82619B88);
-PPC_FUNC(sub_82619B88)
+PPC_FUNC_HOOK(sub_82619B88)
 {
     auto pName = (stdx::string*)g_memory.Translate(ctx.r4.u32);
 
@@ -161,7 +161,7 @@ float ShadowScaleFactor(EShadowResolution ref) {
 
 // CreateArrayTexture
 PPC_FUNC_IMPL(__imp__sub_82619FF0);
-PPC_FUNC(sub_82619FF0)
+PPC_FUNC_HOOK(sub_82619FF0)
 {
     auto pName = (stdx::string*)g_memory.Translate(ctx.r4.u32);
 

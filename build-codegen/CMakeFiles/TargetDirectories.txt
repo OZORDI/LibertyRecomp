@@ -9,6 +9,7 @@
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/tiny-aes.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/aes128.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/mspack.dir
+/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/o1heap.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/imgui.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/package.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/CMakeFiles/package_source.dir
@@ -327,15 +328,6 @@
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/filesystem/CMakeFiles/install.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/filesystem/CMakeFiles/install/local.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/filesystem/CMakeFiles/install/strip.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/rexui.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/package.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/package_source.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/edit_cache.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/rebuild_cache.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/list_install_components.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/install.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/install/local.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/CMakeFiles/install/strip.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/input/CMakeFiles/rexinput.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/input/CMakeFiles/package.dir
 /Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/input/CMakeFiles/package_source.dir

@@ -92,6 +92,8 @@ ppc_u32_result_t ObReferenceObjectByHandle_entry(ppc_u32_t handle, ppc_u32_t obj
       {XObject::Type::Thread, 0xD01BBEEF}};
   auto object = kernel_state()->object_table()->LookupObject<XObject>(handle);
   if (!object) {
+    REXKRNL_WARN("ObReferenceObjectByHandle: handle={:#x} NOT FOUND, out_ptr={:#x}",
+                 (uint32_t)handle, out_object_ptr.guest_address());
     return X_STATUS_INVALID_HANDLE;
   }
 
@@ -99,6 +101,8 @@ ppc_u32_result_t ObReferenceObjectByHandle_entry(ppc_u32_t handle, ppc_u32_t obj
   auto object_type = object_types.find(object->type());
   if (object_type != object_types.end()) {
     if (object_type_ptr && object_type_ptr != object_type->second) {
+      REXKRNL_WARN("ObReferenceObjectByHandle: type mismatch handle={:#x} expected={:#x} got={:#x}",
+                   (uint32_t)handle, (uint32_t)object_type_ptr, object_type->second);
       return X_STATUS_OBJECT_TYPE_MISMATCH;
     }
   } else {
@@ -130,7 +134,7 @@ ppc_u32_result_t ObReferenceObjectByName_entry(ppc_pchar_t name, ppc_u32_t attri
 ppc_u32_result_t ObDereferenceObject_entry(ppc_u32_t native_ptr) {
   REXKRNL_IMPORT_TRACE("ObDereferenceObject", "ptr={:#x}", (uint32_t)native_ptr);
   // Check if a dummy value from ObReferenceObjectByHandle.
-  if (native_ptr == 0xDEADF00D) {
+  if (native_ptr == 0xDEADF00D || native_ptr == 0) {
     return 0;
   }
 

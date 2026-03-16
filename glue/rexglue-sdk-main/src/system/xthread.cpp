@@ -534,7 +534,6 @@ void XThread::Execute() {
     REXSYS_ERROR("XThread::Execute - No function registered at {:08X}", address);
     return;
   }
-
   // Set up the PPCContext for execution
   PPCContext ctx{};
   uint8_t* base = memory->virtual_membase();

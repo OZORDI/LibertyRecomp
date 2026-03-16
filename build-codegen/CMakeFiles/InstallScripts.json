@@ -37,7 +37,6 @@
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/glslang/gtests/cmake_install.cmake",
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/core/cmake_install.cmake",
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/filesystem/cmake_install.cmake",
-		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/ui/cmake_install.cmake",
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/input/cmake_install.cmake",
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/audio/cmake_install.cmake",
 		"/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/src/graphics/cmake_install.cmake",

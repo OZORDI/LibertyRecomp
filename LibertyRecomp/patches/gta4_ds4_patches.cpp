@@ -5,6 +5,7 @@
 
 #include <stdafx.h>
 #include <cpu/ppc_context.h>
+#include <kernel/function.h>
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/config.h>
@@ -751,7 +752,7 @@ void Update()
 // Called when the game changes the player's wanted level
 extern "C" void __imp__sub_82578B80(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82578B80)
+PPC_FUNC_HOOK(sub_82578B80)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -787,7 +788,7 @@ PPC_FUNC(sub_82578B80)
 
 extern "C" void __imp__sub_82546D20(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82546D20)
+PPC_FUNC_HOOK(sub_82546D20)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -829,7 +830,7 @@ extern "C" void __imp__sub_82563DD0(PPCContext& ctx, uint8_t* base);
 
 static int s_trackedVehicleHealth = 1000;
 
-PPC_FUNC(sub_82563DD0)
+PPC_FUNC_HOOK(sub_82563DD0)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -870,7 +871,7 @@ PPC_FUNC(sub_82563DD0)
 
 extern "C" void __imp__sub_82586680(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82586680)
+PPC_FUNC_HOOK(sub_82586680)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -905,7 +906,7 @@ PPC_FUNC(sub_82586680)
 
 extern "C" void __imp__sub_82596428(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82596428)
+PPC_FUNC_HOOK(sub_82596428)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -930,7 +931,7 @@ PPC_FUNC(sub_82596428)
 
 extern "C" void __imp__sub_82563E30(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82563E30)
+PPC_FUNC_HOOK(sub_82563E30)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -962,7 +963,7 @@ PPC_FUNC(sub_82563E30)
 
 extern "C" void __imp__sub_825A2518(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_825A2518)
+PPC_FUNC_HOOK(sub_825A2518)
 {
     PPC_FUNC_PROLOGUE();
     

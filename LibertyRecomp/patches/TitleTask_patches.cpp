@@ -87,7 +87,7 @@ bool TitleTask_RedirectStateTransitionToOutroAnim(PPCRegister& r31)
 
 // Sonicteam::TitleTask::Update
 PPC_FUNC_IMPL(__imp__sub_825126A0);
-PPC_FUNC(sub_825126A0)
+PPC_FUNC_HOOK(sub_825126A0)
 {
     auto pTitleTask = (Sonicteam::TitleTask*)(base + ctx.r3.u32);
     auto deltaTime = ctx.f1.f64;
@@ -226,7 +226,7 @@ PPC_FUNC(sub_825126A0)
 }
 
 PPC_FUNC_IMPL(__imp__sub_82511540);
-PPC_FUNC(sub_82511540)
+PPC_FUNC_HOOK(sub_82511540)
 {
     if (Config::DisableTitleInputDelay)
     {

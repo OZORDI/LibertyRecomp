@@ -55,6 +55,8 @@
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/crt/heap.h>
+#include <rex/chrono/clock.h>
+#include <rex/audio/sdl/sdl_audio_system.h>
 
 #ifdef _WIN32
 #include <timeapi.h>
@@ -176,6 +178,29 @@ static bool RexFallbackCrashHandler(rex::arch::Exception* ex, void* /*data*/) {
 // This sets up RexGlue's signal handlers (SIGILL, SIGSEGV, SIGBUS) via
 // ExceptionHandler::Install() so any faults during startup are caught.
 // The fallback handler only logs diagnostics and returns false.
+static void raw_sigbus_handler(int sig, siginfo_t* info, void* ctx) {
+    // Raw SIGBUS handler - fires before RexGlue exception chain
+    // Prints faulting address then re-raises to let default handler run
+    uintptr_t fa = (uintptr_t)info->si_addr;
+    uintptr_t base = (uintptr_t)g_memory.base;
+    char buf[256];
+    if (fa >= base && fa < base + 0x100000000ULL) {
+        snprintf(buf, sizeof(buf),
+            "\n[SIGBUS] fault at GUEST addr 0x%08X (host 0x%016llX)\n",
+            (uint32_t)(fa - base), (unsigned long long)fa);
+    } else {
+        snprintf(buf, sizeof(buf),
+            "\n[SIGBUS] fault at HOST addr 0x%016llX (OUTSIDE guest memory)\n",
+            (unsigned long long)fa);
+    }
+    write(2, buf, strlen(buf));
+    // Re-raise with default handler
+    struct sigaction sa{};
+    sa.sa_handler = SIG_DFL;
+    sigaction(SIGBUS, &sa, nullptr);
+    raise(SIGBUS);
+}
+
 static void InstallRexGlueExceptionHandlers() {
     // Install the fallback crash handler. ExceptionHandler::Install() also
     // registers SIGILL/SIGSEGV/SIGBUS signal handlers on first call, so
@@ -184,6 +209,13 @@ static void InstallRexGlueExceptionHandlers() {
     // no separate MMIO handler installation is needed.
     rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
     fprintf(stderr, "[RexGlue] Fallback exception handler installed (signal handlers active)\n");
+    // Install raw SIGBUS catcher AFTER RexGlue so it sits on top of the chain
+    {
+        struct sigaction sa{};
+        sa.sa_sigaction = raw_sigbus_handler;
+        sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+        sigaction(SIGBUS, &sa, nullptr);
+    }
     fflush(stderr);
 }
 
@@ -272,7 +304,7 @@ void KiSystemStartup()
     // registered in main() after rex::Runtime::Setup().
     // ---------------------------------------------------------------
 
-    XAudioInitializeSystem();
+    // XAudioInitializeSystem(); // Removed: RexGlue SDL audio handles this
 }
 
 uint32_t LdrLoadModule(const std::filesystem::path &path)
@@ -470,13 +502,32 @@ int main(int argc, char *argv[])
         //   ExceptionHandler (NULL-PC, MMIO) → SEH (data faults in __try)
         // This matches standalone: ExceptionHandler saves SEH as its
         // "previous handler" and falls back to it for unhandled faults.
+        // Give RexGlue full audio control via its SDL AudioSystem.
+        // Liberty's audio hooks in imports.cpp have been removed so RexGlue's
+        // XBOXKRNL exports (XMACreateContext, XAudioRegisterRenderDriverClient,
+        // etc.) handle all game audio calls with full Xenia-based implementations.
+        rex::RuntimeConfig rexConfig;
+        rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
+
         uint32_t rt_status = s_rexRuntime->Setup(
             static_cast<uint32_t>(PPC_CODE_BASE),
             static_cast<uint32_t>(PPC_CODE_SIZE),
             static_cast<uint32_t>(PPC_IMAGE_BASE),
             static_cast<uint32_t>(PPC_IMAGE_SIZE),
-            PPCFuncMappings);
+            PPCFuncMappings,
+            std::move(rexConfig));
         fprintf(stderr, "[Main] Setup() returned 0x%08X\n", rt_status);
+
+        // Xbox 360 timebase runs at exactly 50MHz.
+        // Must be set before any PPC_QUERY_TIMEBASE() call fires, so the game's
+        // timing math (loading-screen task advancement in sub_82143DC8) gets the
+        // correct elapsed-time values.  Without this, guest_tick_frequency_ defaults
+        // to the host CPU frequency (~1-4GHz), causing the 1/50M scaling constant
+        // baked into the game to return effectively-zero milliseconds and every
+        // time-gated loading task spins forever at state=0.
+        rex::chrono::Clock::set_guest_tick_frequency(50000000ULL);
+        fprintf(stderr, "[Main] Guest tick frequency set to 50MHz (Xbox 360 timebase)\n");
+
         if (rt_status != 0 /* X_STATUS_SUCCESS */) {
             fprintf(stderr, "[Main] FATAL: rex::Runtime::Setup() failed with 0x%08X\n", rt_status);
             printf("[EXIT-TRACE] main.cpp:478 calling _Exit\n"); fflush(stdout);
@@ -528,6 +579,9 @@ int main(int argc, char *argv[])
             fs->RegisterSymbolicLink("xbox360:", "\\Device\\Harddisk0\\Partition1\\xbox360");
             // X: drive prefix used by some game code
             fs->RegisterSymbolicLink("x:", "\\Device\\Harddisk0\\Partition1");
+            // update:\path -> \Device\Harddisk0\Partition1\update\path
+            // GTA IV v8 title update content (effects, text, shaders)
+            fs->RegisterSymbolicLink("update:", "\\Device\\Harddisk0\\Partition1\\update");
             // Register writable cache device for Xbox 360 temp/scratch storage
             auto cachePath = GetUserPath() / "cache";
             std::filesystem::create_directories(cachePath);
@@ -547,7 +601,7 @@ int main(int argc, char *argv[])
             // content root name directly to GetGamePath()/dlc/ on the host filesystem.
             // No VFS HostPathDevice mounts are needed.
 
-                        printf("[Main] Registered GTA IV VFS symlinks: common:, platform:, audio:, xbox360:, x:, cache:, cache1:\n");
+                        printf("[Main] Registered GTA IV VFS symlinks: common:, platform:, audio:, xbox360:, x:, update:, cache:, cache1:\n");
             fflush(stdout);
         }
 

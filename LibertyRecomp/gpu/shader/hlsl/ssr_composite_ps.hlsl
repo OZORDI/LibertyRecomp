@@ -23,7 +23,7 @@ struct PSInput
     float2 texCoord : TEXCOORD0;
 };
 
-float4 main(PSInput input) : SV_Target0
+float4 shaderMain(PSInput input) : SV_Target0
 {
     float2 uv = input.texCoord;
     

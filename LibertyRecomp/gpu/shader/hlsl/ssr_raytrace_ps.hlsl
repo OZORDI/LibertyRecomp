@@ -206,7 +206,7 @@ float ScreenEdgeFade(float2 uv)
 }
 
 // Main pixel shader
-PSOutput main(PSInput input)
+PSOutput shaderMain(PSInput input)
 {
     PSOutput output;
     output.reflection = float4(0, 0, 0, 0);

@@ -36,6 +36,7 @@
 
 #include <stdafx.h>
 #include <cpu/ppc_context.h>
+#include <kernel/function.h>
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/config.h>
@@ -133,7 +134,7 @@ inline float SmoothValue(float current, float target, float alpha)
 
 extern "C" void __imp__sub_8259EF90(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_8259EF90)
+PPC_FUNC_HOOK(sub_8259EF90)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -186,7 +187,7 @@ PPC_FUNC(sub_8259EF90)
 
 extern "C" void __imp__sub_82593700(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82593700)
+PPC_FUNC_HOOK(sub_82593700)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -599,7 +600,7 @@ void Update()
 // Blends motion steering input with analog stick values when in a vehicle
 extern "C" void __imp__sub_82593668(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82593668)
+PPC_FUNC_HOOK(sub_82593668)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -710,7 +711,7 @@ PPC_FUNC(sub_82593668)
 // This is called frequently and lets us track if player is in a vehicle
 extern "C" void __imp__sub_82590628(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82590628)
+PPC_FUNC_HOOK(sub_82590628)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -729,7 +730,7 @@ PPC_FUNC(sub_82590628)
 // Hook for IS_CHAR_IN_ANY_HELI (sub_82590918) - to detect helicopter state
 extern "C" void __imp__sub_82590918(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82590918)
+PPC_FUNC_HOOK(sub_82590918)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -751,7 +752,7 @@ PPC_FUNC(sub_82590918)
 
 extern "C" void __imp__sub_82587310(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82587310)
+PPC_FUNC_HOOK(sub_82587310)
 {
     PPC_FUNC_PROLOGUE();
     
@@ -778,7 +779,7 @@ PPC_FUNC(sub_82587310)
 
 extern "C" void __imp__sub_82579960(PPCContext& ctx, uint8_t* base);
 
-PPC_FUNC(sub_82579960)
+PPC_FUNC_HOOK(sub_82579960)
 {
     PPC_FUNC_PROLOGUE();
     

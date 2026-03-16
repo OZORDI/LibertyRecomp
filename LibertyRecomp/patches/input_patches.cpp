@@ -5,7 +5,7 @@ static constexpr int INPUT_LISTENER_B_DOWN = 0x2000000;
 
 // Sonicteam::Player::Input::ListenerNormal::Update
 PPC_FUNC_IMPL(__imp__sub_82222428);
-PPC_FUNC(sub_82222428)
+PPC_FUNC_HOOK(sub_82222428)
 {
     auto pListenerNormal = (Sonicteam::Player::Input::ListenerNormal*)(base + ctx.r3.u32);
     auto pInputManager = (Sonicteam::SoX::Input::Manager*)(base + ctx.r4.u32);

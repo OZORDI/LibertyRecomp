@@ -348,8 +348,13 @@ T GuestToHostFunction(const TFunction& func, TArgs&&... argv)
     }
 }
 
+// PPC_FUNC_HOOK: Use this macro for all PPC function overrides in Liberty code.
+// Ensures extern "C" linkage so the symbol overrides the weak symbol from generated code.
+// PPC_FUNC alone produces C++ mangled names which DON'T override the C-linkage weak symbols.
+#define PPC_FUNC_HOOK(x) extern "C" PPC_FUNC(x)
+
 #define GUEST_FUNCTION_HOOK(subroutine, function) \
-    PPC_FUNC(subroutine) { HostToGuestFunction<function>(ctx, base); }
+    extern "C" PPC_FUNC(subroutine) { HostToGuestFunction<function>(ctx, base); }
 
 #define GUEST_FUNCTION_STUB(subroutine) \
-    PPC_FUNC(subroutine) { }
+    extern "C" PPC_FUNC(subroutine) { }

@@ -3,6 +3,7 @@
 // due to control flow issues in the original PPC code
 
 #include <cpu/ppc_context.h>
+#include <kernel/function.h>
 #include <kernel/memory.h>
 #include <cstring>
 
@@ -15,7 +16,7 @@
 extern "C" PPC_FUNC(__imp__sub_82990830);
 
 // Override the weak symbol with a strong one
-PPC_FUNC(sub_82990830) {
+PPC_FUNC_HOOK(sub_82990830) {
     uint8_t* dst = base + ctx.r3.u32;
     uint8_t* src = base + ctx.r4.u32;
     size_t size = ctx.r5.u32;
@@ -34,7 +35,7 @@ PPC_FUNC(sub_82990830) {
 // It's called from sub_82990830 when r6 == 4
 extern "C" PPC_FUNC(__imp__sub_82990880);
 
-PPC_FUNC(sub_82990880) {
+PPC_FUNC_HOOK(sub_82990880) {
     // This is the same memcpy logic - just copy r5 bytes from r4 to r3
     // But first we need to handle the alignment case where r6 bytes were already copied
     uint8_t* dst = base + ctx.r3.u32;

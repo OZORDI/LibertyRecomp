@@ -181,7 +181,7 @@ ppc_u32_result_t XGetAVPack_entry() {
 }
 
 uint32_t xeXGetGameRegion() {
-  return 0xFFFFu;
+  return 0x00FFu;  // NTSC-U/C region
 }
 
 ppc_u32_result_t XGetGameRegion_entry() {

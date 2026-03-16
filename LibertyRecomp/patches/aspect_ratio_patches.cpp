@@ -255,7 +255,7 @@ void TraverseSceneNode(Chao::CSD::SceneNode* sceneNode, std::string path)
 
 // Sonicteam::CsdResource::MakeResource
 PPC_FUNC_IMPL(__imp__sub_82617570);
-PPC_FUNC(sub_82617570)
+PPC_FUNC_HOOK(sub_82617570)
 {
     auto pName = reinterpret_cast<char*>(base + PPC_LOAD_U32(ctx.r4.u32 + 4));
 
@@ -308,7 +308,7 @@ PPC_FUNC(sub_82617570)
 
 // Chao::CSD::CMemoryAlloc::Free
 PPC_FUNC_IMPL(__imp__sub_82656650);
-PPC_FUNC(sub_82656650)
+PPC_FUNC_HOOK(sub_82656650)
 {
     if (ctx.r4.u32 != NULL && PPC_LOAD_U32(ctx.r4.u32) == 0x4649584E && PPC_LOAD_U32(ctx.r4.u32 + 0x20) == 0x6E43504A) // NXIF, nCPJ
     {
@@ -330,7 +330,7 @@ PPC_FUNC(sub_82656650)
 
 // Chao::CSD::Scene::Render
 PPC_FUNC_IMPL(__imp__sub_828C8F60);
-PPC_FUNC(sub_828C8F60)
+PPC_FUNC_HOOK(sub_828C8F60)
 {
     auto pScene = (Chao::CSD::Scene*)(base + ctx.r3.u32);
 
@@ -1194,7 +1194,7 @@ void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t stride)
 
 // GTA4::CPlatform::Draw
 PPC_FUNC_IMPL(__imp__sub_826315C8);
-PPC_FUNC(sub_826315C8)
+PPC_FUNC_HOOK(sub_826315C8)
 {
     // r3 = GTA4::CPlatform*
     // r4 = Vertex[r5]
@@ -1205,7 +1205,7 @@ PPC_FUNC(sub_826315C8)
 
 // GTA4::CPlatform::DrawNoTex
 PPC_FUNC_IMPL(__imp__sub_82631718);
-PPC_FUNC(sub_82631718)
+PPC_FUNC_HOOK(sub_82631718)
 {
     // r3 = GTA4::CPlatform*
     // r4 = Vertex[r5]
@@ -1216,7 +1216,7 @@ PPC_FUNC(sub_82631718)
 
 // Set CSD scale.
 PPC_FUNC_IMPL(__imp__sub_828C78E0);
-PPC_FUNC(sub_828C78E0)
+PPC_FUNC_HOOK(sub_828C78E0)
 {
     ctx.f1.f64 = 1280.0;
     ctx.f2.f64 = 720.0;
@@ -1226,7 +1226,7 @@ PPC_FUNC(sub_828C78E0)
 
 // Sonicteam::EventEntityTask::Update
 PPC_FUNC_IMPL(__imp__sub_8264AC48);
-PPC_FUNC(sub_8264AC48)
+PPC_FUNC_HOOK(sub_8264AC48)
 {
     if (Config::CutsceneAspectRatio == ECutsceneAspectRatio::Original)
         BlackBar::Show();
@@ -1236,7 +1236,7 @@ PPC_FUNC(sub_8264AC48)
 
 // Sonicteam::HUDResult::Update
 PPC_FUNC_IMPL(__imp__sub_824F4D80);
-PPC_FUNC(sub_824F4D80)
+PPC_FUNC_HOOK(sub_824F4D80)
 {
     BlackBar::Show();
 
@@ -1244,7 +1244,7 @@ PPC_FUNC(sub_824F4D80)
 }
 
 PPC_FUNC_IMPL(__imp__sub_824D32C8);
-PPC_FUNC(sub_824D32C8)
+PPC_FUNC_HOOK(sub_824D32C8)
 {
     auto vftable = PPC_LOAD_U32(ctx.r3.u32);
 
@@ -1257,7 +1257,7 @@ PPC_FUNC(sub_824D32C8)
 
 // Sonicteam::EndingMode::Update
 PPC_FUNC_IMPL(__imp__sub_824A4A40);
-PPC_FUNC(sub_824A4A40)
+PPC_FUNC_HOOK(sub_824A4A40)
 {
     BlackBar::Show();
 
@@ -1266,7 +1266,7 @@ PPC_FUNC(sub_824A4A40)
 
 // Sonicteam::HUDLimitTime::ProcessMessage
 PPC_FUNC_IMPL(__imp__sub_824D6E50);
-PPC_FUNC(sub_824D6E50)
+PPC_FUNC_HOOK(sub_824D6E50)
 {
     if (g_aspectRatio < WIDE_ASPECT_RATIO && Config::UIAlignmentMode == EUIAlignmentMode::Centre)
     {
@@ -1285,7 +1285,7 @@ PPC_FUNC(sub_824D6E50)
 
 // Sonicteam::HUDRaderMap::Update
 PPC_FUNC_IMPL(__imp__sub_824F1538);
-PPC_FUNC(sub_824F1538)
+PPC_FUNC_HOOK(sub_824F1538)
 {
     auto pHUDRaderMap = (Sonicteam::HUDRaderMap*)(base + ctx.r3.u32);
 
@@ -1299,7 +1299,7 @@ PPC_FUNC(sub_824F1538)
 
 // Sonicteam::CObjBalloonIconDrawable::Draw
 PPC_FUNC_IMPL(__imp__sub_82352220);
-PPC_FUNC(sub_82352220)
+PPC_FUNC_HOOK(sub_82352220)
 {
     auto pCObjBalloonIconDrawable = (Sonicteam::CObjBalloonIconDrawable*)(base + ctx.r3.u32);
     auto scale = g_aspectRatioScale;
@@ -1321,7 +1321,7 @@ PPC_FUNC(sub_82352220)
 
 // Sonicteam::MovieObjectWmv::Draw
 PPC_FUNC_IMPL(__imp__sub_8264CC90);
-PPC_FUNC(sub_8264CC90)
+PPC_FUNC_HOOK(sub_8264CC90)
 {
     auto pMovieObjectWmv = (Sonicteam::MovieObjectWmv*)(base + ctx.r3.u32);
 
@@ -1543,7 +1543,7 @@ void TextEntityAlloc(PPCRegister& r3)
 
 // Sonicteam::TextEntity::TextEntity
 PPC_FUNC_IMPL(__imp__sub_8262DC60);
-PPC_FUNC(sub_8262DC60)
+PPC_FUNC_HOOK(sub_8262DC60)
 {
     auto pTextModifier = (uint64_t*)(base + ctx.r3.u32 + sizeof(Sonicteam::TextEntity));
 
@@ -1555,7 +1555,7 @@ PPC_FUNC(sub_8262DC60)
 
 // Sonicteam::TextEntity::Draw
 PPC_FUNC_IMPL(__imp__sub_8262D868);
-PPC_FUNC(sub_8262D868)
+PPC_FUNC_HOOK(sub_8262D868)
 {
     auto pTextEntity = (Sonicteam::TextEntity*)(base + ctx.r3.u32);
     auto textModifier = *(uint64_t*)(base + ctx.r3.u32 + sizeof(Sonicteam::TextEntity));
@@ -1639,7 +1639,7 @@ void SetTextEntityModifier(Sonicteam::TextEntity* pTextEntity, uint64_t flags)
 
 // Sonicteam::HUDMainMenu::Destroy
 PPC_FUNC_IMPL(__imp__sub_824E2978);
-PPC_FUNC(sub_824E2978)
+PPC_FUNC_HOOK(sub_824E2978)
 {
     g_bgArrows.clear();
     g_fgArrows.clear();
@@ -1649,7 +1649,7 @@ PPC_FUNC(sub_824E2978)
 
 // Sonicteam::HUDMainMenu::Update
 PPC_FUNC_IMPL(__imp__sub_824E11D0);
-PPC_FUNC(sub_824E11D0)
+PPC_FUNC_HOOK(sub_824E11D0)
 {
     auto pHUDMainMenu = (Sonicteam::HUDMainMenu*)(base + ctx.r3.u32 - 8);
     auto pHudTextRoot = pHUDMainMenu->m_pHudTextRoot;
@@ -1711,7 +1711,7 @@ PPC_FUNC(sub_824E11D0)
 
 // Sonicteam::HUDMainDisplay::Update
 PPC_FUNC_IMPL(__imp__sub_824DCF40);
-PPC_FUNC(sub_824DCF40)
+PPC_FUNC_HOOK(sub_824DCF40)
 {
     auto pHUDMainDisplay = (Sonicteam::HUDMainDisplay*)(base + ctx.r3.u32);
 
@@ -1725,7 +1725,7 @@ PPC_FUNC(sub_824DCF40)
 
 // Sonicteam::HintWindowTask::Update
 PPC_FUNC_IMPL(__imp__sub_824D12F0);
-PPC_FUNC(sub_824D12F0)
+PPC_FUNC_HOOK(sub_824D12F0)
 {
     auto pHintWindowTask = (Sonicteam::HintWindowTask*)(base + ctx.r3.u32);
 
@@ -1737,7 +1737,7 @@ PPC_FUNC(sub_824D12F0)
 
 // Sonicteam::MessageWindowTask::Update
 PPC_FUNC_IMPL(__imp__sub_82507E68);
-PPC_FUNC(sub_82507E68)
+PPC_FUNC_HOOK(sub_82507E68)
 {
     auto pMessageWindowTask = (Sonicteam::MessageWindowTask*)(base + ctx.r3.u32);
 
@@ -1749,7 +1749,7 @@ PPC_FUNC(sub_82507E68)
 
 // Sonicteam::TextFontPicture::LoadResource
 PPC_FUNC_IMPL(__imp__sub_8263CC40);
-PPC_FUNC(sub_8263CC40)
+PPC_FUNC_HOOK(sub_8263CC40)
 {
     auto pTextFontPicture = (Sonicteam::TextFontPicture*)(base + ctx.r3.u32);
 

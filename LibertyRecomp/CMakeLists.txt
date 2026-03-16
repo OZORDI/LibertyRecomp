@@ -791,6 +791,7 @@ if(USE_REXGLUE_RUNTIME)
         rexcore
         rexsystem
         rexkernel
+        rexaudio
     )
     # Ensure vcpkg fmt headers are found before XenonRecomp's vendored fmt.
     # The copied headers live outside vcpkg_installed/ to avoid -isystem demotion.

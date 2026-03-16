@@ -22,7 +22,7 @@ struct PSInput {
     float2 texCoord : TEXCOORD0;
 };
 
-float4 main(PSInput input) : SV_Target {
+float4 shaderMain(PSInput input) : SV_Target {
     // Sample the input texture
     float4 color = textures[constants.textureIndex].Sample(samplerState, input.texCoord);
     

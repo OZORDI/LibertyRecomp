@@ -3440,60 +3440,8 @@ void Video::Present()
         g_renderQueue.enqueue(clearCmd);
     }
     
-    // AGGRESSIVE TEST: Force draw with cached shaders to verify pipeline
-    // This bypasses the game's render code entirely to prove shaders work
-    static bool s_testDrawLogged = false;
-    static GuestVertexDeclaration* s_testVertexDecl = nullptr;
-    
-    if (g_defaultVertexShader != nullptr && g_defaultPixelShader != nullptr && s_presentCount <= 200)
-    {
-        // Create a simple vertex declaration on first use
-        if (s_testVertexDecl == nullptr) {
-            // Simple vertex format: POSITION (float3) at offset 0
-            static GuestVertexElement testElements[] = {
-                { 0, 0, 0x2A23B9, 0, D3DDECLUSAGE_POSITION, 0, 0 },  // FLOAT3 position
-                { 255, 0, 0xFFFFFFFF, 0, 0, 0, 0 }  // D3DDECL_END
-            };
-            s_testVertexDecl = CreateVertexDeclarationWithoutAddRef(testElements);
-            LOGF_WARNING("Created test vertex declaration: {:p}", (void*)s_testVertexDecl);
-        }
-        
-        if (!s_testDrawLogged) {
-            LOGF_WARNING("FORCING TEST DRAW with cached shaders VS={:p} PS={:p} VDecl={:p}", 
-                        (void*)g_defaultVertexShader, (void*)g_defaultPixelShader, (void*)s_testVertexDecl);
-            s_testDrawLogged = true;
-        }
-        
-        // Bind vertex declaration
-        RenderCommand vdeclCmd;
-        vdeclCmd.type = RenderCommandType::SetVertexDeclaration;
-        vdeclCmd.setVertexDeclaration.vertexDeclaration = s_testVertexDecl;
-        g_renderQueue.enqueue(vdeclCmd);
-        
-        // Bind our cached shaders
-        RenderCommand vsCmd;
-        vsCmd.type = RenderCommandType::SetVertexShader;
-        vsCmd.setVertexShader.shader = g_defaultVertexShader;
-        g_renderQueue.enqueue(vsCmd);
-        
-        RenderCommand psCmd;
-        psCmd.type = RenderCommandType::SetPixelShader;
-        psCmd.setPixelShader.shader = g_defaultPixelShader;
-        g_renderQueue.enqueue(psCmd);
-        
-        // Force a simple test draw (just 3 vertices for a triangle)
-        // This tests if the rendering pipeline can actually execute draws
-        RenderCommand drawCmd;
-        drawCmd.type = RenderCommandType::DrawPrimitive;
-        drawCmd.drawPrimitive.primitiveType = 4; // Triangle list
-        drawCmd.drawPrimitive.startVertex = 0;
-        drawCmd.drawPrimitive.primitiveCount = 1; // 1 triangle
-        g_renderQueue.enqueue(drawCmd);
-        
-        if (s_presentCount == 1) {
-            LOGF_WARNING("TEST DRAW submitted: type={} primitiveCount={}", 4, 1);
-        }
-    }
+    // Test draw disabled — resource creation hooks are off, so no valid shaders/vertex decls
+    // to use. Once resource creation is working, re-enable test draws here.
 
     RenderCommand cmd;
     cmd.type = RenderCommandType::ExecutePendingStretchRectCommands;
@@ -3739,7 +3687,7 @@ static void SetRootDescriptor(const UploadAllocation& allocation, size_t index)
 }
 
 static void ProcExecuteCommandList(const RenderCommand& cmd)
-{    
+{
     if (g_swapChainValid)
     {
         auto swapChainTexture = g_swapChain->getTexture(g_backBufferIndex);
@@ -8813,22 +8761,22 @@ static int CreateShadersForFxc(const char* fxcBaseName)
 // sub_828574A0 — Shader reload: iterates dword_83125900[] and calls
 // sub_8285BDC8(entry, NULL, 0) for each entry whose version changed.
 // The NULL second arg means "use stored path" which can be NULL → (null).sps.
-PPC_FUNC(sub_828574A0) { /* no-op: Liberty shaders are immutable */ }
+PPC_FUNC_HOOK(sub_828574A0) { /* no-op: Liberty shaders are immutable */ }
 
 // sub_8285BDC8 — Opens a shader .fxc file via RAGE VFS and parses it.
 // Stubbed: XEX-embedded shaders (rage_im) aren't in the cache, and the
 // original code calls GPU functions that trap.  Liberty's CreateShader()
 // path handles all shader creation through the embedded cache.
-PPC_FUNC(sub_8285BDC8) { ctx.r3.u64 = 1; }
+PPC_FUNC_HOOK(sub_8285BDC8) { ctx.r3.u64 = 1; }
 
 // sub_8285DF10 — Shader fixup processor (vtable[5] of the shader factory).
 // Stubbed: depends on FXC loading which is also stubbed.
-PPC_FUNC(sub_8285DF10) { /* no-op */ }
+PPC_FUNC_HOOK(sub_8285DF10) { /* no-op */ }
 
 // sub_82858758 — Individual shader preload from file.  Called by the
 // batch loader (sub_8285E048) with each FXC name from preload.list.
 // Stubbed: returns slot 0.  Liberty's CreateShader() handles all shaders.
-PPC_FUNC(sub_82858758) { ctx.r3.s64 = 0; }
+PPC_FUNC_HOOK(sub_82858758) { ctx.r3.s64 = 0; }
 
 // sub_82869F30 — Shader database scanner.  Called from sub_823193A8 as
 // sub_82869F30("common:/shaders/db", 0) to enumerate .sps files on disk
@@ -8851,7 +8799,7 @@ PPC_FUNC(sub_82858758) { ctx.r3.s64 = 0; }
 //     +16: uint32_t reserved       (unknown, set to 0)
 //     +20: uint32_t fxcNamePtr     (guest ptr to FXC shader name from "shader" keyword)
 //     +24: uint32_t reserved2      (unknown, set to 0)
-PPC_FUNC(sub_82869F30) {
+PPC_FUNC_HOOK(sub_82869F30) {
     // r3 = path string ("common:/shaders/db"), r4 = flags
     static bool s_populated = false;
     if (s_populated) return;
@@ -8944,7 +8892,7 @@ PPC_FUNC(sub_82869F30) {
 // entry+12.  This mirrors what sub_82869578 does during the original init
 // scan.  If creation fails, return NULL to prevent crash in sub_8285FF30
 // which dereferences entry+12 as a vtable pointer without checking.
-PPC_FUNC(sub_82869620) {
+PPC_FUNC_HOOK(sub_82869620) {
     int32_t index = ctx.r3.s32;
     if (index == -1) {
         ctx.r3.u64 = 0;
@@ -9057,7 +9005,7 @@ static int s_createShaderFromBytecodeCount = 0;
 static int s_createShaderHits = 0;
 static int s_createShaderMisses = 0;
 
-PPC_FUNC(sub_82A42BA8)
+PPC_FUNC_HOOK(sub_82A42BA8)
 {
     ++s_createShaderFromBytecodeCount;
     
@@ -9209,32 +9157,31 @@ GUEST_FUNCTION_HOOK(sub_82A50F28, GpuMemAllocStub);
 // structures that caused crashes. Instead, we stub the low-level GPU memory
 // allocator (sub_82A50F28) which lets the game's own initialization code run.
 // =============================================================================
-#if 0 // DISABLED - let game's own init run with stubbed GPU memory
+// ENABLED — resource creation hooks allocate proper Guest* objects and register
+// them in the resource registry so binding hooks can validate pointers.
 static GuestBuffer* GTAIV_CreateVertexBuffer(uint32_t device, uint32_t length, uint32_t usage, uint32_t pool, uint32_t unknown)
 {
     static int createCount = 0;
     ++createCount;
-    
+
     if (createCount <= 20 || createCount % 100 == 0) {
-        LOGF_WARNING("GTAIV_CreateVertexBuffer #{} - device={:#x} length={:#x} usage={:#x} pool={:#x}", 
+        LOGF_WARNING("GTAIV_CreateVertexBuffer #{} - device={:#x} length={:#x} usage={:#x} pool={:#x}",
                      createCount, device, length, usage, pool);
     }
-    
-    // Allocate a proper GuestBuffer using the existing infrastructure
+
     auto buffer = g_userHeap.AllocPhysical<GuestBuffer>(ResourceType::VertexBuffer);
     if (!buffer) {
         LOGN_ERROR("Failed to allocate GuestBuffer for vertex buffer");
         return nullptr;
     }
-    
-    // Create actual GPU buffer  
+
     buffer->buffer = g_device->createBuffer(RenderBufferDesc::VertexBuffer(length, GetBufferHeapType(), RenderBufferFlag::INDEX));
     buffer->dataSize = length;
-    
-#ifdef _DEBUG 
-    buffer->buffer->setName(fmt::format("GTA4 Vertex Buffer {:X}", g_memory.MapVirtual(buffer)));
+
+#ifdef _DEBUG
+    buffer->buffer->setName(fmt::format("GTA4 VB {:X}", g_memory.MapVirtual(buffer)));
 #endif
-    
+    GTAIV::RegisterBuffer(g_memory.MapVirtual(buffer), buffer);
     return buffer;
 }
 
@@ -9242,18 +9189,18 @@ static GuestTexture* GTAIV_CreateTexture(uint32_t device, uint32_t width, uint32
 {
     static int createCount = 0;
     ++createCount;
-    
+
     if (createCount <= 20 || createCount % 100 == 0) {
-        LOGF_WARNING("GTAIV_CreateTexture #{} - {}x{} levels={} format={:#x}", 
+        LOGF_WARNING("GTAIV_CreateTexture #{} - {}x{} levels={} format={:#x}",
                      createCount, width, height, levels, format);
     }
-    
+
     auto texture = g_userHeap.AllocPhysical<GuestTexture>(ResourceType::Texture);
     if (!texture) {
         LOGN_ERROR("Failed to allocate GuestTexture");
         return nullptr;
     }
-    
+
     RenderTextureDesc desc;
     desc.dimension = RenderTextureDimension::TEXTURE_2D;
     desc.width = std::max(1u, width);
@@ -9264,7 +9211,7 @@ static GuestTexture* GTAIV_CreateTexture(uint32_t device, uint32_t width, uint32
     desc.multisampling.sampleCount = RenderSampleCount::COUNT_1;
     desc.format = ConvertFormat(format);
     desc.flags = RenderTextureFlag::NONE;
-    
+
     texture->textureHolder = g_device->createTexture(desc);
     texture->texture = texture->textureHolder.get();
     texture->width = desc.width;
@@ -9272,17 +9219,136 @@ static GuestTexture* GTAIV_CreateTexture(uint32_t device, uint32_t width, uint32
     texture->depth = 1;
     texture->mipLevels = desc.mipLevels;
     texture->format = desc.format;
-    
+
+    RenderTextureViewDesc viewDesc;
+    viewDesc.dimension = RenderTextureViewDimension::TEXTURE_2D;
+    viewDesc.format = desc.format;
+    viewDesc.mipLevels = desc.mipLevels;
+    texture->textureView = texture->texture->createTextureView(viewDesc);
+    texture->viewDimension = viewDesc.dimension;
+    texture->descriptorIndex = g_textureDescriptorAllocator.allocate();
+    g_textureDescriptorSet->setTexture(texture->descriptorIndex, texture->texture, RenderTextureLayout::SHADER_READ, texture->textureView.get());
+
 #ifdef _DEBUG
-    texture->texture->setName(fmt::format("GTA4 Texture {:X}", g_memory.MapVirtual(texture)));
+    texture->texture->setName(fmt::format("GTA4 Tex {:X}", g_memory.MapVirtual(texture)));
 #endif
-    
+    GTAIV::RegisterTexture(g_memory.MapVirtual(texture), texture);
     return texture;
 }
 
 GUEST_FUNCTION_HOOK(sub_82A44970, GTAIV_CreateVertexBuffer);
 GUEST_FUNCTION_HOOK(sub_82A44850, GTAIV_CreateTexture);
-#endif
+
+// =============================================================================
+// RAGE CreateRenderTarget hook — sub_828BEC78
+// =============================================================================
+// RAGE's own render target factory. It normally dispatches to sub_82A55538
+// (core Xenos GPU texture allocator) which contains twllei traps that fire
+// on any Xbox format not handled by sub_82A42F10. We bypass the whole chain
+// and create proper host-side GuestSurface / GuestTexture objects instead,
+// exactly like the UnleashedRecomp model.
+//
+// Register layout confirmed from all 5 callers (stw rX,84(r1) before bl):
+//   r3  = device context (unused by us)
+//   r4  = width
+//   r6  = height
+//   r8  = Xbox D3DFMT constant  (matches our GuestFormat enum values)
+//   r9  = MSAA count (0 = none)
+//   r10 = type: 1 = 2D texture, 3 = cube texture, else = render surface
+//   sp+84 (caller frame) = output pointer where handle is written
+//
+// Return: 0 = success, <0 = failure (caller branches on this).
+
+PPC_FUNC_HOOK(sub_828BEC78)
+{
+    static int s_count = 0;
+    ++s_count;
+
+    const uint32_t width   = ctx.r4.u32;
+    const uint32_t height  = ctx.r6.u32;
+    const uint32_t fmtCode = ctx.r8.u32;   // Xbox D3DFMT constant
+    const uint32_t msaa    = ctx.r9.u32;
+    const uint32_t type    = ctx.r10.u32;  // 1=texture2D, 3=cube, else=surface
+    // All callers store the output ptr at sp+84 just before the call.
+    // In PPC_FUNC_HOOK ctx.r1.u32 is the caller's sp (before callee prologue).
+    const uint32_t outPtr  = PPC_LOAD_U32(ctx.r1.u32 + 84);
+
+    if (s_count <= 20 || (s_count % 200) == 0)
+        LOGF_WARNING("[CreateRAGERT] #{} {}x{} fmt={:#x} type={} msaa={} out={:#x}",
+                     s_count, std::max(1u, width), std::max(1u, height),
+                     fmtCode, type, msaa, outPtr);
+
+    if (type == 1 || type == 3) {
+        // Render-target texture (2D or cube) — create via existing CreateTexture path
+        const ResourceType resType = ResourceType::Texture;
+        const auto texture = g_userHeap.AllocPhysical<GuestTexture>(resType);
+        if (!texture) { ctx.r3.s32 = -1; return; }
+
+        RenderTextureDesc desc{};
+        desc.dimension  = RenderTextureDimension::TEXTURE_2D;  // cube uses TEXTURE_2D + arraySize=6
+        desc.width      = std::max(1u, width);
+        desc.height     = std::max(1u, height);
+        desc.depth      = 1;
+        desc.mipLevels  = 1;
+        desc.arraySize  = (type == 3) ? 6 : 1;
+        desc.multisampling.sampleCount = RenderSampleCount::COUNT_1;
+        desc.format     = ConvertFormat(fmtCode);
+        desc.flags      = RenderTextureFlag::NONE;
+
+        texture->textureHolder = g_device->createTexture(desc);
+        texture->texture       = texture->textureHolder.get();
+        texture->width         = desc.width;
+        texture->height        = desc.height;
+        texture->depth         = 1;
+        texture->mipLevels     = 1;
+        texture->format        = desc.format;
+
+        RenderTextureViewDesc vd{};
+        vd.dimension  = (type == 3) ? RenderTextureViewDimension::TEXTURE_CUBE
+                                    : RenderTextureViewDimension::TEXTURE_2D;
+        vd.format     = desc.format;
+        vd.mipLevels  = 1;
+        texture->textureView     = texture->texture->createTextureView(vd);
+        texture->viewDimension   = vd.dimension;
+        texture->descriptorIndex = g_textureDescriptorAllocator.allocate();
+        g_textureDescriptorSet->setTexture(texture->descriptorIndex, texture->texture,
+            RenderTextureLayout::SHADER_READ, texture->textureView.get());
+
+        const uint32_t handle = g_memory.MapVirtual(texture);
+        GTAIV::RegisterTexture(handle, texture);
+        if (outPtr) PPC_STORE_U32(outPtr, handle);
+        ctx.r3.s32 = 0;
+    } else {
+        // Render target or depth/stencil surface — reuse existing CreateSurface.
+        // Compressed formats (DXT1/BC1, DXT4/BC3, DXT5/BC4/BC5) cannot be
+        // multisampled — Metal/Vulkan will assert/crash if MSAA > 1 is requested.
+        // Also treat fmt=0 as RGBA8 (1x1 placeholder surface).
+        static auto IsCompressedFmt = [](uint32_t fmt) {
+            switch (fmt) {
+            case 0x1A200152: // D3DFMT_DXT1
+            case 0x1A200154: // D3DFMT_DXT4/5
+            case 0x1A200155: // DXT5
+            case 0x1A20AB52: // DXT1 sRGB variant
+            case 0x1A20AB54: // DXT4/5 sRGB variant
+                return true;
+            default: return false;
+            }
+        };
+        const uint32_t safeFmt  = (fmtCode == 0) ? 0x1A200186u : fmtCode; // 0→RGBA8
+        const uint32_t safeMsaa = (IsCompressedFmt(safeFmt)) ? 0u : (msaa > 0 ? 1u : 0u);
+        GuestSurface* surface = CreateSurface(
+            std::max(1u, width), std::max(1u, height),
+            safeFmt, safeMsaa, nullptr);
+        if (!surface) { ctx.r3.s32 = -1; return; }
+
+        const uint32_t handle = g_memory.MapVirtual(surface);
+        // CreateSurface already called RegisterSurface; nothing else needed.
+        if (outPtr) PPC_STORE_U32(outPtr, handle);
+        ctx.r3.s32 = 0;
+    }
+}
+
+
 
 // NOTE: The following hooks are DISABLED because the functions have different  
 // parameter layouts than expected. Need to analyze the actual calling conventions
@@ -9312,11 +9378,28 @@ GUEST_FUNCTION_HOOK(sub_82A47E28, UnlockVertexBuffer);
 // sub_828507F8 uses for frame pacing: "if (submitted - presented >= 2) skip Present".
 // Since GUEST_FUNCTION_HOOK replaces the function entirely, we must increment the
 // counter ourselves or the game stops presenting after 2 frames.
-PPC_FUNC(sub_82A467D8)
+PPC_FUNC_HOOK(sub_82A467D8)
 {
     static int s_hookCount = 0;
     ++s_hookCount;
-    
+
+    // Diagnostic: trace the render dispatch path in sub_828C15C8
+    // Gate: *(0x8290B48C) > 0 → enter render dispatch
+    // Scene ptr: r11=0x831C2458, r3=*(r11), vtable=*(r3), func=vtable[64]
+    if (s_hookCount <= 10 || s_hookCount % 200 == 0) {
+        uint32_t gateVal = PPC_LOAD_U32(0x8290B48C);
+        uint32_t sceneListPtr = PPC_LOAD_U32(0x831C2458);  // r3 = *(r11)
+        uint32_t sceneVtable = 0, sceneFunc = 0;
+        if (sceneListPtr != 0 && sceneListPtr < 0xF0000000) {
+            sceneVtable = PPC_LOAD_U32(sceneListPtr);       // *(r3) = vtable
+            if (sceneVtable != 0 && sceneVtable < 0xF0000000)
+                sceneFunc = PPC_LOAD_U32(sceneVtable + 64); // vtable[64]
+        }
+        printf("[RENDER-GATE] frame#%d gate=%d scene@831C2458=0x%08X vt=0x%08X fn=0x%08X\n",
+               s_hookCount, (int32_t)gateVal, sceneListPtr, sceneVtable, sceneFunc);
+        fflush(stdout);
+    }
+
     // Increment the presented frame counter (device[16544]) to maintain frame pacing.
     // Original PPC code does: ++*(_DWORD *)(a1 + 16544);
     uint32_t device = ctx.r3.u32;
@@ -9335,15 +9418,24 @@ PPC_FUNC(sub_82A467D8)
     // Now do the actual host-side Present
     Video::Present();
 
-    // Sync the submitted-frame counter (0x83124CCC) to equal the presented counter
-    // (device[16544]) after every present.  sub_828507F8 gates VdSwap on
-    // (submitted - presented >= 2).  If submitted < presented the gate fires and
-    // VdSwap is skipped, stalling rendering after frame 2.  Keeping them equal
-    // means the difference is always 0, so the gate never triggers.
+    // After every Present, sync two counters that gate the RAGE render loop:
+    //
+    // 1) 0x83124CCC (sub_828507F8 gate): must equal device[16544] so that
+    //    (submitted - presented) is 0, never triggering the "skip VdSwap" path.
+    //
+    // 2) device[16552] (sub_828BF420 spin-wait): sub_828BF420 spins while
+    //    device[16544] - device[16552] >= 2.  On real hardware device[16552]
+    //    is incremented by the GPU ring-buffer completion interrupt.  Since we
+    //    stub the ring buffer it stays 0 and the thread spins forever.
+    //    Fix: keep device[16552] = device[16544] - 1 so the delta is always 1
+    //    (< 2) and the spin exits immediately on the next iteration.
     if (device != 0) {
         uint8_t* devicePtr2 = static_cast<uint8_t*>(g_memory.Translate(device));
         uint32_t fc = GTAIV::GetDeviceU32(devicePtr2, GTAIV::DeviceOffset::FrameCounter);
+        // Sync submitted counter (sub_828507F8 gate)
         PPC_STORE_U32(0x83124CCC, fc);
+        // Sync GPU completion counter (sub_828BF420 spin-wait), keep 1 behind
+        GTAIV::SetDeviceU32(devicePtr2, GTAIV::DeviceOffset::FrameSubmitted, fc > 0 ? fc - 1 : 0);
     }
 }
 
@@ -9418,11 +9510,53 @@ GUEST_FUNCTION_HOOK(sub_826FE5C0, DrawPrimitiveUP);
 // to prevent Xbox 360-specific GPU commands from being executed.
 // =============================================================================
 
-// PM4 Packet Builder - Return cmdPtr unchanged to skip packet building
-// sub_82A492A8(device, cmdPtr, flags, param1, param2) -> returns new cmdPtr
-PPC_FUNC(sub_82A492A8)
+// Texture/RT Surface Allocation — sub_82A55DC0
+// Creates a GPU texture/render-target by allocating memory (sub_821B3608),
+// then writing inline PM4 commands to set up texture descriptors.
+// Since we render natively (no GPU emulation), skip the PM4 commands.
+// Just call the allocator so the game gets a valid guest pointer back.
+extern "C" void __imp__sub_821B3608(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82A55DC0)
 {
-    // Return cmdPtr (r4) unchanged - skip all PM4 packet building
+    // r3 = first param (saved as r18), r4 = width, r5 = height,
+    // r9 = rect descriptor ptr (or 0 to use r4/r5), r10 = format (→ r31)
+    uint32_t width = ctx.r4.u32;
+    uint32_t height = ctx.r5.u32;
+    uint32_t format = ctx.r10.u32;
+
+    // Align dimensions to 32, compute size, align to 4096
+    uint32_t alignedW = (width + 31) & ~31u;
+    uint32_t alignedH = (height + 31) & ~31u;
+    uint32_t bytesPerPixel = (format >> 2) & 0xF; // rough estimate
+    if (bytesPerPixel == 0) bytesPerPixel = 4;
+    uint32_t size = (alignedW * alignedH * bytesPerPixel + 4095) & ~4095u;
+    if (size == 0) size = 4096;
+
+    // Call the game's memory allocator to get a real guest pointer
+    ctx.r3.u32 = size;
+    __imp__sub_821B3608(ctx, base);
+    // r3 now holds the allocated pointer — just return it
+}
+
+// Thin wrapper around sub_82A55DC0 — sub_82A56560
+// Sets up params and tail-calls sub_82A55DC0. Hook delegates directly.
+PPC_FUNC_HOOK(sub_82A56560)
+{
+    sub_82A55DC0(ctx, base);
+}
+
+// PM4 Packet Builder stub — sub_82A492A8(device, cmdPtr, flags, param1, param2)
+// This is called for EVERY draw call (from DrawPrimitive + UnifiedDraw paths).
+// We bypass it (return cmdPtr unchanged) but log first calls to confirm
+// which paths are active.
+PPC_FUNC_HOOK(sub_82A492A8)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || s_count % 5000 == 0)
+        LOGF_WARNING("[PM4Builder] #{} device={:#x} flags={:#x} p1={:#x} p2={:#x}",
+                     s_count, ctx.r3.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32);
+    // Return cmdPtr (r4) unchanged — skip PM4 packet building
     ctx.r3.u64 = ctx.r4.u64;
 }
 
@@ -9433,7 +9567,7 @@ PPC_FUNC(sub_82A492A8)
 // Normal case: advance within segment (matches sub_82A49830 epilogue).
 // Segment-full case: recycle the entire buffer from its original base
 // (device+14888, set by sub_82A49D08/CreateDevice, never modified).
-PPC_FUNC(sub_82A499B8)
+PPC_FUNC_HOOK(sub_82A499B8)
 {
     uint32_t device = ctx.r3.u32;
     if (device != 0) {
@@ -9479,75 +9613,250 @@ PPC_FUNC(sub_82A499B8)
 // =============================================================================
 
 // --- Priority 1: Draw and Present Functions ---
-GUEST_FUNCTION_HOOK(sub_82A49CB0, DrawPrimitive);         // DrawPrimitive (ppc_recomp.135.cpp:35060)
 // sub_82A46330 is GTA IV's internal UnifiedDraw(device, isIndexed) — 2 args only.
-// Hooking it as DrawIndexedPrimitive(device, primType, baseVtx, minVtx, numVtx, startIdx, count)
-// caused r5-r9 to be random PPC register garbage on every indexed draw.
-// The real draw dispatch is already captured at the shared layer:
-//   sub_82543AC8 -> SetIndices  (hooked above)
-//   sub_826FF030 -> DrawIndexedPrimitive (hooked above)
-// UnifiedDraw is therefore stubbed to a no-op so it doesn't corrupt state.
-PPC_FUNC(sub_82A46330) { /* UnifiedDraw stub — draw already handled by shared-layer hooks */ }
+// Stubbed to no-op to prevent PM4 command buffer code from running.
+// sub_82A46330 = UnifiedDraw(device, isIndexed).
+// Only called when device[22280]&4 (special unified draw mode).
+// Log first N calls so we know if this path is active.
+PPC_FUNC_HOOK(sub_82A46330)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 5 || s_count % 1000 == 0)
+        LOGF_WARNING("[UnifiedDraw] #{} device={:#x} isIndexed={}", s_count, ctx.r3.u32, ctx.r4.u32);
+    // No-op: PM4 bypass (sub_82A492A8 stub handles all actual packet skipping)
+}
+
+// sub_82A46578 = DrawSurface(device, indexBufAddr, drawArg)
+// Confirmed from PPC recomp: the real draw dispatch called from FlushRenderState
+// when device[22280]&4 == 0 (which is the NORMAL rendering path).
+// It calls sub_82A46330 if device[22280]&4, otherwise writes PM4 directly.
+// We log this to confirm which draw path fires in normal rendering.
+PPC_FUNC_HOOK(sub_82A46578)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 10 || s_count % 2000 == 0)
+        LOGF_WARNING("[DrawSurface] #{} device={:#x} ibAddr={:#x} drawArg={:#x}",
+                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    // No-op: sub_82A492A8 and sub_82A499B8 stubs prevent actual PM4 submission
+}
+
+// DrawPrimitive — validated: only draws if pipeline state has valid shaders
+GUEST_FUNCTION_HOOK(sub_82A49CB0, DrawPrimitive);
 
 // --- Priority 2: Shader Functions ---
-GUEST_FUNCTION_HOOK(sub_82A3E7A0, SetVertexShader);       // SetVertexShader (also clears PS, device+10932)
-// sub_82A47AE0 sets BOTH vertex and pixel shader in one call:
-//   r3 = device, r4 = vsHandle (GuestShader*), r5 = psHandle (GuestShader*)
-// Hooking it as a plain SetPixelShader(device, shader) would pass vsHandle as the
-// pixel shader and silently drop psHandle — so we use a combined trampoline.
-static void SetBothShaders(GuestDevice* device, GuestShader* vsShader, GuestShader* psShader)
-{
-    // Vertex shader half
-    if (vsShader == nullptr && g_defaultVertexShader != nullptr)
-        vsShader = g_defaultVertexShader;
-    RenderCommand vsCmd;
-    vsCmd.type = RenderCommandType::SetVertexShader;
-    vsCmd.setVertexShader.shader = vsShader;
-    g_renderQueue.enqueue(vsCmd);
-
-    // Pixel shader half
-    if (psShader == nullptr && g_defaultPixelShader != nullptr)
-        psShader = g_defaultPixelShader;
-    RenderCommand psCmd;
-    psCmd.type = RenderCommandType::SetPixelShader;
-    psCmd.setPixelShader.shader = psShader;
-    g_renderQueue.enqueue(psCmd);
+// SetVertexShader — validated via resource registry
+PPC_FUNC_HOOK(sub_82A3E7A0) {
+    static int s_count = 0;
+    ++s_count;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t shaderAddr = ctx.r4.u32;
+    GuestShader* shader = nullptr;
+    if (shaderAddr != 0) {
+        shader = GTAIV::LookupShader(shaderAddr);
+        if (!shader) {
+            if (s_count <= 20) {
+                LOGF_WARNING("[SetVS] #{} skip unregistered shader {:#x}", s_count, shaderAddr);
+            }
+            return;
+        }
+    }
+    if (s_count <= 10 || s_count % 500 == 0) {
+        LOGF_WARNING("[SetVS] #{} shader={:#x} -> {:p}", s_count, shaderAddr, (void*)shader);
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetVertexShader(device, shader);
 }
-GUEST_FUNCTION_HOOK(sub_82A47AE0, SetBothShaders);        // Sets BOTH VS+PS (r4=vsHandle, r5=psHandle)
 
-// --- Priority 3: Resource Binding ---
-// NOTE: sub_82A3A4C0/9120/91D0/9280 are NOT SetStreamSource variants.
-// They are vertex stream normalization state setters from GTA IV's property table (at 0x82A9E2xx).
-// r4 = boolean normalization flag (0 or 1), NOT a buffer pointer. Do NOT hook these.
-// The real SetStreamSource is sub_82543918 (hooked below as SetStreamSource).
-// REMOVED: sub_829C96D0 is flush-only applier called with stale 0x12 from XEX BSS → SIGBUS at 0x400000012.
-// It is never called by game code as SetIndices. TODO: find actual GTA IV SetIndices entry point.
-// GUEST_FUNCTION_HOOK(sub_829C96D0, SetIndices);
-GUEST_FUNCTION_HOOK(sub_82A44B78, SetTexture);            // SetTexture (device+12536)
+// SetBothShaders (VS+PS) — sub_82A47AE0(device, vsShader, psShader)
+PPC_FUNC_HOOK(sub_82A47AE0) {
+    static int s_count = 0;
+    ++s_count;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t vsAddr = ctx.r4.u32;
+    uint32_t psAddr = ctx.r5.u32;
+    GuestShader* vs = vsAddr ? GTAIV::LookupShader(vsAddr) : nullptr;
+    GuestShader* ps = psAddr ? GTAIV::LookupShader(psAddr) : nullptr;
+    if ((vsAddr && !vs) || (psAddr && !ps)) {
+        if (s_count <= 20) {
+            LOGF_WARNING("[SetBothShaders] #{} skip vs={:#x}({}) ps={:#x}({})",
+                s_count, vsAddr, vs?"ok":"miss", psAddr, ps?"ok":"miss");
+        }
+        return;
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetVertexShader(device, vs);
+    // SetPixelShader is enqueued similarly
+    RenderCommand cmd;
+    cmd.type = RenderCommandType::SetPixelShader;
+    cmd.setPixelShader.shader = ps;
+    g_renderQueue.enqueue(cmd);
+}
 
-// --- Priority 3: Render Target and Viewport ---
-GUEST_FUNCTION_HOOK(sub_82A3B690, SetRenderTarget);       // SetRenderTarget (device+1780)
-GUEST_FUNCTION_HOOK(sub_82A3B7B0, SetDepthStencilSurface);// SetDepthStencilSurface (device+12428)
-GUEST_FUNCTION_HOOK(sub_82A42760, SetViewport);           // SetViewport
-GUEST_FUNCTION_HOOK(sub_82A424A8, SetScissorRect);        // SetScissorRect
+// --- Priority 3: Resource Binding (validated via registry) ---
+// SetTexture — sub_82A44B78(device, index, texture)
+PPC_FUNC_HOOK(sub_82A44B78) {
+    static int s_count = 0, s_skip = 0;
+    ++s_count;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t index = ctx.r4.u32;
+    uint32_t texAddr = ctx.r5.u32;
+    GuestTexture* texture = nullptr;
+    if (texAddr != 0) {
+        texture = GTAIV::LookupTexture(texAddr);
+        if (!texture) {
+            ++s_skip;
+            if (s_skip <= 20 || s_skip % 1000 == 0) {
+                LOGF_WARNING("[SetTexture] skip #{} unregistered tex {:#x} (slot {})", s_skip, texAddr, index);
+            }
+            return;
+        }
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetTexture(device, index, texture);
+}
 
-// --- Priority 4: Vertex Declaration and Sampler ---
-GUEST_FUNCTION_HOOK(sub_82A3A890, SetVertexDeclaration);  // SetVertexDeclaration (device+10456)
+// SetRenderTarget — sub_82A3B690(device, index, surface, ?, ?, ?, flags)
+PPC_FUNC_HOOK(sub_82A3B690) {
+    static int s_count = 0, s_skip = 0;
+    ++s_count;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t index = ctx.r4.u32;
+    uint32_t surfAddr = ctx.r5.u32;
+    GuestSurface* surface = nullptr;
+    if (surfAddr != 0) {
+        surface = GTAIV::LookupSurface(surfAddr);
+        if (!surface) {
+            ++s_skip;
+            if (s_skip <= 20 || s_skip % 1000 == 0) {
+                LOGF_WARNING("[SetRT] skip #{} unregistered surface {:#x} (slot {})", s_skip, surfAddr, index);
+            }
+            return;
+        }
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetRenderTarget(device, index, surface);
+}
+
+// SetDepthStencilSurface — sub_82A3B7B0(device, surface)
+PPC_FUNC_HOOK(sub_82A3B7B0) {
+    static int s_count = 0, s_skip = 0;
+    ++s_count;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t surfAddr = ctx.r4.u32;
+    GuestSurface* surface = nullptr;
+    if (surfAddr != 0) {
+        surface = GTAIV::LookupSurface(surfAddr);
+        if (!surface) {
+            ++s_skip;
+            if (s_skip <= 20 || s_skip % 1000 == 0) {
+                LOGF_WARNING("[SetDS] skip #{} unregistered surface {:#x}", s_skip, surfAddr);
+            }
+            return;
+        }
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetDepthStencilSurface(device, surface);
+}
+
+// --- Safe hooks: scalar values only ---
+GUEST_FUNCTION_HOOK(sub_82A42760, SetViewport);
+GUEST_FUNCTION_HOOK(sub_82A424A8, SetScissorRect);
+
+// SetVertexDeclaration — validated by type field
+PPC_FUNC_HOOK(sub_82A3A890) {
+    static int s_skip = 0;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t declAddr = ctx.r4.u32;
+    if (declAddr == 0) return;
+    auto* decl = reinterpret_cast<GuestVertexDeclaration*>(base + declAddr);
+    if (decl->type != ResourceType::VertexDeclaration) {
+        ++s_skip;
+        if (s_skip <= 20 || s_skip % 1000 == 0)
+            LOGF_WARNING("[SetVDecl] skip #{} invalid type at {:#x}", s_skip, declAddr);
+        return;
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetVertexDeclaration(device, decl);
+}
+
 // NOTE: SetSamplerState (sub_82A42930) is handled via dirty flags in FlushRenderState
 // The game sets sampler descriptors directly in device+1152, then we read them during flush
 
 // =============================================================================
 // Shared Graphics Layer Hooks (0x825xxxxx - used by abstraction layer)
-// These may be called by RAGE engine above the D3D wrapper
+// NOTE: Resource CREATION hooks are safe (they create new objects, don't dereference
+// incoming pointers). Resource BINDING hooks are DISABLED because they dereference
+// GuestShader*/GuestBuffer* pointers from guest memory that may be raw Xbox D3D
+// structures if the corresponding creation hook didn't fire for that resource.
 // =============================================================================
 GUEST_FUNCTION_HOOK(sub_82547118, CreateVertexDeclaration);
-GUEST_FUNCTION_HOOK(sub_825470F8, SetVertexDeclaration);
 GUEST_FUNCTION_HOOK(sub_82548700, CreateVertexShader);
-GUEST_FUNCTION_HOOK(sub_82546EE0, SetVertexShader);
 GUEST_FUNCTION_HOOK(sub_82548608, CreatePixelShader);
-GUEST_FUNCTION_HOOK(sub_82546BD8, SetPixelShader);
-GUEST_FUNCTION_HOOK(sub_82543918, SetStreamSource);
-GUEST_FUNCTION_HOOK(sub_82543AC8, SetIndices);
+
+// Shared-layer SetVertexShader — validated via registry
+PPC_FUNC_HOOK(sub_82546EE0) {
+    uint32_t shaderAddr = ctx.r3.u32;
+    GuestShader* shader = shaderAddr ? GTAIV::LookupShader(shaderAddr) : nullptr;
+    if (shaderAddr && !shader) return;
+    RenderCommand cmd;
+    cmd.type = RenderCommandType::SetVertexShader;
+    cmd.setVertexShader.shader = shader;
+    g_renderQueue.enqueue(cmd);
+}
+
+// Shared-layer SetPixelShader — validated via registry
+PPC_FUNC_HOOK(sub_82546BD8) {
+    uint32_t shaderAddr = ctx.r3.u32;
+    GuestShader* shader = shaderAddr ? GTAIV::LookupShader(shaderAddr) : nullptr;
+    if (shaderAddr && !shader) return;
+    RenderCommand cmd;
+    cmd.type = RenderCommandType::SetPixelShader;
+    cmd.setPixelShader.shader = shader;
+    g_renderQueue.enqueue(cmd);
+}
+
+// Shared-layer SetStreamSource — validated via registry
+PPC_FUNC_HOOK(sub_82543918) {
+    static int s_skip = 0;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t index = ctx.r4.u32;
+    uint32_t bufAddr = ctx.r5.u32;
+    uint32_t offset = ctx.r6.u32;
+    uint32_t stride = ctx.r7.u32;
+    GuestBuffer* buffer = nullptr;
+    if (bufAddr != 0) {
+        buffer = GTAIV::LookupBuffer(bufAddr);
+        if (!buffer) {
+            ++s_skip;
+            if (s_skip <= 20 || s_skip % 1000 == 0)
+                LOGF_WARNING("[SetStream] skip #{} unregistered buf {:#x}", s_skip, bufAddr);
+            return;
+        }
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetStreamSource(device, index, buffer, offset, stride);
+}
+
+// Shared-layer SetIndices — validated via registry
+PPC_FUNC_HOOK(sub_82543AC8) {
+    static int s_skip = 0;
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t bufAddr = ctx.r4.u32;
+    GuestBuffer* buffer = nullptr;
+    if (bufAddr != 0) {
+        buffer = GTAIV::LookupBuffer(bufAddr);
+        if (!buffer) {
+            ++s_skip;
+            if (s_skip <= 20 || s_skip % 1000 == 0)
+                LOGF_WARNING("[SetIndices] skip #{} unregistered buf {:#x}", s_skip, bufAddr);
+            return;
+        }
+    }
+    auto* device = reinterpret_cast<GuestDevice*>(base + deviceAddr);
+    SetIndices(device, buffer);
+}
 
 // Conditional rendering
 GUEST_FUNCTION_HOOK(sub_82636BF8, BeginConditionalSurvey);

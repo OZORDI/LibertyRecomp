@@ -30,7 +30,7 @@ bool HasFrameElapsed(double reference, double& timeElapsed, double deltaTime)
 
 // Sonicteam::SoX::Physics::Havok::WorldHavok::Update
 PPC_FUNC_IMPL(__imp__sub_82587AA8);
-PPC_FUNC(sub_82587AA8)
+PPC_FUNC_HOOK(sub_82587AA8)
 {
     auto pPhysicsWorld = (Sonicteam::SoX::Physics::Havok::WorldHavok*)(base + ctx.r3.u32);
 
@@ -81,7 +81,7 @@ void ObjTarzan_PatchDeltaTimeArgument(PPCRegister& value, PPCRegister& value2, P
 
 // Sonicteam::ObjTarzan::UpdatePoint (speculatory)
 PPC_FUNC_IMPL(__imp__sub_8232D770);
-PPC_FUNC(sub_8232D770)
+PPC_FUNC_HOOK(sub_8232D770)
 {
     if (Config::FPS <= 60)
     {
@@ -163,7 +163,7 @@ void HUDLoadingAlloc(PPCRegister& r3)
 
 // Sonicteam::HUDLoading::HUDLoading
 PPC_FUNC_IMPL(__imp__sub_824D7BC8);
-PPC_FUNC(sub_824D7BC8)
+PPC_FUNC_HOOK(sub_824D7BC8)
 {
     auto pPrevLoadingTime = (std::chrono::steady_clock::time_point*)(base + ctx.r3.u32 + sizeof(Sonicteam::HUDLoading));
 
@@ -198,7 +198,7 @@ void HUDWindow_Callback(PPCRegister& f1, PPCRegister& f31)
 
 // Sonicteam::PriceListWindowTask::HUDCALLBACK::Update
 PPC_FUNC_IMPL(__imp__sub_8250AAB0);
-PPC_FUNC(sub_8250AAB0)
+PPC_FUNC_HOOK(sub_8250AAB0)
 {
     static auto s_time = 0.0;
 
@@ -211,7 +211,7 @@ PPC_FUNC(sub_8250AAB0)
 
 // Sonicteam::SelectWindowTask::HUDCALLBACK::Update
 PPC_FUNC_IMPL(__imp__sub_8250D698);
-PPC_FUNC(sub_8250D698)
+PPC_FUNC_HOOK(sub_8250D698)
 {
     static auto s_time = 0.0;
 

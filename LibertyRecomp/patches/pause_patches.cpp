@@ -36,7 +36,7 @@ void GameImp_PauseMenu_AddQuitPrefix(PPCRegister& r1, PPCRegister& r30)
 
 // Sonicteam::PauseAdapter::MapActionNameToID (speculatory)
 PPC_FUNC_IMPL(__imp__sub_8216DA08);
-PPC_FUNC(sub_8216DA08)
+PPC_FUNC_HOOK(sub_8216DA08)
 {
     auto pPauseAdapter = (Sonicteam::PauseAdapter*)(base + ctx.r3.u32);
     auto pMsgPauseAdapterText = (Sonicteam::Message::MsgPauseAdapterText*)(base + ctx.r4.u32);
@@ -50,7 +50,7 @@ PPC_FUNC(sub_8216DA08)
 
 // Sonicteam::PauseAdapter::DoAction (speculatory)
 PPC_FUNC_IMPL(__imp__sub_82170E48);
-PPC_FUNC(sub_82170E48)
+PPC_FUNC_HOOK(sub_82170E48)
 {
     auto pPauseAdapter = (Sonicteam::PauseAdapter*)(base + ctx.r3.u32);
 
@@ -66,7 +66,7 @@ PPC_FUNC(sub_82170E48)
 
 // Sonicteam::PauseTask::Update
 PPC_FUNC_IMPL(__imp__sub_82509870);
-PPC_FUNC(sub_82509870)
+PPC_FUNC_HOOK(sub_82509870)
 {
     auto pPauseTask = (Sonicteam::PauseTask*)(base + ctx.r3.u32);
 

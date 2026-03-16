@@ -6,7 +6,7 @@
 
 // Sonicteam::Player::Object::Update
 PPC_FUNC_IMPL(__imp__sub_82195500);
-PPC_FUNC(sub_82195500)
+PPC_FUNC_HOOK(sub_82195500)
 {
     auto pPlayer = (Sonicteam::Player::Object*)(base + ctx.r3.u32);
     auto pInputManager = pPlayer->GetInputManager();
@@ -74,7 +74,7 @@ PPC_FUNC(sub_82195500)
 
 // Sonicteam::Player::State::TailsContext::Update
 PPC_FUNC_IMPL(__imp__sub_8221A7D8);
-PPC_FUNC(sub_8221A7D8)
+PPC_FUNC_HOOK(sub_8221A7D8)
 {
     if (!Config::TailsGauge)
     {
@@ -111,7 +111,7 @@ PPC_FUNC(sub_8221A7D8)
 
 // Sonicteam::Player::Score::Score
 PPC_FUNC_IMPL(__imp__sub_821E8C48);
-PPC_FUNC(sub_821E8C48)
+PPC_FUNC_HOOK(sub_821E8C48)
 {
     if (!Config::TailsGauge)
     {
@@ -291,7 +291,7 @@ bool UnlimitedAntigravity()
 }
 
 PPC_FUNC_IMPL(__imp__sub_82217FC0);
-PPC_FUNC(sub_82217FC0)
+PPC_FUNC_HOOK(sub_82217FC0)
 {
     if (!Config::RestoreSonicActionGauge)
     {
@@ -349,7 +349,7 @@ PPC_FUNC(sub_82217FC0)
 }
 
 PPC_FUNC_IMPL(__imp__sub_82218068);
-PPC_FUNC(sub_82218068)
+PPC_FUNC_HOOK(sub_82218068)
 {
     if (!Config::RestoreSonicActionGauge)
     {
@@ -402,7 +402,7 @@ PPC_FUNC(sub_82218068)
 // Sonicteam::Player::SonicGauge::IVariable::Init
 // This hook redirects the incorrectly named Lua variables to the ones actually used in the scripts.
 PPC_FUNC_IMPL(__imp__sub_8223F360);
-PPC_FUNC(sub_8223F360)
+PPC_FUNC_HOOK(sub_8223F360)
 {
     auto pIVariable = ctx.r3.u32;
     auto pLuaSystem = ctx.r4.u32;

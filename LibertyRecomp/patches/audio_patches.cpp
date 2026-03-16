@@ -210,10 +210,11 @@ void AudioConfigChanged()
 // External declarations for original PPC functions
 extern "C" void __imp__sub_822EEDB8(PPCContext& ctx, uint8_t* base);
 extern "C" void __imp__sub_821AB5F8(PPCContext& ctx, uint8_t* base);
+extern "C" void __imp__sub_82910858(PPCContext& ctx, uint8_t* base);
 
 // Hook for audio system initialization (sub_822EEDB8)
 // Called during game startup to initialize RAGE audEngine
-PPC_FUNC(sub_822EEDB8) {
+PPC_FUNC_HOOK(sub_822EEDB8) {
     // Call original function first
     __imp__sub_822EEDB8(ctx, base);
     
@@ -224,9 +225,21 @@ PPC_FUNC(sub_822EEDB8) {
 
 // Hook for radio system initialization (sub_821AB5F8)
 // Called during game startup to set up radio stations
-PPC_FUNC(sub_821AB5F8) {
+PPC_FUNC_HOOK(sub_821AB5F8) {
     // Call original function first
     __imp__sub_821AB5F8(ctx, base);
-    
+
     LOG_INFO("[Audio] GTA IV radio system initialized");
+}
+
+// Hook for audio node tree traversal (sub_82910858)
+// Prevents stack overflow from circular references in the audio graph.
+// Each call uses 128 bytes of PPC stack; 505+ levels = cycle in node data.
+// Real audio trees are <20 levels deep, so 64 is a safe limit.
+PPC_FUNC_HOOK(sub_82910858) {
+    static thread_local int depth = 0;
+    if (depth > 64) return;
+    depth++;
+    __imp__sub_82910858(ctx, base);
+    depth--;
 }

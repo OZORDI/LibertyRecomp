@@ -34,6 +34,12 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
         }
     }
 
+    // Log all window events for debugging
+    if (event->type == SDL_WINDOWEVENT) {
+        printf("[SDL_WINEVENT] event=%d windowID=%u\n", event->window.event, event->window.windowID);
+        fflush(stdout);
+    }
+
     switch (event->type)
     {
         case SDL_QUIT:
@@ -41,7 +47,7 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
             if (App::s_isSaving)
                 break;
 
-            printf("[SDL_QUIT] App::Exit() triggered from Window_OnSDLEvent!\n");
+            printf("[SDL_QUIT] App::Exit() triggered from Window_OnSDLEvent! timestamp=%u\n", event->quit.timestamp);
             fflush(stdout);
             App::Exit();
 

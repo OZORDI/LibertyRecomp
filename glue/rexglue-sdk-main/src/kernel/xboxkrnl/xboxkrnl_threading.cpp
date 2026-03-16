@@ -183,6 +183,10 @@ ppc_u32_result_t NtResumeThread_entry(ppc_u32_t handle, ppc_pu32_t suspend_count
 }
 
 ppc_u32_result_t KeResumeThread_entry(ppc_pvoid_t thread_ptr) {
+  if (!thread_ptr.guest_address()) {
+    REXKRNL_WARN("[KeResumeThread] NULL thread pointer");
+    return X_STATUS_INVALID_HANDLE;
+  }
   X_STATUS result = X_STATUS_SUCCESS;
   auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
   if (thread) {
@@ -278,6 +282,10 @@ ppc_u32_result_t KeQueryBasePriorityThread_entry(ppc_pvoid_t thread_ptr) {
 ppc_u32_result_t KeSetBasePriorityThread_entry(ppc_pvoid_t thread_ptr, ppc_u32_t increment) {
   REXKRNL_IMPORT_TRACE("KeSetBasePriorityThread", "thread={:#x} increment={}",
                        thread_ptr.guest_address(), (int32_t)increment);
+  if (!thread_ptr.guest_address()) {
+    REXKRNL_WARN("KeSetBasePriorityThread: NULL thread pointer, returning 0");
+    return 0;
+  }
   int32_t prev_priority = 0;
   auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
 
@@ -291,6 +299,7 @@ ppc_u32_result_t KeSetBasePriorityThread_entry(ppc_pvoid_t thread_ptr, ppc_u32_t
 }
 
 ppc_u32_result_t KeSetDisableBoostThread_entry(ppc_pvoid_t thread_ptr, ppc_u32_t disabled) {
+  if (!thread_ptr.guest_address()) return 0;
   auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
   if (thread) {
     // Uhm?

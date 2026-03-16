@@ -125,7 +125,7 @@ namespace PlayerLimitPatches
 // Original implementation reference
 PPC_FUNC_IMPL(__imp__sub_826A7858);
 
-PPC_FUNC(sub_826A7858)
+PPC_FUNC_HOOK(sub_826A7858)
 {
     using namespace PlayerLimitPatches;
     
@@ -213,92 +213,92 @@ fallback_lookup:
 // --- ppc_recomp.44.cpp loops ---
 
 PPC_FUNC_IMPL(__imp__sub_8267DB90);
-PPC_FUNC(sub_8267DB90)
+PPC_FUNC_HOOK(sub_8267DB90)
 {
     // Distance/proximity check loop - accessor hook handles limit
     __imp__sub_8267DB90(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267D798);
-PPC_FUNC(sub_8267D798)
+PPC_FUNC_HOOK(sub_8267D798)
 {
     __imp__sub_8267D798(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267D910);
-PPC_FUNC(sub_8267D910)
+PPC_FUNC_HOOK(sub_8267D910)
 {
     __imp__sub_8267D910(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267DE28);
-PPC_FUNC(sub_8267DE28)
+PPC_FUNC_HOOK(sub_8267DE28)
 {
     __imp__sub_8267DE28(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267E198);
-PPC_FUNC(sub_8267E198)
+PPC_FUNC_HOOK(sub_8267E198)
 {
     __imp__sub_8267E198(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267EBA8);
-PPC_FUNC(sub_8267EBA8)
+PPC_FUNC_HOOK(sub_8267EBA8)
 {
     __imp__sub_8267EBA8(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267ECF0);
-PPC_FUNC(sub_8267ECF0)
+PPC_FUNC_HOOK(sub_8267ECF0)
 {
     __imp__sub_8267ECF0(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267F318);
-PPC_FUNC(sub_8267F318)
+PPC_FUNC_HOOK(sub_8267F318)
 {
     __imp__sub_8267F318(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_8267F838);
-PPC_FUNC(sub_8267F838)
+PPC_FUNC_HOOK(sub_8267F838)
 {
     __imp__sub_8267F838(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82683998);
-PPC_FUNC(sub_82683998)
+PPC_FUNC_HOOK(sub_82683998)
 {
     __imp__sub_82683998(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82685D20);
-PPC_FUNC(sub_82685D20)
+PPC_FUNC_HOOK(sub_82685D20)
 {
     __imp__sub_82685D20(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82685EB0);
-PPC_FUNC(sub_82685EB0)
+PPC_FUNC_HOOK(sub_82685EB0)
 {
     __imp__sub_82685EB0(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_826861D0);
-PPC_FUNC(sub_826861D0)
+PPC_FUNC_HOOK(sub_826861D0)
 {
     __imp__sub_826861D0(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82689828);
-PPC_FUNC(sub_82689828)
+PPC_FUNC_HOOK(sub_82689828)
 {
     __imp__sub_82689828(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82689998);
-PPC_FUNC(sub_82689998)
+PPC_FUNC_HOOK(sub_82689998)
 {
     __imp__sub_82689998(ctx, base);
 }
@@ -306,31 +306,31 @@ PPC_FUNC(sub_82689998)
 // --- ppc_recomp.46.cpp loops ---
 
 PPC_FUNC_IMPL(__imp__sub_826AE960);
-PPC_FUNC(sub_826AE960)
+PPC_FUNC_HOOK(sub_826AE960)
 {
     __imp__sub_826AE960(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_826AF5B8);
-PPC_FUNC(sub_826AF5B8)
+PPC_FUNC_HOOK(sub_826AF5B8)
 {
     __imp__sub_826AF5B8(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_826AF748);
-PPC_FUNC(sub_826AF748)
+PPC_FUNC_HOOK(sub_826AF748)
 {
     __imp__sub_826AF748(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_826B0720);
-PPC_FUNC(sub_826B0720)
+PPC_FUNC_HOOK(sub_826B0720)
 {
     __imp__sub_826B0720(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_826B0830);
-PPC_FUNC(sub_826B0830)
+PPC_FUNC_HOOK(sub_826B0830)
 {
     __imp__sub_826B0830(ctx, base);
 }
@@ -338,7 +338,7 @@ PPC_FUNC(sub_826B0830)
 // --- ppc_recomp.64.cpp loops ---
 
 PPC_FUNC_IMPL(__imp__sub_827FC738);
-PPC_FUNC(sub_827FC738)
+PPC_FUNC_HOOK(sub_827FC738)
 {
     __imp__sub_827FC738(ctx, base);
 }
@@ -346,7 +346,7 @@ PPC_FUNC(sub_827FC738)
 // --- ppc_recomp.18.cpp loops ---
 
 PPC_FUNC_IMPL(__imp__sub_8238F700);
-PPC_FUNC(sub_8238F700)
+PPC_FUNC_HOOK(sub_8238F700)
 {
     __imp__sub_8238F700(ctx, base);
 }

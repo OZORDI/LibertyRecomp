@@ -107,7 +107,7 @@ void PedestrianAnimationLOD(PPCRegister& val)
 
 // Sonicteam::CommonObjectHint::Update
 PPC_FUNC_IMPL(__imp__sub_822CE930);
-PPC_FUNC(sub_822CE930)
+PPC_FUNC_HOOK(sub_822CE930)
 {
     auto* pCommonObjectHint = (Sonicteam::CommonObjectHint*)(base + ctx.r3.u32);
     auto* pGame = App::s_pApp->m_pDoc->GetDocMode<Sonicteam::GameMode>()->GetGame();
@@ -213,7 +213,7 @@ PPC_FUNC(sub_822CE930)
 }
 
 PPC_FUNC_IMPL(__imp__sub_8244D288);
-PPC_FUNC(sub_8244D288)
+PPC_FUNC_HOOK(sub_8244D288)
 {
     auto isShadowEggCerberus = PPC_LOAD_U32(ctx.r3.u32 + 0x1C);
 
@@ -231,7 +231,7 @@ bool Super3_DisableChangeRequestHint()
 }
 
 PPC_FUNC_IMPL(__imp__sub_824A6EA8);
-PPC_FUNC(sub_824A6EA8)
+PPC_FUNC_HOOK(sub_824A6EA8)
 {
     if ((App::s_isSkipLogos || Config::SkipIntroLogos) && ctx.r4.u32 == 1)
         ctx.r4.u32 = 4;
@@ -239,7 +239,7 @@ PPC_FUNC(sub_824A6EA8)
     __imp__sub_824A6EA8(ctx, base);
 }
 
-PPC_FUNC(sub_82188460)
+PPC_FUNC_HOOK(sub_82188460)
 {
     ctx.r3.u64 = Config::Subtitles;
 }
