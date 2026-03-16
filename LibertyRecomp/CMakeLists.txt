@@ -117,6 +117,7 @@ if (WIN32)
         "os/win32/process_win32.cpp"
         "os/win32/user_win32.cpp"
         "os/win32/version_win32.cpp"
+        "os/discord/discord_presence.cpp"
     )
 elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ios" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(LIBERTY_RECOMP_OS_CXX_SOURCES
@@ -148,6 +149,8 @@ elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQ
         "os/ps4/user_malloc_ps4.cpp"
         "os/ps4/trophy_ps4.cpp"
         "os/ps4/achievement_bridge_ps4.cpp"
+        "os/ps4/np_presence_ps4.cpp"
+        "os/discord/discord_presence.cpp"
     )
     add_compile_definitions(LIBERTY_RECOMP_PS4)
 elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch")
@@ -166,6 +169,7 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
         "os/linux/process_linux.cpp"
         "os/linux/user_linux.cpp"
         "os/linux/version_linux.cpp"
+        "os/discord/discord_presence.cpp"
     )
 elseif (APPLE)
     set(LIBERTY_RECOMP_OS_CXX_SOURCES
@@ -175,6 +179,7 @@ elseif (APPLE)
         "os/macos/user_macos.cpp"
         "os/macos/version_macos.cpp"
         "os/gamecenter/achievement_bridge_gc.mm"
+        "os/discord/discord_presence.cpp"
     )
 endif()
 
@@ -717,6 +722,18 @@ endif()
 
 find_package(CURL REQUIRED)
 
+# Discord Rich Presence (desktop platforms only — PS4 uses sceNpActivity)
+if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
+         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps5" OR CMAKE_SYSTEM_NAME STREQUAL "PS5"))
+    find_package(discord-rpc CONFIG QUIET)
+    if (discord-rpc_FOUND)
+        set(LIBERTY_RECOMP_HAS_DISCORD_RPC TRUE)
+        message(STATUS "Discord RPC: found via vcpkg")
+    else()
+        message(STATUS "Discord RPC: not found, presence will be disabled")
+    endif()
+endif()
+
 if (LIBERTY_RECOMP_METAL)
     target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_METAL)
 endif()
@@ -769,6 +786,12 @@ target_link_libraries(LibertyRecomp PRIVATE
     GameNetworkingSockets::static
     liberty_debugger
 )
+
+# Discord RPC (desktop only)
+if (LIBERTY_RECOMP_HAS_DISCORD_RPC)
+    target_link_libraries(LibertyRecomp PRIVATE discord-rpc)
+    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_DISCORD_RPC)
+endif()
 
 # Force-load LibertyRecompLib on macOS to include all weak symbols (PPC recompiled functions)
 if (APPLE)

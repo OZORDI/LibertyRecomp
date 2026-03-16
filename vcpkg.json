@@ -15,7 +15,11 @@
         { "name": "spdlog", "default-features": false },
         "fmt",
         "date",
-        "utfcpp"
+        "utfcpp",
+        {
+            "name": "discord-rpc",
+            "platform": "!ps4 & !ps5"
+        }
     ],
     "vcpkg-configuration": {
         "overlay-triplets": [

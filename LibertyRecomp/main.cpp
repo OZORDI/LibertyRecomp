@@ -34,6 +34,7 @@
 #include <os/logger.h>
 #include <os/process.h>
 #include <os/registry.h>
+#include <os/discord/discord_presence.h>
 #include <ui/game_window.h>
 #include <ui/installer_wizard.h>
 #include <ui/main_menu.h>
@@ -715,6 +716,7 @@ int main(int argc, char *argv[])
         os::process::ShowConsole();
     LOGN_WARNING("Host Startup");
     HostStartup();
+    os::discord::Initialize();
 
     std::filesystem::path modulePath;
     bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
@@ -952,6 +954,7 @@ int main(int argc, char *argv[])
     }
     printf("[Main] Main XThread launched via RexGlue (handle=0x%08X)\n",
            main_xthread->handle()); fflush(stdout);
+    os::discord::SetState(os::discord::GameState::InGame);
 
     // Wait for the XThread to actually begin executing.
     for (int i = 0; i < 5000 && !main_xthread->is_running(); ++i) {
@@ -968,13 +971,20 @@ int main(int argc, char *argv[])
 
     // Main thread: pump SDL events while game runs on XThread.
     // SDL requires event pumping on the main thread (macOS Cocoa requirement).
+    static int s_discordCallbackTick = 0;
     while (main_xthread->is_running()) {
         SDL_PumpEvents();
+        // Pump Discord callbacks ~once per second (every 1000 ms of 1ms sleeps)
+        if (++s_discordCallbackTick >= 1000) {
+            os::discord::RunCallbacks();
+            s_discordCallbackTick = 0;
+        }
         SDL_Delay(1);
     }
 
     printf("[Main] Main XThread finished\n");
     fflush(stdout);
+    os::discord::Shutdown();
     return 0;
 }
 
