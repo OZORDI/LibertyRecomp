@@ -13,9 +13,11 @@
 #include <arpa/inet.h>
 #endif
 
-// GameNetworkingSockets includes
+// GameNetworkingSockets — not available on PS4 / Switch
+#ifndef LIBERTY_RECOMP_NO_GNS
 #include <steam/steamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
+#endif
 
 namespace Net {
 
@@ -45,48 +47,50 @@ bool P2PManager::Initialize() {
         return true;
     }
     
+#ifndef LIBERTY_RECOMP_NO_GNS
     LOG_INFO("[P2P] Initializing GameNetworkingSockets...");
-    
-    // Initialize GNS
+
     SteamDatagramErrMsg errMsg;
     if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
         LOGF_ERROR("[P2P] Failed to initialize GNS: {}", errMsg);
         return false;
     }
-    
-    // Configure ICE servers (STUN + free TURN)
+
     SteamNetworkingUtils()->SetGlobalConfigValueString(
         k_ESteamNetworkingConfig_P2P_STUN_ServerList,
         "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun.cloudflare.com:3478"
     );
-    
-    // Free public TURN servers (OpenRelay)
-    // These are provided by metered.ca for testing - limited bandwidth but works
     SteamNetworkingUtils()->SetGlobalConfigValueString(
         k_ESteamNetworkingConfig_P2P_TURN_ServerList,
         "turn:openrelay.metered.ca:80?transport=udp,turn:openrelay.metered.ca:443?transport=tcp"
     );
     SteamNetworkingUtils()->SetGlobalConfigValueString(
-        k_ESteamNetworkingConfig_P2P_TURN_UserList,
-        "openrelayproject"
+        k_ESteamNetworkingConfig_P2P_TURN_UserList, "openrelayproject"
     );
     SteamNetworkingUtils()->SetGlobalConfigValueString(
-        k_ESteamNetworkingConfig_P2P_TURN_PassList,
-        "openrelayproject"
+        k_ESteamNetworkingConfig_P2P_TURN_PassList, "openrelayproject"
     );
+#else
+    // PS4 / Switch: no GNS — session tracker will use LAN raw-socket backend
+    LOG_INFO("[P2P] GNS disabled — using raw-socket P2P (LAN mode)");
+#endif
     
     // Create session tracker based on config
     sessionTracker_ = CreateSessionTracker();
     if (!sessionTracker_) {
         LOG_ERROR("[P2P] Failed to create session tracker");
-        GameNetworkingSockets_Kill();
+        #ifndef LIBERTY_RECOMP_NO_GNS
+    GameNetworkingSockets_Kill();
+#endif
         return false;
     }
     
     if (!sessionTracker_->Initialize()) {
         LOG_ERROR("[P2P] Failed to initialize session tracker");
         sessionTracker_.reset();
-        GameNetworkingSockets_Kill();
+        #ifndef LIBERTY_RECOMP_NO_GNS
+    GameNetworkingSockets_Kill();
+#endif
         return false;
     }
     
@@ -117,7 +121,9 @@ void P2PManager::Shutdown() {
     }
     
     // Shutdown GNS
+    #ifndef LIBERTY_RECOMP_NO_GNS
     GameNetworkingSockets_Kill();
+#endif
     
     initialized_ = false;
     LOG_INFO("[P2P] Shutdown complete");

@@ -106,16 +106,53 @@ bool EmbeddedAssets::ExtractObbIfNeeded(const std::filesystem::path& obbPath,
 {
 #if defined(__ANDROID__)
     std::error_code ec;
-    // If the marker file already exists, extraction was done on a previous boot.
     auto marker = destPath / ".obb_extracted";
     if (std::filesystem::exists(marker, ec))
-        return true;
+        return true; // Already extracted on a previous boot
 
-    // TODO: implement OBB zip extraction using minizip or libzip.
-    // For now, log and return false so the caller can show an error.
-    (void)obbPath;
-    (void)destPath;
-    return false;
+    if (!std::filesystem::exists(obbPath, ec)) {
+        // OBB not found — this may be a dev build with files pre-staged
+        return std::filesystem::exists(destPath / "game" / "default.xex", ec);
+    }
+
+    // ── miniz ZIP extraction ──────────────────────────────────────────────────
+    // The Android OBB is a ZIP archive with the game payload at its root.
+    // We extract it to destPath preserving directory structure.
+    #include <cstdio>
+    // Use miniz (already in thirdparty via stb or a direct copy).
+    // If miniz_zip is not available we fall back to reporting the error.
+#ifdef MINIZ_NO_ARCHIVE_APIS
+    (void)obbPath; (void)destPath;
+    return false; // miniz archive support disabled
+#else
+    #include "../../thirdparty/stb/miniz.h"
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_file(&zip, obbPath.string().c_str(), 0))
+        return false;
+
+    mz_uint numFiles = mz_zip_reader_get_num_files(&zip);
+    std::filesystem::create_directories(destPath, ec);
+
+    for (mz_uint i = 0; i < numFiles; ++i) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) continue;
+        if (mz_zip_reader_is_file_a_directory(&zip, i)) continue;
+
+        auto outPath = destPath / stat.m_filename;
+        std::filesystem::create_directories(outPath.parent_path(), ec);
+        if (!mz_zip_reader_extract_to_file(&zip, i, outPath.string().c_str(), 0)) {
+            mz_zip_reader_end(&zip);
+            return false;
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+
+    // Write extraction marker
+    std::ofstream(marker.string()).put('1');
+    return true;
+#endif // MINIZ_NO_ARCHIVE_APIS
+
 #else
     (void)obbPath;
     (void)destPath;

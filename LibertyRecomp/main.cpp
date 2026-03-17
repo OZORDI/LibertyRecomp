@@ -35,6 +35,7 @@
 #include <os/process.h>
 #include <os/registry.h>
 #include <os/discord/discord_presence.h>
+#include <install/embedded_assets.h>
 #include <ui/game_window.h>
 #include <ui/installer_wizard.h>
 #include <ui/main_menu.h>
@@ -719,54 +720,78 @@ int main(int argc, char *argv[])
     os::discord::Initialize();
 
     std::filesystem::path modulePath;
+
+#if defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
+    // ── Embedded build (PS4 / Switch / iOS / Android) ────────────────────────
+    // Game files are already present in the package; skip installer wizard and
+    // main menu entirely.  modulePath points directly at the embedded XEX.
+    //
+    // On Android, extract the OBB payload to internal storage on first boot.
+#if defined(__ANDROID__)
+    {
+        extern const char* g_androidObbPath;
+        if (g_androidObbPath) {
+            auto obbPath  = std::filesystem::path(g_androidObbPath);
+            auto destPath = EmbeddedAssets::GetGameRoot().parent_path();
+            if (!EmbeddedAssets::ExtractObbIfNeeded(obbPath, destPath)) {
+                printf("[Main] FATAL: Failed to extract OBB payload\n");
+                fflush(stdout);
+                std::_Exit(1);
+            }
+        }
+    }
+#endif
+    modulePath = EmbeddedAssets::GetGameRoot() / "default.xex";
+    if (!std::filesystem::exists(modulePath)) {
+        printf("[Main] FATAL: Embedded game XEX not found at %s\n",
+               modulePath.string().c_str());
+        fflush(stdout);
+        std::_Exit(1);
+    }
+    printf("[Main] Embedded build — game root: %s\n",
+           EmbeddedAssets::GetGameRoot().string().c_str()); fflush(stdout);
+
+    // Video device is still needed for rendering.
+    if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
+        ShowVideoBackendErrorAndExit();
+
+    const bool runInstallerWizard = false;
+    const bool showMainMenu       = false;
+
+#else
+    // ── Desktop build ─────────────────────────────────────────────────────────
     bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
-    
-    // TEMPORARY: Force installer UI to always show for preview
-    // TODO: Remove this line after UI preview is done
-    // runInstallerWizard = true;  // DISABLED - respect actual install check
-    
-     if (runInstallerWizard)
-     {
-         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
-         {
-             ShowVideoBackendErrorAndExit();
-         }
 
-         if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
-         {
-             printf("[EXIT-TRACE] main.cpp:675 calling _Exit\n"); fflush(stdout);
-             std::_Exit(0);
-         }
-     }
+    if (runInstallerWizard)
+    {
+        if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
+            ShowVideoBackendErrorAndExit();
 
-    // Show main menu before starting the game
-    // This provides a launcher-style experience like Banjo-Recompiled
-    // TEMPORARY: Disabled main menu for debugging - set to false to skip
-    bool showMainMenu = false; // TODO: Re-enable main menu after debugging
+        if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
+        {
+            printf("[EXIT-TRACE] main.cpp:675 calling _Exit\n"); fflush(stdout);
+            std::_Exit(0);
+        }
+    }
+
+    bool showMainMenu = false;
     for (uint32_t i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "--skip-menu") == 0)
-            showMainMenu = false;
-        if (strcmp(argv[i], "--show-menu") == 0)
-            showMainMenu = true;
+        if (strcmp(argv[i], "--skip-menu") == 0) showMainMenu = false;
+        if (strcmp(argv[i], "--show-menu") == 0) showMainMenu = true;
     }
-    
+
     if (showMainMenu)
     {
-        // Create video device if not already created by installer
         if (!runInstallerWizard)
         {
             if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
-            {
                 ShowVideoBackendErrorAndExit();
-            }
         }
-        
         MainMenu::Init();
         if (!MainMenu::Run())
         {
-            // User selected Exit from main menu
             MainMenu::Shutdown();
             printf("[EXIT-TRACE] main.cpp:707 calling _Exit\n"); fflush(stdout);
             std::_Exit(0);
@@ -774,18 +799,14 @@ int main(int argc, char *argv[])
         MainMenu::Shutdown();
     }
 
-    // ModLoader::Init();
-
-    // Create video device if not already created by installer or main menu
     if (!runInstallerWizard && !showMainMenu)
     {
         printf("[Main] Creating video device...\n"); fflush(stdout);
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
-        {
             ShowVideoBackendErrorAndExit();
-        }
         printf("[Main] Video device created\n"); fflush(stdout);
     }
+#endif // LIBERTY_RECOMP_EMBEDDED_ASSETS
 
     // ------------------------------------------------------------------
     // Step 1: Normal Liberty initialization.
@@ -809,7 +830,11 @@ int main(int argc, char *argv[])
     {
         auto* rt = rex::Runtime::instance();
 
+#if defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
+        auto gameDir = EmbeddedAssets::GetGameRoot();
+#else
         auto gameDir = modulePath.parent_path();
+#endif
         printf("[Main] Setting up RexGlue VFS: %s\n", gameDir.string().c_str()); fflush(stdout);
 
         auto device = std::make_unique<rex::filesystem::HostPathDevice>(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mod/mod_loader.h>
+#include <install/embedded_assets.h>
 
 #define USER_DIRECTORY "LibertyRecomp"
 
@@ -17,14 +18,13 @@ const std::filesystem::path& GetUserPath();
 
 inline std::filesystem::path GetGamePath()
 {
-    // Returns the game install directory
-    // macOS: ~/Library/Application Support/LibertyRecomp/
-    // Structure:
-    //   game/           - extracted game files (common/, xbox360/, audio/)
-    //   game/default.xex - the executable
-    //   shader_cache/   - compiled shaders
-    //   saves/          - save files
+#if defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
+    // Embedded build (PS4 /app0, Switch romfs:, iOS bundle, Android internal)
+    // EmbeddedAssets::GetGameRoot() resolves the platform-specific game root.
+    return EmbeddedAssets::GetGameRoot().parent_path(); // parent = package root
+#else
     return GetUserPath();
+#endif
 }
 
 inline std::filesystem::path GetSavePath(bool checkForMods)

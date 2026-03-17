@@ -32,6 +32,12 @@ static void LoadRequiredModules()
     sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NETCTL);
     sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD);
+
+    // Voice chat: sceAudioIn (microphone capture) + sceNet (for GNS/raw sockets)
+    // ORBIS_SYSMODULE_AUDIO_IN is needed for sceAudioInOpen
+    sceSysmoduleLoadModule(ORBIS_SYSMODULE_AUDIO_IN);
+    // Network module for BSD socket layer (GameNetworkingSockets fallback)
+    sceSysmoduleLoadModule(ORBIS_SYSMODULE_NET);
 }
 
 // ── NP Trophy context setup ───────────────────────────────────────────────────

@@ -722,6 +722,56 @@ endif()
 
 find_package(CURL REQUIRED)
 
+# ── GNS availability check (set variable; definitions applied after exe target) ──
+set(LIBERTY_RECOMP_HAS_GNS TRUE)
+if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR
+    CMAKE_SYSTEM_NAME STREQUAL "PS4"                 OR
+    LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR
+    CMAKE_SYSTEM_NAME STREQUAL "Switch")
+    set(LIBERTY_RECOMP_HAS_GNS FALSE)
+    message(STATUS "GameNetworkingSockets: DISABLED — PS4/Switch use raw-socket P2P fallback")
+else()
+    message(STATUS "GameNetworkingSockets: ENABLED")
+endif()
+
+# ── Embedded-build payload validation ────────────────────────────────────────
+# For platforms that bundle the game at build time (iOS / Android / PS4 / Switch),
+# fail fast with a clear message if the required XEX / RPF files are missing.
+if (LIBERTY_RECOMP_EMBEDDED_ASSETS)
+    if (NOT LIBERTY_RECOMP_EMBEDDED_GAME_PATH)
+        message(FATAL_ERROR
+            "LIBERTY_RECOMP_EMBEDDED_ASSETS is ON but "
+            "LIBERTY_RECOMP_EMBEDDED_GAME_PATH is not set.\n"
+            "Point it at the directory containing default.xex, common.rpf, "
+            "xbox360.rpf and audio.rpf.")
+    endif()
+    foreach(_required_file default.xex common.rpf xbox360.rpf audio.rpf)
+        if (NOT EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_required_file}")
+            message(FATAL_ERROR
+                "Required game file missing from payload: "
+                "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_required_file}\n"
+                "See docs/PLATFORM_SETUP.md#build-time-asset-payload")
+        endif()
+    endforeach()
+    message(STATUS "Embedded payload validated: ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
+
+    # Generate manifest.json so EmbeddedAssets::ReadManifest() works at runtime.
+    string(TIMESTAMP _build_ts "%s" UTC)
+    set(_has_tlad  0)
+    set(_has_tbogt 0)
+    if (EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/dlc/TLAD")
+        set(_has_tlad 1)
+    endif()
+    if (EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/dlc/TBOGT")
+        set(_has_tbogt 1)
+    endif()
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/res/manifest.json.in"
+        "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/manifest.json"
+        @ONLY
+    )
+endif()
+
 # Discord Rich Presence (desktop platforms only — PS4 uses sceNpActivity)
 if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
          LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps5" OR CMAKE_SYSTEM_NAME STREQUAL "PS5"))
@@ -783,9 +833,14 @@ target_link_libraries(LibertyRecomp PRIVATE
     xxHash::xxhash
     CURL::libcurl
     plume
-    GameNetworkingSockets::static
     liberty_debugger
 )
+if (LIBERTY_RECOMP_HAS_GNS)
+    target_link_libraries(LibertyRecomp PRIVATE GameNetworkingSockets::static)
+else()
+    # Tell the source code that GNS is not available on this platform
+    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_NO_GNS)
+endif()
 
 # Discord RPC (desktop only)
 if (LIBERTY_RECOMP_HAS_DISCORD_RPC)

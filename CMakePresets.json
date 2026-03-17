@@ -221,6 +221,10 @@
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
                     "value": "${sourceDir}/tools/local_game_payload",
                     "type": "PATH"
+                },
+                "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
+                    "value": "ON",
+                    "type": "BOOL"
                 }
             },
             "condition": {
@@ -271,6 +275,10 @@
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
                     "value": "${sourceDir}/tools/local_game_payload",
                     "type": "PATH"
+                },
+                "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
+                    "value": "ON",
+                    "type": "BOOL"
                 }
             }
         },
@@ -308,6 +316,10 @@
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
                     "value": "${sourceDir}/tools/local_game_payload",
                     "type": "PATH"
+                },
+                "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
+                    "value": "ON",
+                    "type": "BOOL"
                 }
             }
         },
@@ -345,6 +357,10 @@
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
                     "value": "${sourceDir}/tools/local_game_payload",
                     "type": "PATH"
+                },
+                "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
+                    "value": "ON",
+                    "type": "BOOL"
                 }
             }
         },

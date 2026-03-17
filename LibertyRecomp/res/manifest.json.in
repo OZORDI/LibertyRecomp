@@ -1,0 +1,7 @@
+{
+  "gameVersion": "1.0.0",
+  "titleUpdate": "TU8",
+  "hasTLAD": @_has_tlad@,
+  "hasTBOGT": @_has_tbogt@,
+  "buildTimestamp": @_build_ts@
+}

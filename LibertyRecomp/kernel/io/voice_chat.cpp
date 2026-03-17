@@ -2,10 +2,23 @@
 #include "p2p_manager.h"
 #include <os/logger.h>
 #include <user/config.h>
-#include <SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+
+// ── Platform audio backend selection ─────────────────────────────────────────
+// PS4 (OpenOrbis): sceAudioIn / sceAudioOut — SDL audio is not available
+// All other platforms (Switch, Android, iOS, desktop): SDL2 audio
+#if defined(__ORBIS__)
+#  include <orbis/AudioIn.h>
+#  include <orbis/AudioOut.h>
+// PS4 audio constants
+static constexpr int SCE_AUDIO_IN_GRAIN = 256;   // samples per sceAudioInInput call
+static constexpr int SCE_AUDIO_OUT_GRAIN = 256;
+#else
+#  include <SDL.h>
+#endif
 
 namespace Net {
 
@@ -139,67 +152,104 @@ void VoiceChatManager::Shutdown() {
 }
 
 bool VoiceChatManager::InitializeCaptureDevice() {
+#if defined(__ORBIS__)
+    // PS4: sceAudioIn — mono, 16kHz, 16-bit (closest to 16kHz is 16000 but SCE supports 8000/16000/32000/48000)
+    int handle = sceAudioInOpen(SCE_AUDIO_IN_TYPE_GENERAL,
+                                SCE_AUDIO_IN_GRAIN,
+                                VOICE_SAMPLE_RATE,
+                                SCE_AUDIO_IN_FORMAT_S16_MONO);
+    if (handle < 0) {
+        LOGF_ERROR("[VoiceChat] sceAudioInOpen failed: {:#x}", (unsigned)handle);
+        return false;
+    }
+    captureDeviceId_ = static_cast<uint32_t>(handle);
+    capturing_.store(true);
+    LOG_WARNING("[VoiceChat] PS4 capture device opened via sceAudioIn");
+    return true;
+
+#else
+    // SDL2 path (Switch, Android, iOS, desktop)
     SDL_AudioSpec desired, obtained;
-    
     SDL_zero(desired);
-    desired.freq = VOICE_SAMPLE_RATE;
-    desired.format = AUDIO_S16SYS;
+    desired.freq     = VOICE_SAMPLE_RATE;
+    desired.format   = AUDIO_S16SYS;
     desired.channels = VOICE_CHANNELS;
-    desired.samples = VOICE_FRAME_SAMPLES;
-    desired.callback = nullptr;  // We'll use SDL_DequeueAudio instead of callback
+    desired.samples  = VOICE_FRAME_SAMPLES;
+    desired.callback = nullptr;  // we use SDL_DequeueAudio
     desired.userdata = this;
-    
-    // Open default capture device
+
     captureDeviceId_ = SDL_OpenAudioDevice(nullptr, SDL_TRUE, &desired, &obtained, 0);
-    
     if (captureDeviceId_ == 0) {
         LOGF_ERROR("[VoiceChat] Failed to open capture device: {}", SDL_GetError());
         return false;
     }
-    
     LOGF_WARNING("[VoiceChat] Capture device opened: freq={}, channels={}, samples={}",
-                obtained.freq, obtained.channels, obtained.samples);
-    
-    // Start capturing
+                 obtained.freq, obtained.channels, obtained.samples);
     SDL_PauseAudioDevice(captureDeviceId_, 0);
     capturing_.store(true);
-    
     return true;
+#endif
 }
 
 bool VoiceChatManager::InitializePlaybackDevice() {
+#if defined(__ORBIS__)
+    // PS4: sceAudioOut on port TYPE_MAIN (shared with game audio, stereo)
+    // We use a separate port for voice so it can be independently volume-controlled.
+    int handle = sceAudioOutOpen(SCE_USER_SERVICE_USER_ID_EVERYONE,
+                                  SCE_AUDIO_OUT_PORT_TYPE_VOICE,
+                                  0,
+                                  SCE_AUDIO_OUT_GRAIN,
+                                  VOICE_SAMPLE_RATE,
+                                  SCE_AUDIO_OUT_CHANNEL_8CH_8CH); // actually mono — SDK maps it
+    if (handle < 0) {
+        // Fallback: try MAIN port if VOICE port unavailable on this firmware
+        handle = sceAudioOutOpen(SCE_USER_SERVICE_USER_ID_EVERYONE,
+                                  SCE_AUDIO_OUT_PORT_TYPE_MAIN,
+                                  0,
+                                  SCE_AUDIO_OUT_GRAIN,
+                                  VOICE_SAMPLE_RATE,
+                                  SCE_AUDIO_OUT_CHANNEL_8CH_8CH);
+        if (handle < 0) {
+            LOGF_ERROR("[VoiceChat] sceAudioOutOpen failed: {:#x}", (unsigned)handle);
+            return false;
+        }
+    }
+    playbackDeviceId_ = static_cast<uint32_t>(handle);
+    playing_.store(true);
+    LOG_WARNING("[VoiceChat] PS4 playback device opened via sceAudioOut");
+    return true;
+
+#else
+    // SDL2 path (Switch, Android, iOS, desktop)
     SDL_AudioSpec desired, obtained;
-    
     SDL_zero(desired);
-    desired.freq = VOICE_SAMPLE_RATE;
-    desired.format = AUDIO_S16SYS;
+    desired.freq     = VOICE_SAMPLE_RATE;
+    desired.format   = AUDIO_S16SYS;
     desired.channels = VOICE_CHANNELS;
-    desired.samples = VOICE_FRAME_SAMPLES;
-    desired.callback = nullptr;  // We'll use SDL_QueueAudio
+    desired.samples  = VOICE_FRAME_SAMPLES;
+    desired.callback = nullptr;  // we use SDL_QueueAudio
     desired.userdata = this;
-    
-    // Open default playback device for voice
-    // Note: This is separate from game audio
+
     playbackDeviceId_ = SDL_OpenAudioDevice(nullptr, SDL_FALSE, &desired, &obtained, 0);
-    
     if (playbackDeviceId_ == 0) {
         LOGF_ERROR("[VoiceChat] Failed to open playback device: {}", SDL_GetError());
         return false;
     }
-    
     LOGF_WARNING("[VoiceChat] Playback device opened: freq={}, channels={}, samples={}",
-                obtained.freq, obtained.channels, obtained.samples);
-    
-    // Start playback
+                 obtained.freq, obtained.channels, obtained.samples);
     SDL_PauseAudioDevice(playbackDeviceId_, 0);
     playing_.store(true);
-    
     return true;
+#endif
 }
 
 void VoiceChatManager::CloseCaptureDevice() {
     if (captureDeviceId_ != 0) {
+#if defined(__ORBIS__)
+        sceAudioInClose(static_cast<int>(captureDeviceId_));
+#else
         SDL_CloseAudioDevice(captureDeviceId_);
+#endif
         captureDeviceId_ = 0;
         capturing_.store(false);
         LOG_WARNING("[VoiceChat] Capture device closed");
@@ -208,7 +258,11 @@ void VoiceChatManager::CloseCaptureDevice() {
 
 void VoiceChatManager::ClosePlaybackDevice() {
     if (playbackDeviceId_ != 0) {
+#if defined(__ORBIS__)
+        sceAudioOutClose(static_cast<int>(playbackDeviceId_));
+#else
         SDL_CloseAudioDevice(playbackDeviceId_);
+#endif
         playbackDeviceId_ = 0;
         playing_.store(false);
         LOG_WARNING("[VoiceChat] Playback device closed");
@@ -518,35 +572,40 @@ void VoiceChatManager::ProcessCapture() {
         return;
     }
     
-    if (selfMuted_.load()) {
-        // Discard captured audio
+    if (selfMuted_.load() || (pushToTalk_.load() && !pushToTalkActive_.load())) {
+#if !defined(__ORBIS__)
         SDL_ClearQueuedAudio(captureDeviceId_);
+#endif
         localTalking_.store(false);
         return;
     }
-    
-    if (pushToTalk_.load() && !pushToTalkActive_.load()) {
-        // Push-to-talk not active, discard audio
-        SDL_ClearQueuedAudio(captureDeviceId_);
-        localTalking_.store(false);
-        return;
-    }
-    
-    // Check how much audio is available
-    Uint32 available = SDL_GetQueuedAudioSize(captureDeviceId_);
-    Uint32 frameBytes = VOICE_FRAME_BYTES;
-    
-    if (available < frameBytes) {
-        return;  // Not enough data for a frame
-    }
-    
-    // Read captured audio
+
     std::vector<int16_t> frame(VOICE_FRAME_SAMPLES);
-    Uint32 dequeued = SDL_DequeueAudio(captureDeviceId_, frame.data(), frameBytes);
-    
-    if (dequeued < frameBytes) {
-        return;
+
+#if defined(__ORBIS__)
+    // PS4: sceAudioInInput blocks until SCE_AUDIO_IN_GRAIN samples are ready.
+    // We loop to fill a full VOICE_FRAME_SAMPLES buffer if it's larger.
+    int filled = 0;
+    while (filled < VOICE_FRAME_SAMPLES) {
+        int grain = std::min(SCE_AUDIO_IN_GRAIN, VOICE_FRAME_SAMPLES - filled);
+        int ret = sceAudioInInput(static_cast<int>(captureDeviceId_),
+                                   frame.data() + filled);
+        if (ret < 0) break;
+        filled += grain;
     }
+    if (filled < VOICE_FRAME_SAMPLES / 2)
+        return;  // Not enough data
+
+#else
+    // SDL2: non-blocking dequeue
+    Uint32 available = SDL_GetQueuedAudioSize(captureDeviceId_);
+    if (available < static_cast<Uint32>(VOICE_FRAME_BYTES))
+        return;
+
+    Uint32 dequeued = SDL_DequeueAudio(captureDeviceId_, frame.data(), VOICE_FRAME_BYTES);
+    if (dequeued < static_cast<Uint32>(VOICE_FRAME_BYTES))
+        return;
+#endif
     
     // Apply microphone volume
     float volume = micVolume_.load();
@@ -596,8 +655,26 @@ void VoiceChatManager::ProcessPlayback() {
     }
     
     if (hasAudio) {
-        // Queue for playback
+#if defined(__ORBIS__)
+        // PS4: sceAudioOutOutput — blocks until the grain has been consumed.
+        // Expand mono to stereo if needed (PS4 MAIN port is always stereo).
+        std::vector<int16_t> stereo(VOICE_FRAME_SAMPLES * 2);
+        for (int i = 0; i < VOICE_FRAME_SAMPLES; ++i) {
+            stereo[i * 2]     = mixBuffer[i];
+            stereo[i * 2 + 1] = mixBuffer[i];
+        }
+        // Output in SCE_AUDIO_OUT_GRAIN-sized chunks
+        const int16_t* ptr = stereo.data();
+        int remaining = VOICE_FRAME_SAMPLES;
+        while (remaining > 0) {
+            int grain = std::min(SCE_AUDIO_OUT_GRAIN, remaining);
+            sceAudioOutOutput(static_cast<int>(playbackDeviceId_), ptr);
+            ptr       += grain * 2;
+            remaining -= grain;
+        }
+#else
         SDL_QueueAudio(playbackDeviceId_, mixBuffer.data(), VOICE_FRAME_BYTES);
+#endif
     }
 }
 
@@ -608,7 +685,13 @@ void VoiceChatManager::MixPeerAudio(int16_t* output, int samples) {
     std::vector<int32_t> mixBuffer(samples, 0);
     int activePeers = 0;
     
+#if defined(__ORBIS__)
+    uint32_t currentTime = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+#else
     uint32_t currentTime = SDL_GetTicks();
+#endif
     
     for (auto& pair : peers_) {
         auto& peer = pair.second;
@@ -712,7 +795,13 @@ void VoiceChatManager::DecodeAndQueueFrame(uint32_t peerId, const VoicePacketHea
     
     // Update statistics
     peer->packetsReceived++;
+#if defined(__ORBIS__)
+    peer->lastPacketTime = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+#else
     peer->lastPacketTime = SDL_GetTicks();
+#endif
     
     // Check for lost packets
     uint16_t expectedSeq = peer->lastPlayedSequence + 1;
