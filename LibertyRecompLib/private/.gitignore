@@ -1,2 +1,19 @@
+# Ignore everything by default
 *
+
+# Track this file
 !.gitignore
+
+# Track button prompts directory (custom project assets)
+!button_prompts/
+!button_prompts/*/
+!button_prompts/**/*.xtd
+!button_prompts/**/*.dds
+!button_prompts/**/*.json
+
+# Never track copyrighted game files or build intermediates
+*.xex
+*.rpf
+*.iso
+*.xcp
+.DS_Store

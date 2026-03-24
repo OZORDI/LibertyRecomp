@@ -1,0 +1,158 @@
+{
+  "variant": "steam_deck",
+  "prefix": "sd_",
+  "textures": {
+    "lstick_leftright": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_leftright.dds",
+      "variant_name": "sd_lstick_leftright"
+    },
+    "rstick_leftright": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_leftright.dds",
+      "variant_name": "sd_rstick_leftright"
+    },
+    "dpad_leftright": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_leftright.dds",
+      "variant_name": "sd_dpad_leftright"
+    },
+    "lstick_updown": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_updown.dds",
+      "variant_name": "sd_lstick_updown"
+    },
+    "rstick_updown": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_updown.dds",
+      "variant_name": "sd_rstick_updown"
+    },
+    "lstick_right": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_right.dds",
+      "variant_name": "sd_lstick_right"
+    },
+    "rstick_right": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_right.dds",
+      "variant_name": "sd_rstick_right"
+    },
+    "right_arrow": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_right_arrow.dds",
+      "variant_name": "sd_right_arrow"
+    },
+    "rstick_down": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_down.dds",
+      "variant_name": "sd_rstick_down"
+    },
+    "dpad_updown": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_updown.dds",
+      "variant_name": "sd_dpad_updown"
+    },
+    "lstick_down": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_down.dds",
+      "variant_name": "sd_lstick_down"
+    },
+    "rstick_left": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_left.dds",
+      "variant_name": "sd_rstick_left"
+    },
+    "lstick_left": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_left.dds",
+      "variant_name": "sd_lstick_left"
+    },
+    "rstick_none": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_none.dds",
+      "variant_name": "sd_rstick_none"
+    },
+    "lstick_none": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_none.dds",
+      "variant_name": "sd_lstick_none"
+    },
+    "dpad_right": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_right.dds",
+      "variant_name": "sd_dpad_right"
+    },
+    "down_arrow": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_down_arrow.dds",
+      "variant_name": "sd_down_arrow"
+    },
+    "lstick_all": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_all.dds",
+      "variant_name": "sd_lstick_all"
+    },
+    "rstick_all": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_all.dds",
+      "variant_name": "sd_rstick_all"
+    },
+    "start_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_start_butt.dds",
+      "variant_name": "sd_start_butt"
+    },
+    "left_arrow": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_left_arrow.dds",
+      "variant_name": "sd_left_arrow"
+    },
+    "back_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_back_butt.dds",
+      "variant_name": "sd_back_butt"
+    },
+    "lstick_up": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lstick_up.dds",
+      "variant_name": "sd_lstick_up"
+    },
+    "dpad_down": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_down.dds",
+      "variant_name": "sd_dpad_down"
+    },
+    "dpad_left": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_left.dds",
+      "variant_name": "sd_dpad_left"
+    },
+    "rstick_up": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rstick_up.dds",
+      "variant_name": "sd_rstick_up"
+    },
+    "dpad_none": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_none.dds",
+      "variant_name": "sd_dpad_none"
+    },
+    "dpad_all": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_all.dds",
+      "variant_name": "sd_dpad_all"
+    },
+    "up_arrow": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_up_arrow.dds",
+      "variant_name": "sd_up_arrow"
+    },
+    "lb_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lb_butt.dds",
+      "variant_name": "sd_lb_butt"
+    },
+    "rb_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rb_butt.dds",
+      "variant_name": "sd_rb_butt"
+    },
+    "rt_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_rt_butt.dds",
+      "variant_name": "sd_rt_butt"
+    },
+    "lt_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_lt_butt.dds",
+      "variant_name": "sd_lt_butt"
+    },
+    "dpad_up": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_dpad_up.dds",
+      "variant_name": "sd_dpad_up"
+    },
+    "x_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_x_butt.dds",
+      "variant_name": "sd_x_butt"
+    },
+    "b_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_b_butt.dds",
+      "variant_name": "sd_b_butt"
+    },
+    "y_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_y_butt.dds",
+      "variant_name": "sd_y_butt"
+    },
+    "a_butt": {
+      "source": "/Users/Ozordi/Downloads/LibertyRecomp/tools/GTAIV.EFLC.FusionFix-master/textures/pc/textures/buttons_360.wtd/sd_a_butt.dds",
+      "variant_name": "sd_a_butt"
+    }
+  }
+}

@@ -1,3 +1,13 @@
+# Ignore everything by default (large generated shader blobs)
 *
-!shader_cache.h
+
+# Track the gitignore itself
 !.gitignore
+
+# Track shader cache files (game shaders — required to build)
+!shader_cache.h
+!shader_cache.cpp
+
+# Track postprocess shader cache (postfx shader registry — required to build)
+!postprocess_cache.h
+!postprocess_cache.cpp

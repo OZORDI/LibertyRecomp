@@ -1,1 +1,7 @@
-*.hlsl.*.h
+# Intermediate SPIRV binaries (raw .spv are tracked, but temp build artifacts aren't)
+*.tmp
+*.o
+
+# NOTE: *.hlsl.spirv.h and *.hlsl.dxil.h ARE tracked — they are required to build.
+# Compile them with: tools/compile_postprocess_shaders.sh
+# or:  dxc -T ps_6_0 -E shaderMain -spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-layout -Fh <out>.h -Vn g_<name>_spirv <input>.hlsl
