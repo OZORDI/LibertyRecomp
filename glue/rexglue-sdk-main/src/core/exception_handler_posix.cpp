@@ -42,6 +42,7 @@ namespace rex::arch {
 bool signal_handlers_installed_ = false;
 struct sigaction original_sigill_handler_;
 struct sigaction original_sigsegv_handler_;
+struct sigaction original_sigbus_handler_;
 
 // This can be as large as needed, but isn't often needed.
 // As we will be sometimes firing many exceptions we want to avoid having to
@@ -143,7 +144,23 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     case SIGBUS:
       // macOS delivers SIGBUS (not SIGSEGV) for writes to PROT_NONE shared
       // memory regions — including guest stack guard pages mapped via mmap.
-      // Fall through to the same access-violation handling as SIGSEGV.
+#if defined(__APPLE__) && REX_ARCH_ARM64
+    {
+      // On macOS ARM64, SIGBUS is exclusively delivered for writes to
+      // PROT_NONE pages (guard pages, unmapped shared memory). ESR is
+      // unavailable, and IsArm64LoadPrefetchStore may fail for certain
+      // compiler-generated store variants, silently setting kUnknown in
+      // release builds (NDEBUG makes assert_always a no-op). Hardcode
+      // kWrite to ensure the MMIOHandler chain processes these faults.
+      Exception::AccessViolationOperation access_violation_operation =
+          Exception::AccessViolationOperation::kWrite;
+      ex.InitializeAccessViolation(&thread_context,
+                                   reinterpret_cast<uint64_t>(signal_info->si_addr),
+                                   access_violation_operation);
+    } break;
+#else
+      // Non-Apple or non-ARM64: fall through to SIGSEGV instruction decoding.
+#endif
     case SIGSEGV: {
       Exception::AccessViolationOperation access_violation_operation;
 #if REX_ARCH_AMD64
@@ -279,7 +296,11 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
 }
 
 void ExceptionHandler::Install(Handler fn, void* data) {
-  if (!signal_handlers_installed_) {
+  // Always (re)install signal handlers to ensure ExceptionHandlerCallback
+  // is the active handler. seh_initialize() runs before MMIOHandler::Install()
+  // and overwrites signal handlers with its own SEH handler. Re-installing
+  // here guarantees ExceptionHandlerCallback takes priority over SEH.
+  {
     struct sigaction signal_handler;
 
     std::memset(&signal_handler, 0, sizeof(signal_handler));
@@ -292,8 +313,6 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
     }
-    // macOS delivers SIGBUS for writes to PROT_NONE shared memory (guard pages).
-    static struct sigaction original_sigbus_handler_;
     if (sigaction(SIGBUS, &signal_handler, &original_sigbus_handler_) != 0) {
       assert_always("Failed to install new SIGBUS handler");
     }
@@ -336,6 +355,9 @@ void ExceptionHandler::Uninstall(Handler fn, void* data) {
       }
       if (sigaction(SIGSEGV, &original_sigsegv_handler_, NULL) != 0) {
         assert_always("Failed to restore original SIGSEGV handler");
+      }
+      if (sigaction(SIGBUS, &original_sigbus_handler_, NULL) != 0) {
+        assert_always("Failed to restore original SIGBUS handler");
       }
       signal_handlers_installed_ = false;
     }
