@@ -1,7 +1,9 @@
 #include "imgui_snapshot.h"
 
 #include <locale/locale.h>
+#ifdef ENABLE_IM_FONT_ATLAS_SNAPSHOT
 #include <res/font/im_font_atlas.bin.h>
+#endif
 #include <user/config.h>
 #include <decompressor.h>
 #include <kernel/xdbf.h>
@@ -106,6 +108,7 @@ void ImFontAtlasSnapshot::Snap()
     header->offsetsOffset = offsetsOffset;
 }
 
+#ifdef ENABLE_IM_FONT_ATLAS_SNAPSHOT
 static std::unique_ptr<uint8_t[]> g_imFontAtlas;
 
 ImFontAtlas* ImFontAtlasSnapshot::Load()
@@ -124,6 +127,7 @@ ImFontAtlas* ImFontAtlasSnapshot::Load()
 
     return reinterpret_cast<ImFontAtlas*>(g_imFontAtlas.get() + header->dataOffset);
 }
+#endif // ENABLE_IM_FONT_ATLAS_SNAPSHOT
 
 
 static void GetGlyphs(std::set<ImWchar>& glyphs, const std::string_view& value)
@@ -160,14 +164,17 @@ void ImFontAtlasSnapshot::GenerateGlyphRanges()
             GetGlyphs(glyphs, value);
     }
 
-    for (size_t i = XDBF_LANGUAGE_ENGLISH; i <= XDBF_LANGUAGE_ITALIAN; i++)
+    if (g_xdbfWrapper.pHeader != nullptr)
     {
-        auto achievements = g_xdbfWrapper.GetAchievements(static_cast<EXDBFLanguage>(i));
-        for (auto& achievement : achievements)
+        for (size_t i = XDBF_LANGUAGE_ENGLISH; i <= XDBF_LANGUAGE_ITALIAN; i++)
         {
-            GetGlyphs(glyphs, achievement.Name);
-            GetGlyphs(glyphs, achievement.UnlockedDesc);
-            GetGlyphs(glyphs, achievement.LockedDesc);
+            auto achievements = g_xdbfWrapper.GetAchievements(static_cast<EXDBFLanguage>(i));
+            for (auto& achievement : achievements)
+            {
+                GetGlyphs(glyphs, achievement.Name);
+                GetGlyphs(glyphs, achievement.UnlockedDesc);
+                GetGlyphs(glyphs, achievement.LockedDesc);
+            }
         }
     }
 

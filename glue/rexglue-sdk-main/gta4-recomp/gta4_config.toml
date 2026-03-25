@@ -68,6 +68,19 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A77E28" = {}
 "0x8219E410" = {}
 
+# Undiscovered vtable dispatchers (only reached via indirect calls)
+"0x8219ACA0" = {}
+"0x828764B8" = {}
+"0x82A6C218" = {}
+"0x82A69CC8" = {}
+"0x82A69CA8" = {}
+"0x82A69C68" = {}
+"0x82A69428" = {}
+"0x82A69328" = {}
+"0x82A69308" = {}
+"0x82A692E8" = {}
+"0x82A692C8" = {}
+
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
 "0x82A11D08" = { name = "memset" }

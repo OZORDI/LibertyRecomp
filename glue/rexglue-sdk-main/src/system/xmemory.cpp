@@ -23,6 +23,7 @@
 #include <rex/stream.h>
 #include <rex/system/mmio_handler.h>
 #include <rex/system/xmemory.h>
+#include <rex/system/xthread.h>
 #include <rex/thread.h>
 
 // TODO(benvanik): move xbox.h out
@@ -443,6 +444,22 @@ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> glob
   }
   uint32_t virtual_address = HostToGuestVirtual(host_address);
   BaseHeap* heap = LookupHeap(virtual_address);
+
+  // Handle stack guard page faults: when a guest thread's stack grows past
+  // its guard page, unprotect the page so the stack can expand — mimicking
+  // Xbox 360 kernel stack growth behavior.
+  if (heap->heap_type() == memory::HeapType::kGuestVirtual &&
+      virtual_address >= system::XThread::kStackAddressRangeBegin &&
+      virtual_address < system::XThread::kStackAddressRangeEnd) {
+    // Unprotect the faulting page so the write can proceed.
+    auto page_size = heap->page_size();
+    uint32_t page_addr = virtual_address & ~(page_size - 1);
+    heap->Protect(page_addr, page_size,
+                  memory::kMemoryProtectRead | memory::kMemoryProtectWrite);
+    REXSYS_WARN("Stack guard page hit at guest 0x{:08X} — expanded stack", virtual_address);
+    return true;
+  }
+
   if (heap->heap_type() != memory::HeapType::kGuestPhysical) {
     return false;
   }

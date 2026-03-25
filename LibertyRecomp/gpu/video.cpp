@@ -55,8 +55,10 @@ namespace GTAIV {
 #include <kernel/memory.h>
 #include <kernel/xdbf.h>
 #include <plume_render_interface.h>
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/bc_diff/button_bc_diff.bin.h>
 #include <res/font/im_font_atlas.dds.h>
+#endif
 #include <shader/shader_cache.h>
 #include <Liberty.h>
 #include <ui/achievement_menu.h>
@@ -909,7 +911,9 @@ static void FlushBarriers()
 static std::unique_ptr<uint8_t[]> g_shaderCache;
 static size_t g_shaderCacheSize = 0;
 static bool g_usingDiskCache = false;
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 static std::unique_ptr<uint8_t[]> g_buttonBcDiff;
+#endif
 
 // Try to load shader cache from disk (install-time generated)
 // Returns true if successfully loaded, false to fall back to embedded
@@ -1045,7 +1049,9 @@ static void LoadEmbeddedResources()
         }
     }
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_buttonBcDiff = decompressZstd(g_button_bc_diff, g_button_bc_diff_uncompressed_size);
+#endif
 }
 
 enum class CsdFilterState
@@ -2271,7 +2277,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
               static_cast<int>(g_backbufferFormat), static_cast<int>(Config::HDRMode.Value),
               hdrEnabled ? "enabled" : "disabled");
     
-    g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, g_backbufferFormat, Config::MaxFrameLatency);
+    g_swapChain = g_queue->createSwapChain(RenderSwapChainDesc(GameWindow::s_renderWindow, g_backbufferFormat, bufferCount, false, Config::MaxFrameLatency));
     g_swapChain->setVsyncEnabled(Config::VSync);
     g_swapChainValid = !g_swapChain->needsResize();
 
@@ -6973,6 +6979,7 @@ std::unique_ptr<GuestTexture> LoadTexture(const uint8_t* data, size_t dataSize, 
     return nullptr;
 }
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 static void DiffPatchTexture(GuestTexture& texture, uint8_t* data, uint32_t dataSize)
 {
     auto header = reinterpret_cast<BlockCompressionDiffPatchHeader*>(g_buttonBcDiff.get());
@@ -7004,6 +7011,8 @@ static void DiffPatchTexture(GuestTexture& texture, uint8_t* data, uint32_t data
     }
 }
 
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
+
 static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t dataSize)
 {
     if (data != nullptr)
@@ -7016,7 +7025,9 @@ static void MakePictureData(GuestMyTexture* pictureData, uint8_t* data, uint32_t
             if (pictureData->str1.size.get() > 0)
                 texture.texture->setName(fmt::format("Texture {}", pictureData->str1.c_str()));
 #endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
             DiffPatchTexture(texture, data, dataSize);
+#endif
 
             pictureData->texture = g_memory.MapVirtual(g_userHeap.AllocPhysical<GuestTexture>(std::move(texture)));
             pictureData->width = texture.width;
@@ -9525,6 +9536,15 @@ PPC_FUNC_HOOK(sub_82A55DC0)
     uint32_t height = std::max(1u, ctx.r5.u32);
     uint32_t format = ctx.r10.u32;
 
+    // Safety clamp to Metal's max texture size (16384)
+    constexpr uint32_t kMaxTexDim = 16384;
+    if (width > kMaxTexDim || height > kMaxTexDim) {
+        printf("[sub_82A55DC0] WARNING: clamping oversized texture %ux%u (fmt=0x%08X) to %u max\n",
+               width, height, format, kMaxTexDim);
+        width  = std::min(width,  kMaxTexDim);
+        height = std::min(height, kMaxTexDim);
+    }
+
     // Align dimensions to 32, compute size, align to 4096
     uint32_t alignedW = (width + 31) & ~31u;
     uint32_t alignedH = (height + 31) & ~31u;
@@ -9583,12 +9603,12 @@ PPC_FUNC_HOOK(sub_82A55DC0)
     ctx.r3.u32 = physAddr;
 }
 
-// Thin wrapper around sub_82A55DC0 — sub_82A56560
-// Sets up params and tail-calls sub_82A55DC0. Hook delegates directly.
-PPC_FUNC_HOOK(sub_82A56560)
-{
-    sub_82A55DC0(ctx, base);
-}
+// sub_82A56560 hook REMOVED — it is NOT a thin wrapper. The real function
+// performs ~200 lines of dimension/format computation (calls sub_82A57240,
+// sub_82A57090) before calling sub_82A55DC0 with computed r4=width, r5=height,
+// r10=format. The old hook passed raw caller registers through, causing Metal
+// to crash in validateWithDevice with garbage dimensions/format.
+// The recompiled code handles this correctly.
 
 // PM4 Packet Builder stub — sub_82A492A8(device, cmdPtr, flags, param1, param2)
 // This is called for EVERY draw call (from DrawPrimitive + UnifiedDraw paths).

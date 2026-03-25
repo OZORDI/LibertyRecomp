@@ -180,44 +180,20 @@ static bool RexFallbackCrashHandler(rex::arch::Exception* ex, void* /*data*/) {
 // This sets up RexGlue's signal handlers (SIGILL, SIGSEGV, SIGBUS) via
 // ExceptionHandler::Install() so any faults during startup are caught.
 // The fallback handler only logs diagnostics and returns false.
-static void raw_sigbus_handler(int sig, siginfo_t* info, void* ctx) {
-    // Raw SIGBUS handler - fires before RexGlue exception chain
-    // Prints faulting address then re-raises to let default handler run
-    uintptr_t fa = (uintptr_t)info->si_addr;
-    uintptr_t base = (uintptr_t)g_memory.base;
-    char buf[256];
-    if (fa >= base && fa < base + 0x100000000ULL) {
-        snprintf(buf, sizeof(buf),
-            "\n[SIGBUS] fault at GUEST addr 0x%08X (host 0x%016llX)\n",
-            (uint32_t)(fa - base), (unsigned long long)fa);
-    } else {
-        snprintf(buf, sizeof(buf),
-            "\n[SIGBUS] fault at HOST addr 0x%016llX (OUTSIDE guest memory)\n",
-            (unsigned long long)fa);
-    }
-    write(2, buf, strlen(buf));
-    // Re-raise with default handler
-    struct sigaction sa{};
-    sa.sa_handler = SIG_DFL;
-    sigaction(SIGBUS, &sa, nullptr);
-    raise(SIGBUS);
-}
-
 static void InstallRexGlueExceptionHandlers() {
     // Install the fallback crash handler. ExceptionHandler::Install() also
     // registers SIGILL/SIGSEGV/SIGBUS signal handlers on first call, so
     // any faults during early startup are caught and diagnosed.
     // Memory::Initialize() installs its own MMIOHandler internally, so
     // no separate MMIO handler installation is needed.
+    //
+    // IMPORTANT: Do NOT install a separate raw SIGBUS handler here.
+    // RexGlue's ExceptionHandlerCallback already handles SIGBUS (macOS
+    // delivers SIGBUS for PROT_NONE guard page writes). A raw handler
+    // would override ExceptionHandlerCallback, preventing the MMIOHandler
+    // → AccessViolationCallback → stack guard expansion chain from working.
     rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
     fprintf(stderr, "[RexGlue] Fallback exception handler installed (signal handlers active)\n");
-    // Install raw SIGBUS catcher AFTER RexGlue so it sits on top of the chain
-    {
-        struct sigaction sa{};
-        sa.sa_sigaction = raw_sigbus_handler;
-        sa.sa_flags = SA_SIGINFO | SA_NODEFER;
-        sigaction(SIGBUS, &sa, nullptr);
-    }
     fflush(stderr);
 }
 

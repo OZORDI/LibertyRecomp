@@ -140,6 +140,10 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     case SIGILL:
       ex.InitializeIllegalInstruction(&thread_context);
       break;
+    case SIGBUS:
+      // macOS delivers SIGBUS (not SIGSEGV) for writes to PROT_NONE shared
+      // memory regions — including guest stack guard pages mapped via mmap.
+      // Fall through to the same access-violation handling as SIGSEGV.
     case SIGSEGV: {
       Exception::AccessViolationOperation access_violation_operation;
 #if REX_ARCH_AMD64
@@ -287,6 +291,11 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     }
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
+    }
+    // macOS delivers SIGBUS for writes to PROT_NONE shared memory (guard pages).
+    static struct sigaction original_sigbus_handler_;
+    if (sigaction(SIGBUS, &signal_handler, &original_sigbus_handler_) != 0) {
+      assert_always("Failed to install new SIGBUS handler");
     }
     signal_handlers_installed_ = true;
   }
