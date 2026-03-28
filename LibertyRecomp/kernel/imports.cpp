@@ -27,6 +27,7 @@
 #include <gpu/video.h>
 #include <hid/hid.h>
 #include <memory>
+#include <mutex>
 #include <os/logger.h>
 #include <stdafx.h>
 #include <thread>
@@ -580,9 +581,14 @@ PPC_FUNC_HOOK(sub_828507F8) {
 extern "C" void __imp__sub_829A0678(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_829A0678) { ctx.r3.u32 = 0; }
 
-// sub_829D4C48 - Frame swap stub (would SIGBUS without GPU context)
+// sub_82A46098 - VBlank frame completion dispatch
+// Increments FrameSubmitted (device+16532) and FrameCompleted (device+16552)
+// counters, timestamps frames, and dispatches the frame-done callback
+// (device+16528). The indirect callback signals the frame sync event that
+// sub_821B5890 waits on — without it, the game thread blocks forever after
+// frame 5. The one MMIO write (0x7FC86110) is safely handled by GpuMmioWrite.
 extern "C" void __imp__sub_82A46098(PPCContext &ctx, uint8_t *base);
-PPC_FUNC_HOOK(sub_82A46098) { return; }
+PPC_FUNC_HOOK(sub_82A46098) { __imp__sub_82A46098(ctx, base); }
 
 // sub_829D7368 - VBlank callback (skip Xbox GPU fence queue)
 extern "C" void __imp__sub_82A487B8(PPCContext &ctx, uint8_t *base);
@@ -992,6 +998,89 @@ PPC_FUNC_HOOK(sub_8284C290) {
 }
 
 // =============================================================================
+// DIAGNOSTIC: Double-free detector for heap free function (sub_82848B68)
+//
+// The game's heap free function.  Track recently-freed addresses and flag
+// double-frees, which corrupt the free-list (next = self → infinite loop).
+// =============================================================================
+extern "C" void __imp__sub_82848B68(PPCContext &ctx, uint8_t *base);
+
+static std::mutex s_freeLogMutex;
+static std::unordered_set<uint32_t> s_freedAddrs;
+static std::atomic<int> s_freeCount{0};
+static std::atomic<int> s_doubleFreeCount{0};
+
+PPC_FUNC_HOOK(sub_82848B68) {
+    // r4 = pointer being freed (the user-data pointer, node = r4 - 16)
+    uint32_t ptr = ctx.r4.u32;
+    uint32_t node = ptr - 16;
+    int n = s_freeCount.fetch_add(1, std::memory_order_relaxed);
+
+    // Stack unwinding: sub_82848B68 ← sub_828494D8(112B) ← sub_82847618(128B) ← ???
+    // sub_828494D8 LR at r1+104, sub_82847618 LR at r1+232
+    uint32_t caller = static_cast<uint32_t>(ctx.lr);
+    uint32_t outerCaller = 0;
+    uint32_t outerCaller2 = 0;
+    if (caller == 0x82849560) {
+        outerCaller = ReadGuestU32(ctx.r1.u32 + 104);
+        if (outerCaller == 0x828476EC) {
+            outerCaller2 = ReadGuestU32(ctx.r1.u32 + 232);
+        }
+    }
+
+    // Read first 8 bytes of object (potential next/prev pointers) BEFORE free
+    uint32_t obj_word0 = ReadGuestU32(ptr);
+    uint32_t obj_word1 = ReadGuestU32(ptr + 4);
+
+    {
+        std::lock_guard<std::mutex> lk(s_freeLogMutex);
+        if (s_freedAddrs.count(ptr)) {
+            int df = s_doubleFreeCount.fetch_add(1, std::memory_order_relaxed);
+            if (df < 20) {
+                printf("[DOUBLE-FREE] #%d ptr=0x%08X caller=0x%08X outer1=0x%08X outer2=0x%08X obj[0]=0x%08X obj[4]=0x%08X frees=%d\n",
+                       df, ptr, caller, outerCaller, outerCaller2, obj_word0, obj_word1, n);
+                fflush(stdout);
+            } else if (df == 20) {
+                printf("[DOUBLE-FREE] ... suppressing further output (20 logged). total_frees=%d\n", n);
+                fflush(stdout);
+            }
+        }
+        s_freedAddrs.insert(ptr);
+    }
+
+    // Log first 20 frees with full detail
+    if (n < 20) {
+        printf("[HEAP-FREE] #%d ptr=0x%08X heap=0x%08X caller=0x%08X outer1=0x%08X outer2=0x%08X obj[0]=0x%08X obj[4]=0x%08X\n",
+               n, ptr, ctx.r3.u32, caller, outerCaller, outerCaller2, obj_word0, obj_word1);
+        fflush(stdout);
+    }
+
+    __imp__sub_82848B68(ctx, base);
+}
+
+// =============================================================================
+// DIAGNOSTIC: TLS[1684] debug flag checker
+//
+// TLS[1684] controls debug assertions/memset in the heap allocator.
+// On retail Xbox 360 this is 0.  Log its value on the first allocation
+// so we know if debug paths are active.
+// =============================================================================
+static std::atomic<bool> s_tls1684Checked{false};
+
+extern "C" void __imp__sub_82848750(PPCContext &ctx, uint8_t *base);
+
+PPC_FUNC_HOOK(sub_82848750) {
+    if (!s_tls1684Checked.exchange(true)) {
+        uint32_t r13 = ctx.r13.u32;
+        uint32_t tls1684 = ReadTLS(r13, 1684);
+        printf("[TLS-DEBUG] TLS[1684] = 0x%08X on first sub_82848750 call (0 = retail, nonzero = debug paths active)\n",
+               tls1684);
+        fflush(stdout);
+    }
+    __imp__sub_82848750(ctx, base);
+}
+
+// =============================================================================
 // DIAGNOSTIC: sub_82A50890 — GPU CreateDevice (top-level GPU init)
 // =============================================================================
 extern "C" void __imp__sub_82A50890(PPCContext &ctx, uint8_t *base);
@@ -1198,6 +1287,7 @@ PPC_FUNC_HOOK(sub_828497D8) {
 // =============================================================================
 
 extern "C" void __imp__sub_8285B088(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_B088_count{0};
 PPC_FUNC_HOOK(sub_8285B088) {
     // "Consume pending shader registration request."
     // r3 = shader-slot struct { ptr@+0, status@+4, cond1@+16(unused), cond2@+20 }
@@ -1210,7 +1300,16 @@ PPC_FUNC_HOOK(sub_8285B088) {
     //
     // We let the original run BUT sub_8285A8B0 is now stubbed (see below) so the GPU
     // buffer flush is skipped. The vtable slot 10 path is pure memory and runs fine.
+    int n = s_B088_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 20 || (n % 100) == 0) {
+        printf("[DIAG-B088] sub_8285B088 ENTER #%d r3=0x%08X caller=0x%08X\n", n, ctx.r3.u32, (uint32_t)ctx.lr);
+        fflush(stdout);
+    }
     __imp__sub_8285B088(ctx, base);
+    if (n <= 20 || (n % 100) == 0) {
+        printf("[DIAG-B088] sub_8285B088 RETURN #%d\n", n);
+        fflush(stdout);
+    }
 }
 
 // sub_8285A8B0 — GPU buffer flush called from sub_8285B088.
@@ -1570,6 +1669,971 @@ PPC_FUNC_HOOK(sub_821411D8) {
     __imp__sub_821411D8(ctx, base);
     printf("[DIAG] sub_821411D8 RETURN (game systems init done)\n");
     fflush(stdout);
+}
+
+// sub_82145420 — first-frame setup (called from sub_82140000 after sub_821411D8)
+extern "C" void __imp__sub_82145420(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82145420) {
+    printf("[DIAG] sub_82145420 ENTER (first-frame setup) r3=%u r4=%u caller=0x%08X\n",
+           ctx.r3.u32, ctx.r4.u32, static_cast<uint32_t>(ctx.lr));
+    fflush(stdout);
+    __imp__sub_82145420(ctx, base);
+    printf("[DIAG] sub_82145420 RETURN\n");
+    fflush(stdout);
+}
+
+// sub_821412B8 — subsystem init chain (~50 init calls, called from sub_82140000)
+extern "C" void __imp__sub_821412B8(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_821412B8) {
+    printf("[DIAG] sub_821412B8 ENTER (subsystem init chain) caller=0x%08X\n",
+           static_cast<uint32_t>(ctx.lr));
+    fflush(stdout);
+    __imp__sub_821412B8(ctx, base);
+    printf("[DIAG] sub_821412B8 RETURN\n");
+    fflush(stdout);
+}
+
+// =============================================================================
+// sub_821412B8 BINARY SEARCH — diagnostic probes on callees
+// Each probe prints on entry so we know which calls complete before the hang.
+// Calls are numbered per the 68-call list from research.
+// =============================================================================
+#define INIT_PROBE(name, num, desc) \
+    extern "C" void __imp__##name(PPCContext &ctx, uint8_t *base); \
+    PPC_FUNC_HOOK(name) { \
+        static int _n = 0; \
+        if (++_n <= 3) { printf("[INIT-PROBE] #" #num " " #name " (" desc ") call=%d\n", _n); fflush(stdout); } \
+        __imp__##name(ctx, base); \
+        if (_n <= 3) { printf("[INIT-PROBE] #" #num " " #name " RETURN\n"); fflush(stdout); } \
+    }
+INIT_PROBE(sub_82302308,  2,  "early init")
+INIT_PROBE(sub_826CA440,  3,  "engine mid-level")
+INIT_PROBE(sub_82299500,  4,  "renderer init")
+INIT_PROBE(sub_821B4768,  7,  "player/controller")
+INIT_PROBE(sub_82214E00, 10,  "game systems")
+INIT_PROBE(sub_82266EA8, 11,  "subsystem")
+INIT_PROBE(sub_8233C480, 13,  "subsystem r3=2000")
+INIT_PROBE(sub_82140F38, 15,  "subsystem")
+INIT_PROBE(sub_821E34C0, 20,  "subsystem")
+INIT_PROBE(sub_82206BB8, 25,  "subsystem")
+INIT_PROBE(sub_8223F458, 26,  "between 25-35")
+INIT_PROBE(sub_8223C848, 27,  "between 25-35")
+INIT_PROBE(sub_821FC1F8, 28,  "between 25-35")
+INIT_PROBE(sub_82267948, 31,  "between 25-35")
+// sub_822BCA90 — called many times, print all with caller LR
+extern "C" void __imp__sub_822BCA90(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_822BCA90) {
+    static int _bca_n = 0;
+    ++_bca_n;
+    // Suppress spam — only log first 5 and then every 10000
+    if (_bca_n <= 5 || (_bca_n % 10000) == 0) {
+        printf("[SYNC] sub_822BCA90 call=%d caller=0x%08X\n", _bca_n, static_cast<uint32_t>(ctx.lr));
+        fflush(stdout);
+    }
+    __imp__sub_822BCA90(ctx, base);
+}
+INIT_PROBE(sub_822446A8, 35,  "subsystem")
+INIT_PROBE(sub_821C61D8, 40,  "subsystem")
+INIT_PROBE(sub_82220FC8, 46,  "subsystem")
+INIT_PROBE(sub_822A1028, 50,  "subsystem")
+INIT_PROBE(sub_82146A68, 59,  "late init")
+INIT_PROBE(sub_82227D50, 63,  "late init")
+INIT_PROBE(sub_82329C90, 68,  "final init")
+
+// sub_821FC1F8 internal binary search probes (47 calls total)
+// Probing at calls: 1, 5, 10, 15, 20, 25, 30, 35, 40, 45
+INIT_PROBE(sub_8251BA08, 2801, "821FC1F8 call 1")
+INIT_PROBE(sub_82504318, 2805, "821FC1F8 call 5")
+INIT_PROBE(sub_82446BA8, 2810, "821FC1F8 call 10")
+INIT_PROBE(sub_82446DB0, 2815, "821FC1F8 call 15")
+INIT_PROBE(sub_8254A610, 2820, "821FC1F8 call 20")
+INIT_PROBE(sub_82163F38, 2825, "821FC1F8 call 25")
+INIT_PROBE(sub_82478AF8, 2830, "821FC1F8 call 30")
+INIT_PROBE(sub_822B2010, 2835, "821FC1F8 call 35")
+INIT_PROBE(sub_823A2108, 2840, "821FC1F8 call 40")
+INIT_PROBE(sub_825030B8, 2845, "821FC1F8 call 45")
+
+// sub_82478AF8 internal probes — trace which phase hangs
+INIT_PROBE(sub_826225E0, 3001, "82478AF8 phase1 env-A")
+INIT_PROBE(sub_826226B0, 3003, "82478AF8 phase1 env-C")
+INIT_PROBE(sub_8294BD68, 3005, "82478AF8 phase2 audio-mgr-ctor")
+INIT_PROBE(sub_8294E208, 3010, "82478AF8 phase7 finalize-audio-mgr")
+INIT_PROBE(sub_82956718, 3012, "82478AF8 phase7 xaudio-obj-ctor")
+INIT_PROBE(sub_82953088, 3013, "82478AF8 phase8 audio-graph-init")
+INIT_PROBE(sub_82955838, 3019, "82478AF8 phase8 CreateSourceVoices")
+INIT_PROBE(sub_827ADB48, 3026, "82478AF8 phase12 create-voice-block")
+INIT_PROBE(sub_8287AC38, 3036, "82478AF8 phase16 streaming-graph")
+INIT_PROBE(sub_8261C7C8, 3039, "82478AF8 phase16 audio3D-init")
+INIT_PROBE(sub_8228A1E0, 3049, "82478AF8 phase21 start-stream-thread")
+INIT_PROBE(sub_825FD6B8, 3050, "82478AF8 phase21 start-RPF-stream")
+INIT_PROBE(sub_82955BE0, 3051, "82478AF8 phase21 xaudio-stream-HANG")
+INIT_PROBE(sub_82477670, 3054, "82478AF8 phase22 streaming-tick")
+INIT_PROBE(sub_827C2420, 3055, "82478AF8 tail activate-streaming")
+INIT_PROBE(sub_8284F310, 30551, "827C2420 start-streaming-mgr")
+// sub_82852DD0 replaced with custom detailed hook below (after #undef)
+INIT_PROBE(sub_827ACC98, 3060, "82478AF8 tail bind-voice-ptrs")
+INIT_PROBE(sub_827ACCA0, 3061, "82478AF8 tail pool-config")
+INIT_PROBE(sub_8287A408, 3065, "82478AF8 tail 3D-param-A")
+INIT_PROBE(sub_823B33F8, 3072, "82478AF8 tail construct-stream-block")
+INIT_PROBE(sub_82478A80, 3074, "82478AF8 tail unknown-A80")
+INIT_PROBE(sub_8261FBA0, 3075, "82478AF8 tail unknown-FBA0")
+INIT_PROBE(sub_8287A6A8, 3076, "82478AF8 tail audio-cfg-A6A8")
+INIT_PROBE(sub_8284F468, 30554, "82852DD0 alloc-resource")
+INIT_PROBE(sub_82852A50, 30556, "82852D18 get-resource-ptr")
+INIT_PROBE(sub_82851A10, 30557, "82852D18 pre-vtable-call")
+#undef INIT_PROBE
+
+// ---------------------------------------------------------------------------
+// DIAGNOSTIC: sub_828493E0 — the ACTUAL allocator function called by operator new
+// Traces entry/exit to identify if the hang is inside the allocator body
+// (after the scoped lock is acquired), e.g., infinite loop in free-list walk.
+// ---------------------------------------------------------------------------
+extern "C" void __imp__sub_828493E0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_alloc93E0Count{0};
+
+PPC_FUNC_HOOK(sub_828493E0) {
+    int n = s_alloc93E0Count.fetch_add(1, std::memory_order_relaxed);
+    uint32_t size = ctx.r4.u32;
+    uint32_t caller = static_cast<uint32_t>(ctx.lr);
+
+    // Only trace when called from the engine init range
+    bool fromInit = (caller >= 0x82478000 && caller < 0x8247A000) ||
+                    (caller >= 0x82847500 && caller < 0x82847700);
+
+    if (fromInit || n < 5) {
+        printf("[ALLOC-93E0] ENTER #%d size=%u caller=0x%08X this=0x%08X\n",
+               n, size, caller, ctx.r3.u32);
+        fflush(stdout);
+    }
+
+    __imp__sub_828493E0(ctx, base);
+
+    if (fromInit || n < 5) {
+        printf("[ALLOC-93E0] RETURN #%d r3=0x%08X\n", n, ctx.r3.u32);
+        fflush(stdout);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sub_821B3510 — operator new (diagnostic hook)
+// ---------------------------------------------------------------------------
+extern "C" void __imp__sub_821B3510(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_allocTailCount{0};
+PPC_FUNC_HOOK(sub_821B3510) {
+    uint32_t lr = (uint32_t)ctx.lr;
+    bool fromTail = (lr >= 0x82478000 && lr < 0x8247A000);
+    if (fromTail) {
+        int n = s_allocTailCount.fetch_add(1, std::memory_order_relaxed) + 1;
+        uint32_t size = ctx.r3.u32;
+        // sub_821B3510 always sets flags=0 (li r6,0)
+        constexpr uint32_t flags = 0;
+
+        // Trace the vtable dispatch chain (Level 1: multi-allocator)
+        uint32_t tlsBase = PPC_LOAD_U32(ctx.r13.u32 + 0);
+        uint32_t allocator = (tlsBase != 0) ? PPC_LOAD_U32(tlsBase + 1676) : 0;
+        uint32_t vtable = (allocator != 0) ? PPC_LOAD_U32(allocator + 0) : 0;
+        uint32_t target = (vtable != 0) ? PPC_LOAD_U32(vtable + 8) : 0;
+
+        // Level 2: sub_828475F8 loads sub-allocator at this[(flags+1)*4]
+        uint32_t subAllocIdx = (flags + 1) * 4;
+        uint32_t subAlloc = (allocator != 0) ? PPC_LOAD_U32(allocator + subAllocIdx) : 0;
+        uint32_t subVtable = (subAlloc != 0) ? PPC_LOAD_U32(subAlloc + 0) : 0;
+        uint32_t subTarget = (subVtable != 0) ? PPC_LOAD_U32(subVtable + 8) : 0;
+
+        printf("[TAIL-AF8] ENTER #%d caller=0x%08X size=%d "
+               "alloc=0x%08X->0x%08X "
+               "subAlloc[+%u]=0x%08X->vtable=0x%08X->Alloc=0x%08X\n",
+               n, lr, size,
+               allocator, target,
+               subAllocIdx, subAlloc, subVtable, subTarget);
+        fflush(stdout);
+    }
+    __imp__sub_821B3510(ctx, base);
+    if (fromTail) {
+        printf("[TAIL-AF8] sub_821B3510(alloc) RETURN r3=0x%08X\n", ctx.r3.u32);
+        fflush(stdout);
+    }
+}
+
+// High-limit probes filtered to only log calls from sub_82478AF8 (0x82478xxx-0x82479xxx)
+extern "C" void __imp__sub_8284E830(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8284E830) {
+    uint32_t lr = (uint32_t)ctx.lr;
+    bool fromTail = (lr >= 0x82478000 && lr < 0x8247A000);
+    if (fromTail) { printf("[TAIL-AF8] sub_8284E830 ENTER caller=0x%08X r3=0x%08X\n", lr, ctx.r3.u32); fflush(stdout); }
+    __imp__sub_8284E830(ctx, base);
+    if (fromTail) { printf("[TAIL-AF8] sub_8284E830 RETURN\n"); fflush(stdout); }
+}
+
+extern "C" void __imp__sub_8284D220(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8284D220) {
+    uint32_t lr = (uint32_t)ctx.lr;
+    bool fromTail = (lr >= 0x82478000 && lr < 0x8247A000);
+    if (fromTail) { printf("[TAIL-AF8] sub_8284D220 ENTER caller=0x%08X\n", lr); fflush(stdout); }
+    __imp__sub_8284D220(ctx, base);
+    if (fromTail) { printf("[TAIL-AF8] sub_8284D220 RETURN\n"); fflush(stdout); }
+}
+
+extern "C" void __imp__sub_8299B4A8(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8299B4A8) {
+    uint32_t lr = (uint32_t)ctx.lr;
+    bool fromTail = (lr >= 0x82478000 && lr < 0x8247A000);
+    if (fromTail) { printf("[TAIL-AF8] sub_8299B4A8 ENTER caller=0x%08X\n", lr); fflush(stdout); }
+    __imp__sub_8299B4A8(ctx, base);
+    if (fromTail) { printf("[TAIL-AF8] sub_8299B4A8 RETURN\n"); fflush(stdout); }
+}
+
+// sub_82852DD0 — "OpenAndProcess" streaming resource loader.
+// Custom hook replacing INIT_PROBE — traces every internal step with thread ID.
+// Flow: sub_8284F468 (find) → sub_82852D18 (process) → sub_8285B088 (flush) → return
+extern "C" void __imp__sub_82852DD0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_DD0_count{0};
+PPC_FUNC_HOOK(sub_82852DD0) {
+    int n = s_DD0_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    uint64_t tid = 0;
+    pthread_threadid_np(nullptr, &tid);
+    printf("[TRACE-DD0] ENTER #%d tid=%llu r3=0x%08X r4=0x%08X r5=0x%08X r6=0x%08X r7=0x%08X r8=0x%08X caller=0x%08X\n",
+           n, tid, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, (uint32_t)ctx.lr);
+    fflush(stdout);
+    __imp__sub_82852DD0(ctx, base);
+    printf("[TRACE-DD0] RETURN #%d tid=%llu r3=0x%08X\n", n, tid, ctx.r3.u32);
+    fflush(stdout);
+}
+
+// sub_82852D18 — Resource processor that hangs at vtable[2] dispatch.
+// Diagnostic hook: prints the resolved vtable target before calling original.
+extern "C" void __imp__sub_82852D18(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_852D18_count{0};
+PPC_FUNC_HOOK(sub_82852D18) {
+    int n = s_852D18_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    uint64_t tid = 0;
+    pthread_threadid_np(nullptr, &tid);
+    uint32_t r5_obj = ctx.r5.u32;
+    uint32_t vtable_ptr = r5_obj ? PPC_LOAD_U32(r5_obj) : 0;
+    uint32_t vtable_slot2 = vtable_ptr ? PPC_LOAD_U32(vtable_ptr + 8) : 0;
+    printf("[TRACE-D18] ENTER #%d tid=%llu r3=0x%08X r4=0x%08X r5=0x%08X vt=0x%08X vt[2]=0x%08X r6=0x%08X r7=0x%08X r8=0x%08X caller=0x%08X\n",
+           n, tid, ctx.r3.u32, ctx.r4.u32, r5_obj, vtable_ptr, vtable_slot2,
+           ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, (uint32_t)ctx.lr);
+    fflush(stdout);
+    __imp__sub_82852D18(ctx, base);
+    printf("[TRACE-D18] RETURN #%d tid=%llu r3=0x%08X\n", n, tid, ctx.r3.u32);
+    fflush(stdout);
+}
+
+// =============================================================================
+// SCENE CREATION PATH DIAGNOSTICS
+// =============================================================================
+// The front-end state machine (sub_82142230) controls scene creation.
+// States 0-2 are XAM dialog states, state 3 is resource loading, states 4-6
+// are scene creation. The scene pointer at 0x831C2458 remains NULL if the
+// state machine never reaches state 3+. These hooks trace the path.
+
+// sub_82142230 — FRONT-END STATE MACHINE (states 0-6)
+// This is the main loop that controls sign-in → storage → save → scene creation.
+// r29 tracks the current state.
+extern "C" void __imp__sub_82142230(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82142230) {
+    printf("[STATE-MACHINE] sub_82142230 ENTER caller=0x%08X\n",
+           static_cast<uint32_t>(ctx.lr));
+    fflush(stdout);
+    __imp__sub_82142230(ctx, base);
+    printf("[STATE-MACHINE] sub_82142230 RETURN\n");
+    fflush(stdout);
+}
+
+// sub_822414E8 — STATE 0: Sign-in check
+// Returns: 0 = not signed in (loop), 1 = signed in (→ state 1), 2 = skip to state 3+
+extern "C" void __imp__sub_822414E8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_state0Count{0};
+PPC_FUNC_HOOK(sub_822414E8) {
+    __imp__sub_822414E8(ctx, base);
+    int n = s_state0Count.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[STATE-0] sub_822414E8 (sign-in check) #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_8223DDA8 — STATE 1: Storage device selection
+// Returns: 1 or 2 = advance to state 2, other = loop
+extern "C" void __imp__sub_8223DDA8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_state1Count{0};
+PPC_FUNC_HOOK(sub_8223DDA8) {
+    __imp__sub_8223DDA8(ctx, base);
+    int n = s_state1Count.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[STATE-1] sub_8223DDA8 (storage device) #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_8223DEE8 — STATE 2: Save/load check
+// Returns: 1 = goto loc_821422FC (advance), 2 = state 8 (jump), other = loop
+extern "C" void __imp__sub_8223DEE8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_state2Count{0};
+PPC_FUNC_HOOK(sub_8223DEE8) {
+    __imp__sub_8223DEE8(ctx, base);
+    int n = s_state2Count.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[STATE-2] sub_8223DEE8 (save/load) #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_821406C8 — PLAYER ACCESSOR (state 3 gate)
+// Reads active player index from 0x82A9172C. Returns NULL if -1 (no player).
+// Returns pointer to 188-byte player slot struct.
+// State 3 checks "newly set" transitions on slot fields to detect content readiness.
+extern "C" void __imp__sub_821406C8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_playerAccessCount{0};
+PPC_FUNC_HOOK(sub_821406C8) {
+    __imp__sub_821406C8(ctx, base);
+    uint32_t slotPtr = ctx.r3.u32;
+    int n = s_playerAccessCount.fetch_add(1, std::memory_order_relaxed);
+
+    // Populate player slot content-readiness fields so state 3's "newly set"
+    // transition detectors fire. On Xbox 360, XAM notification callbacks
+    // write these. In the recomp, we set them here on first call.
+    // The detector pattern: triggers when current != 0 AND shadow == 0.
+    // We write current fields; shadows stay 0 until the game copies them.
+    if (slotPtr != 0 && n == 0) {
+        // slot[56] = DLC/title update content ready (check 4 → sets r29=4)
+        PPC_STORE_U32(slotPtr + 56, 1);
+        // slot[68] = Sign-in completion
+        PPC_STORE_U32(slotPtr + 68, 1);
+        // slot[72] = Storage device selected
+        PPC_STORE_U32(slotPtr + 72, 1);
+        // slot[4] = Profile data loaded
+        PPC_STORE_U32(slotPtr + 4, 1);
+        printf("[STATE-3] Populated player slot 0x%08X content fields (56,68,72,4)\n", slotPtr);
+        fflush(stdout);
+    }
+
+    if (n < 20 || (n % 200) == 0) {
+        uint32_t activeIdx = PPC_LOAD_U32(0x82A9172C);
+        printf("[STATE-3] sub_821406C8 #%d = 0x%08X activeIdx=0x%08X "
+               "s56=0x%X s68=0x%X s72=0x%X s4=0x%X\n",
+               n, slotPtr, activeIdx,
+               slotPtr ? PPC_LOAD_U32(slotPtr + 56) : 0,
+               slotPtr ? PPC_LOAD_U32(slotPtr + 68) : 0,
+               slotPtr ? PPC_LOAD_U32(slotPtr + 72) : 0,
+               slotPtr ? PPC_LOAD_U32(slotPtr + 4) : 0);
+        fflush(stdout);
+    }
+}
+
+// sub_82142F90 — MAIN FRAME UPDATE (called every frame)
+// This drives sub_82142230 and the scene render.
+extern "C" void __imp__sub_82142F90(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_frameUpdateCount{0};
+PPC_FUNC_HOOK(sub_82142F90) {
+    int n = s_frameUpdateCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5 || (n % 500) == 0) {
+        uint32_t scenePtr = PPC_LOAD_U32(0x831C2458);
+        uint32_t innerState4 = PPC_LOAD_U32(0x82BF99D4); // sub_822440F8 inner state
+        uint32_t innerState6 = PPC_LOAD_U32(0x82BF9838); // sub_822438B0 inner state
+        uint32_t playerIdx = PPC_LOAD_U32(0x82A95478);   // active player/episode index
+        uint32_t profileIdx = PPC_LOAD_U32(0x82A95474);  // active profile index
+        printf("[FRAME-UPDATE] #%d scene=0x%08X s4inner=%d s6inner=%d "
+               "playerIdx=0x%08X profileIdx=0x%08X\n",
+               n, scenePtr, innerState4, innerState6, playerIdx, profileIdx);
+        fflush(stdout);
+    }
+    __imp__sub_82142F90(ctx, base);
+}
+
+// sub_822440F8 — STATE 4 INNER STATE MACHINE (7 states, save/content)
+// Called by outer state 4. Returns: 0=working, 1=done/error(→r29=7), 2=advance(→r29=5)
+//
+// BYPASS: This function's entire purpose is Xbox 360 save device selection:
+//   State 0: sub_82241428 scans controllers for one WITHOUT storage mapped
+//   State 1: Validates storage device via content enumeration
+//   State 2: Polls content loading (sub_82243F00)
+//   State 3-6: Save slot enumeration and read/write
+//
+// None of this works in recomp (no controllers, no storage devices).
+// sub_82241428 always returns -1 (no controller found) → state 0 returns 1 (error).
+//
+// Fix: Return 2 (success, no-save path) directly. This is what inner state 6
+// returns naturally when no save data exists. The game proceeds to state 5
+// (level selection → scene load dispatch) and then state 6 (scene creation).
+//
+// Side effects reproduced:
+//   - 0x82A95478 (playerIdx) set to 0 (base game, player 0)
+//   - Profile index left at default (game sets it during state 5)
+extern "C" void __imp__sub_822440F8(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_822440F8) {
+    static bool s_logged = false;
+
+    // Ensure player/episode index is set to 0 (base game)
+    uint32_t playerIdx = PPC_LOAD_U32(0x82A95478);
+    if (playerIdx == 0xFFFFFFFF) {
+        PPC_STORE_U32(0x82A95478, 0);
+    }
+
+    if (!s_logged) {
+        s_logged = true;
+        printf("[STATE-4-INNER] BYPASS: returning 2 (no-save success). "
+               "playerIdx=0x%08X, profileIdx=0x%08X\n",
+               PPC_LOAD_U32(0x82A95478), PPC_LOAD_U32(0x82A95474));
+        fflush(stdout);
+    }
+
+    // Return 2 = success (outer state machine sets r29=5, advancing to game start)
+    ctx.r3.u64 = 2;
+}
+
+// sub_822438B0 — STATE 6 INNER STATE MACHINE (8 states, scene/world loading)
+// Inner state at 0x82BF9838 (lis -32064 + offset -26568)
+// Calls sub_82242910 (15-state scene creation sub-machine) in state 2
+extern "C" void __imp__sub_822438B0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_state6InnerCount{0};
+PPC_FUNC_HOOK(sub_822438B0) {
+    uint32_t stateBefore = PPC_LOAD_U32(0x82BF9838);
+    __imp__sub_822438B0(ctx, base);
+    uint32_t stateAfter = PPC_LOAD_U32(0x82BF9838);
+    int n = s_state6InnerCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 30 || stateBefore != stateAfter || (n % 500) == 0) {
+        uint32_t sceneState = PPC_LOAD_U32(0x82BF9848); // sub_82242910 state (0-14)
+        uint32_t scenePtr = PPC_LOAD_U32(0x82BF3A88);   // scene object pointer
+        uint32_t errorCode = PPC_LOAD_U32(0x82A9546C);  // error code
+        printf("[STATE-6-INNER] sub_822438B0 #%d ret=%d state=%d→%d "
+               "sceneCreation=%d sceneObj=0x%08X err=%d\n",
+               n, ctx.r3.s32, stateBefore, stateAfter,
+               sceneState, scenePtr, errorCode);
+        fflush(stdout);
+    }
+}
+
+// sub_822422E0 — STATE 5: GAME START (level selection + scene load dispatch)
+// Reads episode index from 0x82B39504 to pick level 12/13/14
+// State variable at 0x82BF9834 (NOT 0x829F9834)
+//
+// IMPORTANT: After this runs, it writes 2 to 0x82BF9834 ("done").
+// sub_82242910 (scene creation, called from state 6) reads the SAME address
+// at its internal state 4. Value 2 triggers error 34 (case 2 in platform mode switch).
+// On Xbox 360, sub_8223DAA0 returns 0 in the scene creation context (not yet ready),
+// so sub_82242910 takes the normal path (state 0→1) and never reads 0x82BF9834.
+// In the recomp, sub_8223DAA0 returns 1 (ready, because sign-in emulation succeeds),
+// causing the fast path (state 0→4) which hits the stale value 2 → error 34.
+//
+// Fix: Reset 0x82BF9834 to 0 after state 5 completes, so scene creation can proceed.
+extern "C" void __imp__sub_822422E0(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_822422E0) {
+    uint32_t stateBefore = PPC_LOAD_U32(0x82BF9834);
+    uint32_t episode = PPC_LOAD_U32(0x82B39504);
+    printf("[STATE-5-START] sub_822422E0 ENTER state=%d episode=%d\n",
+           stateBefore, episode);
+    fflush(stdout);
+    __imp__sub_822422E0(ctx, base);
+    uint32_t stateAfter = PPC_LOAD_U32(0x82BF9834);
+    printf("[STATE-5-START] sub_822422E0 ret=%d state=%d→%d\n",
+           ctx.r3.s32, stateBefore, stateAfter);
+    fflush(stdout);
+
+    // Reset the state variable so sub_82242910 (scene creation) doesn't
+    // see value 2 at its internal state 4 and trigger error 34.
+    if (stateAfter == 2) {
+        PPC_STORE_U32(0x82BF9834, 0);
+        printf("[STATE-5-START] Reset 0x82BF9834: 2 → 0 (prevent scene creation error 34)\n");
+        fflush(stdout);
+    }
+}
+
+// =============================================================================
+// SCENE STATE MACHINE — PLATFORM ADAPTATION HOOKS
+// These hooks replace Xbox 360-specific blocking patterns with immediate-
+// completion equivalents, preserving all game logic. See docs/rewrite/ for
+// the full research documentation (27 files).
+// =============================================================================
+
+// sub_8223DB20 — SIGN-IN NOTIFICATION GUARD
+// Called by ~30 states across sub_82242910. Polls XNotifyGetNext(handle, 10)
+// for XN_SYS_SIGNINCHANGED. If a notification arrives, triggers error 33.
+// In the recomp, RexGlue broadcasts 0x0A at startup which can cause spurious
+// error 33. Safe to stub: no game-state side effects, pure notification check.
+PPC_FUNC_HOOK(sub_8223DB20) {
+    ctx.r3.u64 = 0;  // No sign-in change detected
+}
+
+// sub_82240B78 — STORAGE DEVICE NOTIFICATION GUARD
+// Called by ~17 states. Polls XNotifyGetNext(handle, 11) for
+// XN_SYS_STORAGEDEVICESCHANGED. Triggers error 34 if device removed.
+// RexGlue never broadcasts 0x0B, so this already returns 0 in practice.
+// Stub makes it explicit and eliminates XNotifyGetNext overhead.
+PPC_FUNC_HOOK(sub_82240B78) {
+    ctx.r3.u64 = 0;  // No storage device change detected
+}
+
+// sub_82240B08 — CONTENT DEVICE READINESS CHECK
+// Called by state 4 of sub_82242910. Checks if save device handle is valid
+// via XamContentGetDeviceData. On Xbox 360, an async content creation
+// populates the handle; in the recomp, it stays null because no async op runs.
+// Fix: Set readiness flags and return 1 (device ready). This makes state 4
+// jump directly to state 9 (scene loading), which is the normal path when
+// a valid save device already exists.
+PPC_FUNC_HOOK(sub_82240B08) {
+    PPC_STORE_U8(0x82BF3A77, 1);   // g_sceneReady = 1
+    PPC_STORE_U8(0x82BF3CDA, 1);   // g_contentReady = 1
+    ctx.r3.u64 = 1;                // Device is ready
+}
+
+// sub_8224FFC8 — XAM DIALOG RESULT PROCESSOR
+// Called 68 times across the codebase. Checks if an Xbox Guide dialog was
+// accepted (r3=8) or cancelled (r3=11). On Xbox 360, this reads the Guide
+// overlay result. In the recomp, no Guide exists, so it always returns 0,
+// preventing the step counter at 0x82BFA13C from advancing. This causes
+// the ready-signal at 0x82BF9B70 to oscillate 1→2→1→2 forever.
+// Fix: Auto-accept dialogs (return 1 for accept, 0 for cancel).
+PPC_FUNC_HOOK(sub_8224FFC8) {
+    uint32_t queryType = ctx.r3.u32;
+    if (queryType == 8) {
+        ctx.r3.u64 = 1;  // Accept — simulate "user pressed A"
+    } else {
+        ctx.r3.u64 = 0;  // Cancel / other — not pressed
+    }
+}
+
+// sub_8284A7E8 — CONTENT CREATION INITIATOR (populates slot[136], calls XamContentCreateEx)
+// After XamContentCreateEx, this function checks if return == 997 (IO_PENDING).
+// If 997: sets slot state = 17 (async path — correct, measures file size later).
+// If not 997: sets slot state = 16 (sync path — skips file size → size mismatch).
+// RexGlue SHOULD return 997 when overlapped is non-null, but we need to verify.
+extern "C" void __imp__sub_8284A7E8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_contentCreateCount{0};
+PPC_FUNC_HOOK(sub_8284A7E8) {
+    uint32_t slotIdx = ctx.r4.u32;
+    int n = s_contentCreateCount.fetch_add(1, std::memory_order_relaxed);
+    printf("[CONTENT-CREATE] sub_8284A7E8 #%d ENTER slotIdx=%d r5=0x%08X r6=0x%08X\n",
+           n, slotIdx, ctx.r5.u32, ctx.r6.u32);
+    fflush(stdout);
+
+    __imp__sub_8284A7E8(ctx, base);
+
+    // After the function runs, check what slot state was set.
+    // Table at 0x83192C58, stride 160 bytes. State is at slot+0 (first dword).
+    uint32_t tableBase = 0x83192C58;
+    uint32_t slotAddr = tableBase + (slotIdx * 160);
+    uint32_t slotState = PPC_LOAD_U32(slotAddr);
+    uint32_t slot136 = PPC_LOAD_U32(slotAddr + 136);
+    uint32_t slot144 = PPC_LOAD_U32(slotAddr + 144);
+    printf("[CONTENT-CREATE] sub_8284A7E8 #%d RETURN ret=%d slotState=%d "
+           "slot[136]=%u slot[144]=%u (state 16=sync/BAD, 17=async/GOOD)\n",
+           n, ctx.r3.s32, slotState, slot136, slot144);
+    fflush(stdout);
+}
+
+// sub_822417B0 — TWO-PHASE CONTENT SIZE CHECKER
+// Phase 1 (r4=1): initiates async content open.
+// Phase 2 (r4=0): polls for completion, writes size delta to 0x82BF99C8.
+// If delta < 0, state 14 transitions to state 13 (error restart loop).
+// Fix: After poll completes, clamp delta to >= 0 (no storage deficit on PC).
+// Only 2 callers (states 12 and 14 of sub_82242910). Safe and contained.
+extern "C" void __imp__sub_822417B0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_twoPhaseCount{0};
+PPC_FUNC_HOOK(sub_822417B0) {
+    uint32_t phase = ctx.r4.u32;
+    int n = s_twoPhaseCount.fetch_add(1, std::memory_order_relaxed);
+
+    __imp__sub_822417B0(ctx, base);
+
+    int32_t delta = static_cast<int32_t>(PPC_LOAD_U32(0x82BF99C8));
+    if (delta < 0) {
+        PPC_STORE_U32(0x82BF99C8, 0);
+        printf("[TWO-PHASE] sub_822417B0 #%d phase=%d ret=%d CLAMPED delta %d→0 "
+               "(no storage deficit on PC)\n",
+               n, phase, ctx.r3.s32, delta);
+        fflush(stdout);
+    } else if (n < 20 || (n % 100) == 0) {
+        printf("[TWO-PHASE] sub_822417B0 #%d phase=%d ret=%d delta=%d\n",
+               n, phase, ctx.r3.s32, delta);
+        fflush(stdout);
+    }
+}
+
+// =============================================================================
+// sub_82A00DC0 — ALIGNMENT-AWARE MEMCPY (582 call sites)
+// =============================================================================
+// This is a byte-level memcpy with alignment optimization: r3=dst, r4=src, r5=count.
+// The GPU/rendering function sub_8285AE20 passes a corrupted count of 0xFFFFFFDB
+// (~4GB unsigned) due to uninitialized GPU state. The memcpy then writes sequentially
+// through memory, hitting stack guard pages in the 0x70000000-0x7F000000 range
+// (which the guard handler blindly unprotects), causing what APPEARS to be a stack
+// overflow but is actually a runaway memcpy with a corrupt length.
+//
+// Fix: Replace with native memcpy + size sanity check. Native memcpy is also
+// significantly faster than the byte-level recompiled PPC version.
+extern "C" void __imp__sub_82A00DC0(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82A00DC0) {
+    uint32_t dst = ctx.r3.u32;
+    uint32_t src = ctx.r4.u32;
+    uint32_t count = ctx.r5.u32;
+
+    // Sanity check: reject obviously corrupt lengths (> 256MB)
+    // No legitimate memcpy in GTA IV should exceed this.
+    constexpr uint32_t kMaxReasonableSize = 256 * 1024 * 1024;
+    if (count > kMaxReasonableSize) {
+        static int s_warnCount = 0;
+        if (s_warnCount++ < 10) {
+            printf("[MEMCPY-GUARD] sub_82A00DC0: rejecting corrupt count=0x%08X (%u) "
+                   "dst=0x%08X src=0x%08X\n", count, count, dst, src);
+            fflush(stdout);
+        }
+        // Return dst (standard memcpy behavior) without copying
+        ctx.r3.u64 = dst;
+        return;
+    }
+
+    // Use native memcpy for speed and correctness
+    if (count > 0 && dst != 0 && src != 0) {
+        std::memcpy(reinterpret_cast<void*>(base + dst),
+                    reinterpret_cast<const void*>(base + src), count);
+    }
+    // Restore original dst in r3 (memcpy returns dst — saved at -8(r1) by prologue)
+    ctx.r3.u64 = PPC_LOAD_U64(ctx.r1.u32 + -8);
+}
+
+// =============================================================================
+// sub_821910D0 — XAUDIO RENDER THREAD PUMP
+// =============================================================================
+// This function is the audio render thread's per-frame worker. It enters a
+// critical section, processes audio buffers, then calls vtable[17] on the
+// XAudioRenderDriverEndpoint (XAudioRenderDriverEndpoint::Present / DMA
+// trigger). On Xbox 360, vtable[17] points into xaudio2.xex code. In the
+// recomp, audio is handled natively via SDL2 and XAudioRenderDriverInitialize
+// is intentionally not emulated (we're not emulating hardware), so the vtable
+// contains garbage (0x000F4000). The MISSING-FUNC handler silently skips the
+// call and execution continues correctly — the function handles critical
+// section, buffer swap, frame counter, and event signaling properly.
+//
+// Key addresses (computed from lis/addi sequences in the recomp):
+//   Critical section:   0x82B2834C (r28+4)
+//   Audio device global: PPC_LOAD_U32(0x831D53EC) → r30
+//   Frame counter:      0x831D53F0 (atomic increment)
+//   Buffer swap base:   0x831D53F0 / 0x831D540C (7 u32 double-buffer)
+//
+// No hook needed — the default PPC_WEAK_FUNC passthrough is correct.
+// The MISSING-FUNC handler silently skips the broken vtable call (42 fprintf
+// to stderr per run — negligible noise). All function logic including critical
+// section, audio buffer drain, frame submission, frame counter increment, and
+// buffer swap operates correctly with the skip.
+
+// =============================================================================
+
+// sub_82242910 — SCENE CREATION SUB-MACHINE (15 states, 0-14)
+// Called from sub_822438B0 state 2. Creates the game world.
+// State counter at 0x82BF9848 (lis r26=-32064 → 0x82C00000, offset -26552 → -0x67B8).
+// NOTE: sub_822438B0 uses 0x82BF9838 (offset -26568). They are DIFFERENT state variables!
+// Scene object written to 0x82BF3A88.
+//
+// FIX: Intercept fast path (state 0→4) and force normal path (state 0→1).
+// On Xbox 360, sub_8223DAA0 returns 0 at state 0 after a device enumeration
+// delay, taking the normal path 0→1→2→3→4. In the recomp, RexGlue reports
+// devices as immediately ready, so sub_8223DAA0 returns 1 (not ready / fast
+// path) on the first call, jumping directly to state 4. This skips states
+// 1-3 which write value 6 to 0x82A9546C. State 4 then reads stale data
+// and triggers error 34 in the platform mode switch.
+//
+// Fix: If state jumped 0→4, force it back to 1 (normal path entry).
+// State 1 has no Xbox hardware dependencies. States 1-3 set up the
+// prerequisites that state 4 expects. sub_8223DB20 (used by state 4+)
+// cannot fail — both return paths are valid.
+//
+// Defense-in-depth: The sub_822422E0 hook (state 5) also resets 0x82BF9834
+// from 2→0 as a safety net in case the fast path is still somehow taken.
+extern "C" void __imp__sub_82242910(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_sceneCreateCount{0};
+PPC_FUNC_HOOK(sub_82242910) {
+    uint32_t stateBefore = PPC_LOAD_U32(0x82BF9848);  // sub_82242910's own state
+    uint32_t modeVal = PPC_LOAD_U32(0x82BF9844);  // platform mode switch (offset -26556)
+    uint32_t oldModeVal = PPC_LOAD_U32(0x82BF9834); // legacy diagnostic addr
+
+    // Intercept fast path 0→4: force normal path entry at state 1
+    if (stateBefore == 0) {
+        printf("[SCENE-CREATE] PRE state=0: platformMode@0x82BF9844=%d "
+               "legacy@0x82BF9834=%d\n", modeVal, oldModeVal);
+        fflush(stdout);
+    }
+
+    // PRE-CALL FIX: Ensure platformMode is 3 BEFORE the function runs.
+    // State 4's scene gate requires (val-3) unsigned ≤ 1 → only 3 or 4
+    // call sub_8223F308 (scene creation). After state 4, we reset to 0.
+    if (stateBefore <= 4) {
+        uint32_t platMode = PPC_LOAD_U32(0x82BF9844);
+        if (platMode != 3 && platMode != 4) {
+            PPC_STORE_U32(0x82BF9844, 3);
+            printf("[SCENE-CREATE] PRE-FIX platformMode@0x82BF9844: %d→3 "
+                   "(for scene creation gate)\n", platMode);
+            fflush(stdout);
+        }
+    }
+
+    __imp__sub_82242910(ctx, base);
+    uint32_t stateAfter = PPC_LOAD_U32(0x82BF9848);
+
+    if (stateBefore == 0 && stateAfter == 4) {
+        PPC_STORE_U32(0x82BF9848, 1);
+        stateAfter = 1;
+        printf("[SCENE-CREATE] INTERCEPTED fast path 0→4, forced to 0→1 "
+               "(normal path entry)\n");
+        fflush(stdout);
+    }
+
+    // NOTE: platformMode stays 3 through states 10/11/12/14.
+    // State 11 with {3,4} routes to state 12 (save overwrite check).
+    // State 12's content size comparison is the current blocker — see docs/rewrite/28-38.
+
+    int n = s_sceneCreateCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 50 || stateBefore != stateAfter || (n % 200) == 0) {
+        uint32_t sceneObj = PPC_LOAD_U32(0x82BF3A88);
+        uint32_t errorCode = PPC_LOAD_U32(0x82A9546C);
+        uint32_t platMode = PPC_LOAD_U32(0x82BF9844);
+        printf("[SCENE-CREATE] sub_82242910 #%d ret=%d state=%d→%d "
+               "platMode=%d sceneObj=0x%08X err=%d\n",
+               n, ctx.r3.s32, stateBefore, stateAfter, platMode, sceneObj, errorCode);
+        fflush(stdout);
+    }
+}
+
+// sub_8223E028 — STATE MACHINE EXIT (writes completion bytes)
+// Called when r29 > 6 — writes to 0x831D5348 and 0x831D5337.
+// If this is never called, the state machine is stuck.
+extern "C" void __imp__sub_8223E028(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_8223E028) {
+    printf("[STATE-EXIT] sub_8223E028 ENTER (state machine completion!) caller=0x%08X\n",
+           static_cast<uint32_t>(ctx.lr));
+    fflush(stdout);
+    __imp__sub_8223E028(ctx, base);
+    printf("[STATE-EXIT] sub_8223E028 RETURN\n");
+    fflush(stdout);
+}
+
+// sub_821B4108 — ACTIVE PLAYER COUNT (for state machine gate)
+// Uses player pool at 0x82B29F18. Returns count of active players.
+extern "C" void __imp__sub_821B4108(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_activeCountCalls{0};
+PPC_FUNC_HOOK(sub_821B4108) {
+    __imp__sub_821B4108(ctx, base);
+    int n = s_activeCountCalls.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[PLAYER-COUNT] sub_821B4108 #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_82241370 — Called at top of sub_82142230 (before state switch)
+extern "C" void __imp__sub_82241370(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_preStateCount{0};
+PPC_FUNC_HOOK(sub_82241370) {
+    __imp__sub_82241370(ctx, base);
+    int n = s_preStateCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5) {
+        printf("[PRE-STATE] sub_82241370 #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_821428C8 — Called each iteration of state machine loop (per-frame update within states)
+extern "C" void __imp__sub_821428C8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_perIterCount{0};
+PPC_FUNC_HOOK(sub_821428C8) {
+    __imp__sub_821428C8(ctx, base);
+    int n = s_perIterCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5 || (n % 500) == 0) {
+        printf("[ITER] sub_821428C8 #%d\n", n);
+        fflush(stdout);
+    }
+}
+
+// =============================================================================
+// sub_821B5890 — Frame Sync Wait (VBlank event)
+//
+// Called at the end of each frame in the main game loop (sub_82140088).
+// Original PPC code:
+//   if (byte[r3+4040] == 0)
+//       sub_828497D8(dword[r3+4024]);  // NtWaitForSingleObjectEx(event, INFINITE)
+//
+// On Xbox 360, the GPU VBlank interrupt signals this event each frame.
+// In the recomp there is no VBlank interrupt — the event is never signaled,
+// so the game thread blocks forever after frame 5.
+//
+// Fix: set the skip-flag byte (r3+4040) to 1 so the wait is bypassed,
+// then call the original to execute the rest of the function (timer updates,
+// sub_821B7EB8, sub_821B7D28, etc.).
+// =============================================================================
+extern "C" void __imp__sub_821B5890(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_821B5890) {
+    uint32_t timer_obj = ctx.r3.u32;
+    // Force the "skip wait" flag so the NtWaitForSingleObjectEx call is bypassed.
+    // Offset 4040 (0xFC8) is the VBlank-ready flag: 0 = wait, non-zero = skip.
+    PPC_STORE_U8(timer_obj + 4040, 1);
+    __imp__sub_821B5890(ctx, base);
+}
+
+// sub_82212EC0 — Audio device connection state machine step.
+// Called every 100ms from sub_82212F38's yield loop. On Xbox 360, an async kernel
+// callback writes struct+2016 = 0 (connected) after XAudio2 device arrival.
+// On PC/macOS that callback never fires, so the loop spins forever.
+// Fix: write state=0 (connected) and endpoint_count=1 on first call.
+extern "C" void __imp__sub_82212EC0(PPCContext &ctx, uint8_t *base);
+static std::atomic<bool> s_audioDeviceFixed{false};
+PPC_FUNC_HOOK(sub_82212EC0) {
+    if (!s_audioDeviceFixed.exchange(true, std::memory_order_relaxed)) {
+        uint32_t structPtr = ctx.r3.u32;
+        // struct+2016 = connection state: 1=connecting, 0=connected
+        PPC_STORE_U32(structPtr + 2016, 0);
+        // struct+288 = endpoint count: must be >= 1 for downstream init
+        PPC_STORE_U32(structPtr + 288, 1);
+        printf("[AUDIO-FIX] sub_82212EC0: forced device state=connected (struct+2016=0, struct+288=1) at struct=0x%08X\n",
+               structPtr);
+        fflush(stdout);
+    }
+    // Skip the original — it calls sub_8220FDB8 which tries Xbox async I/O
+    return;
+}
+
+// sub_82849918 — Yield/sleep function called each state machine iteration
+extern "C" void __imp__sub_82849918(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_yieldCount{0};
+PPC_FUNC_HOOK(sub_82849918) {
+    uint32_t caller = (uint32_t)ctx.lr;
+    __imp__sub_82849918(ctx, base);
+    int n = s_yieldCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 10 || (n % 1000) == 0) {
+        printf("[YIELD] sub_82849918 #%d caller=0x%08X\n", n, caller);
+        fflush(stdout);
+    }
+}
+
+// sub_8224FA48 — Resource readiness check (called in state 3 and every iteration)
+// Reads 0x82BF9B70: returns 0 when value is -1 (no dialog pending), 1 when >= 0.
+// State 3 logic: return 0 → proceed through offset checks → state 4.
+//                return 1 → jump to loc_82142504 → stays in state 3.
+// Natural default of -1 is CORRECT — means "no XAM dialog pending, advance."
+extern "C" void __imp__sub_8224FA48(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_resCheckCount{0};
+PPC_FUNC_HOOK(sub_8224FA48) {
+    __imp__sub_8224FA48(ctx, base);
+    int n = s_resCheckCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[RES-CHECK] sub_8224FA48 #%d = %d (0x82BF9B70=0x%08X)\n",
+               n, ctx.r3.s32, PPC_LOAD_U32(0x82BF9B70));
+        fflush(stdout);
+    }
+}
+
+// sub_821B6FD0 — Multiplayer notification check (state 3 gate 3)
+// Must return 0 for state 3 to proceed to offset checks.
+extern "C" void __imp__sub_821B6FD0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_mpNotifyCount{0};
+PPC_FUNC_HOOK(sub_821B6FD0) {
+    __imp__sub_821B6FD0(ctx, base);
+    int n = s_mpNotifyCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 200) == 0) {
+        printf("[MP-NOTIFY] sub_821B6FD0 #%d = %d (need 0 for state4)\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
+}
+
+// sub_8223CAD8 — Called at start of state 3
+extern "C" void __imp__sub_8223CAD8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_state3InitCount{0};
+PPC_FUNC_HOOK(sub_8223CAD8) {
+    int n = s_state3InitCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5) {
+        printf("[STATE-3-INIT] sub_8223CAD8 #%d ENTER\n", n);
+        fflush(stdout);
+    }
+    __imp__sub_8223CAD8(ctx, base);
+    if (n < 5) {
+        printf("[STATE-3-INIT] sub_8223CAD8 #%d RETURN\n", n);
+        fflush(stdout);
+    }
+}
+
+// sub_82219AC0 — Called with player struct in state 3 (checks byte 361)
+extern "C" void __imp__sub_82219AC0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_playerCheckCount{0};
+PPC_FUNC_HOOK(sub_82219AC0) {
+    int n = s_playerCheckCount.fetch_add(1, std::memory_order_relaxed);
+    __imp__sub_82219AC0(ctx, base);
+    if (n < 5 || (n % 500) == 0) {
+        printf("[PLAYER-CHECK] sub_82219AC0 #%d r3=0x%08X\n", n, ctx.r3.u32);
+        fflush(stdout);
+    }
+}
+
+// sub_82254FE0 — XAM DIALOG COMPLETION (writes 1 to 0x82BF9B70 = "ready")
+// This is the ONLY function that sets the resource readiness dword to a non-negative value.
+// If this is never called, sub_8224FA48 always returns 0 and state 3 loops forever.
+extern "C" void __imp__sub_82254FE0(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_82254FE0) {
+    printf("[READY-SIGNAL] sub_82254FE0 ENTER — writing 1 to 0x82BF9B70! caller=0x%08X\n",
+           static_cast<uint32_t>(ctx.lr));
+    printf("[READY-SIGNAL] args: r3=0x%08X r4=0x%08X r5=0x%08X r6=0x%08X r7=0x%08X r8=0x%08X r9=0x%08X r10=0x%08X\n",
+           ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, ctx.r9.u32, ctx.r10.u32);
+    fflush(stdout);
+    __imp__sub_82254FE0(ctx, base);
+    printf("[READY-SIGNAL] sub_82254FE0 RETURN — 0x82BF9B70 now = 0x%08X\n",
+           PPC_LOAD_U32(0x82BF9B70));
+    fflush(stdout);
+}
+
+// sub_8224FA38 — READY RESET (writes -1 to 0x82BF9B70 = "not ready")
+extern "C" void __imp__sub_8224FA38(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_resetCount{0};
+PPC_FUNC_HOOK(sub_8224FA38) {
+    int n = s_resetCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 10) {
+        printf("[READY-RESET] sub_8224FA38 #%d — resetting 0x82BF9B70 to -1. caller=0x%08X\n",
+               n, static_cast<uint32_t>(ctx.lr));
+        fflush(stdout);
+    }
+    __imp__sub_8224FA38(ctx, base);
+}
+
+// sub_8214C8C8 — READY COUNTER (increments 0x82BF9B70 toward 4)
+extern "C" void __imp__sub_8214C8C8(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_counterCount{0};
+PPC_FUNC_HOOK(sub_8214C8C8) {
+    uint32_t before = PPC_LOAD_U32(0x82BF9B70);
+    __imp__sub_8214C8C8(ctx, base);
+    uint32_t after = PPC_LOAD_U32(0x82BF9B70);
+    int n = s_counterCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 10 || before != after || (n % 500) == 0) {
+        printf("[READY-COUNTER] sub_8214C8C8 #%d — 0x82BF9B70: 0x%08X -> 0x%08X\n",
+               n, before, after);
+        fflush(stdout);
+    }
+}
+
+// sub_8223F9F0 — XAM DIALOG FLOW (big function that calls sub_82254FE0 many times)
+extern "C" void __imp__sub_8223F9F0(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_xamFlowCount{0};
+PPC_FUNC_HOOK(sub_8223F9F0) {
+    int n = s_xamFlowCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5) {
+        printf("[XAM-FLOW] sub_8223F9F0 #%d ENTER caller=0x%08X\n",
+               n, static_cast<uint32_t>(ctx.lr));
+        fflush(stdout);
+    }
+    __imp__sub_8223F9F0(ctx, base);
+    if (n < 5) {
+        printf("[XAM-FLOW] sub_8223F9F0 #%d RETURN r3=0x%08X\n", n, ctx.r3.u32);
+        fflush(stdout);
+    }
+}
+
+// sub_8214B168 — Called in sub_8214C8C8 after readiness check
+extern "C" void __imp__sub_8214B168(PPCContext &ctx, uint8_t *base);
+static std::atomic<int> s_postReadyCount{0};
+PPC_FUNC_HOOK(sub_8214B168) {
+    __imp__sub_8214B168(ctx, base);
+    int n = s_postReadyCount.fetch_add(1, std::memory_order_relaxed);
+    if (n < 5 || (n % 500) == 0) {
+        printf("[POST-READY] sub_8214B168 #%d = %d\n", n, ctx.r3.s32);
+        fflush(stdout);
+    }
 }
 
 // =============================================================================
