@@ -2416,8 +2416,13 @@ PPC_FUNC_HOOK(sub_821B4108) {
     __imp__sub_821B4108(ctx, base);
     int n = s_activeCountCalls.fetch_add(1, std::memory_order_relaxed);
     if (n < 20 || (n % 200) == 0) {
-        printf("[PLAYER-COUNT] sub_821B4108 #%d = %d\n", n, ctx.r3.s32);
+        printf("[PLAYER-COUNT] sub_821B4108 #%d = %d (forcing 1)\n", n, ctx.r3.s32);
         fflush(stdout);
+    }
+    // Force at least 1 active player so the front-end state machine
+    // advances past state 0 (sub_822414E8 "press start" gate)
+    if (ctx.r3.s32 <= 0) {
+        ctx.r3.u64 = 1;
     }
 }
 

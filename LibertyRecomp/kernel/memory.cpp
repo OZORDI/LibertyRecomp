@@ -91,6 +91,26 @@ void Memory::PopulateFunctionTableAndVtables()
         ctx.r3.u32 = 0; // Return success
     });
 
+    // Streaming resource callbacks - reached via vtable dispatch from sub_8286C238
+    // at offset +0x1DC (0x8286C414). Called 144 times during sub_827C2420
+    // (activate-streaming) inside the subsystem init chain (sub_821412B8).
+    // Without these, the init chain loops forever and the game never reaches
+    // the front-end state machine or world init.
+    // TODO: Add these to gta4_config.toml [functions] and re-run codegen
+    //       for full recompiled implementations.
+    InsertFunction(0x82AE5F34, [](PPCContext& ctx, uint8_t* base) {
+        // Streaming resource load callback - return success
+        ctx.r3.u32 = 0;
+    });
+    InsertFunction(0x82AE5EBC, [](PPCContext& ctx, uint8_t* base) {
+        // Streaming resource init callback - return success
+        ctx.r3.u32 = 0;
+    });
+    InsertFunction(0x82AE5F1C, [](PPCContext& ctx, uint8_t* base) {
+        // Streaming resource callback variant - return success
+        ctx.r3.u32 = 0;
+    });
+
     fprintf(stderr, "[Memory] InsertFunction stubs done, calling PrePopulateVtables...\n");
     // Pre-populate vtables with function pointers extracted from XEX
     // This ensures vtables have valid entries before game code runs
@@ -149,6 +169,55 @@ void Memory::PopulateFunctionTableAndVtables()
     PPC_STORE_U32(0x8207BBA0, 0x826F26B8);
 
     fprintf(stderr, "[Memory] Manual vtables done\n");
+
+    // ==========================================================================
+    // XAM Sign-In State Emulation
+    // ==========================================================================
+    // On Xbox 360, the XAM kernel writes the sign-in state byte for each user
+    // slot when a controller signs in. In the recomp, this never happens, so the
+    // front-end state machine (sub_82142230) loops forever at state 0 because:
+    //
+    //   sub_822414E8 (sign-in check)
+    //     → sub_821B4108 (count active player slots)
+    //       → sub_822094B8(slot_N) reads byte[inner_ptr+36]
+    //         → slot 0 inner_ptr = 0x831C4FF8 (set by sub_821B4660)
+    //         → byte[0x831C501C] = 0 ← never written in recomp
+    //     → returns 0 → state 0 loops forever → scene never created
+    //
+    // Fix: Set sign-in state byte for player 0 to non-zero (1 = signed in).
+    // This lets sub_821B4108 return 1 active player, advancing the state machine
+    // past state 0 to state 3+ where scene creation occurs.
+    //
+    // Addresses (verified via Python from sub_821B4660 disassembly):
+    //   inner_ptr base = lis(-31972) + 20472 = 0x831C4FF8
+    //   sign-in byte   = inner_ptr[0] + 36   = 0x831C501C
+    // ==========================================================================
+    PPC_STORE_U8(0x831C501C, 1);  // Player 0 sign-in state = signed in
+    fprintf(stderr, "[Memory] XAM sign-in state: wrote 1 to byte 0x831C501C (player 0 active)\n");
+
+    // ==========================================================================
+    // Front-End Readiness Flag
+    // ==========================================================================
+    // On Xbox 360, sub_821200D0 runs the save state machine (sub_821E6508)
+    // which calls XAM dialog flow (sub_8223F9F0) → sub_82254FE0 writes 1 to
+    // 0x82BF9B70, signaling that sign-in/storage/content setup is complete.
+    //
+    // In the recomp, sub_821200D0 is at address 0x821200D0 — BELOW the
+    // generated code range (0x82140000+). It was never recompiled and never
+    // runs. The front-end state machine (sub_82142230) gets stuck in state 3
+    // because sub_8224FA48 reads 0x82BF9B70 (initialized to -1 = "not ready")
+    // and returns 0 forever.
+    //
+    // Fix: Set the readiness flag directly. Liberty's save_system.cpp handles
+    // save enumeration, and RexGlue provides the XAM subsystem. The state
+    // machine's purpose (sign-in + storage + content setup) is already
+    // fulfilled by our initialization code.
+    // ==========================================================================
+    // NOTE: 0x82BF9B70 must stay at -1 (its natural default). This means
+    // "no XAM dialog pending" which is the correct path for state 3 → state 4.
+    // Writing 1 here was WRONG — it made sub_8224FA48 return 1, which branches
+    // to the dialog-handling path (loc_82142504) that loops back to state 3.
+    // Additionally, this write gets overwritten by XEX PE data section loading anyway.
     // NOTE: Function table protection DISABLED
     // The region 0x831F0000+ overlaps with texture buffer addresses that the game
     // legitimately writes to during texture tiling/swizzling operations (sub_829E4970).
