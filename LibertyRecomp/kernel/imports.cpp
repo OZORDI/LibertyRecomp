@@ -763,11 +763,15 @@ PPC_FUNC_HOOK(sub_82168C08) {
   SignalSemaphoreByGuestAddr(0x83130008, 6);
 }
 
-// sub_82169B00 - Audio thread sync (Xbox worker model not needed on PC)
-PPC_FUNC_HOOK(sub_82169B00) { ctx.r3.u32 = 0; }
+// sub_82169B00 - Audio thread sync — REMOVED: was preventing audio worker
+// threads from constructing sound objects. Without workers running, pool
+// slots stay uninitialized with Xbox kernel addresses (0x85000000 etc.)
+// in vtable fields, causing 543 MISSING-FUNCs in the audio mixer.
+// Let rexglue's recompiled code handle audio threading.
 
-// sub_82169400 - Audio worker thread (not needed on PC, SDL handles audio)
-PPC_FUNC_HOOK(sub_82169400) { ctx.r3.u32 = 0; }
+// sub_82169400 - Audio worker thread — REMOVED: same reason as above.
+// SDL handles audio output, but the game's audio object construction
+// still needs these workers to initialize sound pool entries.
 
 // =============================================================================
 // RAGE ALLOCATOR FIX — Phases 2 & 3

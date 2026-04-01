@@ -8802,98 +8802,23 @@ static int CreateShadersForFxc(const char* fxcBaseName)
 //   sub_827E8180, sub_827E0898, sub_827E04F0, sub_827EF2F8, sub_827EF938
 // =============================================================================
 
-// sub_82869620 — Convert SPS DB index to entry pointer.
-// Original: if (index == -1) return NULL; else return entries_base + index*28;
-//
-// Enhanced: when entry+12 (fxcShaderPtr) is NULL, lazily create an FXC
-// effect object via shaderMgr->vtable[1](fxcName, 0, 0) and store it at
-// entry+12.  This mirrors what sub_82869578 does during the original init
-// scan.  If creation fails, return NULL to prevent crash in sub_8285FF30
-// which dereferences entry+12 as a vtable pointer without checking.
-PPC_FUNC_HOOK(sub_82869620) {
-    int32_t index = ctx.r3.s32;
-    if (index == -1) {
-        ctx.r3.u64 = 0;
-        return;
-    }
-
-    constexpr uint32_t GUEST_SPS_ENTRIES_PTR = 0x83127DAC;
-    constexpr uint32_t GUEST_SHADER_MGR     = 0x83127984;
-
-    uint32_t entriesBase = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRIES_PTR));
-    if (entriesBase == 0) {
-        ctx.r3.u64 = 0;
-        return;
-    }
-
-    uint32_t entryAddr = entriesBase + static_cast<uint32_t>(index) * 28;
-    uint32_t fxcPtr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 12));
-
-    // Lazy creation: if entry+12 is NULL, try to create an FXC effect object
-    if (fxcPtr == 0) {
-        static bool s_creationInProgress = false;
-        if (s_creationInProgress) {
-            // Guard against re-entrance (shouldn't happen, but be safe)
-            ctx.r3.u64 = 0;
-            return;
-        }
-
-        uint32_t shaderMgr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SHADER_MGR));
-        uint32_t fxcNameAddr = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 20));
-        if (shaderMgr != 0 && fxcNameAddr != 0) {
-            // Read shaderMgr->vtable[1] (CreateEffect factory method)
-            uint32_t vtable = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(shaderMgr));
-            uint32_t createFunc = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(vtable + 4));
-
-            if (createFunc != 0) {
-                // Save volatile registers the caller may depend on
-                auto saved_r3 = ctx.r3;  auto saved_r4 = ctx.r4;
-                auto saved_r5 = ctx.r5;  auto saved_r6 = ctx.r6;
-                auto saved_r7 = ctx.r7;  auto saved_r8 = ctx.r8;
-                auto saved_r9 = ctx.r9;  auto saved_r10 = ctx.r10;
-                auto saved_r11 = ctx.r11; auto saved_r12 = ctx.r12;
-                auto saved_lr = ctx.lr;   auto saved_ctr = ctx.ctr;
-
-                // Call shaderMgr->vtable[1](shaderMgr, fxcName, 0, 0)
-                ctx.r3.u64 = shaderMgr;
-                ctx.r4.u64 = fxcNameAddr;
-                ctx.r5.u64 = 0;
-                ctx.r6.u64 = 0;
-
-                s_creationInProgress = true;
-                PPC_CALL_INDIRECT_FUNC(createFunc);
-                s_creationInProgress = false;
-
-                uint32_t newEffect = ctx.r3.u32;
-
-                // Restore volatile registers
-                ctx.r3 = saved_r3;   ctx.r4 = saved_r4;
-                ctx.r5 = saved_r5;   ctx.r6 = saved_r6;
-                ctx.r7 = saved_r7;   ctx.r8 = saved_r8;
-                ctx.r9 = saved_r9;   ctx.r10 = saved_r10;
-                ctx.r11 = saved_r11; ctx.r12 = saved_r12;
-                ctx.lr = saved_lr;   ctx.ctr = saved_ctr;
-
-                if (newEffect != 0) {
-                    // Store the new effect at entry+12
-                    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(entryAddr + 12)) = newEffect;
-                    fxcPtr = newEffect;
-
-                    const char* fxcName = reinterpret_cast<const char*>(g_memory.Translate(fxcNameAddr));
-                    LOGF_WARNING("[SPS DB] Lazy-created FXC effect for '{}' → guest 0x{:08X}", fxcName, newEffect);
-                }
-            }
-        }
-
-        // Final check: if still NULL after creation attempt, return NULL
-        if (fxcPtr == 0) {
-            ctx.r3.u64 = 0;
-            return;
-        }
-    }
-
-    ctx.r3.u64 = entryAddr;
+// sub_828E02E8 — Render state dispatch (grcDevice::SetRenderState vtable dispatch)
+// Reads *(device + offset + 64) for each render state change. On Xbox 360, the
+// Xenos driver fills these function pointers. In the recomp, they're NULL.
+// This causes 77% of all MISSING-FUNC hits (380K+ per run).
+// TODO: Populate device->setRenderStateFunctions[] at CreateDevice time
+// like Unleashed does, instead of no-opping the dispatch.
+PPC_FUNC_HOOK(sub_828E02E8) {
+    // No-op: the device's render state function pointer table has NULL entries.
+    // Unleashed solves this by populating the table at device creation.
 }
+
+// sub_82869620 — REMOVED: was hooking the WRONG FUNCTION.
+// This address is a VMX128 geometry intersection test (ray-box or similar),
+// called by 6 physics/collision functions with vector pointers in r3-r6.
+// The hook was interpreting vector pointers as SPS database indices,
+// silently corrupting collision detection results.
+// Let the recompiled VMX geometry function run.
 
 // =============================================================================
 // RAGE fiStream NULL-Handle Safety Layer — REMOVED (Phase 4)
