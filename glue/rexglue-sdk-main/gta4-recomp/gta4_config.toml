@@ -84,7 +84,16 @@ RemoveDirectoryA   = 0x82A1A160
 #   0x82A69308 — epilogue lwz r12
 #   0x82A692C8 — mid-epilogue bl __restgprlr
 #
-# Only valid entry kept (borderline — stwu at +8 past true entry 0x82A692E0):
+# v8 cross-function branch targets — other functions (0x8217C5A8, 0x827BAC18,
+# 0x821A2EDC) branch directly to these mid-function addresses. The codegen
+# requires them as function entries so branches resolve. The real parent
+# functions (0x8217C0B8, 0x82A77DEC, 0x8219E008) were tried but codegen
+# doesn't extend them to cover these targets. This is a codegen limitation.
+"0x8217C108" = {}   # mid-function lis; branched from sub_8217C5A8
+"0x82A77E28" = {}   # past .text end (epilogue); branched from sub_827BAC18
+"0x8219E410" = {}   # mid-function VMX; branched from sub_821A2EDC
+
+# Only valid entry from original list:
 "0x82A692E8" = {}
 
 # CRT function boundaries: force codegen to split these out as separate functions
