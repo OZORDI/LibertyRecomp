@@ -2061,27 +2061,8 @@ PPC_FUNC_HOOK(sub_82142F90) {
 // Side effects reproduced:
 //   - 0x82A95478 (playerIdx) set to 0 (base game, player 0)
 //   - Profile index left at default (game sets it during state 5)
-extern "C" void __imp__sub_822440F8(PPCContext &ctx, uint8_t *base);
-PPC_FUNC_HOOK(sub_822440F8) {
-    static bool s_logged = false;
-
-    // Ensure player/episode index is set to 0 (base game)
-    uint32_t playerIdx = PPC_LOAD_U32(0x82A95478);
-    if (playerIdx == 0xFFFFFFFF) {
-        PPC_STORE_U32(0x82A95478, 0);
-    }
-
-    if (!s_logged) {
-        s_logged = true;
-        printf("[STATE-4-INNER] BYPASS: returning 2 (no-save success). "
-               "playerIdx=0x%08X, profileIdx=0x%08X\n",
-               PPC_LOAD_U32(0x82A95478), PPC_LOAD_U32(0x82A95474));
-        fflush(stdout);
-    }
-
-    // Return 2 = success (outer state machine sets r29=5, advancing to game start)
-    ctx.r3.u64 = 2;
-}
+// sub_822440F8 — REMOVED: was bypassing Xbox save device selection.
+// Let rexglue's recompiled code handle the save device flow.
 
 // sub_822438B0 — STATE 6 INNER STATE MACHINE (8 states, scene/world loading)
 // Inner state at 0x82BF9838 (lis -32064 + offset -26568)
@@ -2251,47 +2232,10 @@ PPC_FUNC_HOOK(sub_822417B0) {
     }
 }
 
-// =============================================================================
-// sub_82A00DC0 — ALIGNMENT-AWARE MEMCPY (582 call sites)
-// =============================================================================
-// This is a byte-level memcpy with alignment optimization: r3=dst, r4=src, r5=count.
-// The GPU/rendering function sub_8285AE20 passes a corrupted count of 0xFFFFFFDB
-// (~4GB unsigned) due to uninitialized GPU state. The memcpy then writes sequentially
-// through memory, hitting stack guard pages in the 0x70000000-0x7F000000 range
-// (which the guard handler blindly unprotects), causing what APPEARS to be a stack
-// overflow but is actually a runaway memcpy with a corrupt length.
-//
-// Fix: Replace with native memcpy + size sanity check. Native memcpy is also
-// significantly faster than the byte-level recompiled PPC version.
-extern "C" void __imp__sub_82A00DC0(PPCContext &ctx, uint8_t *base);
-PPC_FUNC_HOOK(sub_82A00DC0) {
-    uint32_t dst = ctx.r3.u32;
-    uint32_t src = ctx.r4.u32;
-    uint32_t count = ctx.r5.u32;
-
-    // Sanity check: reject obviously corrupt lengths (> 256MB)
-    // No legitimate memcpy in GTA IV should exceed this.
-    constexpr uint32_t kMaxReasonableSize = 256 * 1024 * 1024;
-    if (count > kMaxReasonableSize) {
-        static int s_warnCount = 0;
-        if (s_warnCount++ < 10) {
-            printf("[MEMCPY-GUARD] sub_82A00DC0: rejecting corrupt count=0x%08X (%u) "
-                   "dst=0x%08X src=0x%08X\n", count, count, dst, src);
-            fflush(stdout);
-        }
-        // Return dst (standard memcpy behavior) without copying
-        ctx.r3.u64 = dst;
-        return;
-    }
-
-    // Use native memcpy for speed and correctness
-    if (count > 0 && dst != 0 && src != 0) {
-        std::memcpy(reinterpret_cast<void*>(base + dst),
-                    reinterpret_cast<const void*>(base + src), count);
-    }
-    // Restore original dst in r3 (memcpy returns dst — saved at -8(r1) by prologue)
-    ctx.r3.u64 = PPC_LOAD_U64(ctx.r1.u32 + -8);
-}
+// sub_82A00DC0 — REMOVED: was native memcpy replacement.
+// Let rexglue's recompiled PPC memcpy run. Note: the rexcrt memcpy hook at
+// 0x82A11940 (in gta4_config.toml [rexcrt]) already provides a native memcpy
+// for the main CRT memcpy. sub_82A00DC0 is a separate alignment-aware variant.
 
 // =============================================================================
 // sub_821910D0 — XAUDIO RENDER THREAD PUMP
@@ -2416,13 +2360,8 @@ PPC_FUNC_HOOK(sub_821B4108) {
     __imp__sub_821B4108(ctx, base);
     int n = s_activeCountCalls.fetch_add(1, std::memory_order_relaxed);
     if (n < 20 || (n % 200) == 0) {
-        printf("[PLAYER-COUNT] sub_821B4108 #%d = %d (forcing 1)\n", n, ctx.r3.s32);
+        printf("[PLAYER-COUNT] sub_821B4108 #%d = %d\n", n, ctx.r3.s32);
         fflush(stdout);
-    }
-    // Force at least 1 active player so the front-end state machine
-    // advances past state 0 (sub_822414E8 "press start" gate)
-    if (ctx.r3.s32 <= 0) {
-        ctx.r3.u64 = 1;
     }
 }
 

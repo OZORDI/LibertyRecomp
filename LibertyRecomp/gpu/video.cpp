@@ -8775,11 +8775,8 @@ static int CreateShadersForFxc(const char* fxcBaseName)
 // material the correct per-FXC vertex/pixel shader pair.
 // =============================================================================
 
-// sub_828574A0 — Shader reload: iterates dword_83125900[] and calls
-// sub_8285BDC8(entry, NULL, 0) for each entry whose version changed.
-// The NULL second arg means "use stored path" which can be NULL → (null).sps.
-// KEPT STUBBED: reload passes NULL causing (null).sps paths at runtime.
-PPC_FUNC_HOOK(sub_828574A0) { /* no-op: Liberty shaders are immutable */ }
+// sub_828574A0 — REMOVED: address does not exist in GTA IV generated code.
+// Was a shader reload stub. Let rexglue handle it.
 
 // sub_8285BDC8 — Opens a shader .fxc file via RAGE VFS and parses it.
 // UN-STUBBED (2026-03-31): Let recompiled code run. It parses .fxc files
@@ -8793,102 +8790,8 @@ PPC_FUNC_HOOK(sub_828574A0) { /* no-op: Liberty shaders are immutable */ }
 // batch loader (sub_8285E048) with each FXC name from preload.list.
 // UN-STUBBED: Let recompiled code open .fxc files and create shaders.
 
-// sub_82869F30 — Shader database scanner.  Called from sub_823193A8 as
-// sub_82869F30("common:/shaders/db", 0) to enumerate .sps files on disk
-// and register them in the shader database.
-//
-// Replacement: populate the guest shader DB from our embedded SPS preset
-// table (sps_preset_table.h) without any file I/O.  This lets the game's
-// material setup code (sub_82869FC0 lookup → sub_82869620 get entry) find
-// the correct SPS preset for each model material.
-//
-// Guest shader database layout (reverse-engineered from PPC):
-//   Global:  *(uint32_t*)0x83127DA4 = entry count
-//   Global:  *(uint32_t*)0x83127DAC = guest ptr to entries array
-//   Global:  *(uint32_t*)0x83127DB0 = guest ptr to db path string
-//   Each entry is 28 bytes:
-//     +0:  uint32_t flags          (unknown, set to 0)
-//     +4:  uint32_t paramListPtr   (linked list of SPS param nodes)
-//     +8:  uint32_t spsNamePtr     (guest ptr to SPS preset name)
-//     +12: uint32_t fxcShaderPtr   (guest ptr to loaded FXC effect object)
-//     +16: uint32_t reserved       (unknown, set to 0)
-//     +20: uint32_t fxcNamePtr     (guest ptr to FXC shader name from "shader" keyword)
-//     +24: uint32_t reserved2      (unknown, set to 0)
-PPC_FUNC_HOOK(sub_82869F30) {
-    // r3 = path string ("common:/shaders/db"), r4 = flags
-    static bool s_populated = false;
-    if (s_populated) return;
-    s_populated = true;
-
-    constexpr uint32_t GUEST_SPS_ENTRY_COUNT = 0x83127DA4;
-    constexpr uint32_t GUEST_SPS_ENTRIES_PTR = 0x83127DAC;
-    constexpr uint32_t GUEST_SPS_DB_PATH    = 0x83127DB0;
-    constexpr size_t   SPS_ENTRY_SIZE       = 28;
-
-    const size_t entryCount = g_spsPresetTableCount;
-
-    // Calculate total string pool size (SPS names + FXC names + db path)
-    size_t stringPoolSize = 0;
-    for (size_t i = 0; i < entryCount; i++) {
-        stringPoolSize += strlen(g_spsPresetTable[i].spsName) + 1;
-        stringPoolSize += strlen(g_spsPresetTable[i].fxcName) + 1;
-    }
-    const char* dbPath = "common:/shaders/db";
-    stringPoolSize += strlen(dbPath) + 1;
-
-    // Allocate a single guest-visible block: entries array + string pool
-    size_t entriesSize = entryCount * SPS_ENTRY_SIZE;
-    size_t totalSize   = entriesSize + stringPoolSize;
-    void* guestBlock   = g_userHeap.AllocPhysical(totalSize, 16);
-    if (!guestBlock) {
-        LOGF_WARNING("[SPS DB] Failed to allocate {} bytes of guest memory", totalSize);
-        return;
-    }
-    memset(guestBlock, 0, totalSize);
-
-    uint8_t* entriesBase = static_cast<uint8_t*>(guestBlock);
-    uint8_t* stringPool  = entriesBase + entriesSize;
-    size_t   stringOff   = 0;
-
-    // Helper: copy a C string into the guest string pool, return guest address
-    auto copyStr = [&](const char* s) -> uint32_t {
-        size_t len  = strlen(s) + 1;
-        uint8_t* dst = stringPool + stringOff;
-        memcpy(dst, s, len);
-        uint32_t ga = g_memory.MapVirtual(dst);
-        stringOff += len;
-        return ga;
-    };
-
-    // Populate each 28-byte entry (big-endian via be<uint32_t>)
-    for (size_t i = 0; i < entryCount; i++) {
-        auto* e = reinterpret_cast<be<uint32_t>*>(entriesBase + i * SPS_ENTRY_SIZE);
-        const auto& sps = g_spsPresetTable[i];
-
-        uint32_t spsNameAddr = copyStr(sps.spsName);
-        uint32_t fxcNameAddr = copyStr(sps.fxcName);
-
-        e[0] = 0;              // +0:  flags
-        e[1] = 0;              // +4:  paramListPtr (no guest param nodes)
-        e[2] = spsNameAddr;    // +8:  spsNamePtr
-        e[3] = 0;              // +12: fxcShaderPtr (NULL — will be resolved by material setup)
-        e[4] = 0;              // +16: reserved
-        e[5] = fxcNameAddr;    // +20: fxcNamePtr
-        e[6] = 0;              // +24: reserved
-    }
-
-    // Copy db path string into pool
-    uint32_t dbPathAddr = copyStr(dbPath);
-
-    // Write the three global pointers that sub_82869FC0 / sub_82869620 read
-    uint32_t entriesGuestAddr = g_memory.MapVirtual(entriesBase);
-    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRY_COUNT)) = static_cast<uint32_t>(entryCount);
-    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_ENTRIES_PTR)) = entriesGuestAddr;
-    *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(GUEST_SPS_DB_PATH))     = dbPathAddr;
-
-    LOGF_WARNING("[SPS DB] Populated {} SPS preset entries ({} bytes) at guest 0x{:08X}",
-                 entryCount, totalSize, entriesGuestAddr);
-}
+// sub_82869F30 — REMOVED: address does not exist in GTA IV generated code.
+// Was a SPS database scanner replacement. Let rexglue handle it.
 
 // =============================================================================
 // RAGE VFS Diagnostic Hooks — REMOVED

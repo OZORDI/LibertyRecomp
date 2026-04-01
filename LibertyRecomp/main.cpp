@@ -424,18 +424,25 @@ int main(int argc, char *argv[])
     // Bridge extracted audio.rpf content to where the RAGE relative device expects it.
     // The packfile device at audio:/ has an AES-encrypted TOC that fails to decrypt in
     // the recompiled env. The fallback relative device uses root game:/xbox360/audio/,
-    // but extracted config files live at audio/config/. Symlink bridges this gap.
+    // but extracted config files live at audio/config/. Copy the directory tree.
     {
-        auto linkPath   = rexContentRoot / "xbox360" / "audio" / "config";
-        auto targetPath = std::filesystem::path("../../audio/config");
+        auto destPath   = rexContentRoot / "xbox360" / "audio" / "config";
+        auto srcPath    = gamePath / "game" / "audio" / "config";
+        // Also try gamePath directly (audio/ may be beside game/)
+        if (!std::filesystem::is_directory(srcPath)) {
+            srcPath = gamePath / "audio" / "config";
+        }
         std::error_code ec;
-        if (!std::filesystem::exists(linkPath, ec)) {
-            std::filesystem::create_directories(linkPath.parent_path(), ec);
-            std::filesystem::create_directory_symlink(targetPath, linkPath, ec);
+        if (std::filesystem::is_directory(srcPath, ec) && !std::filesystem::exists(destPath, ec)) {
+            std::filesystem::create_directories(destPath.parent_path(), ec);
+            std::filesystem::copy(srcPath, destPath,
+                std::filesystem::copy_options::recursive |
+                std::filesystem::copy_options::skip_existing, ec);
             if (!ec) {
-                fprintf(stderr, "[Main] Created symlink: xbox360/audio/config -> ../../audio/config\n");
+                fprintf(stderr, "[Main] Copied audio config: %s -> %s\n",
+                        srcPath.string().c_str(), destPath.string().c_str());
             } else {
-                fprintf(stderr, "[Main] WARN: Could not create audio config symlink: %s\n", ec.message().c_str());
+                fprintf(stderr, "[Main] WARN: Could not copy audio config: %s\n", ec.message().c_str());
             }
         }
     }
@@ -444,6 +451,7 @@ int main(int argc, char *argv[])
     // ContentManager::ListContent() scans: content_root / title_id / content_type / *
     // GTA IV title_id = 545407F2, DLC content_type = 00000002 (kMarketplaceContent).
     // Our DLC is at gamePath/dlc/TLAD and gamePath/dlc/TBOGT.
+    // Copy instead of symlink so there are no filesystem portability issues.
     {
         const auto dlcContentDir = rexContentRoot / "545407F2" / "00000002";
         std::error_code ec;
@@ -455,13 +463,53 @@ int main(int argc, char *argv[])
             auto linkPath  = dlcContentDir / name;
             if (std::filesystem::is_directory(actualDlc, ec) &&
                 !std::filesystem::exists(linkPath, ec)) {
-                std::filesystem::create_directory_symlink(actualDlc, linkPath, ec);
+                std::filesystem::copy(actualDlc, linkPath,
+                    std::filesystem::copy_options::recursive |
+                    std::filesystem::copy_options::skip_existing, ec);
                 if (!ec) {
-                    fprintf(stderr, "[Main] DLC bridge: %s -> %s\n",
-                            linkPath.string().c_str(), actualDlc.string().c_str());
+                    fprintf(stderr, "[Main] DLC bridge copy: %s -> %s\n",
+                            actualDlc.string().c_str(), linkPath.string().c_str());
                 } else {
-                    fprintf(stderr, "[Main] WARN: DLC bridge failed for %s: %s\n",
+                    fprintf(stderr, "[Main] WARN: DLC bridge copy failed for %s: %s\n",
                             name, ec.message().c_str());
+                }
+            }
+        }
+    }
+
+    // Bridge DLC directories into game root for direct file probing.
+    // GTA IV's DLC discovery probes hardcoded paths: game:\DLC1\setup2.xml
+    // and game:\DLC1\DLC.rpf (TLAD = DLC1, TBOGT = DLC2). These bypass the
+    // XAM content system and open files directly via the game: VFS mount.
+    // The game: mount points to rexContentRoot, so we copy DLC content there.
+    {
+        struct DlcGameMapping {
+            const char* gameDirName;  // What the game probes (game:\DLC1\)
+            const char* dlcDirName;   // Where the content lives (dlc/TLAD/)
+        };
+        const DlcGameMapping dlcMappings[] = {
+            { "DLC1", "TLAD" },
+            { "DLC2", "TBOGT" },
+        };
+        std::error_code ec;
+        for (const auto& mapping : dlcMappings) {
+            auto actualDlc = gamePath / "dlc" / mapping.dlcDirName;
+            auto linkPath  = rexContentRoot / mapping.gameDirName;
+            bool srcExists = std::filesystem::is_directory(actualDlc, ec);
+            bool dstExists = std::filesystem::exists(linkPath, ec);
+            fprintf(stderr, "[Main] DLC %s: src=%s exists=%d, dst=%s exists=%d\n",
+                    mapping.gameDirName, actualDlc.string().c_str(), (int)srcExists,
+                    linkPath.string().c_str(), (int)dstExists);
+            if (srcExists && !dstExists) {
+                std::filesystem::copy(actualDlc, linkPath,
+                    std::filesystem::copy_options::recursive |
+                    std::filesystem::copy_options::skip_existing, ec);
+                if (!ec) {
+                    fprintf(stderr, "[Main] DLC game bridge copy: %s -> %s\n",
+                            actualDlc.string().c_str(), linkPath.string().c_str());
+                } else {
+                    fprintf(stderr, "[Main] WARN: DLC game bridge copy failed for %s: %s\n",
+                            mapping.gameDirName, ec.message().c_str());
                 }
             }
         }
@@ -873,6 +921,11 @@ int main(int argc, char *argv[])
         }
         printf("[Main] Header comparison: %d diffs (%d import, %d data) out of %zu bytes\n",
                diffCount, importDiffs, dataDiffs, sizeof(xex_header_data));
+
+        // xex_header_data contains XEX header metadata, NOT .rdata section data.
+        // Applying it as overlay CORRUPTS vtables with ASCII string fragments
+        // (e.g. "DIAL", "- SA", "age:", "Stor"). DO NOT apply.
+        // RexGlue's PE decompression provides the correct .rdata content.
         printf("[Main] RexGlue PE is authoritative — NOT overwriting with xex_header_data\n");
         fflush(stdout);
 
