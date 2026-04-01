@@ -1,5 +1,41 @@
 #include "gta4_init.h"
 
+PPC_FUNC_IMPL(__imp__sub_82A5A2B0);
+PPC_WEAK_FUNC(sub_82A5A2B0) { __imp__sub_82A5A2B0(ctx, base); }
+PPC_FUNC_IMPL(__imp__sub_82A5A2B0) {
+	PPC_FUNC_PROLOGUE();
+	uint32_t ea{};
+	// mflr r12
+	ctx.r12.u64 = ctx.lr;
+	// stw r12,-8(r1)
+	PPC_STORE_U32(ctx.r1.u32 + -8, ctx.r12.u32);
+	// stwu r1,-96(r1)
+	ea = -96 + ctx.r1.u32;
+	PPC_STORE_U32(ea, ctx.r1.u32);
+	ctx.r1.u32 = ea;
+	// lis r11,-32244
+	ctx.r11.s64 = -2113142784;
+	// li r4,0
+	ctx.r4.s64 = 0;
+	// addi r3,r11,-23720
+	ctx.r3.s64 = ctx.r11.s64 + -23720;
+	// bl 0x8284e060
+	ctx.lr = 0x82A5A2CC;
+	sub_8284E060(ctx, base);
+	// lis r11,-31970
+	ctx.r11.s64 = -2095185920;
+	// stw r3,-21792(r11)
+	PPC_STORE_U32(ctx.r11.u32 + -21792, ctx.r3.u32);
+	// addi r1,r1,96
+	ctx.r1.s64 = ctx.r1.s64 + 96;
+	// lwz r12,-8(r1)
+	ctx.r12.u64 = PPC_LOAD_U32(ctx.r1.u32 + -8);
+	// mtlr r12
+	ctx.lr = ctx.r12.u64;
+	// blr 
+	return;
+}
+
 PPC_FUNC_IMPL(__imp__sub_82A5A2E8);
 PPC_WEAK_FUNC(sub_82A5A2E8) { __imp__sub_82A5A2E8(ctx, base); }
 PPC_FUNC_IMPL(__imp__sub_82A5A2E8) {
@@ -16537,32 +16573,6 @@ PPC_FUNC_IMPL(__imp__sub_82A60758) {
 	ctx.r3.s64 = ctx.r11.s64 + 2136;
 	// b 0x829ffa48
 	sub_829FFA48(ctx, base);
-	return;
-}
-
-PPC_FUNC_IMPL(__imp__sub_82A60768);
-PPC_WEAK_FUNC(sub_82A60768) { __imp__sub_82A60768(ctx, base); }
-PPC_FUNC_IMPL(__imp__sub_82A60768) {
-	PPC_FUNC_PROLOGUE();
-	// lis r11,-32005
-	ctx.r11.s64 = -2097479680;
-	// li r9,-1
-	ctx.r9.s64 = -1;
-	// addi r11,r11,12304
-	ctx.r11.s64 = ctx.r11.s64 + 12304;
-	// li r10,57
-	ctx.r10.s64 = 57;
-	// mtctr r10
-	ctx.ctr.u64 = ctx.r10.u64;
-loc_82A6077C:
-	// stw r9,0(r11)
-	PPC_STORE_U32(ctx.r11.u32 + 0, ctx.r9.u32);
-	// addi r11,r11,4
-	ctx.r11.s64 = ctx.r11.s64 + 4;
-	// bdnz 0x82a6077c
-	--ctx.ctr.u64;
-	if (ctx.ctr.u32 != 0) goto loc_82A6077C;
-	// blr 
 	return;
 }
 

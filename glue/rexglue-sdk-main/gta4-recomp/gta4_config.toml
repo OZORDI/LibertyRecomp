@@ -93,8 +93,20 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A77E28" = {}   # past .text end (epilogue); branched from sub_827BAC18
 "0x8219E410" = {}   # mid-function VMX; branched from sub_821A2EDC
 
-# Only valid entry from original list:
-"0x82A692E8" = {}
+# Vtable dispatchers — confirmed LIVE at runtime (show up as MISSING-FUNC
+# when removed). These are mid-function addresses but referenced by vtables.
+"0x8219ACA0" = {}   # vtable dispatcher — 2707 MISSING-FUNC hits when removed
+"0x828764B8" = {}   # vtable dispatcher — 281 MISSING-FUNC hits when removed
+"0x82A6C218" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69CC8" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69CA8" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69C68" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69428" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69328" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A69308" = {}   # vtable dispatcher — referenced from 0x82A18A68
+"0x82A692E8" = {}   # vtable dispatcher — valid stwu prologue
+"0x82A692C8" = {}   # vtable dispatcher — referenced from 0x82A18A68
+
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)

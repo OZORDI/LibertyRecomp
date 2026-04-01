@@ -13767,7 +13767,7 @@ loc_825B9768:
 	temp.f32 = float(ctx.f13.f64);
 	PPC_STORE_U32(ctx.r1.u32 + 116, temp.u32);
 	// frsqrte f13,f0
-	ctx.f13.u64 = uint64_t(rex::ppu_frsqrte_lut.data[ctx.f0.u64 >> 49]) << 32;
+	ctx.f13.f64 = 1.0 / sqrt(ctx.f0.f64);
 	// ld r11,112(r1)
 	ctx.r11.u64 = PPC_LOAD_U64(ctx.r1.u32 + 112);
 	// std r11,112(r1)
@@ -13881,7 +13881,7 @@ loc_825B9768:
 	// fmadds f0,f12,f12,f0
 	ctx.f0.f64 = double(float(ctx.f12.f64 * ctx.f12.f64 + ctx.f0.f64));
 	// frsqrte f13,f0
-	ctx.f13.u64 = uint64_t(rex::ppu_frsqrte_lut.data[ctx.f0.u64 >> 49]) << 32;
+	ctx.f13.f64 = 1.0 / sqrt(ctx.f0.f64);
 	// fneg f10,f0
 	ctx.f10.u64 = ctx.f0.u64 ^ 0x8000000000000000;
 	// fmul f9,f13,f13

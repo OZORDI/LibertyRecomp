@@ -30837,7 +30837,7 @@ loc_827F7DFC:
 	// fmadds f0,f10,f10,f0
 	ctx.f0.f64 = double(float(ctx.f10.f64 * ctx.f10.f64 + ctx.f0.f64));
 	// frsqrte f13,f0
-	ctx.f13.u64 = uint64_t(rex::ppu_frsqrte_lut.data[ctx.f0.u64 >> 49]) << 32;
+	ctx.f13.f64 = 1.0 / sqrt(ctx.f0.f64);
 	// fneg f7,f0
 	ctx.f7.u64 = ctx.f0.u64 ^ 0x8000000000000000;
 	// fmul f6,f13,f13

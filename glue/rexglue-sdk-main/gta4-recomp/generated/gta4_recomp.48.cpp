@@ -11481,7 +11481,7 @@ PPC_FUNC_IMPL(__imp__sub_82787210) {
 	// fmuls f0,f0,f13
 	ctx.f0.f64 = double(float(ctx.f0.f64 * ctx.f13.f64));
 	// fctidz f0,f0
-	ctx.f0.s64 = (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
+	ctx.f0.s64 = std::isnan(ctx.f0.f64) ? int64_t(0x8000000000000000ULL) : (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
 	// stfiwx f0,0,r11
 	PPC_STORE_U32(ctx.r11.u32, ctx.f0.u32);
 	// lwz r4,80(r1)
@@ -25518,7 +25518,7 @@ loc_8278D05C:
 	ctx.r11.s64 = -2095513600;
 	// fctidz f0,f0
 	ctx.fpscr.disableFlushMode();
-	ctx.f0.s64 = (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
+	ctx.f0.s64 = std::isnan(ctx.f0.f64) ? int64_t(0x8000000000000000ULL) : (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
 	// addi r30,r1,80
 	ctx.r30.s64 = ctx.r1.s64 + 80;
 	// addi r31,r11,-4956
@@ -25851,7 +25851,7 @@ loc_8278D220:
 	// lis r11,-31983
 	ctx.r11.s64 = -2096037888;
 	// fctidz f0,f0
-	ctx.f0.s64 = (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
+	ctx.f0.s64 = std::isnan(ctx.f0.f64) ? int64_t(0x8000000000000000ULL) : (ctx.f0.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f0.f64));
 	// stfiwx f0,0,r9
 	PPC_STORE_U32(ctx.r9.u32, ctx.f0.u32);
 	// lwz r27,80(r1)
@@ -25859,11 +25859,11 @@ loc_8278D220:
 	// addi r28,r11,-25464
 	ctx.r28.s64 = ctx.r11.s64 + -25464;
 	// fctidz f0,f12
-	ctx.f0.s64 = (ctx.f12.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f12.f64));
+	ctx.f0.s64 = std::isnan(ctx.f12.f64) ? int64_t(0x8000000000000000ULL) : (ctx.f12.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f12.f64));
 	// stfiwx f0,0,r8
 	PPC_STORE_U32(ctx.r8.u32, ctx.f0.u32);
 	// fctidz f0,f13
-	ctx.f0.s64 = (ctx.f13.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f13.f64));
+	ctx.f0.s64 = std::isnan(ctx.f13.f64) ? int64_t(0x8000000000000000ULL) : (ctx.f13.f64 > double(LLONG_MAX)) ? LLONG_MAX : simde_mm_cvttsd_si64(simde_mm_load_sd(&ctx.f13.f64));
 	// stfiwx f0,0,r7
 	PPC_STORE_U32(ctx.r7.u32, ctx.f0.u32);
 	// lwz r26,84(r1)
@@ -44397,7 +44397,7 @@ loc_82794CBC:
 	// bne cr6,0x82794d34
 	if (!ctx.cr6.eq) goto loc_82794D34;
 	// frsqrte f0,f13
-	ctx.f0.u64 = uint64_t(rex::ppu_frsqrte_lut.data[ctx.f13.u64 >> 49]) << 32;
+	ctx.f0.f64 = 1.0 / sqrt(ctx.f13.f64);
 	// fneg f31,f13
 	ctx.f31.u64 = ctx.f13.u64 ^ 0x8000000000000000;
 	// fmul f29,f0,f0
@@ -44449,7 +44449,7 @@ loc_82794D34:
 	if (!ctx.cr6.eq) goto loc_82794D90;
 	// frsqrte f0,f10
 	ctx.fpscr.disableFlushMode();
-	ctx.f0.u64 = uint64_t(rex::ppu_frsqrte_lut.data[ctx.f10.u64 >> 49]) << 32;
+	ctx.f0.f64 = 1.0 / sqrt(ctx.f10.f64);
 	// fneg f13,f10
 	ctx.f13.u64 = ctx.f10.u64 ^ 0x8000000000000000;
 	// fmul f9,f0,f0

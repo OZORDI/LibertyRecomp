@@ -1,5 +1,31 @@
 #include "gta4_init.h"
 
+PPC_FUNC_IMPL(__imp__sub_82A60768);
+PPC_WEAK_FUNC(sub_82A60768) { __imp__sub_82A60768(ctx, base); }
+PPC_FUNC_IMPL(__imp__sub_82A60768) {
+	PPC_FUNC_PROLOGUE();
+	// lis r11,-32005
+	ctx.r11.s64 = -2097479680;
+	// li r9,-1
+	ctx.r9.s64 = -1;
+	// addi r11,r11,12304
+	ctx.r11.s64 = ctx.r11.s64 + 12304;
+	// li r10,57
+	ctx.r10.s64 = 57;
+	// mtctr r10
+	ctx.ctr.u64 = ctx.r10.u64;
+loc_82A6077C:
+	// stw r9,0(r11)
+	PPC_STORE_U32(ctx.r11.u32 + 0, ctx.r9.u32);
+	// addi r11,r11,4
+	ctx.r11.s64 = ctx.r11.s64 + 4;
+	// bdnz 0x82a6077c
+	--ctx.ctr.u64;
+	if (ctx.ctr.u32 != 0) goto loc_82A6077C;
+	// blr 
+	return;
+}
+
 PPC_FUNC_IMPL(__imp__sub_82A60790);
 PPC_WEAK_FUNC(sub_82A60790) { __imp__sub_82A60790(ctx, base); }
 PPC_FUNC_IMPL(__imp__sub_82A60790) {
@@ -21342,39 +21368,6 @@ PPC_FUNC_IMPL(__imp__sub_82A68938) {
 	ctx.lr = ctx.r12.u64;
 	// ld r31,-16(r1)
 	ctx.r31.u64 = PPC_LOAD_U64(ctx.r1.u32 + -16);
-	// blr 
-	return;
-}
-
-PPC_FUNC_IMPL(__imp__sub_82A689B0);
-PPC_WEAK_FUNC(sub_82A689B0) { __imp__sub_82A689B0(ctx, base); }
-PPC_FUNC_IMPL(__imp__sub_82A689B0) {
-	PPC_FUNC_PROLOGUE();
-	// lis r11,-31975
-	ctx.r11.s64 = -2095513600;
-	// li r10,15
-	ctx.r10.s64 = 15;
-	// addi r11,r11,-4824
-	ctx.r11.s64 = ctx.r11.s64 + -4824;
-	// li r9,0
-	ctx.r9.s64 = 0;
-	// addi r11,r11,8
-	ctx.r11.s64 = ctx.r11.s64 + 8;
-loc_82A689C4:
-	// addi r10,r10,-1
-	ctx.r10.s64 = ctx.r10.s64 + -1;
-	// stw r9,-8(r11)
-	PPC_STORE_U32(ctx.r11.u32 + -8, ctx.r9.u32);
-	// stw r9,-4(r11)
-	PPC_STORE_U32(ctx.r11.u32 + -4, ctx.r9.u32);
-	// stw r9,0(r11)
-	PPC_STORE_U32(ctx.r11.u32 + 0, ctx.r9.u32);
-	// cmpwi cr6,r10,0
-	ctx.cr6.compare<int32_t>(ctx.r10.s32, 0, ctx.xer);
-	// addi r11,r11,12
-	ctx.r11.s64 = ctx.r11.s64 + 12;
-	// bge cr6,0x82a689c4
-	if (!ctx.cr6.lt) goto loc_82A689C4;
 	// blr 
 	return;
 }
