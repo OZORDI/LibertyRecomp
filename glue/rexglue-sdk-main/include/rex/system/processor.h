@@ -124,4 +124,8 @@ class Processor {
   bool function_table_initialized_ = false;
 };
 
+// Forward-compat alias: upstream rexglue v0.7+ renamed Processor to FunctionDispatcher.
+// This lets our code use either name during incremental migration.
+using FunctionDispatcher = Processor;
+
 }  // namespace rex::runtime
