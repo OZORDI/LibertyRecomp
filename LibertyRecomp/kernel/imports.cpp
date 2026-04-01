@@ -1087,14 +1087,70 @@ PPC_FUNC_HOOK(sub_82848750) {
 // =============================================================================
 // DIAGNOSTIC: sub_82A50890 — GPU CreateDevice (top-level GPU init)
 // =============================================================================
+// =============================================================================
+// SetRenderState no-op stub — called by the device's function pointer table
+// when sub_828E02E8 dispatches render state changes. On Xbox 360, the Xenos
+// driver fills these slots with GPU register writers. In the recomp, we use
+// this no-op so the dispatch doesn't hit NULL.
+// Signature: (GuestDevice* device, uint32_t value)
+// =============================================================================
+static void SetRenderStateStub(PPCContext& ctx, uint8_t* base) {
+    // No-op: silently discard render state changes.
+    // TODO: Implement real state tracking like Unleashed's SetRenderState<>.
+}
+
 extern "C" void __imp__sub_82A50890(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_82A50890) {
+    uint32_t deviceAddr = ctx.r3.u32;  // Save device address BEFORE __imp__ call
     printf("[GPU-CREATE] sub_82A50890 ENTER r3=0x%08X r4=0x%08X\n",
-           ctx.r3.u32, ctx.r4.u32);
+           deviceAddr, ctx.r4.u32);
     fflush(stdout);
     __imp__sub_82A50890(ctx, base);
     printf("[GPU-CREATE] sub_82A50890 EXIT  result=0x%08X\n", ctx.r3.u32);
     fflush(stdout);
+
+    // =========================================================================
+    // Populate render state function pointer table in the device struct
+    // (Replicating Unleashed's CreateDevice approach)
+    //
+    // The dispatch function sub_828E02E8 reads:
+    //   table_value = MEM_BE[0x82B0D8F8 + stateIdx * 4]
+    //   device_ptr  = MEM_BE[0x831C22A4]
+    //   func_ptr    = MEM_BE[device_ptr + table_value + 64]
+    //   call func_ptr
+    //
+    // table_value ranges 0x46-0x6D, so func_ptr offsets are 0x86-0xAD.
+    // =========================================================================
+    if (deviceAddr != 0 && deviceAddr > 0x10000) {
+        // Register the no-op stub at a synthetic guest address
+        static bool s_populated = false;
+        if (!s_populated) {
+            s_populated = true;
+
+            // Use an address past the end of code for our stub
+            constexpr uint32_t STUB_GUEST_ADDR = 0x82A90000 - 4;
+            g_memory.InsertFunction(STUB_GUEST_ADDR, SetRenderStateStub);
+
+            // Write the stub address at each of the 18 unique byte offsets
+            // that the index table at 0x82B0D8F8 points to.
+            // The dispatch does: func_ptr = MEM_BE[device_ptr + table_val + 64]
+            // where table_val is one of these 18 values.
+            static const uint32_t kTableOffsets[] = {
+                0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E,
+                0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D
+            };
+            uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
+            for (uint32_t off : kTableOffsets) {
+                // func_ptr location = device + off + 64
+                uint32_t funcOff = off + 64;
+                *reinterpret_cast<uint32_t*>(devicePtr + funcOff) = __builtin_bswap32(STUB_GUEST_ADDR);
+            }
+
+            printf("[GPU-CREATE] Populated render state function table at device+0x86-0xB0 "
+                   "with stub 0x%08X\n", STUB_GUEST_ADDR);
+            fflush(stdout);
+        }
+    }
 }
 
 // DIAGNOSTIC: sub_82A416B8 — D3D device setup (caller of sub_82A50890)

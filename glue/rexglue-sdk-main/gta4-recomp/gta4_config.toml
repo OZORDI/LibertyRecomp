@@ -63,23 +63,29 @@ CreateDirectoryA   = 0x82A14E98   # NtCreateFile + FILE_DIRECTORY_FILE, returns 
 RemoveDirectoryA   = 0x82A1A160
 
 [functions]
-# v8 new unresolved branch targets (verified via capstone/IDA)
-"0x8217C108" = {}
-"0x82A77E28" = {}
-"0x8219E410" = {}
-
-# Undiscovered vtable dispatchers (only reached via indirect calls)
-"0x8219ACA0" = {}
-"0x828764B8" = {}
-"0x82A6C218" = {}
-"0x82A69CC8" = {}
-"0x82A69CA8" = {}
-"0x82A69C68" = {}
-"0x82A69428" = {}
-"0x82A69328" = {}
-"0x82A69308" = {}
+# NOTE (2026-04-01): 13 of 14 original entries were verified as BAD addresses
+# by reading raw PPC bytes from default.bin. They pointed to mid-function code,
+# epilogues, blr instructions, VMX loop bodies, or outside .text entirely.
+# The codegen generated broken "functions" from these — executing from random
+# mid-function points. All 13 removed. See docs/rendering_research.md.
+#
+# Original bad entries (DO NOT RE-ADD):
+#   0x8217C108 — mid-function lis (no prologue)
+#   0x82A77E28 — outside .text (epilogue in padding)
+#   0x8219E410 — mid-function VMX instruction
+#   0x8219ACA0 — mid-function rlwinm (codegen fabricated synthetic stub)
+#   0x828764B8 — switch/case jump table dispatch (lwzx/mtctr/bctr)
+#   0x82A6C218 — mid-function addi (real entry at 0x82A6C208)
+#   0x82A69CC8 — mid-function addi
+#   0x82A69CA8 — epilogue lwz r12
+#   0x82A69C68 — mid-epilogue bl __restgprlr
+#   0x82A69428 — literal blr instruction
+#   0x82A69328 — mid-function addi
+#   0x82A69308 — epilogue lwz r12
+#   0x82A692C8 — mid-epilogue bl __restgprlr
+#
+# Only valid entry kept (borderline — stwu at +8 past true entry 0x82A692E0):
 "0x82A692E8" = {}
-"0x82A692C8" = {}
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)

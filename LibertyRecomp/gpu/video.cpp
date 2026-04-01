@@ -8802,15 +8802,13 @@ static int CreateShadersForFxc(const char* fxcBaseName)
 //   sub_827E8180, sub_827E0898, sub_827E04F0, sub_827EF2F8, sub_827EF938
 // =============================================================================
 
-// sub_828E02E8 — Render state dispatch (grcDevice::SetRenderState vtable dispatch)
-// Reads *(device + offset + 64) for each render state change. On Xbox 360, the
-// Xenos driver fills these function pointers. In the recomp, they're NULL.
-// This causes 77% of all MISSING-FUNC hits (380K+ per run).
-// TODO: Populate device->setRenderStateFunctions[] at CreateDevice time
-// like Unleashed does, instead of no-opping the dispatch.
+// sub_828E02E8 — Render state dispatch: hooked as safety net.
+// The device's function pointer table is populated at CreateDevice time
+// (in sub_82A50890 hook in imports.cpp), but this no-op catches any
+// cases where the table doesn't cover all offsets or the device pointer
+// changes between creation and runtime use.
 PPC_FUNC_HOOK(sub_828E02E8) {
-    // No-op: the device's render state function pointer table has NULL entries.
-    // Unleashed solves this by populating the table at device creation.
+    // No-op: render state changes silently discarded.
 }
 
 // sub_82869620 — REMOVED: was hooking the WRONG FUNCTION.
