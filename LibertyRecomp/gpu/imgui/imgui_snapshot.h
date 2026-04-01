@@ -3,7 +3,9 @@
 // Undefine this to generate a font atlas file in working directory.
 // You also need to do this if you are testing localization, as only
 // characters in the locale get added to the atlas.
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #define ENABLE_IM_FONT_ATLAS_SNAPSHOT
+#endif
 
 struct ImFontAtlasSnapshot
 {

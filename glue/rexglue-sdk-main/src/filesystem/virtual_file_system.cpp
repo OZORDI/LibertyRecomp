@@ -13,6 +13,8 @@
 #include <rex/logging.h>
 #include <rex/string.h>
 
+#include "devices/host_path_entry.h"
+
 namespace rex::filesystem {
 
 VirtualFileSystem::VirtualFileSystem() {}
@@ -210,6 +212,18 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
 
     auto file_name = rex::string::utf8_find_name_from_guest_path(path);
     entry = parent_entry->GetChild(file_name);
+
+    // If the cached entry does not exist on host anymore, invalidate it.
+    if (entry && parent_entry) {
+      const auto* host_path_entry = dynamic_cast<const HostPathEntry*>(parent_entry);
+      if (host_path_entry) {
+        const auto file_path = host_path_entry->host_path() / rex::to_path(entry->name());
+        if (!std::filesystem::exists(file_path)) {
+          entry->Delete();
+          entry = nullptr;
+        }
+      }
+    }
   } else {
     entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
   }
@@ -247,13 +261,9 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
       desired_access & FileAccess::kFileWriteData || desired_access & FileAccess::kFileAppendData;
   if (wants_write &&
       ((parent_entry && parent_entry->is_read_only()) || (entry && entry->is_read_only()))) {
-    // Fail if read only device and wants write.
-    return X_STATUS_ACCESS_DENIED;
-    // TODO(benvanik): figure out why games are opening read-only files with
-    // write modes.
-    //    assert_always();
-    // REXFS_WARN("Attempted to open the file/dir for create/write");
-    // desired_access = FileAccess::kGenericRead | FileAccess::kFileReadData;
+    // Match Xenia behavior: downgrade to read access instead of failing.
+    REXFS_WARN("Attempted to open read-only file/dir for write: {}", path);
+    desired_access = FileAccess::kGenericRead | FileAccess::kFileReadData;
   }
 
   bool created = false;
@@ -283,11 +293,13 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
         break;
       case FileDisposition::kOverwrite:
       case FileDisposition::kOverwriteIf:
-        // Overwrite (we do by delete + recreate).
-        if (!entry->Delete()) {
+        // Overwrite by delete + recreate, or truncate if delete fails
+        // (host file may be briefly locked by cloud sync, AV, etc.).
+        if (entry->Delete()) {
+          entry = nullptr;
+        } else if (!entry->Truncate()) {
           return X_STATUS_ACCESS_DENIED;
         }
-        entry = nullptr;
         *out_action = FileAction::kOverwritten;
         break;
     }

@@ -21,7 +21,9 @@
 #include <sdl_listener.h>
 #include <user/config.h>
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/images/common/libertyrecomp.dds.h>
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
 // Character and logo textures disabled for clean installer
 // #include <res/images/installer/gta4_logo.dds.h>
 // #include <res/images/installer/DLC/tlad_logo.dds.h>
@@ -2134,7 +2136,9 @@ void InstallerWizard::Init()
     // g_installTextures[6] = LOAD_ZSTD_TEXTURE(g_install_007);
     // g_installTextures[7] = LOAD_ZSTD_TEXTURE(g_install_008);
     
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upLibertyDev = LOAD_ZSTD_TEXTURE(g_libertyrecomp);
+#endif
     
     // Logo textures disabled for clean installer
     // g_upGTA4Logo = LOAD_ZSTD_TEXTURE(g_gta4_logo);

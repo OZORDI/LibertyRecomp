@@ -300,7 +300,7 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
     info.access_timestamp = convertUnixtimeToWinFiletime(st.st_atime);
     info.write_timestamp = convertUnixtimeToWinFiletime(st.st_mtime);
     info.path = path;
-    if (ent->d_type == DT_DIR) {
+    if (S_ISDIR(st.st_mode)) {
       info.type = FileInfo::Type::kDirectory;
       info.total_size = 0;
     } else {

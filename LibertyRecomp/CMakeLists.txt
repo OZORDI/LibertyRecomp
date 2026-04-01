@@ -409,6 +409,16 @@ if (LIBERTY_RECOMP_METAL)
     else()
         set(LIBERTY_RECOMP_METAL_SDK "macosx")
     endif()
+
+    # Xcode 26 workaround: Metal Toolchain may be on a mounted DMG volume
+    # rather than installed in the standard Xcode Toolchains directory.
+    if(EXISTS "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metal")
+        set(METAL_TOOL "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metal")
+        set(METALLIB_TOOL "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metallib")
+    else()
+        set(METAL_TOOL "${XCRUN_TOOL}" -sdk ${LIBERTY_RECOMP_METAL_SDK} metal)
+        set(METALLIB_TOOL "${XCRUN_TOOL}" -sdk ${LIBERTY_RECOMP_METAL_SDK} metallib)
+    endif()
 endif()
 
 GenerateVersionSources(
@@ -932,12 +942,12 @@ function(compile_shader FILE_PATH TARGET_NAME)
     if (LIBERTY_RECOMP_METAL)
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.ir
-                COMMAND ${XCRUN_TOOL} -sdk ${LIBERTY_RECOMP_METAL_SDK} metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
+                COMMAND ${METAL_TOOL} -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
                 DEPENDS ${MSL_FILE_PATH}
         )
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.metallib
-                COMMAND ${XCRUN_TOOL} -sdk ${LIBERTY_RECOMP_METAL_SDK} metallib -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
+                COMMAND ${METALLIB_TOOL} -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
                 DEPENDS ${MSL_FILE_PATH}.ir
         )
         BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${MSL_FILE_PATH}.metallib" DEST_FILE "${MSL_FILE_PATH}.metallib" ARRAY_NAME "g_${MSL_NAME}_air")
@@ -1031,6 +1041,8 @@ generate_aggregate_header(
 set(RESOURCES_SOURCE_PATH "${PROJECT_SOURCE_DIR}/../LibertyRecompResources")
 set(RESOURCES_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/res")
 
+# MarathonRecompResources is optional — skip if not present (abandoned main menu approach)
+if(EXISTS "${RESOURCES_SOURCE_PATH}/bc_diff/button_bc_diff.bin")
 ## Miscellaneous ##
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/bc_diff/button_bc_diff.bin" DEST_FILE "${RESOURCES_OUTPUT_PATH}/bc_diff/button_bc_diff.bin" ARRAY_NAME "g_button_bc_diff" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/font/im_font_atlas.bin" DEST_FILE "${RESOURCES_OUTPUT_PATH}/font/im_font_atlas.bin" ARRAY_NAME "g_im_font_atlas" COMPRESSION_TYPE "zstd")
@@ -1063,6 +1075,10 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/inst
 
 ## Game Icon ##
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/game_icon.bmp" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/game_icon.bmp" ARRAY_NAME "g_game_icon")
+target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_HAS_RESOURCES)
+else()
+    message(WARNING "LibertyRecompResources not found — skipping menu/installer resource embedding")
+endif()
 
 ## Button Prompts (Controller-specific XTD files) ##
 set(BUTTON_PROMPTS_SOURCE "${PROJECT_SOURCE_DIR}/../LibertyRecompLib/private/button_prompts")
@@ -1076,7 +1092,8 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/switch/butt
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/steam_controller/buttons_360.xtd" DEST_FILE "${RESOURCES_OUTPUT_PATH}/button_prompts/steam_controller.xtd" ARRAY_NAME "g_button_prompts_steam_controller" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/steam_deck/buttons_360.xtd" DEST_FILE "${RESOURCES_OUTPUT_PATH}/button_prompts/steam_deck.xtd" ARRAY_NAME "g_button_prompts_steam_deck" COMPRESSION_TYPE "zstd")
 
-## Audio ##
+## Audio (also depends on LibertyRecompResources) ##
+if(EXISTS "${RESOURCES_SOURCE_PATH}/music/installer.ogg")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/music/installer.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/music/installer.ogg" ARRAY_NAME "g_installer_music")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/window_open.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/window_open.ogg" ARRAY_NAME "g_window_open")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/window_close.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/window_close.ogg" ARRAY_NAME "g_window_close")
@@ -1084,3 +1101,5 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/curs
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/deside.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/deside.ogg" ARRAY_NAME "g_deside")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/move.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/move.ogg" ARRAY_NAME "g_move")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/main_deside.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/main_deside.ogg" ARRAY_NAME "g_main_deside")
+target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_HAS_AUDIO_RESOURCES)
+endif()

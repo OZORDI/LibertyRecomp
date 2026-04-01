@@ -24,22 +24,32 @@ namespace rex::kernel::crt {
 // ---------------------------------------------------------------------------
 
 static int native_strncmp(const char* s1, const char* s2, size_t n) {
+  // Xbox 360 guest address 0 is mapped readable memory (zero bytes).
+  // Game code may pass NULL when GPU/rendering state is uninitialized.
+  if (!s1) s1 = "";
+  if (!s2) s2 = "";
   return std::strncmp(s1, s2, n);
 }
 
 static char* native_strncpy(char* dst, const char* src, size_t n) {
+  if (!dst) return nullptr;
+  if (!src) { if (n > 0) dst[0] = '\0'; return dst; }
   return std::strncpy(dst, src, n);
 }
 
 static char* native_strchr(const char* s, int c) {
+  if (!s) return nullptr;
   return const_cast<char*>(std::strchr(s, c));
 }
 
 static char* native_strstr(const char* haystack, const char* needle) {
+  if (!haystack) return nullptr;
+  if (!needle) return const_cast<char*>(haystack);
   return const_cast<char*>(std::strstr(haystack, needle));
 }
 
 static char* native_strrchr(const char* s, int c) {
+  if (!s) return nullptr;
   return const_cast<char*>(std::strrchr(s, c));
 }
 
@@ -48,6 +58,8 @@ static char* native_strtok(char* s, const char* delim) {
 }
 
 static int native_stricmp(const char* s1, const char* s2) {
+  if (!s1) s1 = "";
+  if (!s2) s2 = "";
 #if REX_PLATFORM_WIN32
   return _stricmp(s1, s2);
 #else
@@ -96,6 +108,8 @@ static char* native_lstrcatA(char* dst, const char* src) {
 }
 
 static int native_lstrcmpiA(const char* s1, const char* s2) {
+  if (!s1) s1 = "";
+  if (!s2) s2 = "";
 #if REX_PLATFORM_WIN32
   return _stricmp(s1, s2);
 #else

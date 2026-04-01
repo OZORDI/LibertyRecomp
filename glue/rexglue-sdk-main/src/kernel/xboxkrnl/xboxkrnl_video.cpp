@@ -262,6 +262,8 @@ void VdSetGraphicsInterruptCallback_entry(ppc_fn_t callback, ppc_pvoid_t user_da
   // r4 = user_data (r4 of VdSetGraphicsInterruptCallback)
   auto* graphics_system =
       static_cast<graphics::GraphicsSystem*>(kernel_state()->emulator()->graphics_system());
+  if (!graphics_system)
+    return;
   graphics_system->SetInterruptCallback(callback, user_data.guest_address());
 }
 
@@ -271,6 +273,8 @@ void VdInitializeRingBuffer_entry(ppc_pvoid_t ptr, ppc_i32_t size_log2) {
   // Buffer pointers are from MmAllocatePhysicalMemory with WRITE_COMBINE.
   auto* graphics_system =
       static_cast<graphics::GraphicsSystem*>(kernel_state()->emulator()->graphics_system());
+  if (!graphics_system)
+    return;
   graphics_system->InitializeRingBuffer(ptr.guest_address(), size_log2);
 }
 
@@ -278,6 +282,8 @@ void VdEnableRingBufferRPtrWriteBack_entry(ppc_pvoid_t ptr, ppc_i32_t block_size
   // r4 = log2(block size), 6, usually --- <=19
   auto* graphics_system =
       static_cast<graphics::GraphicsSystem*>(kernel_state()->emulator()->graphics_system());
+  if (!graphics_system)
+    return;
   graphics_system->EnableReadPointerWriteBack(ptr.guest_address(), block_size_log2);
 }
 

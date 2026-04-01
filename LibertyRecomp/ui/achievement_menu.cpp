@@ -14,7 +14,9 @@
 #include <exports.h>
 #include <decompressor.h>
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/images/achievements_menu/trophy.dds.h>
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
 
 constexpr double HEADER_CONTAINER_INTRO_MOTION_START = 0;
 constexpr double HEADER_CONTAINER_INTRO_MOTION_END = 15;
@@ -728,7 +730,9 @@ void AchievementMenu::Init()
     g_rodinFont = ImFontAtlasSnapshot::GetFont("FOT-RodinPro-DB.otf");
     g_newRodinFont = ImFontAtlasSnapshot::GetFont("FOT-NewRodinPro-UB.otf");
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTrophyIcon = LOAD_ZSTD_TEXTURE(g_trophy);
+#endif
 }
 
 void AchievementMenu::Draw()

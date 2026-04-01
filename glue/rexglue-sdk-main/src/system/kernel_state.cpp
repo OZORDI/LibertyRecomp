@@ -9,6 +9,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <algorithm>
 #include <string>
 
 #include <fmt/format.h>
@@ -267,8 +268,16 @@ object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
 
   // Create a thread to run in.
   // We start suspended so we can run the debugger prep.
+  // Recompiled PPC functions use 3-8x more stack than original Xbox 360 code
+  // (larger C++ frames, VMX register saves, etc.). The XEX header typically
+  // specifies 256KB-1MB which is insufficient. Enforce a 16MB minimum to
+  // prevent guest stack overflow during deep call chains (world init,
+  // collision detection recursion, rendering pipeline).
+  constexpr uint32_t kMinStackSize = 4 * 1024 * 1024;  // 4 MB
+  uint32_t stack_size = std::max(module->stack_size(), kMinStackSize);
+
   auto thread =
-      object_ref<XThread>(new XThread(kernel_state(), module->stack_size(), 0,
+      object_ref<XThread>(new XThread(kernel_state(), stack_size, 0,
                                       module->entry_point(), 0, X_CREATE_SUSPENDED, true, true));
 
   // We know this is the 'main thread'.

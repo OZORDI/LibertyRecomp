@@ -16,7 +16,9 @@
 #include <shellscalingapi.h>
 #endif
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/images/game_icon.bmp.h>
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
 
 bool m_isFullscreenKeyReleased = true;
 bool m_isResizing = false;
@@ -388,7 +390,9 @@ void GameWindow::SetIcon(EPlayerCharacter player)
             break;
     }
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     SetIcon(g_game_icon, sizeof(g_game_icon));
+#endif
 }
 
 const char* GameWindow::GetTitle()

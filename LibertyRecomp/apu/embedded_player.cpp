@@ -2,6 +2,7 @@
 #include <apu/embedded_player.h>
 #include <user/config.h>
 
+#ifdef LIBERTY_RECOMP_HAS_AUDIO_RESOURCES
 #include <res/music/installer.ogg.h>
 #include <res/sounds/window_open.ogg.h>
 #include <res/sounds/window_close.ogg.h>
@@ -44,7 +45,6 @@ static void PlayEmbeddedSound(EmbeddedSound s)
     EmbeddedSoundData &data = g_embeddedSoundData[size_t(s)];
     if (data.chunk == nullptr)
     {
-        // The sound hasn't been created yet, create it and pick it.
         const void *soundData = nullptr;
         size_t soundDataSize = 0;
         switch (s)
@@ -92,20 +92,15 @@ void EmbeddedPlayer::Init()
 {
     Mix_OpenAudio(XAUDIO_SAMPLES_HZ, AUDIO_F32SYS, 2, 4096);
     g_installerMusic = Mix_LoadMUS_RW(SDL_RWFromConstMem(g_installer_music, sizeof(g_installer_music)), 1);
-
     s_isActive = true;
 }
 
 void EmbeddedPlayer::Play(const char *name) 
 {
     assert(s_isActive && "Playback shouldn't be requested if the Embedded Player isn't active.");
-
     auto it = g_embeddedSoundMap.find(name);
     if (it == g_embeddedSoundMap.end())
-    {
         return;
-    }
-
     PlayEmbeddedSound(it->second);
 }
 
@@ -131,12 +126,20 @@ void EmbeddedPlayer::Shutdown()
         if (data.chunk != nullptr)
             Mix_FreeChunk(data.chunk);
     }
-
     Mix_HaltMusic();
     Mix_FreeMusic(g_installerMusic);
-
     Mix_CloseAudio();
     Mix_Quit();
-
     s_isActive = false;
 }
+
+#else // !LIBERTY_RECOMP_HAS_AUDIO_RESOURCES
+
+// No-op stubs when audio resources are not embedded
+void EmbeddedPlayer::Init() { s_isActive = false; }
+void EmbeddedPlayer::Play(const char*) {}
+void EmbeddedPlayer::PlayMusic() {}
+void EmbeddedPlayer::FadeOutMusic() {}
+void EmbeddedPlayer::Shutdown() { s_isActive = false; }
+
+#endif // LIBERTY_RECOMP_HAS_AUDIO_RESOURCES

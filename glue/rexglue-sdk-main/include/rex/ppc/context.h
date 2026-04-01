@@ -133,8 +133,8 @@ using PPCFunc = void(PPCContext& ctx, uint8_t* base);
     if (_icf_fn) {                                                                       \
       _icf_fn(ctx, base);                                                                \
     } else {                                                                             \
-      fprintf(stderr, "[MISSING-FUNC] indirect call to %08X (in_range=%d)\n",           \
-              _icf_addr, (int)_icf_in_range);                                            \
+      fprintf(stderr, "[MISSING-FUNC] indirect call to %08X (in_range=%d) from %08X\n",  \
+              _icf_addr, (int)_icf_in_range, uint32_t(ctx.lr));                          \
       fflush(stderr);                                                                    \
     }                                                                                    \
   } while (0)

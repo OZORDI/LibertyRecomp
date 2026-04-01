@@ -9,6 +9,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -61,13 +62,15 @@ bool SDLAudioDriver::Initialize() {
   sdl_initialized_ = true;
 
   SDL_AudioSpec desired_spec = {};
-  SDL_AudioSpec obtained_spec;
+  SDL_AudioSpec obtained_spec = {};
   desired_spec.freq = frame_frequency_;
   desired_spec.format = AUDIO_F32;
   desired_spec.channels = frame_channels_;
   desired_spec.samples = channel_samples_;
   desired_spec.callback = SDLCallback;
   desired_spec.userdata = this;
+  // Set default before opening so an early callback won't see channels==0
+  sdl_device_channels_ = frame_channels_;
   // Allow the hardware to decide between 5.1 and stereo
   int allowed_change = SDL_AUDIO_ALLOW_CHANNELS_CHANGE;
   for (int i = 0; i < 2; i++) {
@@ -89,6 +92,20 @@ bool SDLAudioDriver::Initialize() {
     return false;
   }
   sdl_device_channels_ = obtained_spec.channels;
+
+  // Validate format detection produced a usable channel count
+  if (sdl_device_channels_ != 2 && sdl_device_channels_ != 6) {
+    REXAPU_WARN("SDL returned {} channels, falling back to stereo", sdl_device_channels_);
+    SDL_CloseAudioDevice(sdl_device_id_);
+    sdl_device_id_ = -1;
+    desired_spec.channels = 2;
+    sdl_device_id_ = SDL_OpenAudioDevice(nullptr, 0, &desired_spec, &obtained_spec, 0);
+    if (sdl_device_id_ <= 0) {
+      REXAPU_ERROR("SDL_OpenAudioDevice() stereo fallback failed: {}", SDL_GetError());
+      return false;
+    }
+    sdl_device_channels_ = 2;
+  }
 
   SDL_PauseAudioDevice(sdl_device_id_, 0);
 
@@ -143,16 +160,25 @@ void SDLAudioDriver::SDLCallback(void* userdata, Uint8* stream, int len) {
     return;
   }
   const auto driver = static_cast<SDLAudioDriver*>(userdata);
-  assert_true(len ==
-              static_cast<int>(sizeof(float) * channel_samples_ * driver->sdl_device_channels_));
+  const int expected_len =
+      static_cast<int>(sizeof(float) * channel_samples_ *
+                       std::max<uint8_t>(driver->sdl_device_channels_, 1));
+  assert_true(len == expected_len);
 
   std::unique_lock<std::mutex> guard(driver->frames_mutex_);
   if (driver->frames_queued_.empty()) {
+    // Feed silence when no frames are queued to prevent callback stalls
+    static uint32_t sdl_silence_count = 0;
+    if (sdl_silence_count < 10) {
+      REXAPU_DEBUG("SDLCallback: no frames queued (silence)");
+      sdl_silence_count++;
+    }
     std::memset(stream, 0, len);
   } else {
     auto buffer = driver->frames_queued_.front();
     driver->frames_queued_.pop();
     if (REXCVAR_GET(audio_mute)) {
+      // Zero the output buffer when muted (skip conversion work)
       std::memset(stream, 0, len);
     } else {
       switch (driver->sdl_device_channels_) {
@@ -166,6 +192,7 @@ void SDLAudioDriver::SDLCallback(void* userdata, Uint8* stream, int len) {
           break;
         default:
           assert_unhandled_case(driver->sdl_device_channels_);
+          std::memset(stream, 0, len);
           break;
       }
     }

@@ -2,9 +2,11 @@
 #include <locale/locale.h>
 #include <patches/aspect_ratio_patches.h>
 #include <patches/audio_patches.h>
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/images/common/main_menu7.dds.h>
 #include <res/images/common/main_menu8.dds.h>
 #include <res/images/common/main_menu9.dds.h>
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
 #include <ui/black_bar.h>
 #include <ui/button_window.h>
 #include <ui/fader.h>
@@ -1263,9 +1265,15 @@ void OptionsMenu::Draw()
 
 void OptionsMenu::Init()
 {
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexMainMenu7 = LOAD_ZSTD_TEXTURE(g_main_menu7);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexMainMenu8 = LOAD_ZSTD_TEXTURE(g_main_menu8);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexMainMenu9 = LOAD_ZSTD_TEXTURE(g_main_menu9);
+#endif
 }
 
 void OptionsMenu::Open(bool isPause)

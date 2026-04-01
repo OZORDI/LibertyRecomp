@@ -104,6 +104,7 @@ class Entry {
   Entry* CreateEntry(const std::string_view name, uint32_t attributes);
   bool Delete(Entry* entry);
   bool Delete();
+  virtual bool Truncate() { return false; }
   void Touch();
 
   // If successful, out_file points to a new file. When finished, call

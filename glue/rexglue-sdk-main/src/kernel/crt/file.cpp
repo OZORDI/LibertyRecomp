@@ -8,9 +8,11 @@
  * @license     BSD 3-Clause License
  */
 
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <string>
 
 #include <rex/filesystem.h>
 #include <rex/filesystem/device.h>
@@ -65,13 +67,54 @@ static rex::system::KernelState* KS() {
   return rex::system::kernel_state();
 }
 
+// Sanitize a Windows-1252 (ANSI) guest path for safe passage through utfcpp.
+// Bytes > 0x7F are not valid UTF-8 lead/continuation bytes and will cause
+// utfcpp to throw invalid_utf8.  Replace them with '?' to preserve ASCII path
+// separators (the only structurally significant characters) while avoiding the
+// exception.  Returns true if any bytes were replaced.
+static bool SanitizeAnsiPath(const char* src, char* dst, size_t dst_size) {
+  bool sanitized = false;
+  size_t i = 0;
+  for (; src[i] != '\0' && i + 1 < dst_size; ++i) {
+    if (static_cast<unsigned char>(src[i]) > 0x7F) {
+      dst[i] = '?';
+      sanitized = true;
+    } else {
+      dst[i] = src[i];
+    }
+  }
+  dst[i] = '\0';
+  return sanitized;
+}
+
 ppc_u32_result_t CreateFileA_entry(ppc_pchar_t lpFileName, ppc_u32_t dwDesiredAccess,
                                    ppc_u32_t dwShareMode, ppc_pvoid_t lpSecurityAttributes,
                                    ppc_u32_t dwCreationDisposition, ppc_u32_t dwFlagsAndAttributes,
                                    ppc_u32_t hTemplateFile) {
-  const char* path = static_cast<const char*>(lpFileName);
+  const char* raw_path = static_cast<const char*>(lpFileName);
   auto* ks = KS();
   auto disposition = MapDisposition(static_cast<uint32_t>(dwCreationDisposition));
+
+  // Xbox 360 paths are Windows-1252 (ANSI).  Sanitize bytes > 0x7F so that
+  // the VFS (which uses utfcpp for UTF-8 validation) does not throw.
+  char safe_path[512];
+  bool did_sanitize = SanitizeAnsiPath(raw_path, safe_path, sizeof(safe_path));
+  if (did_sanitize) {
+    static bool warned = false;
+    if (!warned) {
+      // Log the original raw bytes as hex so the non-ASCII portion is visible.
+      std::string hex;
+      for (const char* p = raw_path; *p; ++p) {
+        char buf[4];
+        std::snprintf(buf, sizeof(buf), "%02X ", static_cast<unsigned char>(*p));
+        hex += buf;
+      }
+      REXKRNL_WARN("rexcrt_CreateFileA: sanitized non-ASCII path bytes: [{}] -> '{}'", hex,
+                    safe_path);
+      warned = true;
+    }
+  }
+  const char* path = safe_path;
 
   rex::filesystem::File* vfs_file = nullptr;
   rex::filesystem::FileAction action;
@@ -81,10 +124,10 @@ ppc_u32_result_t CreateFileA_entry(ppc_pchar_t lpFileName, ppc_u32_t dwDesiredAc
                                          static_cast<uint32_t>(dwDesiredAccess), false, true,
                                          &vfs_file, &action);
   } catch (const std::exception& e) {
-    REXKRNL_WARN("rexcrt_CreateFileA: exception for path: {}", e.what());
+    REXKRNL_WARN("rexcrt_CreateFileA: exception for path '{}': {}", path, e.what());
     return kInvalidHandleValue;
   } catch (...) {
-    REXKRNL_WARN("rexcrt_CreateFileA: unknown exception for path");
+    REXKRNL_WARN("rexcrt_CreateFileA: unknown exception for path '{}'", path);
     return kInvalidHandleValue;
   }
 

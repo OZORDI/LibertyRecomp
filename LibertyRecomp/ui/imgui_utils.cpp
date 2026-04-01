@@ -8,6 +8,7 @@
 #include <decompressor.h>
 #include <version.h>
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
 #include <res/images/common/button_window.dds.h>
 #include <res/images/common/controller.dds.h>
 #include <res/images/common/kbm.dds.h>
@@ -15,6 +16,7 @@
 #include <res/images/common/select_arrow.dds.h>
 #include <res/images/common/main_menu1.dds.h>
 #include <res/images/common/arrow.dds.h>
+#endif // LIBERTY_RECOMP_HAS_RESOURCES
 
 ImFont* g_pFntRodin;
 ImFont* g_pFntNewRodin;
@@ -33,13 +35,27 @@ void InitImGuiUtils()
     g_pFntRodin = ImFontAtlasSnapshot::GetFont("FOT-RodinPro-DB.otf");
     g_pFntNewRodin = ImFontAtlasSnapshot::GetFont("FOT-NewRodinPro-UB.otf");
 
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexButtonWindow = LOAD_ZSTD_TEXTURE(g_button_window);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexController = LOAD_ZSTD_TEXTURE(g_controller);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexKbm = LOAD_ZSTD_TEXTURE(g_kbm);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexWindow = LOAD_ZSTD_TEXTURE(g_window);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexSelectArrow = LOAD_ZSTD_TEXTURE(g_select_arrow);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexMainMenu1 = LOAD_ZSTD_TEXTURE(g_main_menu1);
+#endif
+#ifdef LIBERTY_RECOMP_HAS_RESOURCES
     g_upTexArrow = LOAD_ZSTD_TEXTURE(g_arrow);
+#endif
 }
 
 void SetGradient(const ImVec2& min, const ImVec2& max, ImU32 top, ImU32 bottom)

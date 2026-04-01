@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -454,10 +455,23 @@ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> glob
     // Unprotect the faulting page so the write can proceed.
     auto page_size = heap->page_size();
     uint32_t page_addr = virtual_address & ~(page_size - 1);
-    heap->Protect(page_addr, page_size,
-                  memory::kMemoryProtectRead | memory::kMemoryProtectWrite);
-    REXSYS_WARN("Stack guard page hit at guest 0x{:08X} — expanded stack", virtual_address);
-    return true;
+    bool ok = heap->Protect(page_addr, page_size,
+                            memory::kMemoryProtectRead | memory::kMemoryProtectWrite);
+    if (ok) {
+      REXSYS_WARN("Stack guard page hit at guest 0x{:08X} — expanded stack", virtual_address);
+      return true;
+    }
+    // Protect failed — page is uncommitted (never allocated or already freed).
+    // This is a genuine stack overflow past all allocated memory.
+    // We must abort() here because the POSIX signal handler falls off the end
+    // when no handler returns true, causing the kernel to re-deliver the signal
+    // and loop infinitely. abort() generates a core dump for debugging.
+    REXSYS_ERROR("FATAL: Stack overflow at guest 0x{:08X} — page 0x{:08X} is uncommitted. "
+                 "The guest PPC stack has exceeded all allocated memory. Aborting.",
+                 virtual_address, page_addr);
+    fflush(stdout);
+    fflush(stderr);
+    std::abort();
   }
 
   if (heap->heap_type() != memory::HeapType::kGuestPhysical) {
