@@ -581,6 +581,98 @@ PPC_FUNC_HOOK(sub_828507F8) {
 extern "C" void __imp__sub_829A0678(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_829A0678) { ctx.r3.u32 = 0; }
 
+// sub_828C9980 - grcEffect::SetTextureSlot
+// Accounts for ~31% of MISSING-FUNC hits (89,952). The original function does a
+// virtual call via vtable[13] on the current texture object to get its underlying
+// resource pointer for an identity check ("is new texture same as current?").
+// That vtable dispatch targets a function not in the recomp table, triggering
+// MISSING-FUNC on every call. Fix: skip the vtable identity check entirely and
+// always take the "different texture" path. This causes redundant texture rebinds
+// but is correct — the identity check was only a GPU state-change optimization
+// on Xbox 360 hardware. The net effect is a large performance win: eliminating
+// 89K fprintf+fflush calls far outweighs redundant emulated-GPU texture binds.
+extern "C" void sub_82147AA8(PPCContext &ctx, uint8_t *base);
+extern "C" void sub_828E0F88(PPCContext &ctx, uint8_t *base);
+extern "C" void sub_828C97E0(PPCContext &ctx, uint8_t *base);
+
+PPC_FUNC_HOOK(sub_828C9980) {
+  // Args: r3=this(effect), r4=slotArray, r5=slotIndex, r6=newTexture
+  uint32_t effect     = ctx.r3.u32;
+  uint32_t slotArray  = ctx.r4.u32;
+  int32_t  slotIndex  = ctx.r5.s32;
+  uint32_t newTexture = ctx.r6.u32;
+
+  if (slotIndex == 0) {
+    // Clear global flag and return (matches epilogue at loc_828C9A48/loc_828C9A54)
+    PPC_STORE_U32(0x831C3DE4, 0);
+    return;
+  }
+
+  uint32_t adjustedIdx = (uint32_t)(slotIndex - 1);
+  uint32_t slotArrayBase = PPC_LOAD_U32(slotArray);
+  uint32_t offset = adjustedIdx * 4;
+  uint32_t currentTex = PPC_LOAD_U32(slotArrayBase + offset);
+
+  if (currentTex == 0) {
+    // Slot is empty — jump to assignment check (loc_828C9A0C path)
+    goto check_assign;
+  }
+
+  // --- ORIGINAL CODE DOES VTABLE[13] DISPATCH HERE FOR IDENTITY CHECK ---
+  // We skip it entirely: always assume textures are different (never early-out).
+  // This eliminates the MISSING-FUNC from the unresolved virtual call.
+
+  {
+    // Reload current texture from slot (mirrors lwz r11,0(r29); lwzx r3,r11,r30)
+    uint32_t curTex = PPC_LOAD_U32(PPC_LOAD_U32(slotArray) + offset);
+    uint8_t texType = PPC_LOAD_U8(curTex + 8);
+    if (texType == 2) {
+      // Special path: sub_828E0F88(currentTexture, newTexture)
+      ctx.r3.u32 = curTex;
+      ctx.r4.u32 = newTexture;
+      sub_828E0F88(ctx, base);
+      goto finalize;
+    }
+    // Normal unbind: sub_82147AA8(currentTexture)
+    ctx.r3.u32 = curTex;
+    sub_82147AA8(ctx, base);
+    // Store new texture in slot
+    PPC_STORE_U32(PPC_LOAD_U32(slotArray) + offset, newTexture);
+    if (newTexture == 0)
+      goto finalize;
+    goto inc_refcount;
+  }
+
+check_assign:
+  {
+    // loc_828C9A0C: slot was empty or identity matched (we only reach here if empty)
+    uint32_t existing = PPC_LOAD_U32(PPC_LOAD_U32(slotArray) + offset);
+    if (existing != 0) goto epilogue;  // slot occupied, same texture
+    if (newTexture == 0) goto epilogue; // both null
+    // Assign new texture to empty slot
+    PPC_STORE_U32(PPC_LOAD_U32(slotArray) + offset, newTexture);
+  }
+
+inc_refcount:
+  {
+    // Increment refcount: *(uint16_t*)(newTexture + 10) += 1
+    uint16_t refCount = PPC_LOAD_U16(newTexture + 10);
+    PPC_STORE_U16(newTexture + 10, (uint16_t)(refCount + 1));
+  }
+
+finalize:
+  // Tail call: sub_828C97E0(effect, slotArray, newTexture, adjustedIdx)
+  ctx.r3.u32 = effect;
+  ctx.r4.u32 = slotArray;
+  ctx.r5.u32 = newTexture;
+  ctx.r6.u32 = adjustedIdx;
+  sub_828C97E0(ctx, base);
+
+epilogue:
+  // Clear global flag at 0x831C3DE4
+  PPC_STORE_U32(0x831C3DE4, 0);
+}
+
 // sub_82A46098 - VBlank frame completion dispatch
 // Increments FrameSubmitted (device+16532) and FrameCompleted (device+16552)
 // counters, timestamps frames, and dispatches the frame-done callback
@@ -2495,6 +2587,39 @@ PPC_FUNC_HOOK(sub_82212EC0) {
     // Skip the original — it calls sub_8220FDB8 which tries Xbox async I/O
     return;
 }
+
+// =============================================================================
+// MISSING-FUNC ELIMINATION HOOKS (3 independent fixes)
+// These eliminate 288K MISSING-FUNC dispatches that cause stack overflow.
+// =============================================================================
+
+// Fix 1: sub_821B3970 / sub_821B3990 — grmSetup vtable dispatch thunks
+// These load the grmSetup singleton from 0x82B29EEC and dispatch vtable[4]/[5].
+// When the global is null (before RAGE init creates the object), they dispatch
+// to address 0 → MISSING-FUNC. Null-guard eliminates ~180K hits.
+extern "C" void __imp__sub_821B3970(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_821B3970) {
+    uint32_t obj = PPC_LOAD_U32(0x82B29EEC);
+    if (obj == 0) { ctx.r3.u64 = 0; return; }
+    __imp__sub_821B3970(ctx, base);
+}
+
+extern "C" void __imp__sub_821B3990(PPCContext &ctx, uint8_t *base);
+PPC_FUNC_HOOK(sub_821B3990) {
+    uint32_t obj = PPC_LOAD_U32(0x82B29EEC);
+    if (obj == 0) { ctx.r3.u64 = 0; return; }
+    __imp__sub_821B3990(ctx, base);
+}
+
+// Fix 2: sub_82191858 — XAudio voice queue drain (use-after-free)
+// Freed voice objects still in queue have 0x3F000000 (0.5f volume) in vtable
+// field. SDL handles audio — this Xbox XAudio path is dead code. ~18K hits.
+PPC_FUNC_HOOK(sub_82191858) {
+    // No-op: XAudio voice queue processing not needed on PC/macOS (SDL audio).
+}
+
+// Fix 3: sub_828C9980 — already hooked at line 598 (Agent 11 added it)
+// grcEffect::SetTextureSlot with null vtable identity check skipped.
 
 // sub_82849918 — Yield/sleep function called each state machine iteration
 extern "C" void __imp__sub_82849918(PPCContext &ctx, uint8_t *base);
