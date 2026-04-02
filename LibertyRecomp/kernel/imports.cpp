@@ -2601,6 +2601,23 @@ extern "C" void __imp__sub_821B3970(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_821B3970) {
     uint32_t obj = PPC_LOAD_U32(0x82B29EEC);
     if (obj == 0) { ctx.r3.u64 = 0; return; }
+    uint32_t vtable_ptr = PPC_LOAD_U32(obj);
+    static bool s_dumped = false;
+    if (!s_dumped) {
+        s_dumped = true;
+        uint32_t slot4 = PPC_LOAD_U32(vtable_ptr + 16);
+        printf("[VTABLE-DIAG] sub_821B3970 first call:\n");
+        printf("  obj_ptr    = 0x%08X\n", obj);
+        printf("  vtable_ptr = 0x%08X (expect 0x82000990)\n", vtable_ptr);
+        printf("  slot4      = 0x%08X (expect 0x828C5B08)\n", slot4);
+        printf("  obj dump:");
+        for (int i = 0; i < 8; i++) printf(" %08X", PPC_LOAD_U32(obj + i * 4));
+        printf("\n");
+        fflush(stdout);
+    }
+    if (vtable_ptr < 0x82000400 || vtable_ptr >= 0x82107068) {
+        ctx.r3.u64 = 0; return;
+    }
     __imp__sub_821B3970(ctx, base);
 }
 
@@ -2608,6 +2625,10 @@ extern "C" void __imp__sub_821B3990(PPCContext &ctx, uint8_t *base);
 PPC_FUNC_HOOK(sub_821B3990) {
     uint32_t obj = PPC_LOAD_U32(0x82B29EEC);
     if (obj == 0) { ctx.r3.u64 = 0; return; }
+    uint32_t vtable_ptr = PPC_LOAD_U32(obj);
+    if (vtable_ptr < 0x82000400 || vtable_ptr >= 0x82107068) {
+        ctx.r3.u64 = 0; return;
+    }
     __imp__sub_821B3990(ctx, base);
 }
 
