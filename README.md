@@ -33,7 +33,6 @@ The runtime is powered by a fork of the [ReXGlue SDK](https://github.com/rexglue
 | iOS | Metal | ✅ Supported |
 | Android | Vulkan | ✅ Supported |
 | PlayStation 4 | Vulkan (OpenOrbis) | ✅ Supported (homebrew/jailbreak only) |
-| Nintendo Switch | Vulkan | ✅ Supported (homebrew) |
 
 See [Platform Setup Guide](/docs/PLATFORM_SETUP.md) for setup instructions for each platform.
 
