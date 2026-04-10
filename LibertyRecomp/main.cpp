@@ -584,6 +584,7 @@ int main(int argc, char *argv[])
         // Get memory base from the Runtime's internally-managed Memory object.
         g_memory.base = s_rexRuntime->virtual_membase();
         fprintf(stderr, "[Main] RexGlue memory: base=%p\n", (void*)g_memory.base);
+        // Set base pointer for rexcrt memset watchpoint diagnostic
         // Populate vtables and install function stubs into guest memory.
         g_memory.PopulateFunctionTableAndVtables();
         printf("[Main] rex::Runtime created (kernel_state=%p)\n",

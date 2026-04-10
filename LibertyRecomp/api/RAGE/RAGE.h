@@ -21,6 +21,8 @@ namespace rage
     class datBase;
     class pgBase;
     class grcDevice;
+    class grcSetup;
+    class grmSetup;
     class grmShaderGroup;
     class fiDevice;
     class fiPackfile;
@@ -213,6 +215,148 @@ namespace rage
         virtual void EndFrame() = 0;
         virtual void Present() = 0;
     };
+
+    // ==========================================================================
+    // grcSetup / grmSetup - Graphics Setup Singleton
+    // ==========================================================================
+    // Class hierarchy: rage::datBase -> rage::grcSetup -> rage::grmSetup
+    //
+    // Manages the RAGE graphics setup lifecycle:
+    // - Device initialization and teardown
+    // - Frame timing via exponential moving average of timebase deltas
+    // - V-sync state machine (uninit -> pending -> ready)
+    // - Screenshot path and user name storage
+    //
+    // Object size: 472 bytes (0x1D8), allocated on guest heap
+    //
+    // Timing constants (Xbox 360 timebase):
+    //   ticksToSeconds = ~0.000020050125 (1 / 49,875,000 Hz)
+    //   EMA weights: old = 63/64 (0.984375), new = 1/64 (0.015625)
+    //   Max acceptable frame delta: 1.0 second
+    //
+    // Guest addresses:
+    //   grcSetup vtable:   0x82093B28
+    //   grmSetup vtable:   0x82000990
+    //   sm_Instance:        0x82B29EEC
+    //
+    // Globals managed by InitDevice:
+    //   0x831C2F88 - grcTextureFactory*
+    //   0x831C5E08 - grcTextureFactory* (secondary)
+    //   0x831C513C - grcEffectFactory* (vtable 0x82094B84)
+    //   0x831C51CC - grcRenderStateFactory* (vtable 0x820951D4)
+    //   0x831C2DA8 - grcDevice*
+    // ==========================================================================
+
+    enum grcSetupInitState : u8
+    {
+        GRC_SETUP_UNINIT  = 0,
+        GRC_SETUP_PENDING = 1,
+        GRC_SETUP_READY   = 2,
+    };
+
+    class grcSetup : public datBase
+    {
+    public:
+        // +0x004: Clear color in ARGB format (init 0xFFFFFFFF by ctor, set to 0xFF000000 by post-init)
+        u32 m_clearColor;
+
+        // +0x008: Timebase snapshot taken at construction (mftb, retried until non-zero low word)
+        u64 m_timebaseInit;
+
+        // +0x010: Timebase snapshot updated each BeginFrame
+        u64 m_timebaseFrame;
+
+        // +0x018: Timebase snapshot updated each BeginScene / EndFrame
+        u64 m_timebasePresent;
+
+        // +0x020: EMA-smoothed raw frame delta in seconds (updated by UpdateTimingRaw)
+        f32 m_smoothedDeltaRaw;
+
+        // +0x024: EMA-smoothed present delta in seconds (updated by EndFrame)
+        f32 m_smoothedDeltaPresent;
+
+        // +0x028: EMA-smoothed scene delta in seconds (updated by BeginScene)
+        f32 m_smoothedDeltaScene;
+
+        // +0x02C: Fourth timing float (reset by SetVsync alongside the other three)
+        f32 m_smoothedDeltaFence;
+
+        // +0x030: Debug/config flags
+        u8 m_bUnknown30;
+        u8 m_pad31;
+        u8 m_bUnknown32;
+        u8 m_bUnknown33;
+
+        // +0x034: Screenshot format valid flag (derived from global config)
+        u8 m_bScreenshotFmtValid;
+
+        // +0x035: Not-widescreen flag (inverted from display config check)
+        u8 m_bNotWidescreen;
+
+        u8 m_pad36[2];
+
+        // +0x038: Screenshot file index (init 1)
+        s32 m_screenshotIndex;
+
+        // +0x03C: Unknown field (init 0)
+        s32 m_field3C;
+
+        // +0x040: Screenshot save path (init "c:/Screenshot", 256 chars)
+        char m_screenshotPath[256];
+
+        // +0x140: V-sync enabled flag (from display config)
+        u8 m_bVsyncEnabled;
+        u8 m_pad141[3];
+
+        // +0x144: Clear color components as floats (set by post-init)
+        f32 m_clearR;
+        f32 m_clearG;
+        f32 m_clearB;
+
+        // +0x150: User name strings (init "Unknown", 64 chars each)
+        char m_userName[64];
+        char m_displayName[64];
+
+        // +0x1D0: Init state machine (0=uninit, 1=pending, 2=ready)
+        u8 m_initState;
+        u8 m_pad1D1[7];
+
+        // -- Virtual methods (grcSetup vtable at 0x82093B28) --
+        // [0] ~grcSetup()                          sub_828C5DF8 - scalar deleting destructor
+        // [1] virtual void InitDevice()             sub_828C5840 - base device init (texture factory, grcDevice)
+        // [2] virtual void BeginScene()             sub_828C59E0 - scene delta EMA + timebase reset
+        // [3] virtual void UpdateTimingRaw()         sub_828C5A98 - raw delta EMA from timebaseInit
+        // [4] virtual void BeginFrame(bool present)  sub_828C5B08 - vsync state machine + frame timebase
+        // [5] virtual void EndFrame()               sub_828C5BA0 - present delta EMA + present params
+        // [6] virtual void Shutdown()               sub_828C5E58 - release texture factory + grcDevice
+    };
+
+    class grmSetup : public grcSetup
+    {
+    public:
+        // No additional fields - same 472-byte layout as grcSetup.
+        // grmSetup overrides vtable slots [0], [1], [2], [6].
+
+        // -- Virtual methods (grmSetup vtable at 0x82000990) --
+        // [0] ~grmSetup()                          sub_821B3A20 - calls grmSetup dtor then free
+        // [1] virtual void InitDevice()             sub_828C5ED8 - grcSetup::InitDevice + shader init
+        //     Calls: sub_828C5840 (base), sub_828C6AD0 (unlit shader),
+        //            sub_828CD438(1) (grcEffectFactory -> 0x831C513C),
+        //            sub_828CFE30(1) (grcRenderStateFactory -> 0x831C51CC)
+        // [2] virtual void BeginScene()             sub_828C5F90 - pure thunk to grcSetup::BeginScene
+        // [3] virtual void UpdateTimingRaw()         sub_828C5A98 - INHERITED from grcSetup
+        // [4] virtual void BeginFrame(bool present)  sub_828C5B08 - INHERITED from grcSetup
+        // [5] virtual void EndFrame()               sub_828C5BA0 - INHERITED from grcSetup
+        // [6] virtual void Shutdown()               sub_828C5F10 - grmSetup-specific shutdown
+        //     Calls: sub_828C7F70 (pipeline shutdown),
+        //            delete 0x831C51CC (grcRenderStateFactory),
+        //            delete 0x831C513C (grcEffectFactory),
+        //            grcSetup::Shutdown (sub_828C5E58)
+    };
+
+    // NOTE: No static_asserts - host layout (64-bit vtable ptr) differs from
+    // Xbox 360 guest layout (32-bit vtable ptr). All actual field access goes
+    // through PPC_LOAD/STORE at the documented guest offsets above.
 
     class grcTexture : public pgBase
     {
@@ -597,23 +741,51 @@ namespace GTA4
     // Pool System (for entity management)
     // ==========================================================================
 
+    // CPool<T> — GTA IV entity pool (verified from sub_8291E858 init, sub_8291E3C0 alloc)
+    //
+    // Layout at 0x831C8EC0 (global pool pointer target):
+    //   +0x00  m_pData          — base pointer to entity array (T-sized slots)
+    //   +0x04  m_pFlags         — base pointer to flags array (1 byte per slot)
+    //   +0x08  m_critSection    — RTL_CRITICAL_SECTION (32 bytes on Xbox 360)
+    //   +0x28  m_totalCount     — total number of slots
+    //   +0x2C  m_freeCount      — slots currently available
+    //   +0x30  m_lastAllocIndex — index of last successful allocation (-1 = none)
+    //   +0x34  m_initialized    — set to 1 after Init()
+    //
+    // Flag byte semantics: bit 7 (0x80) = free, cleared on alloc, set on release.
+    // Entity stride: sizeof(T) — the initializer allocates (count * sizeof(T)) bytes.
+    // Allocator (sub_8291E3C0) scans flags from lastAllocIndex+1, wrapping once.
+
     template<typename T>
     class CPool
     {
     public:
-        T* m_objects;
-        u8* m_flags;
-        u32 m_size;
-        u32 m_firstFree;
-        
+        T*       m_pData;            // +0x00  entity array base
+        u8*      m_pFlags;           // +0x04  per-slot flag bytes
+        u8       m_critSection[32];  // +0x08  RTL_CRITICAL_SECTION (Xbox 360)
+        u32      m_totalCount;       // +0x28  total slot count
+        u32      m_freeCount;        // +0x2C  free slot count
+        s32      m_lastAllocIndex;   // +0x30  last alloc scan position (-1 init)
+        u8       m_initialized;      // +0x34  1 when pool is ready
+        u8       m_pad[3];           // +0x35  alignment padding
+
+        // Get entity at index (returns nullptr if slot is free or out of range)
         T* GetAt(u32 index)
         {
-            if (index < m_size && (m_flags[index] & 0x80) == 0)
-                return &m_objects[index];
+            if (index < m_totalCount && (m_pFlags[index] & 0x80) == 0)
+                return &m_pData[index];
             return nullptr;
         }
-        
-        u32 GetSize() const { return m_size; }
+
+        // Check if a slot is currently in use
+        bool IsSlotActive(u32 index) const
+        {
+            return index < m_totalCount && (m_pFlags[index] & 0x80) == 0;
+        }
+
+        u32 GetSize() const { return m_totalCount; }
+        u32 GetFreeCount() const { return m_freeCount; }
+        u32 GetUsedCount() const { return m_totalCount - m_freeCount; }
     };
 
     // Global pools

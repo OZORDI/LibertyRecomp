@@ -2618,7 +2618,45 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     return 0;
 }
 
-static void DestructResource(GuestResource* resource) 
+// =============================================================================
+// Video::OnGuestDeviceCreated — called from the sub_82A50890 post-hook in
+// imports.cpp after the recomp's Xbox D3D CreateDevice has run.
+// Performs the host-side bookkeeping that the dead CreateDevice() above would
+// have done: move the back-buffer from host heap into guest-visible memory and
+// populate the XDBF achievement texture cache.
+// =============================================================================
+void Video::OnGuestDeviceCreated()
+{
+    // --- XDBF achievement texture cache ---
+    g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture*>();
+    for (auto& achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
+    {
+        if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
+            continue;
+        g_xdbfTextureCache[achievement.ID] =
+            LoadTexture((uint8_t*)achievement.pImageBuffer, achievement.ImageBufferSize).release();
+    }
+
+    // --- Move back-buffer from host heap to guest-visible memory ---
+    if (g_backBufferHolder == nullptr)
+    {
+        LOG_WARNING("[OnGuestDeviceCreated] g_backBufferHolder already consumed — skipping");
+        return;
+    }
+
+    assert(!g_memory.IsInMemoryRange(g_backBuffer) && g_backBufferHolder != nullptr);
+    g_backBuffer = g_userHeap.AllocPhysical<GuestSurface>(std::move(*g_backBufferHolder));
+
+    // Fix stale references — BeginCommandList() may have cached the old host pointer.
+    if (g_renderTarget == g_backBufferHolder.get()) g_renderTarget = g_backBuffer;
+    if (g_depthStencil == g_backBufferHolder.get()) g_depthStencil = g_backBuffer;
+
+    g_backBufferHolder = nullptr;
+
+    LOG_INFO("[OnGuestDeviceCreated] back-buffer moved to guest heap, XDBF cache ready");
+}
+
+static void DestructResource(GuestResource* resource)
 {
     // Needed for hack in CreateSurface (remove if fix it)
     if (resource->type == ResourceType::RenderTarget || resource->type == ResourceType::DepthStencil)
@@ -7113,7 +7151,7 @@ void MovieRendererMidAsmHook(PPCRegister& r3)
         device->samplerStates[i].data[3] = (device->samplerStates[i].data[3].get() & ~0x1f80000) | 0x1280000;
     }
 
-    device->dirtyFlags[3] = device->dirtyFlags[3].get() | 0xe0000000ull;
+    device->dirtyFlags[2] = device->dirtyFlags[2].get() | 0xe0000000000ull;
 }
 
 // Normally, we could delay setting IsMadeOne, but the game relies on that flag
@@ -8927,6 +8965,105 @@ PPC_FUNC_HOOK(sub_82A42BA8)
 }
 
 // =============================================================================
+// GTA IV Pixel Shader Creation Hook (sub_82A42CB8)
+// Mirrors the VS hook above. Called from sub_828C8108 (shader resource fixup)
+// for each pixel shader entry in the compiled "axgr" shader archive.
+// Input format is identical to VS:
+//   r3 = pointer to Xenos shader container
+//     [0] = flags (magic 0x102A11XX, bit 4 set = PS)
+//     [4] = virtualSize (big-endian)
+//     [8] = physicalSize (big-endian)
+// Returns: shader handle in r3, or 0 on failure
+//
+// Without this hook, pixel shaders return raw 40-byte guest descriptors
+// instead of valid GuestShader pointers, causing rendering failures.
+// =============================================================================
+extern "C" void __imp__sub_82A42CB8(PPCContext& ctx, uint8_t* base);
+
+static int s_createPSFromBytecodeCount = 0;
+static int s_createPSHits = 0;
+static int s_createPSMisses = 0;
+
+PPC_FUNC_HOOK(sub_82A42CB8)
+{
+    ++s_createPSFromBytecodeCount;
+
+    uint32_t bytecodeAddr = ctx.r3.u32;
+
+    // Try to intercept and inject cached shader
+    if (bytecodeAddr != 0 && bytecodeAddr < 0xF0000000) {
+        uint8_t* bytecodePtr = static_cast<uint8_t*>(g_memory.Translate(bytecodeAddr));
+
+        if (bytecodePtr != nullptr) {
+            const be<uint32_t>* shaderData = reinterpret_cast<const be<uint32_t>*>(bytecodePtr);
+            uint32_t flags = shaderData[0];
+            uint32_t virtualSize = shaderData[1];
+            uint32_t physicalSize = shaderData[2];
+
+            // Check for valid Xbox 360 shader magic (0x102A11XX)
+            if ((flags & 0xFFFFFF00) == 0x102A1100 && virtualSize > 0 && physicalSize > 0) {
+                uint32_t totalSize = virtualSize + physicalSize;
+
+                // Compute hash of shader bytecode
+                XXH64_hash_t hash = XXH3_64bits(shaderData, totalSize);
+
+                // Lookup in shader cache
+                ShaderCacheEntry* entry = FindShaderCacheEntry(hash);
+
+                if (entry != nullptr) {
+                    ++s_createPSHits;
+
+                    // Determine shader type from flags
+                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
+
+                    // Create GuestShader if not already created
+                    if (entry->guestShader == nullptr) {
+                        entry->guestShader = g_userHeap.AllocPhysical<GuestShader>(type);
+                        entry->guestShader->shaderCacheEntry = entry;
+                    }
+
+                    if (s_createPSFromBytecodeCount <= 50 || s_createPSFromBytecodeCount % 200 == 0) {
+                        LOGF_WARNING("CreatePSFromBytecode #{}: CACHE HIT hash=0x{:X} -> {} type={}",
+                                     s_createPSFromBytecodeCount, hash, entry->filename,
+                                     type == ResourceType::VertexShader ? "VS" : "PS");
+                    }
+
+                    // Return the GuestShader address as the shader handle
+                    ctx.r3.u32 = g_memory.MapVirtual(entry->guestShader);
+                    return;
+                } else {
+                    ++s_createPSMisses;
+                    if (s_createPSMisses <= 30) {
+                        LOGF_WARNING("CreatePSFromBytecode #{}: CACHE MISS hash=0x{:X} size={} flags=0x{:08X}",
+                                     s_createPSFromBytecodeCount, hash, totalSize, flags);
+                    }
+                    // Return a dummy shader -- do NOT fall through to original
+                    // GPU code which contains td assertions that trap.
+                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
+                    GuestShader* dummy = g_userHeap.AllocPhysical<GuestShader>(type);
+                    ctx.r3.u32 = g_memory.MapVirtual(dummy);
+                    return;
+                }
+            } else if (s_createPSFromBytecodeCount <= 20) {
+                LOGF_WARNING("CreatePSFromBytecode #{}: Invalid magic addr=0x{:08X} flags=0x{:08X}",
+                             s_createPSFromBytecodeCount, bytecodeAddr, flags);
+            }
+        }
+    }
+
+    // Log stats periodically
+    if (s_createPSFromBytecodeCount % 500 == 0) {
+        LOGF_WARNING("CreatePSFromBytecode Stats: total={} hits={} misses={}",
+                     s_createPSFromBytecodeCount, s_createPSHits, s_createPSMisses);
+    }
+
+    // Return dummy shader for any uncategorized case -- never fall through
+    // to original GPU code which contains td assertions that trap.
+    GuestShader* fallback = g_userHeap.AllocPhysical<GuestShader>(ResourceType::PixelShader);
+    ctx.r3.u32 = g_memory.MapVirtual(fallback);
+}
+
+// =============================================================================
 // GTA IV Render Path Hooks - HYBRID APPROACH
 // These PPC_FUNC hooks call BOTH:
 // 1. Original PPC code (to update guest state)
@@ -9611,15 +9748,17 @@ PPC_FUNC_HOOK(sub_82A46578)
 // The existing render thread processes RenderCommands → host GPU draws.
 //
 // PM4 state setters INTENTIONALLY UNHOOKED (recompiled code runs freely):
-//   sub_82A3E7A0  — VS PM4 builder (updates device+12700, emits PM4 → no-op'd)
+//   sub_82A3E7A0  — VS PM4 builder (updates device+12700, emits PM4 -> no-op'd)
 //   sub_82A47AE0  — VS+PS PM4 builder (updates device+12700/12704)
 //   sub_82A44B78  — Texture fetch const (updates device+12536+slot*4)
 //   sub_82A3B690  — RT register writer (updates device+12452+idx*4)
 //   sub_82A3B7B0  — DS register writer (updates device+12428)
-//   sub_82A42760  — Viewport writer (updates device+12688 → device+12376)
-//   sub_82A424A8  — Scissor writer (updates device+12684)
 //   sub_82A3A890  — VDecl writer (updates device+10456)
 //   sub_82A3BF50  — SetShader (updates device+12432+type*4)
+//
+// PM4 state setters HOOKED (shader binding requires handle translation):
+//   sub_82A42760  — SetVertexShader (stores VS handle at device[3172]=+12688)
+//   sub_82A424A8  — SetPixelShader  (stores PS handle at device[3171]=+12684)
 //
 // PM4 infrastructure stubs KEPT (prevent ring buffer corruption):
 //   sub_82A492A8  — PM4 packet builder (returns cmdPtr unchanged)
@@ -9629,6 +9768,95 @@ PPC_FUNC_HOOK(sub_82A46578)
 
 // sub_82A49CB0 — PM4 resolve draw packet writer (no-op)
 PPC_FUNC_HOOK(sub_82A49CB0) { }
+
+// =============================================================================
+// Shader Binding Hooks — sub_82A42760 (SetVertexShader) / sub_82A424A8 (SetPixelShader)
+//
+// These functions bind a shader object to the device. On Xbox 360 they:
+//   1. Check if a deferred render context (device[2727]) intercepts the call
+//   2. Store the shader handle at device[3172] (VS) or device[3171] (PS)
+//   3. Parse the shader's embedded state block and apply it to device registers
+//   4. Emit PM4 SET_SHADER commands to the GPU ring buffer
+//
+// We let the recompiled code run to update all device state fields, then
+// intercept the shader handle to translate it to a host GuestShader* and
+// enqueue the SetVertexShader/SetPixelShader render command.
+//
+// sub_82A42760: r3=device, r4=shaderHandle (guest addr of VS object, 0=unbind)
+// sub_82A424A8: r3=device, r4=shaderHandle (guest addr of PS object, 0=unbind)
+// =============================================================================
+
+PPC_FUNC_IMPL(__imp__sub_82A42760);
+PPC_FUNC_HOOK(sub_82A42760)
+{
+    // Capture args before __imp__ clobbers registers
+    uint32_t deviceAddr   = ctx.r3.u32;
+    uint32_t shaderHandle = ctx.r4.u32;
+
+    // Let recompiled code run: updates device state fields, dirty flags,
+    // and shader parameter blocks. PM4 emission is no-op'd by sub_82A46FB0 stub.
+    __imp__sub_82A42760(ctx, base);
+
+    // Translate guest shader handle -> host GuestShader*
+    GuestShader* shader = nullptr;
+    if (shaderHandle != 0) {
+        shader = GTAIV::LookupShader(shaderHandle);
+        if (shader == nullptr) {
+            // The handle may be a direct guest address of a GuestShader
+            // allocated by our PPC_FUNC_HOOK(sub_82A42BA8)
+            void* translated = g_memory.Translate(shaderHandle);
+            if (translated != nullptr) {
+                shader = static_cast<GuestShader*>(translated);
+            }
+        }
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || s_count % 2000 == 0) {
+        LOGF_WARNING("[SetVS] #{} handle={:#x} -> shader={}",
+                     s_count, shaderHandle, shader ? "OK" : "NULL");
+    }
+
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+    SetVertexShader(device, shader);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82A424A8);
+PPC_FUNC_HOOK(sub_82A424A8)
+{
+    // Capture args before __imp__ clobbers registers
+    uint32_t deviceAddr   = ctx.r3.u32;
+    uint32_t shaderHandle = ctx.r4.u32;
+
+    // Let recompiled code run: updates device state fields, dirty flags,
+    // and shader parameter blocks. PM4 emission is no-op'd by sub_82A46FB0 stub.
+    __imp__sub_82A424A8(ctx, base);
+
+    // Translate guest shader handle -> host GuestShader*
+    GuestShader* shader = nullptr;
+    if (shaderHandle != 0) {
+        shader = GTAIV::LookupShader(shaderHandle);
+        if (shader == nullptr) {
+            void* translated = g_memory.Translate(shaderHandle);
+            if (translated != nullptr) {
+                shader = static_cast<GuestShader*>(translated);
+            }
+        }
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || s_count % 2000 == 0) {
+        LOGF_WARNING("[SetPS] #{} handle={:#x} -> shader={}",
+                     s_count, shaderHandle, shader ? "OK" : "NULL");
+    }
+
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+    SetPixelShader(device, shader);
+}
 
 // =============================================================================
 // Draw Function Hooks
@@ -9697,11 +9925,35 @@ PPC_FUNC_HOOK(sub_82A3DF50) {
 }
 
 // --- sub_82A3CC68: DrawPrimitivesInternal (27 callers, main draw path) ---
-// r3=device, r4=flags (bits 0-2=primType), r5=scissorPtr, r6=drawParamStruct,
-// r7=indexBufInfo, r8=vsHandle, r9=instanceCount, r10=viewportPtr, f1=depthBias
 //
-// This is a mega-draw: it handles viewports, scissor, tiling, instancing.
-// We extract primType from r4, read vertex count from the device, and enqueue.
+// Decompiled from IDA pseudocode + recomp scaffold. This is RAGE's unified
+// draw dispatcher. All geometry rendering flows through here.
+//
+// Arguments (PPC calling convention):
+//   r3  = device (rage::grcDevice*)
+//   r4  = flags  (bits 0-2: primType index, bits 4-6: topology override)
+//   r5  = scissorPtr (guest addr, or 0 for default)
+//   r6  = drawParamStruct (rage::grcDrawParams*):
+//           +28: packed index format info
+//           +32: packed surface format (bits 0-5 = Xenos format, bits 6-11 = pitch)
+//           +36: packed vertex counts (depends on tile mode, see below)
+//           +40: stream flags (bits 1-3: multisampling, bit 30: wrap mode)
+//           +48: tile mode flags (bits 9-10: 0x400 = tiled, else linear)
+//   r7  = indexBufInfoPtr (or 0)
+//   r8  = vsConstPtr (or 0, overrides vertex shader constants)
+//   r9  = instanceCount (0 = non-instanced)
+//   r10 = viewportPtr (guest addr, or 0 for default viewport at 0x820BE870)
+//   f1  = depthBias
+//
+// Vertex/index count extraction from drawParamStruct+36:
+//   If tile mode (drawParams+48 & 0x600 == 0x400):
+//     startVertex = packed & 0x7FF
+//     vertexCount = (packed >> 11) & 0x7FF
+//   Else (linear):
+//     startVertex = packed & 0x1FFF
+//     vertexCount = (packed >> 13) & 0x1FFF
+//   Both get +multiSampleBias from drawParams+40
+//
 PPC_FUNC_HOOK(sub_82A3CC68) {
     static int s_count = 0;
     ++s_count;
@@ -9711,26 +9963,42 @@ PPC_FUNC_HOOK(sub_82A3CC68) {
     uint32_t flags = ctx.r4.u32;
     uint32_t primType = flags & 0x7;
 
-    // Try to extract vertex count from draw param struct at r6+36 (packed field)
-    uint32_t primCount = 0;
+    // Extract vertex count from drawParamStruct (r6)
+    uint32_t startVertex = 0;
+    uint32_t vertexCount = 0;
     uint32_t drawParamAddr = ctx.r6.u32;
+
     if (drawParamAddr != 0) {
-        uint32_t packed = PPC_LOAD_U32(drawParamAddr + 36);
-        // Agent 1: "lower 13 bits = start index, upper 13 bits = count"
-        // But this is big-endian packed. Try full lower 16 bits first.
-        uint32_t extracted = packed & 0xFFFF;
-        if (extracted > 0 && extracted < 65536) {
-            primCount = extracted;
+        uint32_t packed36 = PPC_LOAD_U32(drawParamAddr + 36);
+        uint32_t field48  = PPC_LOAD_U32(drawParamAddr + 48);
+        uint32_t field40  = PPC_LOAD_U32(drawParamAddr + 40);
+
+        // Multisample bias: (field40 >> 30) & 2 gives 0 or 2, then +1
+        uint32_t msBias = ((field40 >> 30) & 2) + 1;
+
+        if ((field48 & 0x600) == 0x400) {
+            // Tiled mode: 11-bit fields
+            startVertex = (packed36 & 0x7FF) + msBias;
+            vertexCount = ((packed36 >> 11) & 0x7FF) + msBias;
+        } else {
+            // Linear mode: 13-bit fields
+            startVertex = (packed36 & 0x1FFF) + msBias;
+            vertexCount = ((packed36 >> 13) & 0x1FFF) + msBias;
         }
     }
-    if (primCount == 0) primCount = 3; // fallback: triangle
 
-    if (s_count <= 20 || s_count % 5000 == 0) {
-        LOGF_WARNING("[DrawPrimInternal] #{} primType={} primCount={} flags={:#x} drawParam={:#x}",
-            s_count, primType, primCount, flags, drawParamAddr);
+    if (vertexCount == 0) vertexCount = 3; // fallback: single triangle
+
+    // Extract instance count from r9 (masked by tile stride alignment)
+    uint32_t instanceCount = ctx.r9.u32;
+
+    if (s_count <= 30 || s_count % 5000 == 0) {
+        LOGF_WARNING("[DrawPrimInternal] #{} primType={} start={} count={} inst={} flags={:#x}",
+            s_count, primType, startVertex, vertexCount,
+            instanceCount, flags);
     }
 
-    DrawPrimitive(device, primType, 0, primCount);
+    DrawPrimitive(device, primType, startVertex, vertexCount);
 }
 
 // --- sub_82A3E348: DrawIndexedVertices (3 callers) ---

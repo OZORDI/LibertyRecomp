@@ -79,7 +79,9 @@ set(MVK_INCLUDES
 
 add_library(MoltenVK SHARED ${MVK_SOURCES})
 target_include_directories(MoltenVK PRIVATE ${MVK_INCLUDES})
-target_compile_options(MoltenVK PRIVATE -w)
+target_compile_options(MoltenVK PRIVATE -w -Wno-elaborated-enum-base)
+# Link against Homebrew LLVM's libc++ to match the compiler
+target_link_options(MoltenVK PRIVATE -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++ -lc++)
 target_link_libraries(MoltenVK PRIVATE
     ${APPKIT_LIBRARY} ${FOUNDATION_LIBRARY} ${IOKIT_LIBRARY} ${IOSURFACE_LIBRARY} ${METAL_LIBRARY} ${QUARTZCORE_LIBRARY}
     spirv-cross-msl MoltenVKCommon MoltenVKShaderConverter)

@@ -37,7 +37,7 @@ extern void KernelPhase_EnterRuntime();
 // Calls XamContentCreateEx to create/open save containers
 // =============================================================================
 extern "C" void __imp__sub_829A1C38(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_829A1C38)
+PPC_FUNC(sub_829A1C38)
 {
     static int s_count = 0;
     ++s_count;
@@ -63,7 +63,7 @@ PPC_FUNC_HOOK(sub_829A1C38)
 // Direct jump to XamContentClose
 // =============================================================================
 extern "C" void __imp__sub_829A1CA0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_829A1CA0)
+PPC_FUNC(sub_829A1CA0)
 {
     static int s_count = 0;
     ++s_count;
@@ -86,7 +86,7 @@ PPC_FUNC_HOOK(sub_829A1CA0)
 // Calls XamContentCreateEnumerator to list save files
 // =============================================================================
 extern "C" void __imp__sub_829A1CB8(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_829A1CB8)
+PPC_FUNC(sub_829A1CB8)
 {
     static int s_count = 0;
     ++s_count;
@@ -113,7 +113,7 @@ PPC_FUNC_HOOK(sub_829A1CB8)
 // Orchestrates save operations, calls sub_829A1878
 // =============================================================================
 extern "C" void __imp__sub_8297A930(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_8297A930)
+PPC_FUNC(sub_8297A930)
 {
     static int s_count = 0;
     ++s_count;
@@ -143,7 +143,7 @@ PPC_FUNC_HOOK(sub_8297A930)
 // Initializes save system with 3 save slot contexts (Profile, Game, Autosave)
 // =============================================================================
 extern "C" void __imp__sub_82122CA0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_82122CA0)
+PPC_FUNC(sub_82122CA0)
 {
     static int s_count = 0;
     ++s_count;
@@ -210,7 +210,7 @@ constexpr uint32_t SAVE_NEW_GAME    = 3;            // return 3 → outer for lo
 // CRITICAL: Named `sub_821200D0` (not `sub_821200D0_hook`) to OVERRIDE the
 // weak symbol in ppc_recomp.0.cpp.  By defining a strong symbol we intercept
 // ALL calls including direct bl instructions.
-PPC_FUNC_HOOK(sub_821200D0)
+PPC_FUNC(sub_821200D0)
 {
     static int s_count = 0;
     static bool s_runtimeForced = false;
@@ -229,21 +229,32 @@ PPC_FUNC_HOOK(sub_821200D0)
 
     // === FIX 1: Loop 1 bypass ===
     // Clear BC9 so the original function's Loop 1 (busy-wait on sub_82124490)
-    // exits immediately.  On Xbox 360, sub_821238D0 runs on a dedicated
-    // rendering thread and clears BC9 — in the recomp there is no rendering
-    // thread, so BC9 never clears and Loop 1 spins forever.
+    // exits immediately.  sub_82124490 returns BC9 when BB7 != 0, else 0.
+    // With BC9 = 0, sub_82124490 returns 0 regardless of BB7.
     PPC_STORE_U8(LOADING_STEP_ADDR, 0);
 
-    // === Save state machine: LET REXGLUE HANDLE IT ===
-    // Previously we forced state=17 + retval=3 ("new game") to bypass the
-    // save state machine entirely.  This prevented sub_8223F9F0 (XAM dialog
-    // flow) from running, which meant sub_82254FE0 never fired, leaving the
-    // readiness dword at 0x82BF9B70 stuck at -1.  The front-end state machine
-    // (sub_82142230) then looped forever in state 3 waiting for that flag.
+    // === FIX 2: sub_82121E80 save-load state machine bypass ===
+    // sub_82121E80 has an infinite yield loop: sub_827DAE18(1) → sub_821E6508()
+    // sub_821E6508 is a state machine that progresses through save loading states.
+    // On Xbox 360, it waits for user profile sign-in and save file operations.
+    // In the recomp, these Xbox-specific operations never complete, so the loop
+    // never exits.
     //
-    // RexGlue provides a complete XAM subsystem (sign-in, storage device
-    // selection, content management) ported from Xenia.  Let it run the
-    // state machine naturally so the XAM dialogs complete and signal readiness.
+    // Fix: pre-set the state machine to its final state so sub_821E6508 returns 3
+    // ("new game") immediately.  The calling loop in sub_82121E80 checks:
+    //   v8 = sub_821E6508(); if (v8 == 3) break;
+    // This lets sub_82121E80 proceed to its post-loop initialization code
+    // (clearing BC9/BC8, calling init functions, setting up the game world).
+    //
+    // NOTE: This approach is LTO-proof — it writes directly to guest memory
+    // rather than trying to override weak symbols that ThinLTO may inline.
+    PPC_STORE_U32(SAVE_STATE_ADDR,  SAVE_FINAL_STATE);  // dword_82B94554 = 17
+    PPC_STORE_U32(SAVE_RETVAL_ADDR, SAVE_NEW_GAME);     // dword_82B946C8 = 3
+
+    // === FIX 3: Loop 2 already eliminated by LTO ===
+    // ThinLTO inlined sub_8218C2C0 inside __imp__sub_821200D0 and determined
+    // the result is always 1, so Loop 2 was completely eliminated at link time.
+    // No fix needed — the post-loop shutdown runs automatically.
 
     __imp__sub_821200D0(ctx, base);
 
@@ -275,8 +286,14 @@ PPC_FUNC_HOOK(sub_821200D0)
 // RexGlue's UserProfile::signin_state() already hardcodes return 1 for player 0.
 // This lets sub_821E6508 proceed past the guard and enter the state machine.
 // =============================================================================
-// sub_8219F728 — REMOVED: was forcing player count to 1.
-// Let rexglue's recompiled code handle the player slot scan.
+extern "C" void __imp__sub_8219F728(PPCContext& ctx, uint8_t* base);
+PPC_FUNC(sub_8219F728)
+{
+    static int s_count = 0;
+    if (++s_count <= 3)
+        printf("[sub_8219F728] active-player count hook #%d — returning 1 (user 0 active)\n", s_count);
+    ctx.r3.s64 = 1;
+}
 
 // =============================================================================
 // sub_8218C2C0 - Loading Complete Check
@@ -296,7 +313,7 @@ PPC_FUNC_HOOK(sub_821200D0)
 // Fix: return 1 ("loading complete") so Loop 2 exits and the post-loop
 // initialization sequence (sub_821219B0, sub_821B8FB0, etc.) runs.
 extern "C" void __imp__sub_8218C2C0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_8218C2C0)
+PPC_FUNC(sub_8218C2C0)
 {
     static int s_count = 0;
     if (++s_count <= 5)
@@ -310,48 +327,82 @@ PPC_FUNC_HOOK(sub_8218C2C0)
 // Location: gta4_recomp.0.cpp:4100 (inside __imp__sub_821219B0)
 //
 // Call order in __imp__sub_821219B0:
-//   sub_82192E00(ctx, base);   ← writes 0x830F5820 non-zero
-//   sub_827DE648(ctx, base);   ← spins while 0x830F5820 != 0
+//   sub_82192E00(ctx, base);   ← submits streaming I/O, sets 0x830F5820 != 0
+//   sub_827DE648(ctx, base);   ← waits for 0x830F5820 == 0 (completion)
 //
 // sub_82192E00 marks a streaming job as "in-flight" by writing to 0x830F5820.
-// On Xbox 360, a hardware streaming completion thread clears this.
-// In recomp, RexGlue VFS is fully synchronous — no thread clears it.
+// On Xbox 360, hardware streaming completion workers clear this flag.
 //
-// Fix: run the original streaming init normally, then zero 0x830F5820 so
-// the downstream sub_827DE648 barrier exits immediately on first check.
+// With the async model (streaming_async_patches.cpp), host worker threads
+// process the I/O and the completion path clears 0x830F5820 naturally.
+// We let the original function run and trust the async completion path.
+// A safety fallback clears the flag after a timeout in sub_827DE648.
 //
 // Python-verified: 0x830F0000 + 0x5820 (22560) = 0x830F5820
 // =============================================================================
 extern "C" void __imp__sub_82192E00(PPCContext& ctx, uint8_t* base);
-PPC_FUNC_HOOK(sub_82192E00)
+PPC_FUNC(sub_82192E00)
 {
     static int s_count = 0;
     ++s_count;
 
     __imp__sub_82192E00(ctx, base);
 
-    // Clear the streaming-pending flag — synchronous recomp, nothing to wait for.
-    PPC_STORE_U32(0x830F5820, 0);
+    // With async workers: I/O is dispatched to host thread pool.
+    // The completion path (sub_8284BF50 -> refcount decrement -> callback)
+    // will clear 0x830F5820 when the work finishes. No immediate clear needed.
+    // The downstream barrier (sub_827DE648) handles polling with timeout.
 
-    if (s_count <= 3)
-        printf("[sub_82192E00] hook #%d: streaming init done, 0x830F5820 cleared\n", s_count);
-    fflush(stdout);
+    if (s_count <= 3) {
+        uint32_t flagVal = PPC_LOAD_U32(0x830F5820);
+        printf("[sub_82192E00] hook #%d: streaming init dispatched, "
+               "0x830F5820=%u (async workers will clear)\n", s_count, flagVal);
+        fflush(stdout);
+    }
 }
 
 // =============================================================================
-// sub_827DE648 - Streaming Completion Barrier (belt-and-suspenders fallback)
+// sub_827DE648 - Streaming Completion Barrier
 // Location: gta4_recomp.52.cpp:18640
 //
-// 0x830F5820 is pre-cleared to 0 by sub_82192E00 hook above.
-// This hook is a fallback in case the barrier is somehow reached with
-// a non-zero value — return immediately rather than spinning.
+// Original Xbox behavior: Spin-waits while 0x830F5820 != 0, expecting
+// a hardware completion thread to clear the flag.
+//
+// Async model: Host worker threads (streaming_async_patches.cpp) process
+// the I/O and the completion path clears the flag. This hook polls with
+// yields, and applies a safety timeout to prevent infinite hangs if the
+// async path fails to complete (e.g., during early boot when workers
+// may not yet be running).
 // =============================================================================
-PPC_FUNC_HOOK(sub_827DE648)
+PPC_FUNC(sub_827DE648)
 {
     static int s_count = 0;
-    if (++s_count <= 3)
-        printf("[sub_827DE648] streaming barrier #%d — returning immediately\n", s_count);
-    fflush(stdout);
-    // Return without spinning: 0x830F5820 was cleared by sub_82192E00 hook.
-}
+    ++s_count;
 
+    constexpr uint32_t STREAMING_PENDING = 0x830F5820;
+    constexpr int MAX_POLLS = 50000;   // ~50ms at 1us per poll
+
+    int polls = 0;
+    while (PPC_LOAD_U32(STREAMING_PENDING) != 0) {
+        std::this_thread::yield();
+        ++polls;
+
+        if (polls >= MAX_POLLS) {
+            // Safety timeout: force-clear the flag to prevent a hang.
+            // This covers the case where async workers are not yet running
+            // (e.g., during early boot before pgStreamer::Init host pool start).
+            PPC_STORE_U32(STREAMING_PENDING, 0);
+            if (s_count <= 5)
+                printf("[sub_827DE648] barrier #%d: TIMEOUT after %d polls — "
+                       "force-cleared 0x830F5820\n", s_count, polls);
+            fflush(stdout);
+            return;
+        }
+    }
+
+    if (s_count <= 5) {
+        printf("[sub_827DE648] barrier #%d: completed after %d polls%s\n",
+               s_count, polls, polls == 0 ? " (immediate)" : "");
+        fflush(stdout);
+    }
+}

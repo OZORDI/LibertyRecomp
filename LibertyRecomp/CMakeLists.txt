@@ -82,6 +82,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     "kernel/user_profile.cpp"
     "kernel/save_system.cpp"
     "kernel/save_hooks.cpp"
+    # "kernel/game_fixes.cpp"  # sub_8291DF00 hook moved to patches/audio_pool.cpp
     "kernel/lod_hooks.cpp"
     "kernel/menu_hooks.cpp"
     "kernel/vfs.cpp"
@@ -247,10 +248,19 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/gta4_motion_patches.cpp" # GTA IV motion control (PlayStation gyro/accel)
     "patches/gta4_ds4_patches.cpp"    # DualShock 4/DualSense features (light bar, touchpad)
     "patches/audio_patches.cpp"       # GTA IV audio system (updated for RAGE)
+    "patches/aud_sound_manager.cpp"   # rage::audSoundManager - voice budget + priority sort
     "patches/memcpy_patches.cpp"  # Native memcpy implementation to fix broken recompiled control flow
     "patches/player_limit_patches.cpp"  # Extended multiplayer - raise player limit from 16 to 32+
     "patches/postfx_hooks.cpp"        # PostFX hooks for custom effects (bloom, sun shafts)
-    
+    "patches/grm_setup_patches.cpp"   # rage::grmSetup singleton - graphics init/frame timing/shutdown
+    "patches/frontend_state_hooks.cpp" # Front-end state machine: episode selection + controller slot fix
+    "patches/audio_pool.cpp"          # RAGE audVoicePool - voice entity pool iteration + VCB state
+    "patches/scene_tick_patches.cpp"  # Scene tick / entity update chain - streaming + finalize
+    "patches/scene_render_patches.cpp" # Scene render pipeline - device backend + draw scene
+    "patches/render_phase_patches.cpp" # RAGE render phase system - 37-slot state dispatch + viewport
+    "patches/shader_collection_patches.cpp"  # fiCollection path stack - shader VFS mount chain
+    "patches/streaming_async_patches.cpp"   # Async streaming I/O: host worker pool + completion signaling
+
     # Generic/stub patches needed for compilation
     # "patches/aspect_ratio_patches.cpp"  # Has Sonicteam references - replaced by gta4_aspect_ratio_patches.cpp
     # "patches/camera_patches.cpp"         # Has Sonicteam references - needs GTA IV version
@@ -408,16 +418,6 @@ if (LIBERTY_RECOMP_METAL)
         set(LIBERTY_RECOMP_METAL_SDK "iphoneos")
     else()
         set(LIBERTY_RECOMP_METAL_SDK "macosx")
-    endif()
-
-    # Xcode 26 workaround: Metal Toolchain may be on a mounted DMG volume
-    # rather than installed in the standard Xcode Toolchains directory.
-    if(EXISTS "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metal")
-        set(METAL_TOOL "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metal")
-        set(METALLIB_TOOL "/Volumes/MetalToolchainCryptex/Metal.xctoolchain/usr/bin/metallib")
-    else()
-        set(METAL_TOOL "${XCRUN_TOOL}" -sdk ${LIBERTY_RECOMP_METAL_SDK} metal)
-        set(METALLIB_TOOL "${XCRUN_TOOL}" -sdk ${LIBERTY_RECOMP_METAL_SDK} metallib)
     endif()
 endif()
 
@@ -864,6 +864,10 @@ if (APPLE)
     target_link_libraries(LibertyRecomp PRIVATE "-framework CoreGraphics")
     target_link_libraries(LibertyRecomp PRIVATE "-framework GameKit")
     target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_GAMECENTER)
+    # Link against Homebrew LLVM's libc++ to match the compiler
+    target_link_options(LibertyRecomp PRIVATE -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++ -lc++)
+    # Prefer Homebrew arm64 freetype over /usr/local x86_64 version
+    target_link_directories(LibertyRecomp PRIVATE /opt/homebrew/lib)
 else()
     target_link_libraries(LibertyRecomp PRIVATE LibertyRecompLib)
 endif()
@@ -942,12 +946,12 @@ function(compile_shader FILE_PATH TARGET_NAME)
     if (LIBERTY_RECOMP_METAL)
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.ir
-                COMMAND ${METAL_TOOL} -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
+                COMMAND ${XCRUN_TOOL} -sdk ${LIBERTY_RECOMP_METAL_SDK} metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
                 DEPENDS ${MSL_FILE_PATH}
         )
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.metallib
-                COMMAND ${METALLIB_TOOL} -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
+                COMMAND ${XCRUN_TOOL} -sdk ${LIBERTY_RECOMP_METAL_SDK} metallib -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
                 DEPENDS ${MSL_FILE_PATH}.ir
         )
         BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${MSL_FILE_PATH}.metallib" DEST_FILE "${MSL_FILE_PATH}.metallib" ARRAY_NAME "g_${MSL_NAME}_air")
@@ -1041,8 +1045,6 @@ generate_aggregate_header(
 set(RESOURCES_SOURCE_PATH "${PROJECT_SOURCE_DIR}/../LibertyRecompResources")
 set(RESOURCES_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/res")
 
-# MarathonRecompResources is optional — skip if not present (abandoned main menu approach)
-if(EXISTS "${RESOURCES_SOURCE_PATH}/bc_diff/button_bc_diff.bin")
 ## Miscellaneous ##
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/bc_diff/button_bc_diff.bin" DEST_FILE "${RESOURCES_OUTPUT_PATH}/bc_diff/button_bc_diff.bin" ARRAY_NAME "g_button_bc_diff" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/font/im_font_atlas.bin" DEST_FILE "${RESOURCES_OUTPUT_PATH}/font/im_font_atlas.bin" ARRAY_NAME "g_im_font_atlas" COMPRESSION_TYPE "zstd")
@@ -1075,10 +1077,6 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/inst
 
 ## Game Icon ##
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/game_icon.bmp" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/game_icon.bmp" ARRAY_NAME "g_game_icon")
-target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_HAS_RESOURCES)
-else()
-    message(WARNING "LibertyRecompResources not found — skipping menu/installer resource embedding")
-endif()
 
 ## Button Prompts (Controller-specific XTD files) ##
 set(BUTTON_PROMPTS_SOURCE "${PROJECT_SOURCE_DIR}/../LibertyRecompLib/private/button_prompts")
@@ -1092,8 +1090,7 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/switch/butt
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/steam_controller/buttons_360.xtd" DEST_FILE "${RESOURCES_OUTPUT_PATH}/button_prompts/steam_controller.xtd" ARRAY_NAME "g_button_prompts_steam_controller" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${BUTTON_PROMPTS_SOURCE}/steam_deck/buttons_360.xtd" DEST_FILE "${RESOURCES_OUTPUT_PATH}/button_prompts/steam_deck.xtd" ARRAY_NAME "g_button_prompts_steam_deck" COMPRESSION_TYPE "zstd")
 
-## Audio (also depends on LibertyRecompResources) ##
-if(EXISTS "${RESOURCES_SOURCE_PATH}/music/installer.ogg")
+## Audio ##
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/music/installer.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/music/installer.ogg" ARRAY_NAME "g_installer_music")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/window_open.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/window_open.ogg" ARRAY_NAME "g_window_open")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/window_close.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/window_close.ogg" ARRAY_NAME "g_window_close")
@@ -1101,5 +1098,3 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/curs
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/deside.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/deside.ogg" ARRAY_NAME "g_deside")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/move.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/move.ogg" ARRAY_NAME "g_move")
 BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/sounds/main_deside.ogg" DEST_FILE "${RESOURCES_OUTPUT_PATH}/sounds/main_deside.ogg" ARRAY_NAME "g_main_deside")
-target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_HAS_AUDIO_RESOURCES)
-endif()

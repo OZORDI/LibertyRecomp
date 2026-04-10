@@ -15,6 +15,9 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project("LibertyRecomp-ALL")
 
+# Force FMT_USE_CONSTEVAL off - Homebrew LLVM consteval is broken with vcpkg spdlog
+add_compile_definitions(FMT_USE_CONSTEVAL=0)
+
 # ─── vcpkg check (desktop platforms only) ──────────────────────────────────
 # Mobile/console platforms use system SDKs and don't need vcpkg
 if(NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
