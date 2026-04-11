@@ -636,43 +636,7 @@ int main(int argc, char *argv[])
             fflush(stdout);
         }
 
-        // Populate Processor function table for XThread::Execute().
-        // Memory's function table was populated during InitializeFromRexGlue(),
-        // but the Processor has its own hash map used by processor->GetFunction().
-        // InitializeFunctionTable adopts the existing memory table (no double-init).
-        auto* proc = s_rexRuntime->function_dispatcher();
-        proc->InitializeFunctionTable(
-            static_cast<uint32_t>(PPC_CODE_BASE),
-            static_cast<uint32_t>(PPC_CODE_SIZE),
-            static_cast<uint32_t>(PPC_IMAGE_BASE),
-            static_cast<uint32_t>(PPC_IMAGE_SIZE));
-        {
-            int funcCount = 0;
-            for (size_t i = 0; PPCFuncMappings[i].guest != 0; i++) {
-                if (PPCFuncMappings[i].host != nullptr) {
-                    proc->SetFunction(
-                        static_cast<uint32_t>(PPCFuncMappings[i].guest),
-                        PPCFuncMappings[i].host);
-                    funcCount++;
-                }
-            }
-            fprintf(stderr, "[Main] Processor function table: %d functions registered\n",
-                   funcCount);
-        }
     }
-
-    // Memory::Initialize() installed its own MMIOHandler internally.
-    // Move fallback crash handler to end of chain so MMIOHandler runs first.
-    rex::arch::ExceptionHandler::Uninstall(RexFallbackCrashHandler, nullptr);
-    rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
-
-    // Runtime::Setup() → guest::initialize() installed SEH's signal handler
-    // on top of ExceptionHandler.  Re-install ExceptionHandler so it runs
-    // first.  The chain becomes:
-    //   ExceptionHandler (MMIO, NULL-PC, fallback) → SEH (SehException)
-    // SDK v0.2.1: ReinstallSignalHandlers() removed; SDK manages handler chain internally.
-    fprintf(stderr, "[RexGlue] Exception handlers active (SDK v0.2.1 automatic chain)\n");
-    fflush(stderr);
 
     if (forceInstallationCheck)
     {

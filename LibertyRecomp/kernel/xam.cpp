@@ -253,64 +253,6 @@ bool XNotifyGetNext(uint32_t hNotification, uint32_t dwMsgFilter, be<uint32_t>* 
     return false;
 }
 
-uint32_t XamShowMessageBoxUI(uint32_t dwUserIndex, be<uint16_t>* wszTitle, be<uint16_t>* wszText, uint32_t cButtons,
-    xpointer<be<uint16_t>>* pwszButtons, uint32_t dwFocusButton, uint32_t dwFlags, be<uint32_t>* pResult, XXOVERLAPPED* pOverlapped)
-{
-    *pResult = cButtons ? cButtons - 1 : 0;
-
-#if _DEBUG
-    assert("XamShowMessageBoxUI encountered!" && false);
-#elif _WIN32
-    // This code is Win32-only as it'll most likely crash, misbehave or
-    // cause corruption due to using a different type of memory than what
-    // wchar_t is on Linux. Windows uses 2 bytes while Linux uses 4 bytes.
-    std::vector<std::wstring> texts{};
-
-    texts.emplace_back(reinterpret_cast<wchar_t*>(wszTitle));
-    texts.emplace_back(reinterpret_cast<wchar_t*>(wszText));
-
-    for (size_t i = 0; i < cButtons; i++)
-        texts.emplace_back(reinterpret_cast<wchar_t*>(pwszButtons[i].get()));
-
-    for (auto& text : texts)
-    {
-        for (size_t i = 0; i < text.size(); i++)
-            ByteSwapInplace(text[i]);
-    }
-
-    wprintf(L"[XamShowMessageBoxUI] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    wprintf(L"[XamShowMessageBoxUI] If you are encountering this message and the game has ceased functioning,\n");
-    wprintf(L"[XamShowMessageBoxUI] please create an issue at https://github.com/OZORDI/LibertyRecomp/issues.\n");
-    wprintf(L"[XamShowMessageBoxUI] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    wprintf(L"[XamShowMessageBoxUI] %ls\n", texts[0].c_str());
-    wprintf(L"[XamShowMessageBoxUI] %ls\n", texts[1].c_str());
-    wprintf(L"[XamShowMessageBoxUI] ");
-
-    for (size_t i = 0; i < cButtons; i++)
-    {
-        wprintf(L"%ls", texts[2 + i].c_str());
-
-        if (i != cButtons - 1)
-            wprintf(L" | ");
-    }
-
-    wprintf(L"\n");
-    wprintf(L"[XamShowMessageBoxUI] Defaulted to button: %d\n", pResult->get());
-    wprintf(L"[XamShowMessageBoxUI] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-#endif
-
-    if (pOverlapped)
-    {
-        pOverlapped->dwCompletionContext = GuestThread::GetCurrentThreadId();
-        pOverlapped->Error = 0;
-        pOverlapped->Length = -1;
-    }
-
-    XamNotifyEnqueueEvent(9, 0);
-
-    return 0;
-}
-
 uint32_t XamContentCreateEnumerator(uint32_t dwUserIndex, uint32_t DeviceID, uint32_t dwContentType,
     uint32_t dwContentFlags, uint32_t cItem, be<uint32_t>* pcbBuffer, be<uint32_t>* phEnum)
 {
@@ -330,35 +272,6 @@ uint32_t XamContentCreateEnumerator(uint32_t dwUserIndex, uint32_t DeviceID, uin
     *phEnum = GetKernelHandle(enumerator);
 
     return 0;
-}
-
-// Stub for achievement enumeration - GTA IV specific
-uint32_t XamUserCreateAchievementEnumerator(uint32_t titleId, uint32_t userIndex, uint32_t xuidCount,
-    void* pxuid, uint32_t dwStartingIndex, uint32_t cItem, be<uint32_t>* pcbBuffer, be<uint32_t>* phEnum)
-{
-    // Stub - achievement enumeration not implemented yet
-    // Return error to indicate no achievements available
-    if (phEnum)
-        *phEnum = 0;
-    if (pcbBuffer)
-        *pcbBuffer = 0;
-    return ERROR_NO_MORE_FILES;
-}
-
-// Stub for XeKeys signature verification
-uint32_t XeKeysConsoleSignatureVerification(void* signature, uint32_t signatureSize, void* data, uint32_t dataSize)
-{
-    // Stub - always return success (signature valid)
-    return 0;
-}
-
-// Stub for internal enumeration helper
-uint32_t XamGetPrivateEnumStructureFromHandle(uint32_t hEnum, void** ppEnumData)
-{
-    // Stub - return null
-    if (ppEnumData)
-        *ppEnumData = nullptr;
-    return ERROR_INVALID_HANDLE;
 }
 
 uint32_t XamEnumerate(uint32_t hEnum, uint32_t dwFlags, void* pvBuffer, uint32_t cbBuffer, be<uint32_t>* pcItemsReturned, XXOVERLAPPED* pOverlapped)
@@ -508,30 +421,6 @@ uint32_t XamContentClose(const char* szRootName, XXOVERLAPPED* pOverlapped)
     }
     
     return 0;
-}
-
-uint32_t XamContentGetDeviceData(uint32_t DeviceID, XDEVICE_DATA* pDeviceData)
-{
-    pDeviceData->DeviceID = DeviceID;
-    pDeviceData->DeviceType = XCONTENTDEVICETYPE_HDD;
-    pDeviceData->ulDeviceBytes = 0x40000000;      // 1GB total (increased from 256MB)
-    pDeviceData->ulDeviceFreeBytes = 0x40000000;  // 1GB free
-    pDeviceData->wszName[0] = 'G';
-    pDeviceData->wszName[1] = 'T';
-    pDeviceData->wszName[2] = 'A';
-    pDeviceData->wszName[3] = '4';
-    pDeviceData->wszName[4] = '\0';
-
-    return 0;
-}
-
-// Device state check - always return ready
-uint32_t XamContentGetDeviceState(uint32_t DeviceID, be<uint32_t>* pState)
-{
-    if (pState)
-        *pState = 1; // Device ready
-    
-    return ERROR_SUCCESS;
 }
 
 uint32_t XamInputGetCapabilities(uint32_t unk, uint32_t userIndex, uint32_t flags, XAMINPUT_CAPABILITIES* caps)
@@ -836,15 +725,3 @@ uint32_t XamUserWriteProfileSettings(uint32_t dwUserIndex, uint32_t dwNumSetting
     return ERROR_SUCCESS;
 }
 
-// XamUserGetSigninState — removed, handled by rexkernel (xam_user.cpp)
-// Let rexglue runtime run uninterrupted.
-
-uint32_t XamUserGetSigninInfo(uint32_t dwUserIndex, uint32_t dwFlags, void* pInfo)
-{
-    if (dwUserIndex != 0)
-        return ERROR_NO_SUCH_USER;
-    
-    // Stub: Return success
-    // TODO: Fill in user info structure if needed
-    return ERROR_SUCCESS;
-}
