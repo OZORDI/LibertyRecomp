@@ -14,7 +14,7 @@
 #include "xbox.h"
 #include "xdm.h"
 #include "xex.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #ifdef __APPLE__
 #include <CommonCrypto/CommonCryptor.h>
 #endif
@@ -120,7 +120,7 @@ void PumpSdlEventsIfNeeded() {
     SDL_PumpEvents();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_QUIT) { std::_Exit(0); }
+      if (event.type == SDL_EVENT_QUIT) { std::_Exit(0); }
     }
   }
 }
@@ -143,7 +143,7 @@ void SignalSemaphoreByGuestAddr(uint32_t guestAddr, int32_t count) {
   void* ptr = g_memory.Translate(guestAddr);
   if (!ptr) return;
   auto sem = rex::system::XObject::GetNativeObject<rex::system::XSemaphore>(ks, ptr);
-  if (sem) { sem->ReleaseSemaphore(count); }
+  if (sem) { sem->ReleaseSemaphore(count, nullptr); }
 }
 
 // =============================================================================
@@ -198,7 +198,7 @@ void VdSwap() {
 
   if (IsMainThread()) {
     SDL_PumpEvents();
-    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     GameWindow::Update();
   }
   Video::Present();
@@ -266,7 +266,7 @@ void StartVBlankTimer() {
   if (g_vblankThreadRunning) return;
 
   auto* ks = rex::system::kernel_state();
-  if (!ks || !ks->processor()) {
+  if (!ks || !ks->function_dispatcher()) {
     printf("[StartVBlankTimer] ERROR: kernel_state or processor not ready\n");
     return;
   }
@@ -305,7 +305,7 @@ void StartVBlankTimer() {
               //   FrameSubmitted counter and clears frame-done fence).
               // r3=1: CPU interrupt/error path — NOT what we want.
               uint64_t args[] = {0, g_gpuRingBuffer.interruptUserData};
-              ks->processor()->ExecuteInterrupt(
+              ks->function_dispatcher()->ExecuteInterrupt(
                   thread->thread_state(),
                   g_gpuRingBuffer.interruptCallback,
                   args, 2);
@@ -2940,7 +2940,13 @@ PPC_FUNC_HOOK(sub_8214B168) {
 // MAIN ENTRY POINT
 // =============================================================================
 extern "C" void __imp__sub_8218BEA8(PPCContext &ctx, uint8_t *base);
-extern "C" void __imp__sub_82856F08(PPCContext &ctx, uint8_t *base);
+
+// __imp__sub_82856F08 was never a real function boundary in the XEX — the
+// address 0x82856F08 falls inside another function. Provide a no-op stub so
+// the per-frame loop hook below can reference it without a linker error.
+extern "C" void __imp__sub_82856F08(PPCContext &ctx, uint8_t *base) {
+    (void)ctx; (void)base;
+}
 
 PPC_FUNC_HOOK(sub_8218BEA8) {
   static bool s_initDone = false;
@@ -3095,9 +3101,6 @@ GUEST_FUNCTION_HOOK(__imp__XamVoiceClose, XamVoiceClose);
 GUEST_FUNCTION_HOOK(__imp__XamVoiceHeadsetPresent, XamVoiceHeadsetPresent);
 GUEST_FUNCTION_HOOK(__imp__XamVoiceSubmitPacket, XamVoiceSubmitPacket);
 
-// --- Sessions ---
-GUEST_FUNCTION_HOOK(__imp__XamSessionCreateHandle, Net::XamSessionCreateHandle);
-GUEST_FUNCTION_HOOK(__imp__XamSessionRefObjByHandle, Net::XamSessionRefObjByHandle);
-
-// --- Profile ---
-GUEST_FUNCTION_HOOK(__imp__XamUserReadProfileSettings, XamUserReadProfileSettings);
+// --- Sessions + Profile ---
+// Removed: XamSessionCreateHandle, XamSessionRefObjByHandle, XamUserReadProfileSettings
+// These are now handled by rexkernel (xam_user.cpp) — let rexglue run uninterrupted.

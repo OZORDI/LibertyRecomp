@@ -1775,7 +1775,7 @@ static void CreateImGuiBackend()
     OptionsMenu::Init();
     InstallerWizard::Init();
 
-    ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
+    ImGui_ImplSDL3_InitForOther(GameWindow::s_pWindow);
 
 #ifdef ENABLE_IM_FONT_ATLAS_SNAPSHOT
     g_imFontTexture = LoadTexture(
@@ -2894,7 +2894,7 @@ static uint16_t g_debugAchievementId = 1;
 
 static void HandleAchievementDebugKey()
 {
-    bool toggleAchievement = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F10] != 0;
+    bool toggleAchievement = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F10];
 
     if (!g_achievementDebugWasToggled && toggleAchievement)
     {
@@ -2909,7 +2909,7 @@ static void HandleAchievementDebugKey()
 
 static void DrawProfiler()
 {
-    bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1] != 0;
+    bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1];
 
     if (!g_profilerWasToggled && toggleProfiler)
     {
@@ -3149,7 +3149,7 @@ static void DrawFPS()
 
 static void DrawImGui()
 {
-    ImGui_ImplSDL2_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
 
     auto& io = ImGui::GetIO();
     io.DisplaySize = { float(Video::s_viewportWidth), float(Video::s_viewportHeight) };
@@ -8363,7 +8363,7 @@ class SDLEventListenerForPSOCaching : public SDLEventListener
 public:
     bool OnSDLEvent(SDL_Event* event) override 
     {
-        if (event->type != SDL_QUIT)
+        if (event->type != SDL_EVENT_QUIT)
             return false;
 
         std::lock_guard lock(g_pipelineCacheMutex);

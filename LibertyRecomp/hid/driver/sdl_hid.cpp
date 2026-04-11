@@ -1,5 +1,5 @@
 #include <stdafx.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <user/config.h>
 #include <hid/hid.h>
 #include <hid/mouse_camera.h>
@@ -16,7 +16,7 @@
 #include <cstring>
 #include <cmath>
 
-#define TRANSLATE_INPUT(S, X) SDL_GameControllerGetButton(controller, S) << FirstBitLow(X)
+#define TRANSLATE_INPUT(S, X) SDL_GetGamepadButton(controller, S) << FirstBitLow(X)
 #define VIBRATION_TIMEOUT_MS 5000
 
 // Motion sensing state (global for active controller)
@@ -26,9 +26,9 @@ static bool g_motionSensorEnabled = false;
 class Controller
 {
 public:
-    SDL_GameController* controller{};
+    SDL_Gamepad* controller{};
     SDL_Joystick* joystick{};
-    SDL_JoystickID id{ -1 };
+    SDL_JoystickID id{ 0 };
     XAMINPUT_GAMEPAD state{};
     XAMINPUT_VIBRATION vibration{ 0, 0 };
     int index{};
@@ -46,43 +46,42 @@ public:
 
     Controller() = default;
 
-    explicit Controller(int index) : Controller(SDL_GameControllerOpen(index))
+    explicit Controller(SDL_JoystickID instance_id) : Controller(SDL_OpenGamepad(instance_id))
     {
-        this->index = index;
     }
 
-    Controller(SDL_GameController* controller) : controller(controller)
+    Controller(SDL_Gamepad* controller) : controller(controller)
     {
         if (!controller)
             return;
 
-        joystick = SDL_GameControllerGetJoystick(controller);
-        id = SDL_JoystickInstanceID(joystick);
-        
+        joystick = SDL_GetGamepadJoystick(controller);
+        id = SDL_GetJoystickID(joystick);
+
         // Check for motion sensor support
-        hasGyro = SDL_GameControllerHasSensor(controller, SDL_SENSOR_GYRO) == SDL_TRUE;
-        hasAccel = SDL_GameControllerHasSensor(controller, SDL_SENSOR_ACCEL) == SDL_TRUE;
+        hasGyro = SDL_GamepadHasSensor(controller, SDL_SENSOR_GYRO);
+        hasAccel = SDL_GamepadHasSensor(controller, SDL_SENSOR_ACCEL);
         
         if (hasGyro || hasAccel) {
             LOGFN("Motion sensors detected - Gyro: {}, Accel: {}", hasGyro ? "Yes" : "No", hasAccel ? "Yes" : "No");
         }
     }
 
-    SDL_GameControllerType GetControllerType() const
+    SDL_GamepadType GetControllerType() const
     {
-        return SDL_GameControllerGetType(controller);
+        return SDL_GetGamepadType(controller);
     }
 
     hid::EInputDevice GetInputDevice() const
     {
         switch (GetControllerType())
         {
-            case SDL_CONTROLLER_TYPE_PS3:
-            case SDL_CONTROLLER_TYPE_PS4:
-            case SDL_CONTROLLER_TYPE_PS5:
+            case SDL_GAMEPAD_TYPE_PS3:
+            case SDL_GAMEPAD_TYPE_PS4:
+            case SDL_GAMEPAD_TYPE_PS5:
                 return hid::EInputDevice::PlayStation;
-            case SDL_CONTROLLER_TYPE_XBOX360:
-            case SDL_CONTROLLER_TYPE_XBOXONE:
+            case SDL_GAMEPAD_TYPE_XBOX360:
+            case SDL_GAMEPAD_TYPE_XBOXONE:
                 return hid::EInputDevice::Xbox;
             default:
                 return hid::EInputDevice::Unknown;
@@ -91,7 +90,7 @@ public:
 
     const char* GetControllerName() const
     {
-        auto result = SDL_GameControllerName(controller);
+        auto result = SDL_GetGamepadName(controller);
 
         if (!result)
             return "Unknown Device";
@@ -109,11 +108,11 @@ public:
             SetMotionEnabled(false);
         }
 
-        SDL_GameControllerClose(controller);
+        SDL_CloseGamepad(controller);
 
         controller = nullptr;
         joystick = nullptr;
-        id = -1;
+        id = 0;
         hasGyro = false;
         hasAccel = false;
         motionEnabled = false;
@@ -132,18 +131,18 @@ public:
         
         if (enabled) {
             if (hasGyro) {
-                SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_GYRO, SDL_TRUE);
+                SDL_SetGamepadSensorEnabled(controller, SDL_SENSOR_GYRO, true);
             }
             if (hasAccel) {
-                SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_ACCEL, SDL_TRUE);
+                SDL_SetGamepadSensorEnabled(controller, SDL_SENSOR_ACCEL, true);
             }
             LOG_INFO("Motion sensors enabled");
         } else {
             if (hasGyro) {
-                SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_GYRO, SDL_FALSE);
+                SDL_SetGamepadSensorEnabled(controller, SDL_SENSOR_GYRO, false);
             }
             if (hasAccel) {
-                SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_ACCEL, SDL_FALSE);
+                SDL_SetGamepadSensorEnabled(controller, SDL_SENSOR_ACCEL, false);
             }
             LOG_INFO("Motion sensors disabled");
         }
@@ -155,7 +154,7 @@ public:
             integratedPitch = 0.0f;
             integratedRoll = 0.0f;
             integratedYaw = 0.0f;
-            lastMotionTimestamp = SDL_GetTicks64() * 1000; // Convert to microseconds
+            lastMotionTimestamp = SDL_GetTicks() * 1000; // Convert to microseconds
         }
     }
     
@@ -170,12 +169,12 @@ public:
         outState.hasGyro = hasGyro;
         outState.hasAccel = hasAccel;
         outState.isCalibrated = true; // SDL handles calibration
-        outState.timestamp = SDL_GetTicks64() * 1000; // Microseconds
+        outState.timestamp = SDL_GetTicks() * 1000; // Microseconds
         
         // Read gyroscope (radians/second)
         if (hasGyro) {
             float gyroData[3] = {0, 0, 0};
-            if (SDL_GameControllerGetSensorData(controller, SDL_SENSOR_GYRO, gyroData, 3) == 0) {
+            if (SDL_GetGamepadSensorData(controller, SDL_SENSOR_GYRO, gyroData, 3)) {
                 outState.gyroX = gyroData[0];
                 outState.gyroY = gyroData[1];
                 outState.gyroZ = gyroData[2];
@@ -185,7 +184,7 @@ public:
         // Read accelerometer (m/s² - divide by 9.81 to get g-forces)
         if (hasAccel) {
             float accelData[3] = {0, 0, 0};
-            if (SDL_GameControllerGetSensorData(controller, SDL_SENSOR_ACCEL, accelData, 3) == 0) {
+            if (SDL_GetGamepadSensorData(controller, SDL_SENSOR_ACCEL, accelData, 3)) {
                 // SDL returns m/s², convert to g-forces
                 constexpr float GRAVITY = 9.81f;
                 outState.accelX = accelData[0] / GRAVITY;
@@ -238,14 +237,14 @@ public:
 
         auto& pad = state;
 
-        pad.sThumbLX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-        pad.sThumbLY = ~SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
+        pad.sThumbLX = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX);
+        pad.sThumbLY = ~SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY);
 
-        pad.sThumbRX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX);
-        pad.sThumbRY = ~SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY);
+        pad.sThumbRX = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX);
+        pad.sThumbRY = ~SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY);
 
-        pad.bLeftTrigger = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7;
-        pad.bRightTrigger = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7;
+        pad.bLeftTrigger = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) >> 7;
+        pad.bRightTrigger = SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >> 7;
     }
 
     void Poll()
@@ -257,25 +256,25 @@ public:
 
         pad.wButtons = 0;
 
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_DPAD_UP, XAMINPUT_GAMEPAD_DPAD_UP);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_DPAD_DOWN, XAMINPUT_GAMEPAD_DPAD_DOWN);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_DPAD_LEFT, XAMINPUT_GAMEPAD_DPAD_LEFT);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_DPAD_RIGHT, XAMINPUT_GAMEPAD_DPAD_RIGHT);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_DPAD_UP, XAMINPUT_GAMEPAD_DPAD_UP);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_DPAD_DOWN, XAMINPUT_GAMEPAD_DPAD_DOWN);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_DPAD_LEFT, XAMINPUT_GAMEPAD_DPAD_LEFT);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, XAMINPUT_GAMEPAD_DPAD_RIGHT);
 
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_START, XAMINPUT_GAMEPAD_START);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_BACK, XAMINPUT_GAMEPAD_BACK);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_TOUCHPAD, XAMINPUT_GAMEPAD_BACK);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_START, XAMINPUT_GAMEPAD_START);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_BACK, XAMINPUT_GAMEPAD_BACK);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_TOUCHPAD, XAMINPUT_GAMEPAD_BACK);
 
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_LEFTSTICK, XAMINPUT_GAMEPAD_LEFT_THUMB);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_RIGHTSTICK, XAMINPUT_GAMEPAD_RIGHT_THUMB);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_LEFT_STICK, XAMINPUT_GAMEPAD_LEFT_THUMB);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_RIGHT_STICK, XAMINPUT_GAMEPAD_RIGHT_THUMB);
 
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_LEFTSHOULDER, XAMINPUT_GAMEPAD_LEFT_SHOULDER);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, XAMINPUT_GAMEPAD_RIGHT_SHOULDER);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, XAMINPUT_GAMEPAD_LEFT_SHOULDER);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, XAMINPUT_GAMEPAD_RIGHT_SHOULDER);
 
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_A, XAMINPUT_GAMEPAD_A);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_B, XAMINPUT_GAMEPAD_B);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_X, XAMINPUT_GAMEPAD_X);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_CONTROLLER_BUTTON_Y, XAMINPUT_GAMEPAD_Y);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_SOUTH, XAMINPUT_GAMEPAD_A);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_EAST, XAMINPUT_GAMEPAD_B);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_WEST, XAMINPUT_GAMEPAD_X);
+        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_NORTH, XAMINPUT_GAMEPAD_Y);
     }
 
     void SetVibration(const XAMINPUT_VIBRATION& vibration)
@@ -285,12 +284,12 @@ public:
 
         this->vibration = vibration;
 
-        SDL_GameControllerRumble(controller, vibration.wLeftMotorSpeed * 256, vibration.wRightMotorSpeed * 256, VIBRATION_TIMEOUT_MS);
+        SDL_RumbleGamepad(controller, vibration.wLeftMotorSpeed * 256, vibration.wRightMotorSpeed * 256, VIBRATION_TIMEOUT_MS);
     }
 
     void SetLED(const uint8_t r, const uint8_t g, const uint8_t b) const
     {
-        SDL_GameControllerSetLED(controller, r, g, b);
+        SDL_SetGamepadLED(controller, r, g, b);
     }
 };
 
@@ -345,7 +344,7 @@ inline Controller* FindController(int which)
 }
 
 // Maps SDL_GameControllerType to EInputDeviceExplicit with name-based detection for special controllers
-static hid::EInputDeviceExplicit MapControllerType(SDL_GameControllerType sdlType, const char* controllerName)
+static hid::EInputDeviceExplicit MapControllerType(SDL_GamepadType sdlType, const char* controllerName)
 {
     // First check name for special controllers that SDL doesn't have dedicated types for
     if (controllerName)
@@ -375,32 +374,26 @@ static hid::EInputDeviceExplicit MapControllerType(SDL_GameControllerType sdlTyp
     // Fall back to SDL type mapping
     switch (sdlType)
     {
-        case SDL_CONTROLLER_TYPE_XBOX360:
+        case SDL_GAMEPAD_TYPE_XBOX360:
             return hid::EInputDeviceExplicit::Xbox360;
-        case SDL_CONTROLLER_TYPE_XBOXONE:
+        case SDL_GAMEPAD_TYPE_XBOXONE:
             return hid::EInputDeviceExplicit::XboxOne;
-        case SDL_CONTROLLER_TYPE_PS3:
+        case SDL_GAMEPAD_TYPE_PS3:
             return hid::EInputDeviceExplicit::DualShock3;
-        case SDL_CONTROLLER_TYPE_PS4:
+        case SDL_GAMEPAD_TYPE_PS4:
             return hid::EInputDeviceExplicit::DualShock4;
-        case SDL_CONTROLLER_TYPE_PS5:
+        case SDL_GAMEPAD_TYPE_PS5:
             return hid::EInputDeviceExplicit::DualSense;
-        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
             return hid::EInputDeviceExplicit::SwitchPro;
-        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
             return hid::EInputDeviceExplicit::SwitchJCLeft;
-        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
             return hid::EInputDeviceExplicit::SwitchJCRight;
-        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
             return hid::EInputDeviceExplicit::SwitchJCPair;
-        case SDL_CONTROLLER_TYPE_VIRTUAL:
-            return hid::EInputDeviceExplicit::Virtual;
-        case SDL_CONTROLLER_TYPE_AMAZON_LUNA:
-            return hid::EInputDeviceExplicit::Luna;
-        case SDL_CONTROLLER_TYPE_GOOGLE_STADIA:
-            return hid::EInputDeviceExplicit::Stadia;
-        case SDL_CONTROLLER_TYPE_NVIDIA_SHIELD:
-            return hid::EInputDeviceExplicit::NvShield;
+        case SDL_GAMEPAD_TYPE_STANDARD:
+            return hid::EInputDeviceExplicit::Unknown;
         default:
             return hid::EInputDeviceExplicit::Unknown;
     }
@@ -457,22 +450,22 @@ static void UpdateMouseCursorVisibility()
             // Show cursor briefly when mouse moves, then hide
             if (now - s_lastMouseMovement < MOUSE_HIDE_DELAY)
             {
-                SDL_ShowCursor(SDL_ENABLE);
+                SDL_ShowCursor();
             }
             else
             {
-                SDL_ShowCursor(SDL_DISABLE);
+                SDL_HideCursor();
             }
         }
         else
         {
-            SDL_ShowCursor(SDL_DISABLE);
+            SDL_HideCursor();
         }
     }
     else
     {
         // Windowed mode or cursor forced visible
-        SDL_ShowCursor(SDL_ENABLE);
+        SDL_ShowCursor();
     }
 }
 
@@ -508,11 +501,11 @@ static void SetControllerTimeOfDayLED(Controller& controller, EPlayerCharacter p
     controller.SetLED(r, g, b);
 }
 
-int HID_OnSDLEvent(void*, SDL_Event* event)
+bool HID_OnSDLEvent(void*, SDL_Event* event)
 {
     switch (event->type)
     {
-        case SDL_CONTROLLERDEVICEADDED:
+        case SDL_EVENT_GAMEPAD_ADDED:
         {
             const auto freeIndex = FindFreeController();
 
@@ -528,7 +521,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
 
-        case SDL_CONTROLLERDEVICEREMOVED:
+        case SDL_EVENT_GAMEPAD_REMOVED:
         {
             auto* controller = FindController(event->cdevice.which);
 
@@ -538,21 +531,21 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
 
-        case SDL_CONTROLLERBUTTONDOWN:
-        case SDL_CONTROLLERBUTTONUP:
-        case SDL_CONTROLLERAXISMOTION:
-        case SDL_CONTROLLERTOUCHPADDOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
         {
             auto* controller = FindController(event->cdevice.which);
 
             if (!controller)
                 break;
 
-            if (event->type == SDL_CONTROLLERAXISMOTION)
+            if (event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
             {
-                if (abs(event->caxis.value) > 8000)
+                if (abs(event->gaxis.value) > 8000)
                 {
-                    SDL_ShowCursor(SDL_DISABLE);
+                    SDL_HideCursor();
                     SetControllerInputDevice(controller);
                 }
 
@@ -560,7 +553,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             }
             else
             {
-                SDL_ShowCursor(SDL_DISABLE);
+                SDL_HideCursor();
                 SetControllerInputDevice(controller);
 
                 controller->Poll();
@@ -569,8 +562,8 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
 
-        case SDL_KEYDOWN:
-        case SDL_KEYUP:
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
         {
             // Enqueue keystroke for XamInputGetKeystrokeEx
             ProcessKeyboardEvent(event->key);
@@ -590,10 +583,11 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
         }
 
 
-        case SDL_MOUSEMOTION:
+        case SDL_EVENT_MOUSE_MOTION:
         {
             // Only switch to mouse on significant movement (> 5 pixels)
-            if (abs(event->motion.xrel) > 5 || abs(event->motion.yrel) > 5)
+            // SDL3: motion.xrel/yrel are float
+    if (fabsf(event->motion.xrel) > 5.0f || fabsf(event->motion.yrel) > 5.0f)
             {
                 if (!App::s_isLoading)
                 {
@@ -608,7 +602,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
                 }
                 
                 // Update mouse camera with delta
-                MouseCamera::Update(event->motion.xrel, event->motion.yrel, 1.0f / 60.0f);
+                MouseCamera::Update((int32_t)event->motion.xrel, (int32_t)event->motion.yrel, 1.0f / 60.0f);
                 
                 // Track last movement for cursor visibility
                 s_lastMouseMovement = std::chrono::steady_clock::now();
@@ -618,8 +612,8 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
         
-        case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
         {
             if (!App::s_isLoading)
             {
@@ -638,7 +632,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
         
-        case SDL_MOUSEWHEEL:
+        case SDL_EVENT_MOUSE_WHEEL:
         {
             if (!App::s_isLoading)
             {
@@ -654,30 +648,29 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             
             // Accumulate wheel delta (Y axis for vertical scrolling)
             // Positive = scroll up (next weapon), Negative = scroll down (previous weapon)
-            s_mouseWheelDelta += event->wheel.y;
+            // SDL3: wheel.y is float
+            s_mouseWheelDelta += (int32_t)event->wheel.y;
             
             s_lastMouseMovement = std::chrono::steady_clock::now();
             UpdateMouseCursorVisibility();
             break;
         }
 
-        case SDL_WINDOWEVENT:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
         {
-            if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
-            {
-                // Stop vibrating controllers on focus lost.
-                for (auto& controller : g_controllers)
-                    controller.SetVibration({ 0, 0 });
-                
-                // Reset mouse camera
-                MouseCamera::Reset();
-            }
-            else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-            {
-                // Reset mouse state on focus gain
-                s_lastMouseMovement = std::chrono::steady_clock::now();
-            }
+            // Stop vibrating controllers on focus lost.
+            for (auto& controller : g_controllers)
+                controller.SetVibration({ 0, 0 });
 
+            // Reset mouse camera
+            MouseCamera::Reset();
+            break;
+        }
+
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        {
+            // Reset mouse state on focus gain
+            s_lastMouseMovement = std::chrono::steady_clock::now();
             break;
         }
 
@@ -690,7 +683,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
         }
     }
 
-    return 0;
+    return true;
 }
 
 int32_t hid::GetMouseWheelDelta()
@@ -709,24 +702,24 @@ void hid::Init()
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS3, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS4, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS4_RUMBLE, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_PLAYER_LED, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
+    // PS5 rumble hint merged into SDL_HINT_JOYSTICK_ENHANCED_REPORTS above
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_WII, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1");
     SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "1");
     
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0"); // Uses Button Labels. This hint is disabled for Nintendo Controllers.
+    // SDL3: SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS removed; button labels are always positional
 
     SDL_InitSubSystem(SDL_INIT_EVENTS);
     SDL_AddEventWatch(HID_OnSDLEvent, nullptr);
 
-    SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
 
     // Load controller mappings from SDL_GameControllerDB
-    if (int mappings = SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt"); mappings > 0) {
+    if (int mappings = SDL_AddGamepadMappingsFromFile("gamecontrollerdb.txt"); mappings > 0) {
         LOGFN("Loaded {} controller mapping(s) from SDL_GameControllerDB ({})", mappings, "gamecontrollerdb.txt");
     }
     
@@ -825,7 +818,7 @@ static uint16_t SDLScancodeToVirtualKey(SDL_Scancode scancode, uint16_t mod) {
 
 // Get unicode character for the key
 static uint16_t SDLScancodeToUnicode(SDL_Scancode scancode, uint16_t mod) {
-    bool shift = (mod & KMOD_SHIFT) != 0;
+    bool shift = (mod & SDL_KMOD_SHIFT) != 0;
     
     // Letters A-Z
     if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
@@ -857,15 +850,15 @@ static uint16_t SDLScancodeToUnicode(SDL_Scancode scancode, uint16_t mod) {
 
 // Process SDL keyboard event into keystroke queue
 static void ProcessKeyboardEvent(const SDL_KeyboardEvent& key) {
-    uint16_t virtualKey = SDLScancodeToVirtualKey(key.keysym.scancode, key.keysym.mod);
+    uint16_t virtualKey = SDLScancodeToVirtualKey(key.scancode, key.mod);
     if (virtualKey == 0) return;
     
     hid::KeystrokeEvent event;
     event.virtualKey = virtualKey;
-    event.unicode = SDLScancodeToUnicode(key.keysym.scancode, key.keysym.mod);
+    event.unicode = SDLScancodeToUnicode(key.scancode, key.mod);
     event.userIndex = 0;
     
-    if (key.type == SDL_KEYDOWN) {
+    if (key.type == SDL_EVENT_KEY_DOWN) {
         event.flags = key.repeat ? XINPUT_KEYSTROKE_REPEAT : XINPUT_KEYSTROKE_KEYDOWN;
     } else {
         event.flags = XINPUT_KEYSTROKE_KEYUP;
@@ -966,8 +959,8 @@ bool hid::HasLightBar()
         return false;
     
     // DualShock 4 and DualSense have light bars
-    auto type = SDL_GameControllerGetType(g_activeController->controller);
-    return type == SDL_CONTROLLER_TYPE_PS4 || type == SDL_CONTROLLER_TYPE_PS5;
+    auto type = SDL_GetGamepadType(g_activeController->controller);
+    return type == SDL_GAMEPAD_TYPE_PS4 || type == SDL_GAMEPAD_TYPE_PS5;
 }
 
 void hid::SetLightBarColor(uint8_t r, uint8_t g, uint8_t b)
@@ -993,8 +986,8 @@ bool hid::HasTouchpad()
         return false;
     
     // DualShock 4 and DualSense have touchpads
-    auto type = SDL_GameControllerGetType(g_activeController->controller);
-    return type == SDL_CONTROLLER_TYPE_PS4 || type == SDL_CONTROLLER_TYPE_PS5;
+    auto type = SDL_GetGamepadType(g_activeController->controller);
+    return type == SDL_GAMEPAD_TYPE_PS4 || type == SDL_GAMEPAD_TYPE_PS5;
 }
 
 const hid::TouchpadState& hid::GetTouchpadState()
@@ -1009,20 +1002,19 @@ void hid::UpdateTouchpadState()
         return;
     }
     
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-    // Get touchpad state from SDL (touchpad API added in 2.0.14)
-    Uint8 state;
+    // SDL3: touchpad API always available
+    bool state;
     float x, y, pressure;
     
     // Finger 0
-    if (SDL_GameControllerGetTouchpadFinger(g_activeController->controller, 0, 0, &state, &x, &y, &pressure) == 0) {
-        g_touchpadState.finger0Down = (state == SDL_PRESSED);
+    if (SDL_GetGamepadTouchpadFinger(g_activeController->controller, 0, 0, &state, &x, &y, &pressure)) {
+        g_touchpadState.finger0Down = state;
         g_touchpadState.finger0X = x;
         g_touchpadState.finger0Y = y;
         
         // Calculate swipe velocity
         if (g_touchpadState.finger0Down) {
-            uint64_t now = SDL_GetTicks64();
+            uint64_t now = SDL_GetTicks();
             float dt = (now - g_lastTouchTime) / 1000.0f;
             
             if (dt > 0.0f && dt < 0.1f && g_lastTouchTime > 0) {
@@ -1047,15 +1039,11 @@ void hid::UpdateTouchpadState()
     }
     
     // Finger 1 (multi-touch)
-    if (SDL_GameControllerGetTouchpadFinger(g_activeController->controller, 0, 1, &state, &x, &y, &pressure) == 0) {
-        g_touchpadState.finger1Down = (state == SDL_PRESSED);
+    if (SDL_GetGamepadTouchpadFinger(g_activeController->controller, 0, 1, &state, &x, &y, &pressure)) {
+        g_touchpadState.finger1Down = state;
         g_touchpadState.finger1X = x;
         g_touchpadState.finger1Y = y;
     }
-#else
-    // SDL version too old for touchpad support
-    g_touchpadState = {};
-#endif
 }
 
 // ============================================================================
@@ -1068,8 +1056,8 @@ bool hid::HasAdaptiveTriggers()
         return false;
     
     // Only DualSense has adaptive triggers
-    auto type = SDL_GameControllerGetType(g_activeController->controller);
-    return type == SDL_CONTROLLER_TYPE_PS5;
+    auto type = SDL_GetGamepadType(g_activeController->controller);
+    return type == SDL_GAMEPAD_TYPE_PS5;
 }
 
 void hid::InitDualSense()

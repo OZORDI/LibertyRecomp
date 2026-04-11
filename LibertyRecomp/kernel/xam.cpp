@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include "xxHashMap.h"
 #include <user/paths.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // Debug logging control
 #define SAVE_SYSTEM_DEBUG_LOGGING 1
@@ -836,19 +836,8 @@ uint32_t XamUserWriteProfileSettings(uint32_t dwUserIndex, uint32_t dwNumSetting
     return ERROR_SUCCESS;
 }
 
-// User signin state - use centralized UserProfile
-PPC_FUNC(__imp__XamUserGetSigninState)
-{
-    uint32_t dwUserIndex = ctx.r3.u32;
-    
-    if (dwUserIndex != 0) {
-        ctx.r3.u32 = 0; // Not signed in (only user 0 is supported)
-    } else {
-        // Return the signin state from our centralized profile
-        auto& profile = Liberty::GetUserProfile();
-        ctx.r3.u32 = static_cast<uint32_t>(profile.signinState());
-    }
-}
+// XamUserGetSigninState — removed, handled by rexkernel (xam_user.cpp)
+// Let rexglue runtime run uninterrupted.
 
 uint32_t XamUserGetSigninInfo(uint32_t dwUserIndex, uint32_t dwFlags, void* pInfo)
 {

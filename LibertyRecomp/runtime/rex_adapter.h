@@ -65,7 +65,7 @@ using object_ref = rex::system::object_ref<T>;
 #define REX_MEMBASE() g_memory.base
 #define REX_RUNTIME_INSTANCE() rex::Runtime::instance()
 #define REX_KERNEL_STATE() rex::Runtime::instance()->kernel_state()
-#define REX_PROCESSOR() rex::Runtime::instance()->processor()
+#define REX_PROCESSOR() rex::Runtime::instance()->function_dispatcher()
 
 // =============================================================================
 // Sub-adapter headers

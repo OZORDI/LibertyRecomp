@@ -1,13 +1,15 @@
 # =============================================================================
-# RexGlue SDK Integration for LibertyRecomp
+# RexGlue SDK Integration for LibertyRecomp (v0.7.4)
 # =============================================================================
-# Selectively builds only the RexGlue subsystems needed by LibertyRecomp:
+# Selectively builds the RexGlue subsystems needed by LibertyRecomp:
 #   - rexcore       (threading, memory utils, exception handling, logging)
 #   - rexfilesystem (VFS, STFS/disc image devices)
-#   - rexruntime    (processor, MMIO handler, XEX module loading)
+#   - rexsystem     (processor, MMIO handler, XEX module loading)
 #   - rexkernel     (kernel objects, threading, kernel state)
+#   - rexaudio      (REAL - SDL3 audio backend for XMA/audio processing)
+#   - rexinput      (REAL - SDL3 input backend for controller emulation)
 #
-# LibertyRecomp provides its own: GPU, audio, input, UI, file I/O, patches.
+# LibertyRecomp provides its own: GPU, UI, file I/O, patches.
 # =============================================================================
 
 include(GNUInstallDirs)
@@ -15,14 +17,53 @@ include(GNUInstallDirs)
 set(REXGLUE_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-sdk-main")
 set(REXGLUE_ROOT "${REXGLUE_SDK_ROOT}")
 
-# --- Configuration -----------------------------------------------------------
+# --- Version header generation -----------------------------------------------
+# The 0.7.4 root CMakeLists generates version.h from version.h.in using
+# project(rexglue VERSION 0.7.4) variables. Since we're add_subdirectory'd,
+# PROJECT_VERSION_* won't be set. Generate it manually.
+set(PROJECT_VERSION "0.7.4")
+set(PROJECT_VERSION_MAJOR 0)
+set(PROJECT_VERSION_MINOR 7)
+set(PROJECT_VERSION_PATCH 4)
+set(REXGLUE_VERSION_SUFFIX "-liberty")
 
-# Enable headless mode: LibertyRecomp provides its own GPU/audio/input
-# subsystems, so RexGlue's graphics/input/SDL dependencies are not needed.
-# REX_HEADLESS affects: kernel_state (no input drivers), xobject (wait caps),
-# runtime (no GPU/APU init), xam_ui (headless dialog dispatch).
-# LibertyRecomp's rendering, audio, and input code handle these instead.
-set(REXGLUE_HEADLESS ON)
+# macOS needs these globally for ucontext (fibers) and BSD extensions
+if(APPLE)
+    add_compile_definitions(_XOPEN_SOURCE=600 _DARWIN_C_SOURCE)
+endif()
+
+# Platform detection for version.h (mirrors root CMakeLists logic)
+if(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+        set(REX_PLATFORM "macos-arm64")
+    else()
+        set(REX_PLATFORM "macos-amd64")
+    endif()
+elseif(WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        set(REX_PLATFORM "win-amd64")
+    else()
+        set(REX_PLATFORM "win-arm64")
+    endif()
+else()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        set(REX_PLATFORM "linux-amd64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+        set(REX_PLATFORM "linux-arm64")
+    else()
+        set(REX_PLATFORM "linux-${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+endif()
+
+string(TIMESTAMP REXGLUE_BUILD_TIMESTAMP "%Y%m%d_%H%M")
+
+configure_file(
+    "${REXGLUE_SDK_ROOT}/include/rex/version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/rex/version.h"
+    @ONLY
+)
+
+# --- Configuration -----------------------------------------------------------
 
 # Compiler flags needed by RexGlue code (normally set by its root CMakeLists)
 add_compile_options(-fno-char8_t)
@@ -47,8 +88,8 @@ if(NOT TARGET utf8cpp)
 endif()
 
 # --- RexGlue vendored thirdparty (selective) ---------------------------------
-# Only build the targets needed by rexcore/rexruntime/rexkernel.
-# Skips xxHash, disasm (conflict with XenonRecomp), glslang, FFmpeg (unused).
+# Only build the targets needed by rexcore/rexruntime/rexkernel/rexaudio/rexinput.
+# Skips xxHash, disasm (conflict with XenonRecomp), glslang, Vulkan (unused).
 
 set(REX_3P "${REXGLUE_SDK_ROOT}/thirdparty")
 
@@ -99,6 +140,73 @@ endif()
 # protobuf/GameNetworkingSockets which also link vcpkg abseil.
 find_package(absl CONFIG REQUIRED)
 
+# --- SDL3 from rexglue thirdparty -------------------------------------------
+# rexaudio and rexinput need SDL3. Build it from the SDK's vendored copy
+# with audio+joystick only (no video/render/GPU).
+if(NOT TARGET SDL3-static)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+
+    # Enable subsystems needed by LibertyRecomp (video, input, audio, haptic, sensor)
+    # rexaudio only uses audio but extra subsystems don't hurt
+    set(SDL_VIDEO ON CACHE BOOL "" FORCE)
+    set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+    set(SDL_HAPTIC ON CACHE BOOL "" FORCE)
+    set(SDL_SENSOR ON CACHE BOOL "" FORCE)
+    set(SDL_JOYSTICK ON CACHE BOOL "" FORCE)
+    set(SDL_GAMEPAD ON CACHE BOOL "" FORCE)
+    set(SDL_POWER OFF CACHE BOOL "" FORCE)
+    set(SDL_FILESYSTEM OFF CACHE BOOL "" FORCE)
+    set(SDL_LOCALE OFF CACHE BOOL "" FORCE)
+    set(SDL_FILE OFF CACHE BOOL "" FORCE)
+    set(SDL_MISC OFF CACHE BOOL "" FORCE)
+
+    # Enable Metal on macOS for window surface creation
+    set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+    set(SDL_VULKAN ON CACHE BOOL "" FORCE)
+    set(SDL_METAL ON CACHE BOOL "" FORCE)
+
+    # Disable dummy drivers
+    set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
+    set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
+    set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(
+        "${REX_3P}/sdl3"
+        "${CMAKE_CURRENT_BINARY_DIR}/rexglue-sdl3"
+        EXCLUDE_FROM_ALL
+    )
+
+    # SDL3 uses getpagesize() which Clang 19+ rejects as implicit in C. Suppress.
+    if(TARGET SDL3-static)
+        target_compile_options(SDL3-static PRIVATE -Wno-implicit-function-declaration)
+    endif()
+endif()
+
+# --- imgui (needed by rexkernel xam_ui.cpp for #include <imgui.h>) -----------
+if(NOT TARGET imgui)
+    set(IMGUI_DIR "${REX_3P}/imgui")
+    if(EXISTS "${IMGUI_DIR}/imgui.cpp")
+        add_library(imgui STATIC
+            ${IMGUI_DIR}/imgui.cpp
+            ${IMGUI_DIR}/imgui_demo.cpp
+            ${IMGUI_DIR}/imgui_draw.cpp
+            ${IMGUI_DIR}/imgui_tables.cpp
+            ${IMGUI_DIR}/imgui_widgets.cpp
+        )
+        add_library(imgui::imgui ALIAS imgui)
+        target_include_directories(imgui PUBLIC
+            $<BUILD_INTERFACE:${IMGUI_DIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+        target_compile_options(imgui PRIVATE -w)
+        message(STATUS "RexGlue: Built imgui from SDK thirdparty")
+    endif()
+endif()
+
 # --- Fix: vcpkg fmt/spdlog compatibility -------------------------------------
 # XenonRecomp vendors fmt 11.0.2 with `basic_format_string` alias removed.
 # vcpkg's spdlog was compiled against vcpkg's fmt which retains the alias.
@@ -121,88 +229,91 @@ else()
 endif()
 
 # --- RexGlue core subsystems ------------------------------------------------
+# The sub-CMakeLists use ${PROJECT_SOURCE_DIR}/include to find rex headers.
+# When built as add_subdirectory, PROJECT_SOURCE_DIR is LibertyRecomp root,
+# not rexglue root. Fix by overriding the include dirs after each target.
+
+# Common include dirs to inject into every rexglue target
+set(_REXGLUE_INC "${REXGLUE_SDK_ROOT}/include")
+set(_REXGLUE_GEN_INC "${CMAKE_CURRENT_BINARY_DIR}/include")  # generated version.h
 
 add_subdirectory(
     "${REXGLUE_SDK_ROOT}/src/core"
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-core"
 )
+target_include_directories(rexcore PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexcore PRIVATE "${REXGLUE_SDK_ROOT}" "${REX_3P}/cli11/include")
 
 add_subdirectory(
     "${REXGLUE_SDK_ROOT}/src/filesystem"
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-filesystem"
 )
+target_include_directories(rexfilesystem PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexfilesystem PRIVATE "${REXGLUE_SDK_ROOT}")
 
 add_subdirectory(
     "${REXGLUE_SDK_ROOT}/src/system"
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-runtime"
 )
+target_include_directories(rexsystem PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexsystem PRIVATE "${REXGLUE_SDK_ROOT}")
 
-# --- Pre-built rexui from SDK (provides ImGuiDialog, WindowedAppContext etc.)
-# The SDK ships librexui.a for macOS ARM64. rexkernel/xam_ui.cpp needs it.
-set(_REXGLUE_PREBUILT "${REXGLUE_SDK_ROOT}/out/macos-arm64/Release")
-if(EXISTS "${_REXGLUE_PREBUILT}/librexui.a")
-    add_library(rexui STATIC IMPORTED)
-    set_target_properties(rexui PROPERTIES
-        IMPORTED_LOCATION "${_REXGLUE_PREBUILT}/librexui.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${REXGLUE_SDK_ROOT}/include"
-    )
-    add_library(rex::ui ALIAS rexui)
-    message(STATUS "RexGlue: Using pre-built librexui.a for UI symbols")
-else()
-    message(WARNING "RexGlue: Pre-built librexui.a not found at ${_REXGLUE_PREBUILT}")
-endif()
+# --- rexaudio (REAL build, SDL3 backend) ------------------------------------
+add_subdirectory(
+    "${REXGLUE_SDK_ROOT}/src/audio"
+    "${CMAKE_CURRENT_BINARY_DIR}/rexglue-audio"
+)
+target_include_directories(rexaudio PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexaudio PRIVATE "${REXGLUE_SDK_ROOT}")
 
-# Also need libimgui.a from pre-built SDK (used by rexui)
-if(EXISTS "${_REXGLUE_PREBUILT}/libimgui.a")
-    add_library(imgui_prebuilt STATIC IMPORTED)
-    set_target_properties(imgui_prebuilt PROPERTIES
-        IMPORTED_LOCATION "${_REXGLUE_PREBUILT}/libimgui.a")
-    message(STATUS "RexGlue: Using pre-built libimgui.a")
-endif()
+# --- rexinput (REAL build, SDL3 backend) ------------------------------------
+add_subdirectory(
+    "${REXGLUE_SDK_ROOT}/src/input"
+    "${CMAKE_CURRENT_BINARY_DIR}/rexglue-input"
+)
+target_include_directories(rexinput PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexinput PRIVATE "${REXGLUE_SDK_ROOT}")
 
-# --- Headless stubs for rexgraphics / rexinput / rexaudio ------------------
-# In headless mode, LibertyRecomp provides its own GPU/audio/input.
-# rexkernel links PRIVATE against these, so we need stub targets to satisfy
-# CMake dependency resolution without pulling in the full GPU stack.
-# The SDK headers (rex/graphics/, rex/input/) are already in the include path
-# via rexcore's PUBLIC include directory.
+# --- Headless stubs for rexgraphics and rexui --------------------------------
+# LibertyRecomp provides its own GPU and UI. rexkernel links PRIVATE against
+# rexgraphics so we need an INTERFACE stub. rexui is only needed for
+# ImGuiDialog symbols in xam_ui.cpp — stub it since we have our own UI.
 if(NOT TARGET rexgraphics)
     add_library(rexgraphics INTERFACE)
     add_library(rex::graphics ALIAS rexgraphics)
     message(STATUS "RexGlue: Using headless stub for rexgraphics")
 endif()
-if(NOT TARGET rexinput)
-    add_library(rexinput INTERFACE)
-    add_library(rex::input ALIAS rexinput)
-    message(STATUS "RexGlue: Using headless stub for rexinput")
-endif()
-if(NOT TARGET rexaudio)
-    # Build real rexaudio with SDL backend so RexGlue's XAudio/XMA kernel
-    # exports (XAudioRegisterRenderDriverClient, XAudioSubmitRenderDriverFrame,
-    # etc.) have a backing AudioSystem implementation.
-    add_subdirectory(
-        "${REXGLUE_SDK_ROOT}/src/audio"
-        "${CMAKE_CURRENT_BINARY_DIR}/rexglue-audio"
-    )
-    message(STATUS "RexGlue: Building real rexaudio (SDL backend)")
+if(NOT TARGET rexui)
+    add_library(rexui INTERFACE)
+    add_library(rex::ui ALIAS rexui)
+    message(STATUS "RexGlue: Using headless stub for rexui (LibertyRecomp has own UI)")
 endif()
 
+# --- rexkernel ---------------------------------------------------------------
 add_subdirectory(
     "${REXGLUE_SDK_ROOT}/src/kernel"
     "${CMAKE_CURRENT_BINARY_DIR}/rexglue-kernel"
 )
+target_include_directories(rexkernel PUBLIC "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_include_directories(rexkernel PRIVATE "${REXGLUE_SDK_ROOT}")
+
+# rexkernel's CMakeLists links the top-level o1heap (v2), but heap.cpp needs
+# the SDK's o1heap v3 (O1HEAP_ALIGNMENT = sizeof(void*)*2, has o1heapReallocate).
+# Swap the link: remove v2, add v3.
+if(TARGET rexglue_o1heap)
+    get_target_property(_kern_libs rexkernel LINK_LIBRARIES)
+    list(REMOVE_ITEM _kern_libs o1heap)
+    list(APPEND _kern_libs rexglue_o1heap)
+    set_target_properties(rexkernel PROPERTIES LINK_LIBRARIES "${_kern_libs}")
+endif()
 
 # --- Tell rexkernel that LibertyRecomp overrides certain PPC hooks (avoids duplicate symbols)
-# This must be set BEFORE rexkernel sources are compiled.
 target_compile_definitions(rexkernel PRIVATE LIBERTY_RECOMP_OVERRIDES)
 
-# --- Link pre-built rexui into rexkernel (provides ImGuiDialog etc.)
-if(TARGET rexui AND TARGET rexkernel)
-    target_link_libraries(rexkernel PUBLIC rexui)
-    if(TARGET imgui_prebuilt)
-        target_link_libraries(rexkernel PUBLIC imgui_prebuilt)
-    endif()
-    message(STATUS "RexGlue: Linked pre-built rexui into rexkernel")
+# --- Link imgui into rexkernel (xam_ui.cpp needs <imgui.h>) ---
+if(TARGET imgui AND TARGET rexkernel)
+    target_link_libraries(rexkernel PUBLIC imgui)
+    message(STATUS "RexGlue: Linked imgui into rexkernel")
 endif()
 
 # --- Fix: inject vcpkg fmt headers into rexcore so spdlog finds the right fmt
@@ -212,12 +323,12 @@ endif()
 # injecting the copied vcpkg fmt headers (with the alias) as a high-priority
 # include dir directly on rexcore and its dependents.
 if(DEFINED _REXFMT_INC AND EXISTS "${_REXFMT_INC}/fmt")
-    foreach(_rexlib rexcore rexfilesystem rexsystem rexkernel)
+    foreach(_rexlib rexcore rexfilesystem rexsystem rexkernel rexaudio rexinput)
         if(TARGET ${_rexlib})
             target_include_directories(${_rexlib} BEFORE PUBLIC "${_REXFMT_INC}")
         endif()
     endforeach()
-    message(STATUS "RexGlue: Injected vcpkg fmt headers into rexcore/filesystem/runtime/kernel")
+    message(STATUS "RexGlue: Injected vcpkg fmt headers into all rexglue targets")
 endif()
 
 # --- Fix: utf8cpp include path
@@ -232,9 +343,20 @@ endif()
 
 # --- Fix: add thirdparty/imgui to rexkernel include path
 # xam_ui.cpp uses #include <imgui.h> which needs thirdparty/imgui/ specifically
-# (thirdparty/ alone doesn't resolve imgui.h since it lives in the imgui subdir).
 if(TARGET rexkernel)
     target_include_directories(rexkernel PRIVATE
         "${REXGLUE_SDK_ROOT}/thirdparty/imgui")
     message(STATUS "RexGlue: Injected imgui include path into rexkernel")
 endif()
+
+# --- Linker stubs for rex::ui and rex::audio symbols -------------------------
+# rexkernel references ImGuiDialog / WindowedAppContext / XmaDecoder but rexui
+# and rexaudio are INTERFACE stubs. Provide empty implementations so the linker
+# is satisfied without building the full graphics stack.
+add_library(rexglue_stubs STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-stubs/ui_stubs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-stubs/audio_stubs.cpp"
+)
+target_include_directories(rexglue_stubs PRIVATE "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
+target_compile_options(rexglue_stubs PRIVATE -w)
+message(STATUS "RexGlue: Built rexglue_stubs (ui + audio linker stubs)")

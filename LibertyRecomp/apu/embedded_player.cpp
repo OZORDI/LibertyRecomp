@@ -78,7 +78,7 @@ static void PlayEmbeddedSound(EmbeddedSound s)
             return;
         }
 
-        data.chunk = Mix_LoadWAV_RW(SDL_RWFromConstMem(soundData, soundDataSize), 1);
+        data.chunk = Mix_LoadWAV_IO(SDL_IOFromConstMem(soundData, soundDataSize), true);
     }
     
     Mix_VolumeChunk(data.chunk, (Config::MasterVolume * Config::EffectsVolume * EmbeddedPlayer::EFFECTS_VOLUME) * MIX_MAX_VOLUME);
@@ -90,8 +90,13 @@ static Mix_Music* g_installerMusic;
 
 void EmbeddedPlayer::Init() 
 {
-    Mix_OpenAudio(XAUDIO_SAMPLES_HZ, AUDIO_F32SYS, 2, 4096);
-    g_installerMusic = Mix_LoadMUS_RW(SDL_RWFromConstMem(g_installer_music, sizeof(g_installer_music)), 1);
+    // SDL3: Mix_OpenAudio signature changed
+    SDL_AudioSpec mixSpec{};
+    mixSpec.freq = XAUDIO_SAMPLES_HZ;
+    mixSpec.format = SDL_AUDIO_F32;
+    mixSpec.channels = 2;
+    Mix_OpenAudio(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixSpec);
+    g_installerMusic = Mix_LoadMUS_IO(SDL_IOFromConstMem(g_installer_music, sizeof(g_installer_music)), true);
     s_isActive = true;
 }
 

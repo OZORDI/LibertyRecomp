@@ -11,7 +11,7 @@
 #include <user/config.h>
 #include <patches/gta4_ds4_patches.h>     // Our header with TouchpadGesture enum
 #include <patches/gta4_motion_patches.h>  // For VehicleState
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -113,7 +113,7 @@ static void CalculateLightBarColor()
         return;
     }
     
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Priority 1: Player is dead - solid dark red
     if (s_playerDead) {
@@ -224,7 +224,7 @@ void OnWantedLevelChanged(int newLevel)
     
     // Reset flash state when wanted level changes
     s_flashState = false;
-    s_lastFlashTime = SDL_GetTicks64();
+    s_lastFlashTime = SDL_GetTicks();
     
 #if 0  // Debug logging
     LOGFN("[DS4] Wanted level changed to: {}", s_wantedLevel);
@@ -262,7 +262,7 @@ static void DetectGestures()
     }
     
     const auto& touch = hid::GetTouchpadState();
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Track touch start
     if (touch.finger0Down && !s_touchWasDown) {
@@ -357,7 +357,7 @@ void CycleWeapon(int direction)
 
 void TriggerExplosionHaptic(float intensity)
 {
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Cooldown to prevent haptic spam
     if (now - s_lastExplosionHapticTime < EXPLOSION_HAPTIC_COOLDOWN_MS) {
@@ -415,7 +415,7 @@ void OnExplosion(float x, float y, float z, float radius, int type)
 
 void TriggerImpactHaptic(float intensity)
 {
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Cooldown to prevent haptic spam
     if (now - s_lastImpactHapticTime < IMPACT_HAPTIC_COOLDOWN_MS) {
@@ -556,7 +556,7 @@ static void UpdateWeatherHaptic()
 
 void TriggerGearChangeHaptic()
 {
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Cooldown to prevent spam
     if (now - s_lastGearChangeTime < GEAR_CHANGE_COOLDOWN_MS) {

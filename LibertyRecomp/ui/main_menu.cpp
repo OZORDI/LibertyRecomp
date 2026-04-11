@@ -1,7 +1,7 @@
 #include "main_menu.h"
 
 #include <imgui.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <gpu/video.h>
 #include <gpu/imgui/imgui_snapshot.h>
@@ -84,9 +84,9 @@ public:
 
         switch (event->type)
         {
-            case SDL_KEYDOWN:
+            case SDL_EVENT_KEY_DOWN:
             {
-                switch (event->key.keysym.scancode)
+                switch (event->key.scancode)
                 {
                     case SDL_SCANCODE_UP:
                     case SDL_SCANCODE_W:
@@ -116,26 +116,26 @@ public:
                 }
                 break;
             }
-            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             {
-                switch (event->cbutton.button)
+                switch (event->gbutton.button)
                 {
-                    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+                    case SDL_GAMEPAD_BUTTON_DPAD_UP:
                         g_upPressed = true;
                         return true;
-                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+                    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
                         g_downPressed = true;
                         return true;
-                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
                         g_leftPressed = true;
                         return true;
-                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
                         g_rightPressed = true;
                         return true;
-                    case SDL_CONTROLLER_BUTTON_A:
+                    case SDL_GAMEPAD_BUTTON_SOUTH:
                         g_acceptPressed = true;
                         return true;
-                    case SDL_CONTROLLER_BUTTON_B:
+                    case SDL_GAMEPAD_BUTTON_EAST:
                         g_backPressed = true;
                         return true;
                 }
@@ -1302,7 +1302,7 @@ bool MainMenu::Run()
     {
         Video::WaitOnSwapChain();
         SDL_PumpEvents();
-        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
         GameWindow::Update();
         Video::Present();
         

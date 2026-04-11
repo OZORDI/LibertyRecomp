@@ -340,7 +340,7 @@ set(LIBERTY_RECOMP_RUNTIME_CXX_SOURCES
 )
 
 set(LIBERTY_RECOMP_THIRDPARTY_SOURCES
-    "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl2.cpp"
+    "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl3.cpp"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/imgui.cpp"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/imgui_demo.cpp"
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/imgui_draw.cpp"
@@ -837,8 +837,7 @@ target_link_libraries(LibertyRecomp PRIVATE
     msdf-atlas-gen::msdf-atlas-gen
     nfd::nfd
     XenonUtils
-    SDL2::SDL2-static
-    SDL2_mixer
+    SDL3::SDL3-static
     tomlplusplus::tomlplusplus
     xxHash::xxhash
     CURL::libcurl
@@ -863,7 +862,10 @@ if (APPLE)
     target_link_libraries(LibertyRecomp PRIVATE -Wl,-force_load,$<TARGET_FILE:LibertyRecompLib>)
     target_link_libraries(LibertyRecomp PRIVATE "-framework CoreGraphics")
     target_link_libraries(LibertyRecomp PRIVATE "-framework GameKit")
-    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_GAMECENTER)
+    target_link_libraries(LibertyRecomp PRIVATE "-framework IOKit")
+    target_link_libraries(LibertyRecomp PRIVATE "-framework Metal")
+    target_link_libraries(LibertyRecomp PRIVATE "-framework Foundation")
+    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_GAMECENTER _XOPEN_SOURCE=600 _DARWIN_C_SOURCE)
     # Link against Homebrew LLVM's libc++ to match the compiler
     target_link_options(LibertyRecomp PRIVATE -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++ -lc++)
     # Prefer Homebrew arm64 freetype over /usr/local x86_64 version
@@ -884,6 +886,8 @@ if(USE_REXGLUE_RUNTIME)
         rexsystem
         rexkernel
         rexaudio
+        rexglue_o1heap
+        rexglue_stubs
     )
     # Ensure vcpkg fmt headers are found before XenonRecomp's vendored fmt.
     # The copied headers live outside vcpkg_installed/ to avoid -isystem demotion.

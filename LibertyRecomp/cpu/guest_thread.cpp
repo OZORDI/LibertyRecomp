@@ -1,6 +1,6 @@
 #include "guest_thread.h"
 #include "ppc_context.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <kernel/function.h>
 #include <kernel/heap.h>

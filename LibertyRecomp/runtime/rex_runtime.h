@@ -26,7 +26,7 @@ inline rex::system::KernelState* GetKernelState() {
 }
 
 inline rex::runtime::Processor* GetProcessor() {
-    return rex::Runtime::instance()->processor();
+    return rex::Runtime::instance()->function_dispatcher();
 }
 
 template<typename T = void>

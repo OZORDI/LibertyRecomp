@@ -254,12 +254,8 @@ void KiSystemStartup()
 
     g_userHeap.Init();
 
-    // Initialize rexcrt o1heap for generated code's RtlAllocateHeap hooks
-    if (!rex::kernel::crt::InitHeap(FLAGS_rexcrt_heap_size_mb)) {
-        fprintf(stderr, "[Main] FATAL: rexcrt heap init failed\n");
-        printf("[EXIT-TRACE] main.cpp:248 calling _Exit\n"); fflush(stdout);
-        std::_Exit(1);
-    }
+    // rexcrt heap is now initialized in main() after Runtime::Setup(),
+    // where runtime->memory() is available (matching rex_app.cpp pattern).
 
     // Initialize save system early - creates directories and registers save content
     SaveSystem::Initialize();
@@ -559,9 +555,17 @@ int main(int argc, char *argv[])
             printf("[EXIT-TRACE] main.cpp:478 calling _Exit\n"); fflush(stdout);
             std::_Exit(1);
         }
+
+        // Initialize rexcrt heap with the Runtime's Memory (matches rex_app.cpp pattern).
+        // Must be after Setup() so runtime_->memory() is valid.
+        if (!rex::kernel::crt::InitHeap(FLAGS_rexcrt_heap_size_mb, s_rexRuntime->memory())) {
+            fprintf(stderr, "[Main] FATAL: rexcrt heap init failed\n");
+            std::_Exit(1);
+        }
+        fprintf(stderr, "[Main] rexcrt heap initialized (%u MB)\n", FLAGS_rexcrt_heap_size_mb);
         // DIAG: verify xstart is registered after Setup()
         {
-            auto* p = s_rexRuntime->processor();
+            auto* p = s_rexRuntime->function_dispatcher();
             PPCFunc* xsf = p->GetFunction(0x82A11290);
             fprintf(stderr, "[DIAG] After Setup(): GetFunction(0x82A11290)=%p  HasFT=%d\n",
                     (void*)xsf, (int)p->HasFunctionTable());
@@ -636,7 +640,7 @@ int main(int argc, char *argv[])
         // Memory's function table was populated during InitializeFromRexGlue(),
         // but the Processor has its own hash map used by processor->GetFunction().
         // InitializeFunctionTable adopts the existing memory table (no double-init).
-        auto* proc = s_rexRuntime->processor();
+        auto* proc = s_rexRuntime->function_dispatcher();
         proc->InitializeFunctionTable(
             static_cast<uint32_t>(PPC_CODE_BASE),
             static_cast<uint32_t>(PPC_CODE_SIZE),
@@ -994,7 +998,7 @@ int main(int argc, char *argv[])
     auto* rt = rex::Runtime::instance();
     // DIAG: verify xstart is still registered right before LaunchModule
     {
-        auto* p = rt->processor();
+        auto* p = rt->function_dispatcher();
         PPCFunc* xsf = p->GetFunction(0x82A11290);
         fprintf(stderr, "[DIAG] Before LaunchModule(): GetFunction(0x82A11290)=%p  HasFT=%d  instance=%p\n",
                 (void*)xsf, (int)p->HasFunctionTable(), (void*)rt);

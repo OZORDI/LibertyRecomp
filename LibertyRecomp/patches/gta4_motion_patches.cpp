@@ -40,7 +40,7 @@
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/config.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cmath>
 #include <algorithm>  // for std::clamp
 
@@ -333,7 +333,7 @@ bool GetMotionControlPreference()
 void TriggerMotionReload()
 {
     s_motionReloadTriggered = true;
-    s_lastShakeTime = SDL_GetTicks64();
+    s_lastShakeTime = SDL_GetTicks();
     
 #if MOTION_PATCHES_DEBUG_LOGGING
     LOGFN("[MotionPatch] Motion reload triggered!");
@@ -373,7 +373,7 @@ void UpdateMotionReloadDetection()
     constexpr uint64_t SHAKE_TIMEOUT_MS = 500;     // Time window for shake detection
     constexpr uint64_t SHAKE_COOLDOWN_MS = 200;    // Cooldown after triggering
     
-    uint64_t now = SDL_GetTicks64();
+    uint64_t now = SDL_GetTicks();
     
     // Cooldown after reload to prevent retriggering
     if (s_lastShakeTime > 0 && (now - s_lastShakeTime) < SHAKE_COOLDOWN_MS) {

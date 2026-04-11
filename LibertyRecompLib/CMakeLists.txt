@@ -10,6 +10,11 @@ else()
     add_compile_options(-ffp-model=strict)
 endif()
 
+# macOS needs _XOPEN_SOURCE for ucontext (fibers) used by rex/thread/fiber.h
+if(APPLE)
+    add_compile_definitions(_XOPEN_SOURCE=600 _DARWIN_C_SOURCE)
+endif()
+
 target_compile_definitions(XenonRecomp PRIVATE 
     XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml\"
     XENON_RECOMP_HEADER_FILE_PATH=\"${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/ppc_context.h\")

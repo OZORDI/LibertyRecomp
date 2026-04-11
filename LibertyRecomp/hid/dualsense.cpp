@@ -1,7 +1,7 @@
 #include <stdafx.h>
 #include <hid/dualsense.h>
 #include <hid/hid.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <os/logger.h>
 #include <cstring>
 #include <algorithm>
@@ -10,8 +10,8 @@
 /**
  * DualSense Controller Implementation
  * 
- * This implementation uses SDL2's HIDAPI support to communicate with the
- * DualSense controller. SDL2 2.0.16+ includes native DualSense support.
+ * This implementation uses SDL3's HIDAPI support to communicate with the
+ * DualSense controller. SDL3 includes native DualSense support.
  * 
  * Protocol notes:
  * - USB mode: 48-byte output reports, Report ID 0x02
@@ -31,9 +31,9 @@
 class Controller
 {
 public:
-    SDL_GameController* controller{};
+    SDL_Gamepad* controller{};
     SDL_Joystick* joystick{};
-    SDL_JoystickID id{ -1 };
+    SDL_JoystickID id{ 0 };
     // ... other members not needed for our purposes
 };
 
@@ -205,7 +205,7 @@ namespace DualSense
     // and raw HID for adaptive triggers (not exposed by SDL)
     
     // Helper function to get active controller from external global
-    static SDL_GameController* GetActiveController()
+    static SDL_Gamepad* GetActiveController()
     {
         if (!g_activeController)
             return nullptr;
@@ -213,27 +213,28 @@ namespace DualSense
     }
     
     // Check if connected controller is DualSense
-    static bool IsDualSenseController(SDL_GameController* controller)
+    static bool IsDualSenseController(SDL_Gamepad* controller)
     {
         if (!controller) return false;
         
-        SDL_GameControllerType type = SDL_GameControllerGetType(controller);
-        return type == SDL_CONTROLLER_TYPE_PS5;
+        SDL_GamepadType type = SDL_GetGamepadType(controller);
+        return type == SDL_GAMEPAD_TYPE_PS5;
     }
     
     // Check connection mode (USB vs Bluetooth)
-    static bool DetectBluetoothMode(SDL_GameController* controller)
+    static bool DetectBluetoothMode(SDL_Gamepad* controller)
     {
         if (!controller) return false;
         
         // SDL doesn't directly expose this, but we can check device path
         // BT devices typically have different path patterns
-        SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
+        SDL_Joystick* joystick = SDL_GetGamepadJoystick(controller);
         if (!joystick) return false;
         
         // Get device path if available (SDL 2.24.0+)
-        #if SDL_VERSION_ATLEAST(2, 24, 0)
-        const char* path = SDL_JoystickPath(joystick);
+        // SDL3: path always available
+        {
+        const char* path = SDL_GetJoystickPath(joystick);
         if (path)
         {
             // Platform-specific BT detection
@@ -272,13 +273,10 @@ namespace DualSense
             (void)path;
             #endif
         }
-        #else
-        // SDL version too old for path detection
-        (void)joystick;
-        #endif
+        }
         
         // Default to USB mode (safer - smaller packets)
-        // Note: SDL_GameControllerSendEffect will use the correct mode internally
+        // Note: SDL_SendGamepadEffect will use the correct mode internally
         // for DualSense controllers, so this detection is primarily informational
         return false;
     }
@@ -287,7 +285,7 @@ namespace DualSense
     static void SendEffectReport()
     {
         // Get active controller
-        SDL_GameController* controller = GetActiveController();
+        SDL_Gamepad* controller = GetActiveController();
         if (!controller || !IsDualSenseController(controller))
         {
             s_connected = false;
@@ -297,10 +295,10 @@ namespace DualSense
         s_connected = true;
         s_bluetoothMode = DetectBluetoothMode(controller);
         
-        // SDL 2.0.16+ supports DualSense but doesn't expose adaptive triggers
-        // We need to use SDL_GameControllerSendEffect() which was added in SDL 2.0.16
+        // SDL3 supports DualSense but doesn't expose adaptive triggers directly
+        // We use SDL_SendGamepadEffect() to send raw effect packets
         
-        #if SDL_VERSION_ATLEAST(2, 0, 16)
+        // SDL3: SendEffect always available
         // Build the effect state packet
         // Using DS5EffectsState_t layout from SDL's hidapi_ps5.c
         
@@ -357,12 +355,12 @@ namespace DualSense
         EncodeTriggerEffect(s_leftTriggerEffect, packet.leftTriggerEffect);
         
         // Send via SDL's effect API
-        int result = SDL_GameControllerSendEffect(controller, &packet, sizeof(packet));
+        bool result = SDL_SendGamepadEffect(controller, &packet, sizeof(packet));
         
-        if (result != 0)
+        if (!result)
         {
-            // SDL_GameControllerSendEffect may not be available or failed
-            // This is expected on some platforms/SDL versions
+            // SDL_SendGamepadEffect failed
+            // This can happen if the controller disconnected or doesn't support effects
             static bool s_loggedWarning = false;
             if (!s_loggedWarning)
             {
@@ -372,16 +370,6 @@ namespace DualSense
         }
         
         s_effectsDirty = false;
-        #else
-        // SDL version too old - adaptive triggers not supported
-        s_effectsDirty = false;
-        static bool s_loggedWarning = false;
-        if (!s_loggedWarning)
-        {
-            LOG_WARNING("DualSense: Adaptive triggers require SDL 2.0.16 or later");
-            s_loggedWarning = true;
-        }
-        #endif
     }
     
     // ========================================================================
@@ -394,7 +382,7 @@ namespace DualSense
         if (!s_initialized) return false;
         
         // Refresh connection status
-        SDL_GameController* controller = GetActiveController();
+        SDL_Gamepad* controller = GetActiveController();
         s_connected = IsDualSenseController(controller);
         
         return s_connected;
@@ -520,7 +508,7 @@ namespace DualSense
         
         // Set restoration timer
         // Semi-auto: 80ms recoil, Auto: sustain while firing
-        s_recoilEndTime = SDL_GetTicks64() + (profile.isAutomatic ? 50 : 80);
+        s_recoilEndTime = SDL_GetTicks() + (profile.isAutomatic ? 50 : 80);
         s_inRecoilAnimation = true;
     }
     
@@ -630,7 +618,7 @@ namespace DualSense
         // Handle recoil animation end
         if (s_inRecoilAnimation)
         {
-            uint64_t now = SDL_GetTicks64();
+            uint64_t now = SDL_GetTicks();
             if (now >= s_recoilEndTime)
             {
                 // Restore pre-recoil effect
