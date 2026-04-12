@@ -154,6 +154,13 @@ void Memory::PopulateFunctionTableAndVtables()
     PPC_STORE_U8(0x831C501C, 1);  // Player 0 sign-in state = signed in
     fprintf(stderr, "[Memory] XAM sign-in state: wrote 1 to byte 0x831C501C (player 0 active)\n");
 
+    // RPF mode flag: sub_8285DD10 checks this to decide whether to open
+    // common.rpf/xbox360.rpf/audio.rpf as fiPackfile archives (flag=1)
+    // or mount loose directories (flag=0). On Xbox 360, disc detection
+    // sets this during boot. We set it so the game loads RPF archives.
+    PPC_STORE_U32(0x831B59F8, 1);
+    fprintf(stderr, "[Memory] RPF mode flag set (0x831B59F8 = 1)\n");
+
     // ==========================================================================
     // Front-End Readiness Flag
     // ==========================================================================

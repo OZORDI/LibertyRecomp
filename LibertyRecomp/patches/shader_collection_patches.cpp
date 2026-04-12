@@ -23,19 +23,9 @@ static constexpr uint32_t STR_COMMON_SHADERS         = 0x820009D4;
 static constexpr uint32_t STR_UPDATE_SHADERS         = 0x820024F0;
 static constexpr uint32_t ADDR_RPF_MODE_FLAG         = 0x831B59F8;
 
-// =============================================================================
-// sub_8285DD10 - RPF Mode Flag Check
-// =============================================================================
-// On Xbox 360, this returns 1 (RPF mode) because dword_831B59F8 is set during
-// disc/boot detection. In the recomp, 0x831B59F8 is zero so it returns 0,
-// causing directory mount instead of RPF open. Fix: return 1 unconditionally.
-//
-PPC_FUNC_HOOK(sub_8285DD10)
-{
-    uint32_t origFlag = PPC_LOAD_U32(ADDR_RPF_MODE_FLAG);
-    LOGF_INFO("shader_collection: sub_8285DD10 (RPF mode check) flag=0x{:08X}, forcing return 1 (RPF mode)", origFlag);
-    ctx.r3.u64 = 1;
-}
+// sub_8285DD10 — removed. Was forcing RPF mode by overriding return value.
+// Instead, set the RPF flag (0x831B59F8) in guest memory during init so the
+// recompiled code naturally takes the RPF path. See memory.cpp.
 
 // =============================================================================
 // sub_828C8D78 - setShaderBasePath (passthrough)

@@ -984,35 +984,8 @@ PPC_FUNC_HOOK(sub_8284C290) {
 // Parameters: r3 = size, r4 = flags (bit-31 path = physical/GPU alloc)
 // Returns:    r3 = guest pointer to allocated block (non-zero on success)
 // =============================================================================
-extern "C" void __imp__sub_82A10EB0(PPCContext &ctx, uint8_t *base);
-static std::atomic<int> s_rageAllocCount{0};
-
-PPC_FUNC_HOOK(sub_82A10EB0) {
-    uint32_t size  = ctx.r3.u32;
-    uint32_t flags = ctx.r4.u32;
-    if (size == 0 || size >= 0x4000000u) {
-        // Out-of-range — fall through to original (will likely fail too)
-        __imp__sub_82A10EB0(ctx, base);
-        return;
-    }
-    auto* ks = rex::system::kernel_state();
-    auto* mem = ks ? ks->memory() : nullptr;
-    if (mem) {
-        uint32_t guest = mem->SystemHeapAlloc(size);
-        ctx.r3.u32 = guest;
-        int n = s_rageAllocCount.fetch_add(1, std::memory_order_relaxed);
-        if (n < 50 || (n & 0xFF) == 0) {
-            printf("[RAGE-HEAP] sub_82A10EB0 #%d size=0x%X flags=0x%08X -> 0x%08X\n",
-                   n, size, flags, guest);
-            fflush(stdout);
-        }
-    } else {
-        printf("[RAGE-HEAP] CRITICAL: kernel_state() null, size=0x%X flags=0x%08X\n",
-               size, flags);
-        fflush(stdout);
-        ctx.r3.u32 = 0;
-    }
-}
+// sub_82A10EB0 — RAGE heap allocator. Removed override — let recompiled code
+// handle allocation through its own RtlAllocateHeap → rexcrt path.
 
 // =============================================================================
 // GPU RING BUFFER SUBMIT + FENCE WAIT STUBS
@@ -1979,6 +1952,11 @@ GUEST_FUNCTION_WEAK_STUB(__imp__XamShowMarketplaceUI)
 GUEST_FUNCTION_WEAK_STUB(__imp__XamShowMarketplaceDownloadItemsUI)
 GUEST_FUNCTION_WEAK_STUB(__imp__XNetLogonGetMachineID)
 GUEST_FUNCTION_WEAK_STUB(__imp__XNetLogonGetTitleID)
+// XAM functions now handled by rexglue — weak stubs for link-time resolution
+GUEST_FUNCTION_WEAK_STUB(__imp__XamUserReadProfileSettings)
+GUEST_FUNCTION_WEAK_STUB(__imp__XamSessionCreateHandle)
+GUEST_FUNCTION_WEAK_STUB(__imp__XamSessionRefObjByHandle)
+GUEST_FUNCTION_WEAK_STUB(__imp__XamUserGetSigninState)
 GUEST_FUNCTION_WEAK_STUB(__imp__XamUserGetMembershipTierFromXUID)
 GUEST_FUNCTION_WEAK_STUB(__imp__XamUserGetOnlineCountryFromXUID)
 
