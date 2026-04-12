@@ -93,19 +93,23 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A77E28" = {}   # tail-call thunk: b sub_82812248
 "0x8219E410" = {}   # branch target from sub_821A2EDC
 
-# REMOVED (2026-04-11): 11 "vtable dispatcher" entries that were actually
-# mid-function offsets or static initializer DATA tables. They caused codegen
-# to split parent functions at bad boundaries, producing broken control flow.
-# The 0x82A6xxxx cluster (9 entries) was in DATA region past function boundaries.
-# 0x8219ACA0 and 0x828764B8 were mid-function offsets in unrelated functions.
+# CRT static constructors called by the xinit table (0x82A90010-0x82A916B0).
+# These are real PPC functions (lis/addi/stw/blr atexit registration stubs).
+# The CRT init loop calls them via PPC_CALL_INDIRECT_FUNC. Without these
+# entries, codegen merges them into neighboring functions, corrupting the
+# code at these addresses and breaking CRT static initialization.
+"0x82A6C218" = {}   # CRT ctor — atexit registration
+"0x82A69CC8" = {}   # CRT ctor — atexit registration
+"0x82A69CA8" = {}   # CRT ctor — atexit registration
+"0x82A69C68" = {}   # CRT ctor — atexit registration
+"0x82A69428" = {}   # CRT ctor — atexit registration
+"0x82A69328" = {}   # CRT ctor — atexit registration
+"0x82A69308" = {}   # CRT ctor — atexit registration
+"0x82A692E8" = {}   # CRT ctor — atexit registration
+"0x82A692C8" = {}   # CRT ctor — atexit registration
 
-# REMOVED (2026-04-12): All 11 mid-function entries deleted.
-# They split parent functions at bad boundaries, producing 88 unresolved
-# conditional branches in the codegen output. The parent function 0x8218BC38
-# alone had 42 broken branches from being split into 4 fragments.
-# Let rexglue's codegen handle these functions as single units.
-# The hooks that referenced these addresses are also removed from
-# imports.cpp and save_hooks.cpp.
+# Mid-function vtable dispatchers — NOT restored (genuinely mid-function)
+# 0x8219ACA0 and 0x828764B8 were mid-function offsets, not CRT ctors
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
