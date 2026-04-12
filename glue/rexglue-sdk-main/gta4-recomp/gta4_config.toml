@@ -56,7 +56,7 @@ MoveFileA          = 0x82A14DC8
 SetFileAttributesA = 0x82A14B30
 GetFileAttributesA = 0x82A14AC8
 SetFileTime        = 0x82A14A18
-FindFirstFileA     = 0x82A19F88
+FindFirstFileA     = 0x82A14988   # was 0x82A19F88 (NT-level NtQueryDirectoryFile wrapper, wrong layer)
 FindNextFileA      = 0x82A1A100
 FlushFileBuffers   = 0x82A188E0   # thin wrapper calling NtFlushBuffersFile
 CreateDirectoryA   = 0x82A14E98   # NtCreateFile + FILE_DIRECTORY_FILE, returns 1/0
@@ -140,7 +140,7 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A14B30" = { name = "SetFileAttributesA" }
 "0x82A14AC8" = { name = "GetFileAttributesA" }
 "0x82A14A18" = { name = "SetFileTime" }
-"0x82A19F88" = { name = "FindFirstFileA" }
+"0x82A14988" = { name = "FindFirstFileA" }  # was 0x82A19F88 (NT-level, wrong)
 "0x82A1A100" = { name = "FindNextFileA" }
 "0x82A188E0" = { name = "FlushFileBuffers" }
 "0x82A14E98" = { name = "CreateDirectoryA" }
