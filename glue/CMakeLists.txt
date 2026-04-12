@@ -354,8 +354,7 @@ endif()
 # and rexaudio are INTERFACE stubs. Provide empty implementations so the linker
 # is satisfied without building the full graphics stack.
 add_library(rexglue_stubs STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-stubs/ui_stubs.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-stubs/audio_stubs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue_stubs.cpp"
 )
 target_include_directories(rexglue_stubs PRIVATE "${_REXGLUE_INC}" "${_REXGLUE_GEN_INC}")
 target_compile_options(rexglue_stubs PRIVATE -w)
