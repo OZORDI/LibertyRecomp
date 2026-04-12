@@ -1,2 +1,0 @@
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/sdl2/CMakeFiles/CheckOBJC/CMakeFiles/edit_cache.dir
-/Users/Ozordi/Downloads/LibertyRecomp/build-codegen/thirdparty/sdl2/CMakeFiles/CheckOBJC/CMakeFiles/rebuild_cache.dir

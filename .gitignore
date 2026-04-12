@@ -655,3 +655,19 @@ docs/*.md
 # Claude and GitHub metadata - do not commit
 .claude/
 .github/
+
+# Claude Code / AI agent artifacts
+.claude/
+.github/skills/
+
+# Build codegen output (regenerated from source)
+build-codegen/
+
+# Root-level scripts and logs (local dev only)
+*.sh
+*.py
+*.pid
+chat_summary*.txt
+liberty_exec_log.txt
+run.pid
+
