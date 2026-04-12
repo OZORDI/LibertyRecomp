@@ -99,20 +99,13 @@ RemoveDirectoryA   = 0x82A1A160
 # The 0x82A6xxxx cluster (9 entries) was in DATA region past function boundaries.
 # 0x8219ACA0 and 0x828764B8 were mid-function offsets in unrelated functions.
 
-# Dead hook revival: mid-function addresses referenced by PPC_FUNC_HOOK in
-# imports.cpp / save_hooks.cpp. Without these entries, codegen doesn't emit
-# sub_XXXXXXXX symbols and the hooks silently never fire.
-"0x82168C08" = {}   # mid-func in 0x82168B68 — audio init
-"0x8218BE50" = {}   # mid-func in 0x8218BC38 — aligned alloc fallback
-"0x8218BEA8" = {}   # mid-func in 0x8218BC38 — main loop driver
-"0x8218C2C0" = {}   # mid-func in 0x8218BC38 — loading complete check
-"0x82192E00" = {}   # mid-func in 0x82192CF8 — streaming init flag clear
-"0x827D85E0" = {}   # mid-func in 0x827D8554 — allocator push guard
-"0x827D8620" = {}   # mid-func in 0x827D8554 — allocator pop guard
-"0x827DE648" = {}   # mid-func in 0x827DE610 — streaming completion barrier
-"0x827DF248" = {}   # mid-func in 0x827DEDB0 — pgStreamer::Init
-"0x827FC7F0" = {}   # mid-func in 0x827FC6E8 — RAGE AES decrypt
-"0x829A2540" = {}   # mid-func in 0x829A1F38 — NtSetEvent guard
+# REMOVED (2026-04-12): All 11 mid-function entries deleted.
+# They split parent functions at bad boundaries, producing 88 unresolved
+# conditional branches in the codegen output. The parent function 0x8218BC38
+# alone had 42 broken branches from being split into 4 fragments.
+# Let rexglue's codegen handle these functions as single units.
+# The hooks that referenced these addresses are also removed from
+# imports.cpp and save_hooks.cpp.
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)

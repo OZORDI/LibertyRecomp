@@ -9,8 +9,6 @@
 #include "function.h"
 #include "memory.h"
 #include <cstdio>
-#include <thread>
-#include <chrono>
 #include <atomic>
 #include <os/logger.h>
 
@@ -25,7 +23,6 @@ extern void KernelPhase_EnterRuntime();
 // sub_821200D0 - Post-Init (Profiles/Saves)
 // =============================================================================
 extern "C" void __imp__sub_821200D0(PPCContext& ctx, uint8_t* base);
-extern void ShutdownAllWorkers();
 
 constexpr uint32_t LOADING_FLAG_ADDR = 0x83137BB7;
 constexpr uint32_t LOADING_STEP_ADDR = 0x83137BC9;
@@ -79,68 +76,3 @@ PPC_FUNC(sub_8219F728)
     ctx.r3.s64 = 1;
 }
 
-// =============================================================================
-// sub_8218C2C0 - Loading Complete Check
-// =============================================================================
-// Depends on Xbox 360 VBlank hardware that doesn't exist in the recomp.
-// Fix: return 1 ("loading complete") so Loop 2 exits.
-extern "C" void __imp__sub_8218C2C0(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_8218C2C0)
-{
-    static int s_count = 0;
-    if (++s_count <= 5)
-        printf("[sub_8218C2C0] hook called #%d — returning 1\n", s_count);
-    ctx.r3.s64 = 1;
-}
-
-// =============================================================================
-// sub_82192E00 - Streaming Init
-// =============================================================================
-extern "C" void __imp__sub_82192E00(PPCContext& ctx, uint8_t* base);
-PPC_FUNC(sub_82192E00)
-{
-    static int s_count = 0;
-    ++s_count;
-
-    __imp__sub_82192E00(ctx, base);
-
-    if (s_count <= 3) {
-        uint32_t flagVal = PPC_LOAD_U32(0x830F5820);
-        printf("[sub_82192E00] hook #%d: streaming init dispatched, "
-               "0x830F5820=%u (async workers will clear)\n", s_count, flagVal);
-        fflush(stdout);
-    }
-}
-
-// =============================================================================
-// sub_827DE648 - Streaming Completion Barrier
-// =============================================================================
-PPC_FUNC(sub_827DE648)
-{
-    static int s_count = 0;
-    ++s_count;
-
-    constexpr uint32_t STREAMING_PENDING = 0x830F5820;
-    constexpr int MAX_POLLS = 50000;
-
-    int polls = 0;
-    while (PPC_LOAD_U32(STREAMING_PENDING) != 0) {
-        std::this_thread::yield();
-        ++polls;
-
-        if (polls >= MAX_POLLS) {
-            PPC_STORE_U32(STREAMING_PENDING, 0);
-            if (s_count <= 5)
-                printf("[sub_827DE648] barrier #%d: TIMEOUT after %d polls — "
-                       "force-cleared 0x830F5820\n", s_count, polls);
-            fflush(stdout);
-            return;
-        }
-    }
-
-    if (s_count <= 5) {
-        printf("[sub_827DE648] barrier #%d: completed after %d polls%s\n",
-               s_count, polls, polls == 0 ? " (immediate)" : "");
-        fflush(stdout);
-    }
-}

@@ -15,9 +15,6 @@
 #include "xdm.h"
 #include "xex.h"
 #include <SDL3/SDL.h>
-#ifdef __APPLE__
-#include <CommonCrypto/CommonCryptor.h>
-#endif
 #include <apu/audio.h>
 #include <atomic>
 #include <cpu/guest_thread.h>
@@ -700,42 +697,6 @@ PPC_FUNC_HOOK(sub_8284CFD8) {
     }
 }
 
-// sub_827DF248 - pgStreamer::Init
-// REMOVED: Old sync-mode force hook superseded by streaming_async_patches.cpp
-// which sets sync flag for InitInternal (skip Xbox threads), starts host worker
-// pool, then clears runtime sync flag so submissions go through async path.
-// See streaming_async_patches.cpp PPC_FUNC_HOOK(sub_827DF248) for the replacement.
-
-// sub_829A2540 - NtSetEvent wrapper called by RPF streaming workers (sub_827EE568)
-// after processing each work item. The completion event handle at work item
-// offset 156 is never set by the producer (sub_827EEBD8 only writes 156 bytes
-// into 160-byte slots), so it retains guest memory debug fill (0xCDCDCDCD).
-// NtSetEvent(0xCDCDCDCD) returns STATUS_INVALID_HANDLE on every iteration,
-// flooding the log via RtlSetLastNTError -> RtlNtStatusToDosError on 3 worker
-// threads. Guard: skip when handle is clearly invalid.
-extern "C" void __imp__sub_829A2540(PPCContext &ctx, uint8_t *base);
-PPC_FUNC_HOOK(sub_829A2540) {
-  uint32_t handle = ctx.r3.u32;
-  if (handle == 0 || handle == 0xCDCDCDCD) {
-    ctx.r3.u32 = 0;
-    return;
-  }
-  __imp__sub_829A2540(ctx, base);
-}
-
-// =============================================================================
-// AUDIO HOOKS
-// =============================================================================
-
-// sub_82168C08 - Audio init: signal events to unblock workers
-extern "C" void __imp__sub_82168C08(PPCContext &ctx, uint8_t *base);
-PPC_FUNC_HOOK(sub_82168C08) {
-  __imp__sub_82168C08(ctx, base);
-  SignalEventByGuestAddr(0x83130044);
-  SignalEventByGuestAddr(0x83137B80);
-  SignalSemaphoreByGuestAddr(0x83130008, 6);
-}
-
 // sub_82169B00 - Audio thread sync (Xbox worker model not needed on PC)
 PPC_FUNC_HOOK(sub_82169B00) { ctx.r3.u32 = 0; }
 
@@ -743,22 +704,12 @@ PPC_FUNC_HOOK(sub_82169B00) { ctx.r3.u32 = 0; }
 PPC_FUNC_HOOK(sub_82169400) { ctx.r3.u32 = 0; }
 
 // =============================================================================
-// RAGE ALLOCATOR FIX — Phases 2 & 3
+// RAGE ALLOCATOR FIX — Fallback allocator
 //
-// Root cause: Liberty stubs several shader/GPU init functions that participate
-// in RAGE's push/pop allocator-swap protocol.  When a stubbed function skips
-// setting TLS[1680] (target allocator) before a push, or skips a push that a
-// later pop depends on, TLS[1676] (active allocator) gets zeroed — killing
-// ALL subsequent allocations.
-//
-// Phase 2: Protective push/pop hooks — prevent TLS[1676] from being zeroed.
-// Phase 3: Fallback allocator — if TLS[1676] is still 0, route through
-//          RexGlue's SystemHeapAlloc so allocations never silently fail.
+// If TLS[1676] (active allocator) is 0, route through RexGlue's
+// SystemHeapAlloc so allocations never silently fail.
 // =============================================================================
 extern "C" void __imp__sub_8218BE28(PPCContext &ctx, uint8_t *base);
-extern "C" void __imp__sub_8218BE50(PPCContext &ctx, uint8_t *base);
-extern "C" void __imp__sub_827D85E0(PPCContext &ctx, uint8_t *base);
-extern "C" void __imp__sub_827D8620(PPCContext &ctx, uint8_t *base);
 
 // Safe big-endian read from guest memory
 static uint32_t ReadGuestU32(uint32_t guestAddr) {
@@ -787,81 +738,12 @@ static void WriteTLS(uint32_t r13, uint32_t offset, uint32_t value) {
 }
 
 static std::atomic<int> s_allocFallbackCount{0};
-static std::atomic<int> s_pushGuardCount{0};
-static std::atomic<int> s_popGuardCount{0};
-
 // Validate that a TLS[1676] value points to a real RAGE allocator object.
 // A valid allocator has a vtable pointer at offset 0 in the XEX code range.
 static bool IsValidAllocator(uint32_t memMgr) {
     if (memMgr == 0) return false;
     uint32_t vtable = ReadGuestU32(memMgr);
     return (vtable >= 0x82000000u && vtable < 0x84000000u);
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2: Protective PUSH hook (sub_827D85E0)
-//
-// Original behavior: if cur != target, sets TLS[1676] = TLS[1680].
-// Problem: if TLS[1680] is 0 (target not set by a stubbed function),
-//          this writes 0 into TLS[1676], killing the allocator.
-// Fix: if TLS[1680] == 0 AND cur != 0, skip the push entirely.
-//      The allocator stays alive with its current value.
-// ---------------------------------------------------------------------------
-PPC_FUNC_HOOK(sub_827D85E0) {
-    uint32_t r13 = ctx.r13.u32;
-    uint32_t cur    = ReadTLS(r13, 1676);
-    uint32_t target = ReadTLS(r13, 1680);
-
-    if (!IsValidAllocator(target) && IsValidAllocator(cur)) {
-        // Target allocator wasn't set (likely a stubbed function skipped it).
-        // Don't let the push zero out the active allocator.
-        // Pretend the push happened with cur == target (increment refcount).
-        uint32_t refcnt = ReadTLS(r13, 1668);
-        WriteTLS(r13, 1668, refcnt + 1);
-        int n = s_pushGuardCount.fetch_add(1, std::memory_order_relaxed);
-        if (n < 5) {
-            printf("[PUSH GUARD] #%d blocked push with target=0, kept cur=0x%08X refcnt=%u->%u caller=0x%08X\n",
-                   n, cur, refcnt, refcnt + 1, static_cast<uint32_t>(ctx.lr));
-            fflush(stdout);
-        }
-        return;
-    }
-
-    __imp__sub_827D85E0(ctx, base);
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2: Protective POP hook (sub_827D8620)
-//
-// Original behavior: if refcount == 0, restores TLS[1676] from TLS[1672],
-//                    then zeros TLS[1672].
-// Problem: if TLS[1672] is 0 (a push was skipped by a stubbed function),
-//          this writes 0 into TLS[1676], killing the allocator.
-// Fix: if refcount == 0 AND TLS[1672] == 0 AND TLS[1676] != 0,
-//      skip the pop entirely.  The allocator stays alive.
-// ---------------------------------------------------------------------------
-PPC_FUNC_HOOK(sub_827D8620) {
-    uint32_t r13 = ctx.r13.u32;
-    uint32_t refcnt = ReadTLS(r13, 1668);
-    uint32_t saved  = ReadTLS(r13, 1672);
-    uint32_t cur    = ReadTLS(r13, 1676);
-
-    if (refcnt == 0 && saved == 0 && cur != 0) {
-        // The saved allocator is 0 — restoring it would kill TLS[1676].
-        // This means a matching push was skipped (Liberty stub).
-        // Skip the pop to keep the allocator alive.
-        int n = s_popGuardCount.fetch_add(1, std::memory_order_relaxed);
-        if (n < 5) {
-            printf("[POP GUARD] #%d blocked pop with saved=0, kept cur=0x%08X caller=0x%08X\n",
-                   n, cur, static_cast<uint32_t>(ctx.lr));
-            fflush(stdout);
-        }
-        return;
-    }
-
-    // If our push guard incremented refcount, the pop's refcount > 0 path
-    // will simply decrement it and return — which is correct.
-    __imp__sub_827D8620(ctx, base);
 }
 
 // ---------------------------------------------------------------------------
@@ -901,47 +783,6 @@ PPC_FUNC_HOOK(sub_8218BE28) {
     __imp__sub_8218BE28(ctx, base);
 }
 
-// ---------------------------------------------------------------------------
-// Phase 3b: Fallback allocator (sub_8218BE50) — aligned variant
-//
-// Same as sub_8218BE28 above, but sub_8218BE50 takes an explicit alignment
-// parameter in r4 instead of hardcoding 16.  The RPF2 TOC allocation
-// (sub_827EF2F8) calls sub_8218BE50(tocSize, 128) and hangs when this
-// returns 0 because dev+8 becomes NULL.
-// ---------------------------------------------------------------------------
-PPC_FUNC_HOOK(sub_8218BE50) {
-    uint32_t r13 = ctx.r13.u32;
-    uint32_t memMgr = ReadTLS(r13, 1676);
-
-    if (!IsValidAllocator(memMgr)) {
-        uint32_t size  = ctx.r3.u32;
-        uint32_t align = ctx.r4.u32;
-        if (align < 16) align = 16;
-        // Round size up to alignment so the block satisfies the request
-        uint32_t allocSize = (size + align - 1) & ~(align - 1);
-        auto* ks = rex::system::kernel_state();
-        auto* mem = ks ? ks->memory() : nullptr;
-        if (mem) {
-            uint32_t guest = mem->SystemHeapAlloc(allocSize);
-            ctx.r3.u32 = guest;
-            int n = s_allocFallbackCount.fetch_add(1, std::memory_order_relaxed);
-            if (n < 200 || (n & 0xFF) == 0) {
-                printf("[ALLOC FALLBACK] #%d size=%u align=%u -> 0x%08X..0x%08X caller=0x%08X\n",
-                       n, size, align, guest, guest + allocSize,
-                       static_cast<uint32_t>(ctx.lr));
-                fflush(stdout);
-            }
-        } else {
-            printf("[ALLOC FALLBACK] CRITICAL: RexGlue memory not available, size=%u align=%u\n", size, align);
-            fflush(stdout);
-            ctx.r3.u32 = 0;
-        }
-        return;
-    }
-
-    // Normal path — allocator chain is healthy
-    __imp__sub_8218BE50(ctx, base);
-}
 
 // ---------------------------------------------------------------------------
 // Phase 4: Guard sub_827DAE40 — direct TLS[1676/1680] writer
@@ -1064,62 +905,6 @@ PPC_FUNC_HOOK(sub_8285A8B0) {
 
 
 
-// =============================================================================
-// NATIVE AES DECRYPTION — Replace recompiled RAGE AES with hardware-accelerated
-// =============================================================================
-// sub_827FC7F0 is RAGE's AES decrypt wrapper. Original PPC code calls
-// sub_827FC738 which applies sub_827FC190 (AES-256-ECB block cipher) 16 times
-// per 16-byte block. The recompiled table-based AES with PPC byte-swap
-// emulation is ~1000x slower than native. Replace with CommonCrypto AES.
-//
-// Calling convention:
-//   r3 = keySchedule (guest ptr — ignored, we use the extracted key)
-//   r4 = dataPtr (guest ptr to data, decrypted IN-PLACE)
-//   r5 = size in bytes (masked to 16-byte alignment internally)
-//   Returns r3 = 1 (success)
-// =============================================================================
-
-#ifdef __APPLE__
-static const uint8_t s_rageAesKey[32] = {
-    0x1a, 0xb5, 0x6f, 0xed, 0x7e, 0xc3, 0xff, 0x01,
-    0x22, 0x7b, 0x69, 0x15, 0x33, 0x97, 0x5d, 0xce,
-    0x47, 0xd7, 0x69, 0x65, 0x3f, 0xf7, 0x75, 0x42,
-    0x6a, 0x96, 0xcd, 0x6d, 0x53, 0x07, 0x56, 0x5d
-};
-#endif
-
-PPC_FUNC_HOOK(sub_827FC7F0) {
-    uint32_t dataAddr = ctx.r4.u32;
-    uint32_t size = ctx.r5.u32 & 0xFFFFFFF0u;
-
-    if (dataAddr == 0 || size == 0) {
-        ctx.r3.u32 = 1;
-        return;
-    }
-
-    uint8_t* data = static_cast<uint8_t*>(g_memory.Translate(dataAddr));
-
-#ifdef __APPLE__
-    // Apply AES-256-ECB decrypt 16 times per block (matches RAGE cipher)
-    for (uint32_t offset = 0; offset < size; offset += 16) {
-        for (int pass = 0; pass < 16; ++pass) {
-            size_t outLen = 0;
-            CCCrypt(kCCDecrypt, kCCAlgorithmAES, kCCOptionECBMode,
-                    s_rageAesKey, sizeof(s_rageAesKey),
-                    nullptr,
-                    data + offset, 16,
-                    data + offset, 16, &outLen);
-        }
-    }
-#else
-    // Non-Apple: fall through to original PPC code
-    extern "C" void __imp__sub_827FC7F0(PPCContext &ctx, uint8_t *base);
-    __imp__sub_827FC7F0(ctx, base);
-    return;
-#endif
-
-    ctx.r3.u32 = 1;
-}
 
 // sub_82140000 — RAGE init gate.
 // Calls sub_821B3CE8 (full RAGE engine init) and returns 1 on success, 0 on failure.
@@ -1887,39 +1672,6 @@ PPC_FUNC_HOOK(sub_82A12B60) {
 // NOTE: Audio object vtable guards (sub_829158F0/82915840) moved to
 // patches/scene_tick_patches.cpp — full decompilation with entity lifecycle.
 
-// =============================================================================
-// MAIN ENTRY POINT
-// =============================================================================
-extern "C" void __imp__sub_8218BEA8(PPCContext &ctx, uint8_t *base);
-
-// __imp__sub_82856F08 was never a real function boundary in the XEX — the
-// address 0x82856F08 falls inside another function. Provide a no-op stub so
-// the per-frame loop hook below can reference it without a linker error.
-extern "C" void __imp__sub_82856F08(PPCContext &ctx, uint8_t *base) {
-    (void)ctx; (void)base;
-}
-
-PPC_FUNC_HOOK(sub_8218BEA8) {
-  static bool s_initDone = false;
-
-  if (!s_initDone) {
-    LOG_WARNING("[MAIN] Running full game initialization...");
-    __imp__sub_8218BEA8(ctx, base);
-    s_initDone = true;
-    LOG_WARNING("[MAIN] Initialization complete, entering render loop");
-  }
-
-  static int s_loopCount = 0;
-  while (true) {
-    ++s_loopCount;
-    if (s_loopCount <= 20 || (s_loopCount % 500) == 0) {
-        printf("[MAIN_LOOP] Iteration #%d\n", s_loopCount);
-        fflush(stdout);
-    }
-    __imp__sub_82856F08(ctx, base);
-    std::this_thread::sleep_for(std::chrono::milliseconds(16));
-  }
-}
 
 // =============================================================================
 // LINKER STUBS — Referenced by PPCFuncMappings in recompiled code.
