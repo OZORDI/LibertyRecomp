@@ -51,7 +51,11 @@ public:
     static inline double s_animTime = 0.0;
     
     // Menu item counts
+#if !defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
     static constexpr int MAIN_MENU_ITEMS = 6; // Start Game, Controls, Settings, Mods, Install/Update, Exit
+#else
+    static constexpr int MAIN_MENU_ITEMS = 5; // Start Game, Controls, Settings, Mods, Exit (no installer on consoles)
+#endif
     
     // Version string
     static inline std::string s_versionString = "v1.0.0";

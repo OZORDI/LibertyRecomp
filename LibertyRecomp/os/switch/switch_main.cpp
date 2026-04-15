@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_NX
 // Nintendo Switch entry point / runtime init for LibertyRecomp (libnx/devkitPro)
 // Runs before main() via __appInit(), which libnx calls from its own _start.
 //
@@ -74,7 +75,8 @@ extern "C" void __appInit(void)
             if (R_SUCCEEDED(accountListAllUsers(uid_list, 8, &total)) && total > 0)
                 g_nx_uid = uid_list[0];
         }
-        accountExit();
+        // NOTE: Do NOT call accountExit() here — account services must remain
+        // available throughout the app lifecycle.  Cleanup is in __appExit().
     }
 
     // Mount save data only if we resolved a valid user.
@@ -96,6 +98,9 @@ extern "C" void __appInit(void)
     // Audio output
     audoutInitialize();
 
+    // Network interface management (needed for IP queries via nifm)
+    nifmInitialize(NifmServiceType_User);
+
     // Network (optional; non-fatal for offline play)
     socketInitializeDefault();
 
@@ -109,9 +114,11 @@ extern "C" void __appInit(void)
 extern "C" void __appExit(void)
 {
     socketExit();
+    nifmExit();
     audoutExit();
     hidExit();
     timeExit();
+    accountExit();
 
     // Commit and unmount save data — MUST happen before fsExit()
     if (g_save_mounted) {
@@ -141,3 +148,4 @@ extern "C" bool SwitchAppletIsRunning(void)
     return true;
 }
 
+#endif // LIBERTY_RECOMP_NX

@@ -7,6 +7,7 @@
 #include "video.h"
 #include <kernel/memory.h>
 #include <cstdio>
+#include <os/logger.h>
 
 extern Memory g_memory;
 
@@ -244,15 +245,15 @@ void LogRenderState(const RenderState& state, const char* context) {
     static uint32_t logCount = 0;
     if (++logCount > 100) return;  // Limit logging
 
-    printf("[GTAIV::%s] VS=0x%08X PS=0x%08X Valid=%d\n",
+    REXLOG_DEBUG("[GTAIV::{}] VS=0x{:08X} PS=0x{:08X} Valid={}",
            context, state.vertexShaderHandle, state.pixelShaderHandle, state.shaderValid);
-    printf("  VB[0-3]={0x%08X, 0x%08X, 0x%08X, 0x%08X}\n",
-           state.streamSource[0], state.streamSource[1], 
+    REXLOG_DEBUG("  VB[0-3]={{0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}}}",
+           state.streamSource[0], state.streamSource[1],
            state.streamSource[2], state.streamSource[3]);
-    printf("  IB=0x%08X RT[0]=0x%08X DS=0x%08X\n",
+    REXLOG_DEBUG("  IB=0x{:08X} RT[0]=0x{:08X} DS=0x{:08X}",
            state.indexBuffer, state.renderTarget[0], state.depthStencil);
-    printf("  EDRAM: base=0x%08X pitch=%u fmt=0x%02X (HDR=%s)\n",
-           state.edramBase, state.edramPitch, 
+    REXLOG_DEBUG("  EDRAM: base=0x{:08X} pitch={} fmt=0x{:02X} (HDR={})",
+           state.edramBase, state.edramPitch,
            static_cast<uint32_t>(state.surfaceFormat),
            state.IsHDR10Bit() ? "10-bit" : (state.IsHDR16Bit() ? "16-bit" : "8-bit"));
 }

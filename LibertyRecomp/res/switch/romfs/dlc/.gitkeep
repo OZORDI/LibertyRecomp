@@ -1,0 +1,3 @@
+# Populated at build time from ${LIBERTY_RECOMP_EMBEDDED_DLC_PATH}
+# (or ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/dlc if that variable is unset).
+# Mounts as `romfs:/dlc/` inside the NRO — see res/switch/romfs/.gitkeep.

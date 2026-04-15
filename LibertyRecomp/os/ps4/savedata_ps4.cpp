@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_PS4
 // os/ps4/savedata_ps4.cpp
 // PS4 save-data mount helper for LibertyRecomp.
 //
@@ -72,3 +73,4 @@ void UmountSaveData(const std::string& mount_point)
 }
 
 }  // namespace os::savedata
+#endif // LIBERTY_RECOMP_PS4

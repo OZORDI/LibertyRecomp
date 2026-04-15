@@ -16,6 +16,7 @@ extern "C" const char* LIBERTY_IOS_GetDocumentsPath()
         if ([paths count] > 0)
         {
             strncpy(s_documentsPath, [paths[0] UTF8String], sizeof(s_documentsPath) - 1);
+            s_documentsPath[sizeof(s_documentsPath) - 1] = '\0';
         }
     }
     return s_documentsPath;
@@ -27,7 +28,10 @@ extern "C" const char* LIBERTY_IOS_GetBundlePath()
     {
         NSString* bp = [[NSBundle mainBundle] bundlePath];
         if (bp)
+        {
             strncpy(s_bundlePath, [bp UTF8String], sizeof(s_bundlePath) - 1);
+            s_bundlePath[sizeof(s_bundlePath) - 1] = '\0';
+        }
     }
     return s_bundlePath;
 }

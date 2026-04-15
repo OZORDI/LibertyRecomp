@@ -1,48 +1,21 @@
 #include <os/logger.h>
-#include <os/process.h>
+#include <rex/logging.h>
 
-#define FOREGROUND_WHITE  (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)
-#define FOREGROUND_YELLOW (FOREGROUND_RED | FOREGROUND_GREEN)
+#include <spdlog/sinks/wincolor_sink.h>
+#include <spdlog/sinks/msvc_sink.h>
 
-static HANDLE g_hStandardOutput;
-
-void os::logger::Init()
+void os::logger::PlatformInitSinks()
 {
-    g_hStandardOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    // Colored console output for attached terminals.
+    auto console_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
+    rex::AddSink(console_sink);
+
+    // Mirror log output to the Visual Studio / WinDbg output window.
+    auto debug_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+    rex::AddSink(debug_sink);
 }
 
-void os::logger::Log(const std::string_view str, ELogType type, const char* func)
+void os::logger::PlatformShutdownSinks()
 {
-    if (!os::process::g_consoleVisible)
-        return;
-
-    switch (type)
-    {
-        case ELogType::Utility:
-            SetConsoleTextAttribute(g_hStandardOutput, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-            break;
-
-        case ELogType::Warning:
-            SetConsoleTextAttribute(g_hStandardOutput, FOREGROUND_YELLOW | FOREGROUND_INTENSITY);
-            break;
-
-        case ELogType::Error:
-            SetConsoleTextAttribute(g_hStandardOutput, FOREGROUND_RED | FOREGROUND_INTENSITY);
-            break;
-
-        default:
-            SetConsoleTextAttribute(g_hStandardOutput, FOREGROUND_WHITE);
-            break;
-    }
-
-    if (func)
-    {
-        fmt::println("[{}] {}", func, str);
-    }
-    else
-    {
-        fmt::println("{}", str);
-    }
-
-    SetConsoleTextAttribute(g_hStandardOutput, FOREGROUND_WHITE);
+    // spdlog handles sink cleanup on shutdown; nothing to do here.
 }

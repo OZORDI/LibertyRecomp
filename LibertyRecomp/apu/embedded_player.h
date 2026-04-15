@@ -1,16 +1,15 @@
 #pragma once
 
-struct EmbeddedPlayer 
+// Stub — Liberty's embedded music player was removed. rexglue handles all
+// audio natively (or not at all in stub mode). These are no-ops so the
+// installer wizard / exports.cpp keep compiling.
+
+namespace EmbeddedPlayer
 {
-    // Arbitrarily picked volume to match the mixing in the original game.
-    static constexpr float MUSIC_VOLUME = 0.25f;
-    static constexpr float EFFECTS_VOLUME = 0.2f;
-
-    static inline bool s_isActive = false;
-
-    static void Init();
-    static void Play(const char *name);
-    static void PlayMusic();
-    static void FadeOutMusic();
-    static void Shutdown();
-};
+    inline bool s_isActive = false;
+    inline void Init()                    {}
+    inline void Shutdown()                {}
+    inline void Play(const char*)         {}
+    inline void PlayMusic()               {}
+    inline void FadeOutMusic()            {}
+}

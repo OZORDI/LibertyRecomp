@@ -2,7 +2,10 @@
 
 #include <plume_render_interface_types.h>
 #include <user/config.h>
+
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <sdl_events.h>
+#endif
 
 // Default to native display resolution (detected at runtime)
 // These are fallback values if detection fails
@@ -14,7 +17,11 @@
 class GameWindow
 {
 public:
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     static inline SDL_Window* s_pWindow = nullptr;
+#else
+    static inline void* s_pWindow = nullptr; // unused on console
+#endif
     static inline plume::RenderWindow s_renderWindow;
 
     static inline int s_x;
@@ -24,10 +31,15 @@ public:
 
     static inline EPlayerCharacter s_playerCharacter;
 
-    static inline bool s_isFocused;
+    static inline bool s_isFocused
+#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+        = true // Console is always focused
+#endif
+        ;
     static inline bool s_isFullscreenCursorVisible;
     static inline bool s_isChangingDisplay;
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     static SDL_Surface* GetIconSurface(void* pIconBmp, size_t iconSize);
     static void SetIcon(void* pIconBmp, size_t iconSize);
     static void SetIcon(EPlayerCharacter player = EPlayerCharacter::Sonic);
@@ -52,4 +64,14 @@ public:
     static bool IsPositionValid();
     static bool Init(const char* sdlVideoDriver = nullptr);
     static void Update();
+#else
+    // Console stubs — always fullscreen, fixed resolution
+    static const char* GetTitle() { return "LibertyRecomp"; }
+    static void SetTitle(const char* = nullptr) {}
+    static bool IsFullscreen() { return true; }
+    static bool SetFullscreen(bool) { return true; }
+    static void GetSizeInPixels(int *w, int *h) { if (w) *w = s_width; if (h) *h = s_height; }
+    static bool Init(const char* = nullptr) { s_isFocused = true; return true; }
+    static void Update() {}
+#endif
 };

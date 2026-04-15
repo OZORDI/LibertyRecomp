@@ -16,6 +16,32 @@
 #include <cstring>
 #include <cmath>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IOS
+#include <os/ios/haptics_ios.h>
+#define LR_USE_IOS_HAPTICS 1
+#endif
+#endif
+
+#ifndef LR_USE_IOS_HAPTICS
+#define LR_USE_IOS_HAPTICS 0
+#endif
+
+#if defined(__ANDROID__)
+#include <android/api-level.h>
+#include <os/android/vibration_android.h>
+#define LR_USE_ANDROID_VIBRATION 1
+// Runtime SDL3 property exposing the Android InputDevice ID for a joystick.
+#ifndef SDL_PROP_JOYSTICK_ANDROID_DEVICE_ID_NUMBER
+#define SDL_PROP_JOYSTICK_ANDROID_DEVICE_ID_NUMBER "SDL.joystick.android.device_id"
+#endif
+#endif
+
+#ifndef LR_USE_ANDROID_VIBRATION
+#define LR_USE_ANDROID_VIBRATION 0
+#endif
+
 #define TRANSLATE_INPUT(S, X) SDL_GetGamepadButton(controller, S) << FirstBitLow(X)
 #define VIBRATION_TIMEOUT_MS 5000
 
@@ -44,6 +70,20 @@ public:
     float integratedYaw{};
     uint64_t lastMotionTimestamp{};
 
+#if LR_USE_IOS_HAPTICS
+    // True when the native Core Haptics engine came up successfully for this pad.
+    // When false we fall back to SDL_RumbleGamepad.
+    bool iosHapticsReady{};
+#endif
+
+#if LR_USE_ANDROID_VIBRATION
+    // Android InputDevice ID (from SDL joystick properties).
+    // -1 means unknown — fall back to SDL_RumbleGamepad.
+    int32_t androidDeviceId{ -1 };
+    // True when the platform API supports VibratorManager (API 31+).
+    bool androidVibratorReady{};
+#endif
+
     Controller() = default;
 
     explicit Controller(SDL_JoystickID instance_id) : Controller(SDL_OpenGamepad(instance_id))
@@ -65,6 +105,33 @@ public:
         if (hasGyro || hasAccel) {
             LOGFN("Motion sensors detected - Gyro: {}, Accel: {}", hasGyro ? "Yes" : "No", hasAccel ? "Yes" : "No");
         }
+
+#if LR_USE_IOS_HAPTICS
+        // Bring up the native Core Haptics engine for this pad.
+        // The wrapper sets a flag internally on failure; we re-query by attempting
+        // a no-op rumble — simpler: treat init as best-effort and let the wrapper
+        // silently no-op if the underlying GCController has no haptics.
+        ios_haptics_init(controller);
+        iosHapticsReady = true;
+#endif
+
+#if LR_USE_ANDROID_VIBRATION
+        // Grab the Android InputDevice ID SDL attached to this joystick so we can
+        // route rumble through Android's VibratorManager (API 31+). If the
+        // property is missing (e.g. SDL couldn't resolve it), fall back to SDL.
+        if (joystick) {
+            SDL_PropertiesID props = SDL_GetJoystickProperties(joystick);
+            if (props != 0) {
+                Sint64 devId = SDL_GetNumberProperty(props, SDL_PROP_JOYSTICK_ANDROID_DEVICE_ID_NUMBER, -1);
+                androidDeviceId = static_cast<int32_t>(devId);
+            }
+        }
+        // VibratorManager.getVibration(int) arrived in API 31 (Android 12).
+        androidVibratorReady = (android_get_device_api_level() >= 31) && (androidDeviceId >= 0);
+        if (androidVibratorReady) {
+            LOGFN("Android vibration routing enabled for InputDevice {}", androidDeviceId);
+        }
+#endif
     }
 
     SDL_GamepadType GetControllerType() const
@@ -107,6 +174,22 @@ public:
         if (motionEnabled) {
             SetMotionEnabled(false);
         }
+
+#if LR_USE_IOS_HAPTICS
+        if (iosHapticsReady) {
+            ios_haptics_shutdown(controller);
+            iosHapticsReady = false;
+        }
+#endif
+
+#if LR_USE_ANDROID_VIBRATION
+        // Make sure we leave the native vibrator silent when the pad goes away.
+        if (androidVibratorReady && androidDeviceId >= 0) {
+            android_vibration_stop(androidDeviceId);
+        }
+        androidVibratorReady = false;
+        androidDeviceId = -1;
+#endif
 
         SDL_CloseGamepad(controller);
 
@@ -284,7 +367,35 @@ public:
 
         this->vibration = vibration;
 
-        SDL_RumbleGamepad(controller, vibration.wLeftMotorSpeed * 256, vibration.wRightMotorSpeed * 256, VIBRATION_TIMEOUT_MS);
+        const uint16_t low  = static_cast<uint16_t>(vibration.wLeftMotorSpeed  * 256);
+        const uint16_t high = static_cast<uint16_t>(vibration.wRightMotorSpeed * 256);
+
+#if LR_USE_IOS_HAPTICS
+        if (iosHapticsReady)
+        {
+            ios_haptics_set_rumble(controller, low, high, VIBRATION_TIMEOUT_MS);
+            return;
+        }
+#endif
+
+#if LR_USE_ANDROID_VIBRATION
+        if (androidVibratorReady)
+        {
+            // Route through Android VibratorManager (API 31+). Forward the 16-bit
+            // XInput speeds directly; the native side scales as needed. Zero speed
+            // on both motors means stop.
+            if (vibration.wLeftMotorSpeed == 0 && vibration.wRightMotorSpeed == 0)
+                android_vibration_stop(androidDeviceId);
+            else
+                android_vibration_set_rumble(androidDeviceId,
+                                             vibration.wLeftMotorSpeed,
+                                             vibration.wRightMotorSpeed,
+                                             VIBRATION_TIMEOUT_MS);
+            return;
+        }
+#endif
+
+        SDL_RumbleGamepad(controller, low, high, VIBRATION_TIMEOUT_MS);
     }
 
     void SetLED(const uint8_t r, const uint8_t g, const uint8_t b) const

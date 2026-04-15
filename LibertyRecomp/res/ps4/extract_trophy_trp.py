@@ -18,8 +18,10 @@ To obtain it:
 import struct, os, sys, argparse, shutil
 
 TRP_MAGIC = 0xDCA24D00
-HEADER_SIZE = 64
-ENTRY_SIZE  = 64  # version 1; version 2 uses same layout
+# Header is 96 bytes on PS4 (version 3). PS3 / version 1 also uses 96 in practice —
+# orbis-pub-cmd and OpenOrbis create-trp both emit a 96-byte header.
+HEADER_SIZE = 96
+ENTRY_SIZE  = 64  # fixed entry record size (see header entrySize field @ +0x14)
 
 def extract_trp(trp_path: str, out_dir: str) -> list[tuple[str, int]]:
     with open(trp_path, 'rb') as f:

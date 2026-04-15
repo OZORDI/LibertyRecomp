@@ -1,7 +1,9 @@
 #include "main_menu.h"
 
 #include <imgui.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <SDL3/SDL.h>
+#endif
 
 #include <gpu/video.h>
 #include <gpu/imgui/imgui_snapshot.h>
@@ -12,10 +14,14 @@
 #include <ui/message_window.h>
 #include <ui/game_window.h>
 #include <ui/gta4_style.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <ui/installer_wizard.h>
+#endif
 #include <user/config.h>
 #include <user/paths.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <sdl_listener.h>
+#endif
 #include <app.h>
 #include <exports.h>
 #include <version.h>
@@ -40,9 +46,11 @@ static constexpr float TOGGLE_HEIGHT = 30.0f;
 static const char* g_mainMenuItems[] = {
     "Start Game",
     "Controls",
-    "Settings", 
+    "Settings",
     "Mods",
+#if !defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
     "Install DLCs / Updates",
+#endif
     "Exit"
 };
 
@@ -74,6 +82,7 @@ static int g_settingsOptionCount = 0;
 static bool g_pendingChanges = false;
 
 // SDL Event Listener for Main Menu
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 class MainMenuEventListener : public SDLEventListener
 {
 public:
@@ -148,6 +157,7 @@ public:
 };
 
 static MainMenuEventListener g_eventListener;
+#endif
 
 void MainMenu::Init()
 {
@@ -171,7 +181,9 @@ void MainMenu::Open()
     s_stateTime = ImGui::GetTime();
     s_animTime = ImGui::GetTime();
     
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     GameWindow::SetFullscreenCursorVisibility(true);
+#endif
 }
 
 void MainMenu::Close()
@@ -330,12 +342,16 @@ void MainMenu::OnMainMenuSelect(int index)
         case 3: // Mods
             s_currentPage = MainMenuPage::Mods;
             break;
-            
+
+#if !defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
         case 4: // Install / Update
             s_currentPage = MainMenuPage::InstallDLC;
             break;
-            
+
         case 5: // Exit
+#else
+        case 4: // Exit (no Install/Update on console builds)
+#endif
             // Exit application
             s_state = MainMenuState::Closing;
             s_stateTime = ImGui::GetTime();
@@ -406,13 +422,15 @@ void MainMenu::DrawHeader()
     drawList->AddText(g_pFntNewRodin, titleFontSize, {titleX, titleY}, 
                       GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha), title);
     
-    // Debug: Show mouse position
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+    // Debug: Show mouse position (desktop only; consoles have no mouse)
     auto& io = ImGui::GetIO();
     char mouseDebug[128];
-    snprintf(mouseDebug, sizeof(mouseDebug), "Mouse: %.0f, %.0f | Display: %.0f x %.0f", 
+    snprintf(mouseDebug, sizeof(mouseDebug), "Mouse: %.0f, %.0f | Display: %.0f x %.0f",
              io.MousePos.x, io.MousePos.y, io.DisplaySize.x, io.DisplaySize.y);
-    drawList->AddText(g_pFntRodin, Scale(14.0f), {titleX, titleY + titleSize.y + Scale(10.0f)}, 
+    drawList->AddText(g_pFntRodin, Scale(14.0f), {titleX, titleY + titleSize.y + Scale(10.0f)},
                       GTA4Style::WithAlpha(GTA4Style::Colors::TextGray, alpha), mouseDebug);
+#endif
 }
 
 void MainMenu::DrawMenuButton(const char* label, bool selected, float x, float y, float width, float height, bool* pressed)
@@ -1301,8 +1319,10 @@ bool MainMenu::Run()
     while (s_isVisible)
     {
         Video::WaitOnSwapChain();
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+#endif
         GameWindow::Update();
         Video::Present();
         
@@ -1313,7 +1333,9 @@ bool MainMenu::Run()
         }
     }
     
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     GameWindow::SetFullscreenCursorVisibility(false);
+#endif
     
     // Return true if game should start, false if exit was selected
     return (s_selectedMainOption == 0); // Start Game was selected

@@ -904,10 +904,14 @@ const char* GetBackendStatusString(Backend backend) {
 #endif
             
         case Backend::XeSS:
+#ifdef _WIN32
             if (XeSSContext::IsAvailable()) {
                 return "Available (Intel XeSS SDK)";
             }
             return "Unavailable (libxess.dll not found)";
+#else
+            return "Unavailable (Windows only)";
+#endif
             
         case Backend::MetalFX:
 #ifdef __APPLE__

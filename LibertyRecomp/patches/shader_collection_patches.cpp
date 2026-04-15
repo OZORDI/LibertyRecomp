@@ -6,6 +6,7 @@
 #include <kernel/function.h>
 #include <kernel/memory.h>
 #include <os/logger.h>
+#include <os/diag.h>
 #include <cstring>
 
 // =============================================================================
@@ -36,19 +37,96 @@ static constexpr uint32_t ADDR_RPF_MODE_FLAG         = 0x831B59F8;
 PPC_FUNC_IMPL(__imp__sub_828C8D78);
 PPC_FUNC_HOOK(sub_828C8D78)
 {
+    // Log the path being set
+    uint32_t pathAddr = ctx.r3.u32;
+    char pathStr[64] = {};
+    if (pathAddr) {
+        for (int i = 0; i < 63; i++) {
+            char c = static_cast<char>(PPC_LOAD_U8(pathAddr + i));
+            if (c == 0) break;
+            pathStr[i] = c;
+        }
+    }
+    if (::os::diag::ShouldEmit()) {
+        fprintf(stderr, "[SHADER-DIAG] setShaderBasePath('%s') addr=0x%08X\n", pathStr, pathAddr);
+        fflush(stderr);
+    }
     __imp__sub_828C8D78(ctx, base);
 }
 
 // =============================================================================
-// sub_828CAA60 - Compiled Shader Loader (passthrough)
+// sub_828CAA60 - Compiled Shader Loader (with diagnostics)
 // =============================================================================
-// Opens a fiStream for a shader path resolved via buildPath against the
-// fiCollection at 0x82B07278. The recompiled code handles paths correctly.
-//
+static int s_shaderLoadCount = 0;
 PPC_FUNC_IMPL(__imp__sub_828CAA60);
-PPC_FUNC_IMPL(__imp__sub_8284F310);  // pushPath original
-PPC_FUNC_IMPL(__imp__sub_8284E830);  // popPath original
+PPC_FUNC_IMPL(__imp__sub_8284F310);
+PPC_FUNC_IMPL(__imp__sub_8284E830);
 PPC_FUNC_HOOK(sub_828CAA60)
 {
+    uint32_t objAddr = ctx.r3.u32;
+    uint32_t nameAddr = ctx.r4.u32;
+    uint32_t flags = ctx.r5.u32;
+    int n = s_shaderLoadCount++;
+
+    // Read name string
+    char name[64] = {};
+    if (nameAddr) {
+        for (int i = 0; i < 63; i++) {
+            char c = static_cast<char>(PPC_LOAD_U8(nameAddr + i));
+            if (c == 0) break;
+            name[i] = c;
+        }
+    }
+
+    // Read obj+32 (the path field) BEFORE the call
+    uint32_t pathBefore = (objAddr != 0) ? PPC_LOAD_U32(objAddr + 32) : 0;
+
+    if (n < 20 && ::os::diag::ShouldEmit()) {
+        fprintf(stderr, "[SHADER-DIAG] sub_828CAA60 #%d obj=0x%08X name='%s'(0x%08X) flags=%u path_before=0x%08X\n",
+                n, objAddr, name, nameAddr, flags, pathBefore);
+        fflush(stderr);
+    }
+
+    // ---------------------------------------------------------------------
+    // Fix: ensure setShaderBasePath has run before the loader dereferences
+    // the shader collection.
+    //
+    // sub_821B3CE8 (grmSetup ctor) calls sub_828C58D0 (which invokes this
+    // loader) BEFORE calling sub_828C8D78 (setShaderBasePath). On the Xbox
+    // 360 the stale base-path buffer (`aTuneShadersLib` @ 0x82B0D348) held
+    // whatever the BSS/image zero-init plus earlier static ctors left
+    // there, but on the recomp it is pure-zero, so sub_828CAA60's path-
+    // build branch constructs `"/<name>.fxc"` (empty base) and the
+    // downstream fiDevice lookup returns a null/invalid device pointer
+    // → vtable deref at guest 0 → SIGBUS.
+    //
+    // Detect the empty base-path and pre-populate it with the canonical
+    // "common:/shaders" value (same string the game writes on the real
+    // hardware). This is a pre-call fix-up — the real sub_828C8D78 still
+    // runs later under sub_821B3CE8 and overwrites with the identical
+    // value, so no ordering assumption is broken.
+    if (PPC_LOAD_U8(ADDR_TUNE_SHADERS_LIB) == 0)
+    {
+        PPCContext save_ctx = ctx;
+        ctx.r3.u64 = STR_COMMON_SHADERS;
+        __imp__sub_828C8D78(ctx, base);
+        ctx = save_ctx;
+        if (n < 20) {
+            fprintf(stderr, "[SHADER-FIX ] sub_828CAA60 #%d primed aTuneShadersLib with 'common:/shaders' "
+                            "before first loader call\n", n);
+            fflush(stderr);
+        }
+    }
+
     __imp__sub_828CAA60(ctx, base);
+
+    // Read obj+32 AFTER the call
+    uint32_t pathAfter = (objAddr != 0) ? PPC_LOAD_U32(objAddr + 32) : 0;
+    uint32_t result = ctx.r3.u32;
+
+    if (n < 20 && ::os::diag::ShouldEmit()) {
+        fprintf(stderr, "[SHADER-DIAG] sub_828CAA60 #%d result=%u path_after=0x%08X\n",
+                n, result, pathAfter);
+        fflush(stderr);
+    }
 }

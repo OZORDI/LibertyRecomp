@@ -205,6 +205,12 @@ namespace PlatformPaths
         }
         
         return GetAesKeyPath();
+#elif defined(__ORBIS__)
+        // PS4: AES key is bundled into the /app0 package
+        return std::filesystem::path("/app0/aes_key.bin");
+#elif defined(__SWITCH__)
+        // Switch: AES key is in RomFS
+        return std::filesystem::path("romfs:/aes_key.bin");
 #else
         // Linux: next to executable or development path
         std::error_code ec;
@@ -217,12 +223,12 @@ namespace PlatformPaths
                 return bundledPath;
             }
         }
-        
+
         std::vector<std::filesystem::path> devPaths = {
             "LibertyRecompLib/private/aes_key.bin",
             "../LibertyRecompLib/private/aes_key.bin",
         };
-        
+
         for (const auto& p : devPaths)
         {
             if (std::filesystem::exists(p, ec))
@@ -230,7 +236,7 @@ namespace PlatformPaths
                 return std::filesystem::absolute(p);
             }
         }
-        
+
         return GetAesKeyPath();
 #endif
     }

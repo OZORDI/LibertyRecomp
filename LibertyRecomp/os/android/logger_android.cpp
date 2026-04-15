@@ -1,7 +1,13 @@
-// Android logger — routes through logcat via __android_log_print
+// Android logger — uses spdlog's built-in android_sink (logcat via __android_log_write).
+#ifdef LIBERTY_RECOMP_ANDROID
 #include <os/logger.h>
+
+#include <memory>
+
 #include <android/log.h>
-#include <string>
+
+#include <rex/logging.h>
+#include <spdlog/sinks/android_sink.h>
 
 #define LIBERTY_LOG_TAG "LibertyRecomp"
 
@@ -11,19 +17,11 @@ void os::logger::Init()
         "LibertyRecomp logger initialized (logcat)");
 }
 
-void os::logger::Log(const std::string_view str, ELogType type, const char* func)
+void os::logger::PlatformInitSinks()
 {
-    android_LogPriority prio;
-    switch (type)
-    {
-    case ELogType::Warning: prio = ANDROID_LOG_WARN;  break;
-    case ELogType::Error:   prio = ANDROID_LOG_ERROR; break;
-    default:                prio = ANDROID_LOG_DEBUG; break;
-    }
-
-    std::string s(str);
-    if (func)
-        __android_log_print(prio, LIBERTY_LOG_TAG, "[%s] %s", func, s.c_str());
-    else
-        __android_log_print(prio, LIBERTY_LOG_TAG, "%s", s.c_str());
+    Init();
+    auto sink = std::make_shared<spdlog::sinks::android_sink_mt>(LIBERTY_LOG_TAG);
+    rex::logging::AddSink(sink);
 }
+
+#endif // LIBERTY_RECOMP_ANDROID

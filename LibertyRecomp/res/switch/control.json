@@ -1,0 +1,59 @@
+{
+  "_comment": "Source metadata for Switch control.nacp. Consumed by CMake at configure time (see LibertyRecomp/CMakeLists.txt — Switch NRO packaging block) which feeds fields into `nacptool --create`. Keep in sync with res/switch/icon.jpg.",
+
+  "name":    "Liberty Recompiled",
+  "author":  "LibertyRecomp Contributors",
+  "version": "1.0.0",
+
+  "titleId":            "0100000000010000",
+  "saveDataOwnerId":    "0100000000010000",
+  "addOnContentBaseId": "0100000000011000",
+
+  "displayVersion": "1.0.0",
+
+  "supportedLanguages": [
+    "AmericanEnglish",
+    "BritishEnglish",
+    "Japanese",
+    "French",
+    "German",
+    "LatinAmericanSpanish",
+    "Spanish",
+    "Italian",
+    "Dutch",
+    "CanadianFrench",
+    "Portuguese",
+    "Russian",
+    "Korean",
+    "TraditionalChinese",
+    "SimplifiedChinese"
+  ],
+
+  "startupUserAccount":      "Required",
+  "userAccountSwitchLock":   "Disable",
+  "screenshot":              "Allow",
+  "videoCapture":            "Enable",
+  "dataLossConfirmation":    "Required",
+  "playLogPolicy":           "All",
+  "logoType":                "Nintendo",
+  "logoHandling":            "Auto",
+  "crashReport":             "Allow",
+  "hdcp":                    "None",
+  "runtimeAddOnContentInstall": "Deny",
+
+  "userAccountSaveDataSize":        "0x4000000",
+  "userAccountSaveDataJournalSize": "0x200000",
+  "deviceSaveDataSize":             "0",
+  "deviceSaveDataJournalSize":      "0",
+
+  "ratingAge": {
+    "CERO":    18,
+    "ESRB":    17,
+    "PEGI":    18,
+    "USK":     18,
+    "ClassInd": 18
+  },
+
+  "attributeFlag":        "None",
+  "parentalControlFlag":  "FreeCommunication"
+}

@@ -10,7 +10,7 @@
 // These structures are used by the recompiled PPC code.
 //
 // IMPORTANT: All structures must match Xbox 360 memory layout!
-// - Xbox 360 is big-endian (handled by XenonRecomp memory operations)
+// - Xbox 360 is big-endian (handled by rexglue PPC memory operations)
 // - Pointers are 32-bit on Xbox 360
 // - Alignment may differ from x86
 // =============================================================================

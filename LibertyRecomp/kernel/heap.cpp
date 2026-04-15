@@ -4,8 +4,8 @@
 #include <cstring>
 #include <algorithm>
 
-#include <rex/kernel/kernel_state.h>
-#include <rex/kernel/xmemory.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xmemory.h>
 
 // =============================================================================
 // Guest-memory allocator backed by RexGlue's Memory system.
@@ -28,8 +28,13 @@ static rex::memory::Memory* rexmem() {
 }
 
 void Heap::Init() {
-  std::fprintf(stderr, "[Heap::Init] Using RexGlue memory system (no o1heap)\n");
-  std::fflush(stderr);
+  // Intentional no-op. The real guest heap (rex::Runtime's memory::Memory
+  // with SystemHeapAlloc) is brought up inside rex::Runtime::Setup() at
+  // main.cpp:~567, and the rexcrt CRT heap is initialised at main.cpp:~594.
+  // This function survives only as a symbol for the legacy bootstrap call
+  // path — it allocates nothing and owns no state. Do not log from here:
+  // the old log line was misleading (it fired after Heap::Init was already
+  // effectively complete, suggesting late heap init when there was none).
 }
 
 void *Heap::Alloc(size_t size) {

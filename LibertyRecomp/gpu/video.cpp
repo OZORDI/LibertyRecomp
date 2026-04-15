@@ -1,5 +1,6 @@
 #include "video.h"
 #include "gtaiv_device.h"
+#include <os/logger.h>
 #include "gtaiv_render_state.h"
 #include "postprocess_aa.h"
 #include "postprocess_renderer.h"
@@ -66,7 +67,9 @@ namespace GTAIV {
 #include <ui/button_window.h>
 #include <ui/fader.h>
 #include <ui/imgui_utils.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <ui/installer_wizard.h>
+#endif
 #include <ui/message_window.h>
 #include <ui/options_menu.h>
 #include <ui/game_window.h>
@@ -74,7 +77,9 @@ namespace GTAIV {
 #include <ui/main_menu.h>
 #include <patches/aspect_ratio_patches.h>
 #include <user/config.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <sdl_listener.h>
+#endif
 #include <xxHashMap.h>
 #include <os/process.h>
 
@@ -1773,9 +1778,13 @@ static void CreateImGuiBackend()
     AchievementMenu::Init();
     AchievementOverlay::Init();
     OptionsMenu::Init();
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     InstallerWizard::Init();
+#endif
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     ImGui_ImplSDL3_InitForOther(GameWindow::s_pWindow);
+#endif
 
 #ifdef ENABLE_IM_FONT_ATLAS_SNAPSHOT
     g_imFontTexture = LoadTexture(
@@ -1900,6 +1909,7 @@ static void CreateImGuiBackend()
     {
         fwrite(snapshot.data.data(), 1, snapshot.data.size(), file);
         fclose(file);
+        REXLOG_DEBUG("ImFontAtlas snapshot dumped to im_font_atlas.bin ({} bytes)", snapshot.data.size());
     }
 
     ddspp::Header header;
@@ -1914,6 +1924,7 @@ static void CreateImGuiBackend()
         fwrite(&headerDX10, sizeof(headerDX10), 1, file);
         fwrite(pixels, 4, width * height, file);
         fclose(file);
+        REXLOG_DEBUG("ImFontAtlas DDS dumped to im_font_atlas.dds ({}x{})", width, height);
     }
 #endif
 }
@@ -2169,7 +2180,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
             {
                 // If this is the first crash we ran into, reboot and try the other graphics API.
                 os::process::StartProcess(os::process::GetExecutablePath(), { "--graphics-api-retry" });
-                printf("[EXIT-TRACE] video.cpp:2166 calling _Exit\n"); fflush(stdout);
+                REXLOG_INFO("[EXIT-TRACE] video.cpp:2166 calling _Exit");
                 std::_Exit(0);
             }
         }
@@ -2600,7 +2611,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     {
         auto funcOffset = getSetAddress(functionOffset, state/4);
         uint32_t addr = __builtin_bswap32(*(uint32_t*)g_memory.Translate(funcOffset));
-        printf("state %d of %x is %x\n", state, funcOffset, addr);
+        REXLOG_DEBUG("state {} of {:x} is {:x}", static_cast<uint32_t>(state), funcOffset, addr);
         g_memory.InsertFunction(addr, function);
         device->setRenderStateFunctions[state / 4] = addr;
     }
@@ -2894,6 +2905,7 @@ static uint16_t g_debugAchievementId = 1;
 
 static void HandleAchievementDebugKey()
 {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     bool toggleAchievement = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F10];
 
     if (!g_achievementDebugWasToggled && toggleAchievement)
@@ -2905,10 +2917,12 @@ static void HandleAchievementDebugKey()
     }
 
     g_achievementDebugWasToggled = toggleAchievement;
+#endif
 }
 
 static void DrawProfiler()
 {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1];
 
     if (!g_profilerWasToggled && toggleProfiler)
@@ -2919,6 +2933,7 @@ static void DrawProfiler()
     }
 
     g_profilerWasToggled = toggleProfiler;
+#endif
 
     if (!g_profilerVisible)
         return;
@@ -3034,10 +3049,12 @@ static void DrawProfiler()
             {
                 IMGUI_GENERIC_ROW("API", "%s", backend.c_str());
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
                 if (auto pSDLVideoDriver = SDL_GetCurrentVideoDriver())
                 {
                     IMGUI_GENERIC_ROW("SDL Video Driver", "%s", pSDLVideoDriver);
                 }
+#endif
 
                 IMGUI_GENERIC_ROW("Device", "%s", g_device->getDescription().name.c_str());
                 IMGUI_GENERIC_ROW("Device Type", "%s", DeviceTypeName(g_device->getDescription().type));
@@ -3149,7 +3166,9 @@ static void DrawFPS()
 
 static void DrawImGui()
 {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     ImGui_ImplSDL3_NewFrame();
+#endif
 
     auto& io = ImGui::GetIO();
     io.DisplaySize = { float(Video::s_viewportWidth), float(Video::s_viewportHeight) };
@@ -3159,7 +3178,11 @@ static void DrawImGui()
     // we can adjust the mouse events before ImGui processes them.
     // Skip this adjustment during main menu / installer as it can cause issues
     // when the viewport equals the swap chain size.
-    if (!MainMenu::s_isVisible && !InstallerWizard::s_isVisible)
+    if (!MainMenu::s_isVisible
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+        && !InstallerWizard::s_isVisible
+#endif
+    )
     {
         uint32_t width = g_swapChain->getWidth();
         uint32_t height = g_swapChain->getHeight();
@@ -3211,7 +3234,9 @@ static void DrawImGui()
     AchievementMenu::Draw();
     OptionsMenu::Draw();
     AchievementOverlay::Draw();
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     InstallerWizard::Draw();
+#endif
     ButtonWindow::Draw();
     MessageWindow::Draw();
     Fader::Draw();
@@ -3629,7 +3654,11 @@ void Video::Present()
 
     // ImGui has threading issues during gameplay - crashes with iterator assertions
     // But the installer and main menu run single-threaded, so enable ImGui for their UI
-    if (InstallerWizard::s_isVisible || MainMenu::s_isVisible)
+    if (
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+        InstallerWizard::s_isVisible ||
+#endif
+        MainMenu::s_isVisible)
     {
         DrawImGui();
     }
@@ -6248,7 +6277,7 @@ static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType reso
     {
         LOG_ERROR("Shader cache is empty (g_shaderCacheEntryCount == 0). GTA IV shader extraction/recompilation has not been implemented yet.");
         LOG_ERROR("Expected: extract shaders from GTA IV .rpf archives and generate LibertyRecompLib/shader/shader_cache.cpp.");
-        printf("[EXIT-TRACE] video.cpp:6225 calling _Exit\n"); fflush(stdout);
+        REXLOG_INFO("[EXIT-TRACE] video.cpp:6225 calling _Exit");
         std::_Exit(1);
     }
 
@@ -6266,7 +6295,7 @@ static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType reso
     if (findResult == nullptr) {
         LOGF_ERROR("Shader of function {:x} is not found by value: {:x}", reinterpret_cast<uintptr_t>(function), hash);
         LOG_ERROR("This usually means the shader cache is incomplete for this title.");
-        printf("[EXIT-TRACE] video.cpp:6242 calling _Exit\n"); fflush(stdout);
+        REXLOG_INFO("[EXIT-TRACE] video.cpp:6242 calling _Exit");
         std::_Exit(1);
     }
     if (findResult != nullptr)
@@ -6832,7 +6861,7 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     case ddspp::BC7_UNORM_SRGB:
         return RenderFormat::BC7_UNORM_SRGB;
     default:
-        printf("format: %x\n", format);
+        REXLOG_DEBUG("Unsupported DDS format: {:x}", static_cast<uint32_t>(format));
         assert(false && "Unsupported format from DDS.");
         return RenderFormat::UNKNOWN;
     }
@@ -8358,162 +8387,20 @@ static bool CheckMadeAll(const T& modelData)
 #endif
 
 #ifdef PSO_CACHING
+// NOTE: Legacy pipeline-state cache dumper (wrote "send_this_file_to_skyth.txt"
+// on SDL_QUIT for the Sonic Unleashed Recompiled era) removed. Re-introduce a
+// proper cache mechanism here if PSO_CACHING is ever re-enabled.
 class SDLEventListenerForPSOCaching : public SDLEventListener
 {
 public:
-    bool OnSDLEvent(SDL_Event* event) override 
+    bool OnSDLEvent(SDL_Event* event) override
     {
-        if (event->type != SDL_EVENT_QUIT)
-            return false;
-
-        std::lock_guard lock(g_pipelineCacheMutex);
-        if (g_pipelineStatesToCache.empty())
-            return false;
-
-        FILE* f = fopen("send_this_file_to_skyth.txt", "ab");
-        if (f != nullptr)
-        {
-            ankerl::unordered_dense::set<GuestVertexDeclaration*> vertexDeclarations;
-            xxHashMap<PipelineState> pipelineStatesToCache;
-
-            for (auto& [hash, pipelineState] : g_pipelineStatesToCache)
-            {
-                if (pipelineState.vertexShader->shaderCacheEntry == nullptr ||
-                    (pipelineState.pixelShader != nullptr && pipelineState.pixelShader->shaderCacheEntry == nullptr))
-                {
-                    continue;
-                }
-
-                vertexDeclarations.emplace(pipelineState.vertexDeclaration);
-
-                // Mask out the config options.
-                pipelineState.sampleCount = 1;
-                pipelineState.enableAlphaToCoverage = false;
-
-                if ((pipelineState.specConstants & SPEC_CONSTANT_ALPHA_TO_COVERAGE) != 0)
-                {
-                    pipelineState.specConstants &= ~SPEC_CONSTANT_ALPHA_TO_COVERAGE;
-                    pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
-                }
-
-                pipelineStatesToCache.emplace(XXH3_64bits(&pipelineState, sizeof(pipelineState)), pipelineState);
-            }
-
-            for (auto vertexDeclaration : vertexDeclarations)
-            {
-                fmt::print(f, "static uint8_t g_vertexElements_{:016X}[] = {{", vertexDeclaration->hash);
-
-                auto bytes = reinterpret_cast<uint8_t*>(vertexDeclaration->vertexElements.get());
-                for (size_t i = 0; i < vertexDeclaration->vertexElementCount * sizeof(GuestVertexElement); i++)
-                    fmt::print(f, "0x{:X},", bytes[i]);
-
-                fmt::println(f, "}};");
-            }
-
-            for (auto& [pipelineHash, pipelineState] : pipelineStatesToCache)
-            {
-                fmt::println(f, "{{ "
-                    "reinterpret_cast<GuestShader*>(0x{:X}),"
-                    "reinterpret_cast<GuestShader*>(0x{:X}),"
-                    "reinterpret_cast<GuestVertexDeclaration*>(0x{:X}),"
-                    "{},"
-                    "{},"
-                    "{},"
-                    "{},"
-                    "RenderBlend::{},"
-                    "RenderBlend::{},"
-                    "RenderCullMode::{},"
-                    "RenderFrontFace::{},"
-                    "RenderComparisonFunction::{},"
-                    "RenderComparisonFunction::{},"
-                    "RenderStencilOp::{},"
-                    "RenderStencilOp::{},"
-                    "RenderStencilOp::{},"
-                    "RenderComparisonFunction::{},"
-                    "RenderStencilOp::{},"
-                    "RenderStencilOp::{},"
-                    "RenderStencilOp::{},"
-                    "{},"
-                    "{},"
-                    "{},"
-                    "{},"
-                    "RenderBlendOperation::{},"
-                    "{},"
-                    "{},"
-                    "RenderBlend::{},"
-                    "RenderBlend::{},"
-                    "RenderBlendOperation::{},"
-                    "0x{:X},"
-                    "RenderPrimitiveTopology::{},"
-                    "{{ {},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{} }},"
-                    "RenderFormat::{},"
-                    "RenderFormat::{},"
-                    "{},"
-                    "{},"
-                    "0x{:X} }},",
-                    pipelineState.vertexShader->shaderCacheEntry->hash,
-                    pipelineState.pixelShader != nullptr ? pipelineState.pixelShader->shaderCacheEntry->hash : 0,
-                    pipelineState.vertexDeclaration->hash,
-                    pipelineState.zEnable,
-                    pipelineState.zWriteEnable,
-                    pipelineState.stencilEnable,
-                    pipelineState.stencilTwoSided,
-                    magic_enum::enum_name(pipelineState.srcBlend),
-                    magic_enum::enum_name(pipelineState.destBlend),
-                    magic_enum::enum_name(pipelineState.cullMode),
-                    magic_enum::enum_name(pipelineState.frontFace),
-                    magic_enum::enum_name(pipelineState.zFunc),
-                    magic_enum::enum_name(pipelineState.stencilFunc),
-                    magic_enum::enum_name(pipelineState.stencilFail),
-                    magic_enum::enum_name(pipelineState.stencilZFail),
-                    magic_enum::enum_name(pipelineState.stencilPass),
-                    magic_enum::enum_name(pipelineState.stencilFuncCCW),
-                    magic_enum::enum_name(pipelineState.stencilFailCCW),
-                    magic_enum::enum_name(pipelineState.stencilZFailCCW),
-                    magic_enum::enum_name(pipelineState.stencilPassCCW),
-                    pipelineState.stencilMask,
-                    pipelineState.stencilWriteMask,
-                    pipelineState.stencilRef,
-                    pipelineState.alphaBlendEnable,
-                    magic_enum::enum_name(pipelineState.blendOp),
-                    pipelineState.slopeScaledDepthBias,
-                    pipelineState.depthBias,
-                    magic_enum::enum_name(pipelineState.srcBlendAlpha),
-                    magic_enum::enum_name(pipelineState.destBlendAlpha),
-                    magic_enum::enum_name(pipelineState.blendOpAlpha),
-                    pipelineState.colorWriteEnable,
-                    magic_enum::enum_name(pipelineState.primitiveTopology),
-                    pipelineState.vertexStrides[0],
-                    pipelineState.vertexStrides[1],
-                    pipelineState.vertexStrides[2],
-                    pipelineState.vertexStrides[3],
-                    pipelineState.vertexStrides[4],
-                    pipelineState.vertexStrides[5],
-                    pipelineState.vertexStrides[6],
-                    pipelineState.vertexStrides[7],
-                    pipelineState.vertexStrides[8],
-                    pipelineState.vertexStrides[9],
-                    pipelineState.vertexStrides[10],
-                    pipelineState.vertexStrides[11],
-                    pipelineState.vertexStrides[12],
-                    pipelineState.vertexStrides[13],
-                    pipelineState.vertexStrides[14],
-                    pipelineState.vertexStrides[15],
-                    magic_enum::enum_name(pipelineState.renderTargetFormat),
-                    magic_enum::enum_name(pipelineState.depthStencilFormat),
-                    pipelineState.sampleCount,
-                    pipelineState.enableAlphaToCoverage,
-                    pipelineState.specConstants);
-            }
-
-            fclose(f);
-        }
-
         return false;
     }
 };
 SDLEventListenerForPSOCaching g_sdlEventListenerForPSOCaching;
 #endif
+
 
 void VideoConfigValueChangedCallback(IConfigDef* config)
 {
@@ -9373,9 +9260,8 @@ PPC_FUNC_HOOK(sub_82A467D8)
             if (sceneVtable != 0 && sceneVtable < 0xF0000000)
                 sceneFunc = PPC_LOAD_U32(sceneVtable + 64); // vtable[64]
         }
-        printf("[RENDER-GATE] frame#%d gate=%d scene@831C2458=0x%08X vt=0x%08X fn=0x%08X\n",
+        REXLOG_DEBUG("[RENDER-GATE] frame#{} gate={} scene@831C2458=0x{:08X} vt=0x{:08X} fn=0x{:08X}",
                s_hookCount, (int32_t)gateVal, sceneListPtr, sceneVtable, sceneFunc);
-        fflush(stdout);
     }
 
     // Increment the presented frame counter (device[16544]) to maintain frame pacing.
@@ -9387,9 +9273,8 @@ PPC_FUNC_HOOK(sub_82A467D8)
         GTAIV::SetDeviceU32(devicePtr, GTAIV::DeviceOffset::FrameCounter, frameCounter + 1);
         
         if (s_hookCount <= 10 || (s_hookCount % 100) == 0) {
-            printf("[sub_82A467D8] Hook #%d: device=0x%08X, frameCounter %u -> %u\n",
+            REXLOG_DEBUG("[sub_82A467D8] Hook #{}: device=0x{:08X}, frameCounter {} -> {}",
                    s_hookCount, device, frameCounter, frameCounter + 1);
-            fflush(stdout);
         }
     }
     
@@ -9427,8 +9312,7 @@ PPC_FUNC_HOOK(sub_82A467D8)
         PPC_STORE_U32(0x82B0B48C, 1);
         int32_t after = (int32_t)PPC_LOAD_U32(0x82B0B48C);
         if (s_hookCount <= 10 || s_hookCount % 2000 == 0) {
-            printf("[GATE-WRITE] frame#%d before=%d after=%d\n", s_hookCount, before, after);
-            fflush(stdout);
+            REXLOG_DEBUG("[GATE-WRITE] frame#{} before={} after={}", s_hookCount, before, after);
         }
     }
 }
@@ -9532,7 +9416,7 @@ PPC_FUNC_HOOK(sub_82A55DC0)
         height = std::max(1u, bottom - top);
         static int s_rectLog = 0;
         if (s_rectLog++ < 10 || width > 16384 || height > 16384) {
-            printf("[sub_82A55DC0] rect@0x%08X: {%u, %u, %u, %u} → %ux%u caller=0x%08X\n",
+            REXLOG_DEBUG("[sub_82A55DC0] rect@0x{:08X}: {{{}, {}, {}, {}}} -> {}x{} caller=0x{:08X}",
                    rectPtr, left, top, right, bottom, width, height, static_cast<uint32_t>(ctx.lr));
         }
     } else {
@@ -9549,7 +9433,7 @@ PPC_FUNC_HOOK(sub_82A55DC0)
     if (width > kMaxTexDim || height > kMaxTexDim) {
         static int s_clampLog = 0;
         if (s_clampLog++ < 10) {
-            printf("[sub_82A55DC0] clamping garbage %ux%u → 32x32 (r9=0x%08X caller=0x%08X)\n",
+            REXLOG_DEBUG("[sub_82A55DC0] clamping garbage {}x{} -> 32x32 (r9=0x{:08X} caller=0x{:08X})",
                    width, height, ctx.r9.u32, static_cast<uint32_t>(ctx.lr));
         }
         width  = 32;

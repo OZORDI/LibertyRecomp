@@ -1,4 +1,7 @@
 #include "game_window.h"
+
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+
 #include <gpu/video.h>
 #include <os/logger.h>
 #include <os/user.h>
@@ -724,3 +727,312 @@ bool GameWindow::IsPositionValid()
     SDL_free(displayIds);
     return false;
 }
+
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+
+#if defined(LIBERTY_RECOMP_PS4)
+
+#include "game_window.h"
+#include <cstdio>
+#include <cstring>
+
+#include <orbis/VideoOut.h>
+#include <orbis/SystemService.h>
+#include <orbis/_types/video.h>
+#include <orbis/_types/user.h>
+
+// PS4 video-out state. On PS4 there is no window system — the TV is the display
+// and it is always fullscreen. We open a single video-out handle (the "main"
+// bus) at startup and expose that handle as the render surface. plume's PS4
+// backend consumes the handle in place of an HWND/NSWindow*/X11 Window.
+namespace {
+    constexpr int32_t kInvalidVideoOutHandle = -1;
+    int32_t g_videoOutHandle = kInvalidVideoOutHandle;
+
+    // Query the TV resolution as reported by the system. Falls back to 1080p
+    // if the status call fails for any reason (e.g. no HDMI signal yet).
+    void QueryVideoOutResolution(int32_t handle, int& width, int& height)
+    {
+        width = DEFAULT_WIDTH;
+        height = DEFAULT_HEIGHT;
+
+        if (handle < 0)
+            return;
+
+        OrbisVideoOutResolutionStatus status{};
+        int32_t ret = sceVideoOutGetResolutionStatus(handle, &status);
+        if (ret == 0 && status.width > 0 && status.height > 0)
+        {
+            width = static_cast<int>(status.width);
+            height = static_cast<int>(status.height);
+        }
+        else
+        {
+            std::printf("[PS4][GameWindow] sceVideoOutGetResolutionStatus failed: 0x%08X\n", ret);
+        }
+    }
+}
+
+bool GameWindow::Init(const char* /*sdlVideoDriver*/)
+{
+    // Disable the idle / screensaver timer while the game is running.
+    sceSystemServiceDisableSuspendConfirmationDialog();
+    sceSystemServiceHideSplashScreen();
+
+    if (g_videoOutHandle >= 0)
+    {
+        // Already opened (Init called twice). Refresh resolution and return.
+        QueryVideoOutResolution(g_videoOutHandle, s_width, s_height);
+        s_isFocused = true;
+        return true;
+    }
+
+    int32_t handle = sceVideoOutOpen(
+        ORBIS_VIDEO_USER_MAIN,
+        ORBIS_VIDEO_OUT_BUS_MAIN,
+        0,
+        nullptr);
+
+    if (handle < 0)
+    {
+        std::printf("[PS4][GameWindow] sceVideoOutOpen failed: 0x%08X\n", handle);
+        return false;
+    }
+
+    g_videoOutHandle = handle;
+
+    QueryVideoOutResolution(g_videoOutHandle, s_width, s_height);
+    s_x = 0;
+    s_y = 0;
+
+    // Expose the video-out handle to plume as the render "window". plume's PS4
+    // backend treats this as an opaque surface identifier, not an HWND.
+    s_pWindow = reinterpret_cast<void*>(static_cast<intptr_t>(g_videoOutHandle));
+    s_renderWindow.videoOutHandle = g_videoOutHandle;
+
+    s_isFocused = true;
+    s_isFullscreenCursorVisible = false;
+    s_isChangingDisplay = false;
+
+    std::printf("[PS4][GameWindow] video out opened: handle=%d resolution=%dx%d\n",
+                g_videoOutHandle, s_width, s_height);
+    return true;
+}
+
+void GameWindow::Update()
+{
+    // PS4 has no window events to pump here — resolution is fixed for the
+    // lifetime of the video-out handle, the HID layer handles pad events
+    // directly via scePadReadState, and there is no focus/resize/move to
+    // track. Left as a no-op on purpose.
+}
+
+#endif // LIBERTY_RECOMP_PS4
+
+#if defined(LIBERTY_RECOMP_NX)
+
+// Nintendo Switch windowing backend — libnx NWindow / vi layer.
+// The default NWindow created at application startup is used as the surface
+// for VK_NN_vi_surface (Vulkan). Switch has no concept of a windowed mode:
+// the compositor always presents full-screen, at 1920x1080 in docked mode and
+// 1280x720 in handheld mode. The operation mode is re-queried every frame so
+// the swapchain can be rebuilt when the user docks/undocks.
+
+#include "game_window.h"
+#include <cstdio>
+
+#include <switch.h>
+
+namespace
+{
+    NWindow*  g_nwindow   = nullptr;
+    ViDisplay g_viDisplay = {};
+    ViLayer   g_viLayer   = {};
+    NWindow   g_ownedNwindow = {};
+    bool      g_ownsLayer = false;
+    bool      g_viInitOk  = false;
+
+    void QueryOperationMode(int& width, int& height)
+    {
+        // Default to handheld; upgrade to docked if applet reports it.
+        width  = 1280;
+        height = 720;
+
+        AppletOperationMode mode = appletGetOperationMode();
+        if (mode == AppletOperationMode_Console)
+        {
+            width  = 1920;
+            height = 1080;
+        }
+    }
+}
+
+bool GameWindow::Init(const char* /*sdlVideoDriver*/)
+{
+    // Prefer the libnx-managed default NWindow (viInit + default layer happen
+    // automatically during application startup). Fall back to explicit vi
+    // display/layer creation if the default is missing.
+    g_nwindow = nwindowGetDefault();
+
+    if (!g_nwindow || !nwindowIsValid(g_nwindow))
+    {
+        std::printf("[NX][GameWindow] default NWindow unavailable, creating vi layer manually\n");
+
+        Result rc = viInitialize(ViServiceType_Application);
+        if (R_FAILED(rc))
+        {
+            std::printf("[NX][GameWindow] viInitialize failed: 0x%08X\n", rc);
+            return false;
+        }
+        g_viInitOk = true;
+
+        rc = viOpenDefaultDisplay(&g_viDisplay);
+        if (R_FAILED(rc))
+        {
+            // Older/name-based path.
+            rc = viOpenDisplay("Default", &g_viDisplay);
+        }
+        if (R_FAILED(rc))
+        {
+            std::printf("[NX][GameWindow] viOpenDisplay failed: 0x%08X\n", rc);
+            viExit();
+            g_viInitOk = false;
+            return false;
+        }
+
+        rc = viCreateLayer(&g_viDisplay, &g_viLayer);
+        if (R_FAILED(rc))
+        {
+            std::printf("[NX][GameWindow] viCreateLayer failed: 0x%08X\n", rc);
+            viCloseDisplay(&g_viDisplay);
+            viExit();
+            g_viInitOk = false;
+            return false;
+        }
+
+        viSetLayerScalingMode(&g_viLayer, ViScalingMode_FitToLayer);
+
+        rc = nwindowCreateFromLayer(&g_ownedNwindow, &g_viLayer);
+        if (R_FAILED(rc))
+        {
+            std::printf("[NX][GameWindow] nwindowCreateFromLayer failed: 0x%08X\n", rc);
+            viDestroyManagedLayer(&g_viLayer);
+            viCloseDisplay(&g_viDisplay);
+            viExit();
+            g_viInitOk = false;
+            return false;
+        }
+
+        g_nwindow   = &g_ownedNwindow;
+        g_ownsLayer = true;
+    }
+
+    int w = 0, h = 0;
+    QueryOperationMode(w, h);
+    s_width  = w;
+    s_height = h;
+    s_x      = 0;
+    s_y      = 0;
+
+    // Keep NWindow dimensions in sync with the current operation mode before
+    // the Vulkan swapchain attaches any buffers.
+    nwindowSetDimensions(g_nwindow, static_cast<u32>(w), static_cast<u32>(h));
+
+    // Expose the NWindow* as the native surface handle; plume's Switch backend
+    // feeds this to vkCreateViSurfaceNN as VkViSurfaceCreateInfoNN::window.
+    s_pWindow = static_cast<void*>(g_nwindow);
+    s_renderWindow.window = static_cast<void*>(g_nwindow);
+
+    s_isFocused = true;
+    s_isFullscreenCursorVisible = false;
+    s_isChangingDisplay = false;
+
+    std::printf("[NX][GameWindow] NWindow ready: %dx%d (%s)\n",
+                w, h,
+                appletGetOperationMode() == AppletOperationMode_Console ? "docked" : "handheld");
+    return true;
+}
+
+void GameWindow::Update()
+{
+    if (!g_nwindow)
+        return;
+
+    // Re-query operation mode so dock/undock transitions rebuild the swapchain.
+    int w = 0, h = 0;
+    QueryOperationMode(w, h);
+
+    if (w != s_width || h != s_height)
+    {
+        s_width  = w;
+        s_height = h;
+        nwindowSetDimensions(g_nwindow, static_cast<u32>(w), static_cast<u32>(h));
+        s_isChangingDisplay = true;
+        std::printf("[NX][GameWindow] operation mode changed -> %dx%d\n", w, h);
+    }
+}
+
+// ---------- Switch-specific helpers (not in the cross-platform header) ----------
+// These mirror the interface sketched in the task:
+//   GetHWND, ToggleFullscreen, PumpEvents, GetDisplayCount, GetDisplayBounds,
+//   GetResolution. Exposed as free functions under the GameWindowNX namespace
+//   so callers that need Switch specifics can reach them without polluting the
+//   cross-platform GameWindow API.
+namespace GameWindowNX
+{
+    void* GetHWND()
+    {
+        // Native handle used for VK_NN_vi_surface (VkViSurfaceCreateInfoNN::window).
+        return static_cast<void*>(g_nwindow);
+    }
+
+    // Switch is always fullscreen; toggle is a no-op.
+    void ToggleFullscreen() { /* no-op on Switch */ }
+
+    // HID (hid/hid.cpp) is pumped separately; nothing to drain here.
+    void PumpEvents() { /* no-op on Switch */ }
+
+    int GetDisplayCount()
+    {
+        return 1;
+    }
+
+    void GetDisplayBounds(int /*index*/, int* x, int* y, int* w, int* h)
+    {
+        int rw = 0, rh = 0;
+        QueryOperationMode(rw, rh);
+        if (x) *x = 0;
+        if (y) *y = 0;
+        if (w) *w = rw;
+        if (h) *h = rh;
+    }
+
+    void GetResolution(int* w, int* h)
+    {
+        int rw = 0, rh = 0;
+        QueryOperationMode(rw, rh);
+        if (w) *w = rw;
+        if (h) *h = rh;
+    }
+
+    void Shutdown()
+    {
+        if (g_ownsLayer)
+        {
+            if (g_nwindow)
+                nwindowClose(g_nwindow);
+            viDestroyManagedLayer(&g_viLayer);
+            viCloseDisplay(&g_viDisplay);
+            g_ownsLayer = false;
+        }
+        if (g_viInitOk)
+        {
+            viExit();
+            g_viInitOk = false;
+        }
+        g_nwindow = nullptr;
+        GameWindow::s_pWindow = nullptr;
+    }
+}
+
+#endif // LIBERTY_RECOMP_NX

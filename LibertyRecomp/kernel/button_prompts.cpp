@@ -159,8 +159,18 @@ namespace ButtonPrompts
             case hid::EInputDeviceExplicit::NvShield:
                 return "xbox_one";
             default:
-                // Default to Xbox One for unknown controllers
+                // Platform-native default for unknown/unrecognized controllers:
+                // on console builds we should always fall back to the console's
+                // own prompt set rather than Xbox One, so the on-screen glyphs
+                // always match the device the game is actually running on.
+#if defined(LIBERTY_RECOMP_PS4)
+                return "ps4";
+#elif defined(LIBERTY_RECOMP_NX) || defined(LIBERTY_RECOMP_SWITCH) || defined(__SWITCH__)
+                return "switch";
+#else
+                // Default to Xbox One for unknown controllers on PC platforms
                 return "xbox_one";
+#endif
         }
     }
 

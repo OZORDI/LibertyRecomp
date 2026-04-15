@@ -22,16 +22,16 @@
 
 #include <rex/runtime.h>
 #include <rex/kernel.h>
-#include <rex/kernel/kernel_state.h>
-#include <rex/kernel/xobject.h>
-#include <rex/kernel/xevent.h>
-#include <rex/kernel/xsemaphore.h>
-#include <rex/kernel/xmutant.h>
-#include <rex/kernel/xthread.h>
-#include <rex/kernel/xmemory.h>
-#include <rex/runtime/processor.h>
-#include <rex/runtime/thread_state.h>
-#include <rex/runtime/mmio_handler.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xobject.h>
+#include <rex/system/xevent.h>
+#include <rex/system/xsemaphore.h>
+#include <rex/system/xmutant.h>
+#include <rex/system/xthread.h>
+#include <rex/system/xmemory.h>
+// rex/runtime/processor.h removed in graine; not used by adapter
+#include <rex/system/thread_state.h>
+#include <rex/system/mmio_handler.h>
 #include <rex/exception_handler.h>
 
 // =============================================================================
@@ -41,7 +41,8 @@
 namespace rex {
 namespace adapter {
 
-using Processor = rex::runtime::Processor;
+// graine renamed runtime::Processor -> system::runtime::FunctionDispatcher
+using Processor = rex::runtime::FunctionDispatcher;
 using ThreadState = rex::runtime::ThreadState;
 using Memory = rex::memory::Memory;
 using KernelState = rex::system::KernelState;

@@ -1,3 +1,5 @@
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+
 #include "installer_wizard.h"
 
 #include <nfd.h>
@@ -2283,3 +2285,5 @@ bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
 
     return !g_isQuitting;
 }
+
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX

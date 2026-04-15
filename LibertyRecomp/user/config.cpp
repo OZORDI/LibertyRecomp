@@ -52,6 +52,7 @@ CONFIG_DEFINE_ENUM_TEMPLATE(ESlidingAttack)
     { "X", ESlidingAttack::X }
 };
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 CONFIG_DEFINE_ENUM_TEMPLATE(SDL_Scancode)
 {
     { "???", SDL_SCANCODE_UNKNOWN },
@@ -302,6 +303,7 @@ CONFIG_DEFINE_ENUM_TEMPLATE(SDL_Scancode)
     { "CALL", SDL_SCANCODE_CALL },
     { "END CALL", SDL_SCANCODE_ENDCALL },
 };
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
 
 CONFIG_DEFINE_ENUM_TEMPLATE(EChannelConfiguration)
 {
@@ -909,13 +911,16 @@ void Config::CreateCallbacks()
 
     Config::WindowSize.LockCallback = [](ConfigDef<int32_t>* def)
     {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         // Try matching the current window size with a known configuration.
         if (def->Value < 0)
             def->Value = GameWindow::FindNearestDisplayMode();
+#endif
     };
 
     Config::WindowSize.ApplyCallback = [](ConfigDef<int32_t>* def)
     {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         auto displayModes = GameWindow::GetDisplayModes();
 
         // Use largest supported resolution if overflowed.
@@ -926,17 +931,22 @@ void Config::CreateCallbacks()
         auto centre = SDL_WINDOWPOS_CENTERED_DISPLAY(GameWindow::GetDisplay());
 
         GameWindow::SetDimensions(mode.w, mode.h, centre, centre);
+#endif
     };
 
     Config::Monitor.Callback = [](ConfigDef<int32_t>* def)
     {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         GameWindow::SetDisplay(def->Value);
+#endif
     };
 
     Config::Fullscreen.Callback = [](ConfigDef<bool>* def)
     {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         GameWindow::SetFullscreen(def->Value);
         GameWindow::SetDisplay(Config::Monitor);
+#endif
     };
 
     Config::ResolutionScale.Callback = [](ConfigDef<float>* def)

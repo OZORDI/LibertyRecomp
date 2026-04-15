@@ -7,6 +7,10 @@
 #include <os/gamecenter/achievement_bridge_gc.h>
 #endif
 
+#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+#include <os/android/achievement_bridge_android.h>
+#endif
+
 #define NUM_RECORDS sizeof(AchievementManager::Data.Records) / sizeof(AchievementData::AchRecord)
 
 time_t AchievementManager::GetTimestamp(uint16_t id)
@@ -69,6 +73,11 @@ void AchievementManager::Unlock(uint16_t id)
 
     if (Config::AchievementNotifications)
         AchievementOverlay::Open(id);
+
+#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+    // Mirror the Xbox unlock into Google Play Games.
+    LibertyAndroidOnXboxAchievementUnlocked(static_cast<uint32_t>(id));
+#endif
 }
 
 void AchievementManager::UnlockAll()

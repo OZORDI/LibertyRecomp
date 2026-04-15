@@ -1,5 +1,7 @@
 #pragma once
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+
 class ISDLEventListener
 {
 public:
@@ -30,3 +32,5 @@ public:
 
     bool OnSDLEvent(SDL_Event* event) override { return false; }
 };
+
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX

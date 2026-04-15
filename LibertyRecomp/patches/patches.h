@@ -1,19 +1,9 @@
 #pragma once
 
-// GTA IV-specific patches
-#include "gta4_patches.h"
-#include "player_limit_patches.h"
-
-// Note: The following Sonic '06 specific patches are disabled for GTA IV:
-// - aspect_ratio_patches.h (has Sonicteam namespace references)
-// - camera_patches.h (has Sonicteam namespace references)
-// - Other game-specific patches
+// Umbrella header — most patches removed during non-A/I/R cleanup.
+// Remaining patches self-register via static PPC_FUNC_HOOK linker symbols.
 
 inline void InitPatches()
 {
-    // Initialize GTA IV-specific patches
-    GTA4Patches::Init();
-    
-    // Initialize player limit patches (extended multiplayer support)
-    PlayerLimitPatches::Init();
+    // no-op: all active patches auto-register via extern "C" PPC_FUNC_HOOK symbols
 }

@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_NX
 // Switch process helpers (libnx)
 #include <os/process.h>
 #include <switch.h>
@@ -5,9 +6,9 @@
 
 std::filesystem::path os::process::GetExecutablePath()
 {
-    // On Switch homebrew, the NRO is loaded from the SD card
-    // envGetNextLoadPath() gives us the loader path
-    const char* path = envGetNextLoadPath();
+    // On Switch homebrew, envGetLoaderInfo() returns the path of the current NRO.
+    // envGetNextLoadPath() is wrong here — it returns the chainload target, not us.
+    const char* path = envGetLoaderInfo();
     if (path && path[0] != '\0')
         return std::filesystem::path(path);
     return std::filesystem::path("romfs:/");
@@ -47,3 +48,4 @@ void os::process::ShowConsole()
 {
     // No-op on Switch
 }
+#endif // LIBERTY_RECOMP_NX

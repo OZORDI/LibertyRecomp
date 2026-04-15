@@ -10,6 +10,9 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #endif
+#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+#include <unistd.h>
+#endif
 #ifndef _WIN32
 #include <signal.h>
 #endif
@@ -18,26 +21,34 @@
 #include <kernel/function.h>
 #include <kernel/memory.h>
 #include <kernel/heap.h>
-#include <kernel/save_system.h>
 #include <file.h>
 #include <vector>
 #include <image.h>
-#include <apu/audio.h>
 #include <hid/hid.h>
 #include <user/config.h>
 #include <user/paths.h>
 #include <user/registry.h>
 #include <kernel/xdbf.h>
+#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
 #include <install/auto_installer.h>
 #include <install/installer.h>
+#endif
+#ifndef LIBERTY_RECOMP_NO_CURL
 #include <install/update_checker.h>
+#endif
 #include <os/logger.h>
+#include <os/diag.h>
 #include <os/process.h>
 #include <os/registry.h>
+#include <CLI/CLI.hpp>
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
 #include <os/discord/discord_presence.h>
+#endif
 #include <install/embedded_assets.h>
 #include <ui/game_window.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <ui/installer_wizard.h>
+#endif
 #include <ui/main_menu.h>
 #include <mod/mod_loader.h>
 #include <preload_executable.h>
@@ -46,19 +57,26 @@
 #include <debugger.h>
 
 #include <rex/exception_handler.h>
+#include <rex/platform/exceptions.h>  // rex::SehException
 #include <rex/logging.h>
 #include <rex/runtime.h>
-#include <rex/runtime/guest/exceptions.h>
-#include <rex/runtime/processor.h>
-#include <rex/kernel/kernel_state.h>
-#include <rex/kernel/xthread.h>
-#include <rex/kernel/xobject.h>
-#include <rex/kernel/user_module.h>
+// #include <rex/runtime/guest/exceptions.h>  // Not present in graine SDK; unused
+// #include <rex/runtime/processor.h>         // Not present in graine SDK; unused
+#include <rex/system/kernel_state.h>
+#include <rex/system/xthread.h>
+#include <rex/system/xobject.h>
+#include <rex/system/user_module.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/crt/heap.h>
 #include <rex/chrono/clock.h>
+#if defined(LIBERTY_RECOMP_PS4)
+#include "../glue/rexglue-sdk-main/src/audio/orbis/orbis_audio_system.h"
+#elif defined(LIBERTY_RECOMP_NX)
+#include <rex/audio/switch/switch_audio_system.h>
+#else
 #include <rex/audio/sdl/sdl_audio_system.h>
+#endif
 
 #ifdef _WIN32
 #include <timeapi.h>
@@ -113,7 +131,7 @@ static bool RexFallbackCrashHandler(rex::arch::Exception* ex, void* /*data*/) {
             (unsigned long long)ex->fault_address());
     fprintf(stderr, "PC:            0x%016llX\n",
             (unsigned long long)ex->pc());
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     {
         Dl_info info;
         if (dladdr((void*)ex->pc(), &info)) {
@@ -201,11 +219,13 @@ static void InstallRexGlueExceptionHandlers() {
 
 static void ShowVideoBackendErrorAndExit()
 {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     if (GameWindow::s_pWindow)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
     }
     else
+#endif
     {
         fprintf(stderr, "[Main] Video backend initialization failed (no window available for message box).\n");
         fflush(stderr);
@@ -237,7 +257,10 @@ void KiSystemStartup()
     
     if (g_memory.base == nullptr)
     {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
+#endif
+        fprintf(stderr, "[Main] Memory allocation failed\n"); fflush(stderr);
         printf("[EXIT-TRACE] main.cpp:230 calling _Exit\n"); fflush(stdout);
         std::_Exit(1);
     }
@@ -257,18 +280,7 @@ void KiSystemStartup()
     // rexcrt heap is now initialized in main() after Runtime::Setup(),
     // where runtime->memory() is available (matching rex_app.cpp pattern).
 
-    // Initialize save system early - creates directories and registers save content
-    SaveSystem::Initialize();
-
-    // Save file backwards compat — copy base save to modded save if missing
-    const auto saveFilePath = GetSaveFilePath(true);
-    if (!std::filesystem::exists(saveFilePath))
-    {
-        std::error_code ec;
-        std::filesystem::create_directories(saveFilePath.parent_path(), ec);
-        if (!ec)
-            std::filesystem::copy_file(GetSaveFilePath(false), saveFilePath, ec);
-    }
+    // SaveSystem removed — rexglue handles save/content via XAM.
 
     // ---------------------------------------------------------------
     // REMOVED: Liberty's VFS, content registration, path cache, root
@@ -343,7 +355,7 @@ int main(int argc, char *argv[])
     os::process::CheckConsole();
 
     if (!os::registry::Init())
-        LOGN_WARNING("OS does not support registry.");
+        LOGN("OS does not support registry.");
 
     os::logger::Init();
 
@@ -356,23 +368,26 @@ int main(int argc, char *argv[])
     bool forceInstallationCheck = false;
     bool graphicsApiRetry = false;
     const char *sdlVideoDriver = nullptr;
+    std::string sdlVideoDriverStr;
 
-    for (uint32_t i = 1; i < argc; i++)
     {
-        forceInstaller = forceInstaller || (strcmp(argv[i], "--install") == 0);
-        forceDLCInstaller = forceDLCInstaller || (strcmp(argv[i], "--install-dlc") == 0);
-        useDefaultWorkingDirectory = useDefaultWorkingDirectory || (strcmp(argv[i], "--use-cwd") == 0);
-        forceInstallationCheck = forceInstallationCheck || (strcmp(argv[i], "--install-check") == 0);
-        graphicsApiRetry = graphicsApiRetry || (strcmp(argv[i], "--graphics-api-retry") == 0);
-        App::s_isSkipLogos = App::s_isSkipLogos || (strcmp(argv[i], "--skip-logos") == 0);
+        CLI::App cli{"Liberty Recompiled \u2014 GTA IV PPC recompilation"};
+        cli.allow_extras();
+        bool skipLogos = false;
+        cli.add_flag("--install",              forceInstaller,             "Force the installer wizard to run");
+        cli.add_flag("--install-dlc",          forceDLCInstaller,          "Install DLC content from staged sources");
+        cli.add_flag("--use-cwd",              useDefaultWorkingDirectory, "Use current working directory instead of executable path");
+        cli.add_flag("--install-check",        forceInstallationCheck,     "Force re-validation of the installed game files");
+        cli.add_flag("--graphics-api-retry",   graphicsApiRetry,           "Retry with an alternative graphics API on failure");
+        cli.add_flag("--skip-logos",           skipLogos,                  "Skip publisher/developer logos at startup");
+        cli.add_option("--sdl-video-driver",   sdlVideoDriverStr,          "Override the SDL video driver");
 
-        if (strcmp(argv[i], "--sdl-video-driver") == 0)
-        {
-            if ((i + 1) < argc)
-                sdlVideoDriver = argv[++i];
-            else
-                LOGN_WARNING("No argument was specified for --sdl-video-driver. Option will be ignored.");
-        }
+        try { cli.parse(argc, argv); }
+        catch (const CLI::ParseError &e) { return cli.exit(e); }
+
+        App::s_isSkipLogos = App::s_isSkipLogos || skipLogos;
+        if (!sdlVideoDriverStr.empty())
+            sdlVideoDriver = sdlVideoDriverStr.c_str();
     }
 
     if (!useDefaultWorkingDirectory)
@@ -384,11 +399,9 @@ int main(int argc, char *argv[])
 
     Config::Load();
 
-    // Initialize RexGlue logging before anything else that might use it.
-    // Guest threads call kernel exports (RtlNtStatusToDosError etc.) that log
-    // via REXKRNL_IMPORT_INFO; the lazy auto-init in GetLogger() has a
-    // thread-safety issue on ARM64 (plain bool without memory barrier).
-    rex::InitLogging();
+    // RexGlue logging init happens inside os::logger::Init() (see C4 refactor):
+    // os::logger::Init() now calls rex::InitLogging() + registers platform sinks.
+    // Calling it again here would be redundant.
 
     // SDK v0.2.1: Memory is now created and owned internally by rex::Runtime.
     // g_memory.base is set from runtime->virtual_membase() after Setup() succeeds.
@@ -411,11 +424,13 @@ int main(int argc, char *argv[])
 
     // Extract title update files BEFORE VFS init — HostPathDevice snapshots the
     // directory at mount time, so default.xexp must exist before rex::Runtime::Setup().
+#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
     {
         AutoInstallResult aiResult = AutoInstaller::Run(gamePath);
         if (!aiResult.errorMessage.empty())
             fprintf(stderr, "[AutoInstall] Warning: %s\n", aiResult.errorMessage.c_str());
     }
+#endif
 
     // Bridge extracted audio.rpf content to where the RAGE relative device expects it.
     // The packfile device at audio:/ has an AES-encrypted TOC that fails to decrypt in
@@ -529,7 +544,13 @@ int main(int argc, char *argv[])
         // XBOXKRNL exports (XMACreateContext, XAudioRegisterRenderDriverClient,
         // etc.) handle all game audio calls with full Xenia-based implementations.
         rex::RuntimeConfig rexConfig;
+#if defined(LIBERTY_RECOMP_PS4)
+        rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::orbis::OrbisAudioSystem);
+#elif defined(LIBERTY_RECOMP_NX)
+        rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::nx::SwitchAudioSystem);
+#else
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
+#endif
 
         uint32_t rt_status = s_rexRuntime->Setup(
             static_cast<uint32_t>(PPC_CODE_BASE),
@@ -563,13 +584,13 @@ int main(int argc, char *argv[])
             std::_Exit(1);
         }
         fprintf(stderr, "[Main] rexcrt heap initialized (%u MB)\n", FLAGS_rexcrt_heap_size_mb);
-        // DIAG: verify xstart is registered after Setup()
-        {
+        // DIAG: verify xstart is registered after Setup().
+        // Gated by LIBERTY_VERBOSE_DIAG env var — silent in normal runs.
+        if (::os::diag::ShouldEmit()) {
             auto* p = s_rexRuntime->function_dispatcher();
             PPCFunc* xsf = p->GetFunction(0x82A11290);
             fprintf(stderr, "[DIAG] After Setup(): GetFunction(0x82A11290)=%p  HasFT=%d\n",
                     (void*)xsf, (int)p->HasFunctionTable());
-            // Check PPCFuncMappings array for 0x82A11290
             int total = 0, nullHost = 0;
             bool foundEntry = false;
             for (int i = 0; PPCFuncMappings[i].guest != 0; ++i) {
@@ -627,6 +648,24 @@ int main(int argc, char *argv[])
                 printf("[Main] WARNING: Failed to initialize cache device\n");
             }
 
+            // Register writable save device for PS4 (SCE savedata mount at /savedata0/)
+#ifdef LIBERTY_RECOMP_PS4
+            if (!g_ps4SaveMountPoint.empty()) {
+                auto saveDevice = std::make_unique<rex::filesystem::HostPathDevice>(
+                    "\\Device\\SavePartition", std::filesystem::path(g_ps4SaveMountPoint),
+                    /*read_only=*/false);
+                if (saveDevice->Initialize()) {
+                    fs->RegisterDevice(std::move(saveDevice));
+                    fs->RegisterSymbolicLink("save:", "\\Device\\SavePartition");
+                    printf("[Main] Registered save: device at %s\n",
+                           g_ps4SaveMountPoint.c_str());
+                } else {
+                    printf("[Main] WARNING: Failed to initialize save device at %s\n",
+                           g_ps4SaveMountPoint.c_str());
+                }
+            }
+#endif
+
             // DLC path resolution is handled by the XAM content system at runtime.
             // When the game calls XamContentCreateEx for DLC, XamRootCreate maps the
             // content root name directly to GetGamePath()/dlc/ on the host filesystem.
@@ -640,6 +679,7 @@ int main(int argc, char *argv[])
 
     if (forceInstallationCheck)
     {
+#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
         // Create the console to show progress to the user, otherwise it will seem as if the game didn't boot at all.
         os::process::ShowConsole();
 
@@ -673,23 +713,25 @@ int main(int argc, char *argv[])
         });
 
         char resultText[512];
-        uint32_t messageBoxStyle;
         if (journal.lastResult == Journal::Result::Success)
         {
             snprintf(resultText, sizeof(resultText), "%s", Localise("IntegrityCheck_Success").c_str());
             fprintf(stdout, "%s\n", resultText);
-            messageBoxStyle = SDL_MESSAGEBOX_INFORMATION;
         }
         else
         {
             snprintf(resultText, sizeof(resultText), Localise("IntegrityCheck_Failed").c_str(), journal.lastErrorMessage.c_str());
             fprintf(stderr, "%s\n", resultText);
-            messageBoxStyle = SDL_MESSAGEBOX_ERROR;
         }
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+        uint32_t messageBoxStyle = (journal.lastResult == Journal::Result::Success)
+            ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR;
         SDL_ShowSimpleMessageBox(messageBoxStyle, GameWindow::GetTitle(), resultText, GameWindow::s_pWindow);
+#endif
         printf("[EXIT-TRACE] main.cpp:637 calling _Exit\n"); fflush(stdout);
         std::_Exit(int(journal.lastResult));
+#endif // !PS4 && !NX
     }
 
 #if defined(_WIN32) && defined(LIBERTY_RECOMP_D3D12)
@@ -708,9 +750,11 @@ int main(int argc, char *argv[])
 
     if (Config::ShowConsole)
         os::process::ShowConsole();
-    LOGN_WARNING("Host Startup");
+    LOGN("Host Startup");
     HostStartup();
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
     os::discord::Initialize();
+#endif
 
     std::filesystem::path modulePath;
 
@@ -881,7 +925,7 @@ int main(int argc, char *argv[])
                 bool inImportRange = (i >= 0x700 && i < 0x950);
                 if (inImportRange) importDiffs++;
                 else dataDiffs++;
-                if (diffCount <= 20) {
+                if (diffCount <= 20 && ::os::diag::ShouldEmit()) {
                     printf("[HeaderDiff] offset=0x%05zX rex=0x%02X hdr=0x%02X %s\n",
                            i, rexPE[i], xex_header_data[i],
                            inImportRange ? "(IMPORT)" : "(DATA)");
@@ -914,6 +958,7 @@ int main(int argc, char *argv[])
         fflush(stdout);
     }
 
+#ifndef LIBERTY_RECOMP_NO_CURL
     // Check the time since the last time an update was checked.
     constexpr double TimeBetweenUpdateChecksInSeconds = 6 * 60 * 60;
     time_t timeNow = std::time(nullptr);
@@ -925,6 +970,7 @@ int main(int argc, char *argv[])
         Config::LastChecked = timeNow;
         Config::Save();
     }
+#endif
 
     // Install a terminate handler to diagnose uncaught exceptions.
     std::set_terminate([]() {
@@ -956,12 +1002,12 @@ int main(int argc, char *argv[])
     // XThread with entry point, stack size, and TLS from the XEX header.
     // This is exactly how standalone RexGlue works.
     // ------------------------------------------------------------------
-    LOGN_WARNING("Start Guest Thread");
-    LOGN_WARNING(modulePath.string());
+    LOGN("Start Guest Thread");
+    LOGN(modulePath.string());
 
     auto* rt = rex::Runtime::instance();
     // DIAG: verify xstart is still registered right before LaunchModule
-    {
+    if (::os::diag::ShouldEmit()) {
         auto* p = rt->function_dispatcher();
         PPCFunc* xsf = p->GetFunction(0x82A11290);
         fprintf(stderr, "[DIAG] Before LaunchModule(): GetFunction(0x82A11290)=%p  HasFT=%d  instance=%p\n",
@@ -977,11 +1023,17 @@ int main(int argc, char *argv[])
     }
     printf("[Main] Main XThread launched via RexGlue (handle=0x%08X)\n",
            main_xthread->handle()); fflush(stdout);
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
     os::discord::SetState(os::discord::GameState::InGame);
+#endif
 
     // Wait for the XThread to actually begin executing.
     for (int i = 0; i < 5000 && !main_xthread->is_running(); ++i) {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         SDL_Delay(1);
+#else
+        usleep(1000);
+#endif
         if (i == 100 || i == 1000 || i == 3000) {
             printf("[Main] Still waiting for XThread (i=%d, running=%d)\n",
                    i, (int)main_xthread->is_running()); fflush(stdout);
@@ -994,20 +1046,39 @@ int main(int argc, char *argv[])
 
     // Main thread: pump SDL events while game runs on XThread.
     // SDL requires event pumping on the main thread (macOS Cocoa requirement).
+#if defined(LIBERTY_RECOMP_NX)
+    extern bool SwitchAppletIsRunning();
+#endif
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
     static int s_discordCallbackTick = 0;
-    while (main_xthread->is_running()) {
+#endif
+    while (main_xthread->is_running()
+#if defined(LIBERTY_RECOMP_NX)
+           && SwitchAppletIsRunning()
+#endif
+    ) {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         SDL_PumpEvents();
+#endif
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
         // Pump Discord callbacks ~once per second (every 1000 ms of 1ms sleeps)
         if (++s_discordCallbackTick >= 1000) {
             os::discord::RunCallbacks();
             s_discordCallbackTick = 0;
         }
+#endif
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
         SDL_Delay(1);
+#else
+        usleep(1000);
+#endif
     }
 
     printf("[Main] Main XThread finished\n");
     fflush(stdout);
+#if defined(LIBERTY_RECOMP_DISCORD_RPC)
     os::discord::Shutdown();
+#endif
     return 0;
 }
 

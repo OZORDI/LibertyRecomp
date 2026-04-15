@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_PS4
 // PS4 process helpers (OpenOrbis)
 #include <os/process.h>
 #include <orbis/libkernel.h>
@@ -43,3 +44,4 @@ void os::process::ShowConsole()
 {
     // No console window on PS4 homebrew
 }
+#endif // LIBERTY_RECOMP_PS4

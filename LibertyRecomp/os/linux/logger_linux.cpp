@@ -1,17 +1,15 @@
 #include <os/logger.h>
+#include <rex/logging.h>
 
-void os::logger::Init()
+#include <spdlog/sinks/ansicolor_sink.h>
+
+void os::logger::PlatformInitSinks()
 {
+    auto sink = std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>();
+    rex::AddSink(sink);
 }
 
-void os::logger::Log(const std::string_view str, ELogType type, const char* func)
+void os::logger::PlatformShutdownSinks()
 {
-    if (func)
-    {
-        fmt::println("[{}] {}", func, str);
-    }
-    else
-    {
-        fmt::println("{}", str);
-    }
+    // spdlog handles sink cleanup on shutdown; nothing to do here.
 }

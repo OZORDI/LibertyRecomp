@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_PS4
 // PS4 trophy unlock helper for LibertyRecomp
 // Call LibertyPS4UnlockTrophy(id) from the achievements system.
 
@@ -22,3 +23,4 @@ bool LibertyPS4UnlockTrophy(int trophy_id)
     // 0x80551604 = SCE_NP_TROPHY_ERROR_ALREADY_UNLOCKED — not an error
     return (ret == 0 || ret == 0x80551604);
 }
+#endif // LIBERTY_RECOMP_PS4

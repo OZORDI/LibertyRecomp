@@ -1,5 +1,7 @@
 #pragma once
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+
 #include <SDL3/SDL.h>
 #include <ui/game_window.h>
 
@@ -35,3 +37,5 @@ inline void SDL_User_PlayerChar(EPlayerCharacter character)
 
     SDL_PushEvent(&event);
 }
+
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX

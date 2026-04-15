@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_PS4
 // PS4 entry point for LibertyRecomp (OpenOrbis)
 // user_malloc_init() MUST run before any heap allocation.
 
@@ -6,6 +7,9 @@
 #include <orbis/UserService.h>
 #include <orbis/Sysmodule.h>
 #include <orbis/NpTrophy.h>
+#include <orbis/NpManager.h>
+#include <orbis/Net.h>
+#include <orbis/NetCtl.h>
 #include "np_conf_ps4.h"
 
 // Forward declarations
@@ -23,21 +27,45 @@ int32_t g_np_handle     = 0;
 // ORBIS_SYSMODULE_INTERNAL_* variants accept uint32_t; cast is intentional.
 static void LoadRequiredModules()
 {
+    int32_t rc;
+
     // Trophy subsystem (regular module)
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_NP_TROPHY);
+    rc = sceSysmoduleLoadModule(ORBIS_SYSMODULE_NP_TROPHY);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load SYSMODULE_NP_TROPHY\n");
 
     // Internal modules: audio + pad + net (non-fatal; SDL handles absence)
-    sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_AUDIOOUT);
-    sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_AUDIOIN);
-    sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
-    sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NETCTL);
-    sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD);
+    rc = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_AUDIOOUT);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load INTERNAL_AUDIOOUT\n");
 
-    // Voice chat: sceAudioIn (microphone capture) + sceNet (for GNS/raw sockets)
-    // ORBIS_SYSMODULE_AUDIO_IN is needed for sceAudioInOpen
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_AUDIO_IN);
-    // Network module for BSD socket layer (GameNetworkingSockets fallback)
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_NET);
+    rc = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_AUDIOIN);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load INTERNAL_AUDIOIN\n");
+
+    rc = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load INTERNAL_NET\n");
+
+    rc = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NETCTL);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load INTERNAL_NETCTL\n");
+
+    rc = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD);
+    if (rc != 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: failed to load INTERNAL_PAD\n");
+
+    // Voice chat: AudioIn & Net are already loaded via internal modules above.
+    // No additional sceSysmoduleLoadModule calls needed.
+}
+
+// ── NP availability check (TRC requirement) ──────────────────────────────────
+// Must be called before any NP service usage.  Non-fatal — game works offline.
+static void CheckNpAvailability()
+{
+    int32_t npRet = sceNpCheckNpAvailabilityA(0, g_ps4_user_id);
+    if (npRet < 0)
+        sceKernelDebugOutText(0, "LibertyRecomp: sceNpCheckNpAvailabilityA returned error (offline?)\n");
 }
 
 // ── NP Trophy context setup ───────────────────────────────────────────────────
@@ -60,7 +88,11 @@ static void InitNpTrophy()
 
     // RegisterContext installs the trophy pack on first run.
     // Passing 0 for options uses default (show trophy install dialog if needed).
-    sceNpTrophyRegisterContext(g_np_context, g_np_handle, 0);
+    {
+        int32_t rc = sceNpTrophyRegisterContext(g_np_context, g_np_handle, 0);
+        if (rc < 0)
+            sceKernelDebugOutText(0, "LibertyRecomp: sceNpTrophyRegisterContext failed\n");
+    }
 }
 
 // ── Debugger hook ─────────────────────────────────────────────────────────────
@@ -77,7 +109,7 @@ static void InitNetDebug()
 #endif
 
 // ── PS4 application entry point ───────────────────────────────────────────────
-int ps4_main(SceSize argc, const void* argv)
+int ps4_main(size_t argc, const void* argv)
 {
     // 1. Heap FIRST — must precede any C++ static constructors or SDL init
     if (user_malloc_init() != 0)
@@ -90,24 +122,44 @@ int ps4_main(SceSize argc, const void* argv)
 #endif
 
     // 2. UserService — required before most SCE services
-    SceUserServiceInitializeParams userSvcParams = {};
-    userSvcParams.priority = SCE_KERNEL_PRIO_FIFO_DEFAULT;
-    sceUserServiceInitialize(&userSvcParams);
+    OrbisUserServiceInitializeParams userSvcParams = {};
+    userSvcParams.priority = 256; // default priority (SCE_KERNEL_PRIO_FIFO_DEFAULT)
+    {
+        int32_t rc = sceUserServiceInitialize(&userSvcParams);
+        if (rc != 0)
+            sceKernelDebugOutText(0, "LibertyRecomp: sceUserServiceInitialize failed\n");
+    }
 
     // 3. Load dynamic modules (NP Trophy, audio, pad, net)
     LoadRequiredModules();
 
-    // 4. Stand up NP Trophy context (non-fatal; game runs without trophies)
+    // 3b. Initialize sceNet + sceNetCtl (required before BSD socket layer is usable)
+    {
+        int32_t rc = sceNetInit();
+        if (rc < 0)
+            sceKernelDebugOutText(0, "LibertyRecomp: sceNetInit failed\n");
+
+        rc = sceNetCtlInit();
+        if (rc < 0)
+            sceKernelDebugOutText(0, "LibertyRecomp: sceNetCtlInit failed\n");
+    }
+
+    // 4. Check NP availability (TRC-required before any NP calls; non-fatal)
+    CheckNpAvailability();
+
+    // 5. Stand up NP Trophy context (non-fatal; game runs without trophies)
     InitNpTrophy();
 
-    // 5. Hand off to SDL/main
+    // 6. Hand off to SDL/main
     const char* fake_argv[] = { "LibertyRecomp", nullptr };
     int ret = main(1, const_cast<char**>(fake_argv));
 
-    // 6. Tear down NP and heap
+    // 7. Tear down NP, net, and heap
     if (g_np_handle)  sceNpTrophyDestroyHandle(g_np_handle);
     if (g_np_context) sceNpTrophyDestroyContext(g_np_context);
+    sceNetTerm();
     user_malloc_finalize();
 
     return ret;
 }
+#endif // LIBERTY_RECOMP_PS4

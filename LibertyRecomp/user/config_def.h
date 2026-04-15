@@ -30,6 +30,7 @@ CONFIG_DEFINE_LOCALISED("Input", bool, MotionReload, true, false);         // Sh
 CONFIG_DEFINE_LOCALISED("Input", bool, MotionHelicopter, false, false);    // Tilt to control helicopters
 
 // GTA IV Control Scheme - Face Buttons
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_A, SDL_SCANCODE_LSHIFT, false);      // Sprint (on foot) / Handbrake (in car)
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_B, SDL_SCANCODE_LCTRL, false);       // Crouch/Duck
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_X, SDL_SCANCODE_SPACE, false);       // Jump
@@ -73,6 +74,7 @@ CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_Headlight, SDL_SCANCODE_G, fals
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RadioNext, SDL_SCANCODE_X, false);    // Next Radio Station
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_RadioPrev, SDL_SCANCODE_Z, false);    // Previous Radio Station
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_PushToTalk, SDL_SCANCODE_GRAVE, false);
+#endif // !PS4 && !NX
 
 CONFIG_DEFINE_LOCALISED("Audio", float, MasterVolume, 1.0f, false);
 CONFIG_DEFINE_LOCALISED("Audio", float, MusicVolume, 0.6f, false);

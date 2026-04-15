@@ -85,8 +85,10 @@ namespace GTA4FrameHooks
         // Pump SDL events to prevent window from becoming unresponsive
         if (std::this_thread::get_id() == g_mainThreadId)
         {
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
             SDL_PumpEvents();
             SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+#endif
             GameWindow::Update();
         }
     }

@@ -92,6 +92,10 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
 
 void ModLoader::Init()
 {
+#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+    // No mod support on console
+    return;
+#else
     const std::filesystem::path& userPath = GetUserPath();
 
     IniFile configIni;
@@ -251,6 +255,7 @@ void ModLoader::Init()
             }
         }
     }
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
 }
 
 static constexpr uint32_t LZX_SIGNATURE = 0xFF512EE;

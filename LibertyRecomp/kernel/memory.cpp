@@ -1,7 +1,7 @@
 #include <stdafx.h>
 #include "memory.h"
 
-#include <rex/kernel/xmemory.h>
+#include <rex/system/xmemory.h>
 #include <rex/logging.h>
 
 // Include pre-generated vtable data from GTA IV XEX

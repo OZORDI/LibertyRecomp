@@ -4,6 +4,10 @@
 #include <fstream>
 #include <filesystem>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 // ── Platform-specific game root ─────────────────────────────────────────────
 static std::filesystem::path ResolveEmbeddedGameRoot()
 {
@@ -11,7 +15,7 @@ static std::filesystem::path ResolveEmbeddedGameRoot()
     return std::filesystem::path("/app0/game");
 #elif defined(__SWITCH__)
     return std::filesystem::path("romfs:/game");
-#elif defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#elif TARGET_OS_IOS
     // Bundle resources are at <Bundle>/game/
     extern "C" const char* LIBERTY_IOS_GetBundlePath();
     const char* bp = LIBERTY_IOS_GetBundlePath();

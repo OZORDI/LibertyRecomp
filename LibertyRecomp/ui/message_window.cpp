@@ -9,7 +9,9 @@
 #include <app.h>
 #include <decompressor.h>
 #include <exports.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <sdl_listener.h>
+#endif
 
 static bool g_isAwaitingResult{};
 static bool g_isClosing{};
@@ -32,6 +34,7 @@ static std::vector<std::string> g_buttons{};
 static int g_defaultButtonIndex{};
 static int g_cancelButtonIndex{};
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 class SDLEventListenerForMessageWindow : public SDLEventListener
 {
 public:
@@ -134,6 +137,7 @@ public:
     }
 }
 g_sdlEventListenerForMessageWindow;
+#endif
 
 void DrawContainerArrow(const ImVec2 pos, float scale, float rotation, uint32_t colour)
 {

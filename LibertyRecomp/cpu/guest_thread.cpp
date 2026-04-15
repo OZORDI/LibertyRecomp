@@ -1,6 +1,8 @@
 #include "guest_thread.h"
 #include "ppc_context.h"
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <SDL3/SDL.h>
+#endif
 #include <cstdio>
 #include <kernel/function.h>
 #include <kernel/heap.h>

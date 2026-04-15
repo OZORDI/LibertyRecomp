@@ -40,9 +40,17 @@
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/config.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <SDL3/SDL.h>
+#endif
 #include <cmath>
 #include <algorithm>  // for std::clamp
+#include <chrono>
+
+static uint64_t GetTicksMs() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 
 // Debug logging control - set to 1 to enable verbose logging
 #define MOTION_PATCHES_DEBUG_LOGGING 0
@@ -333,7 +341,7 @@ bool GetMotionControlPreference()
 void TriggerMotionReload()
 {
     s_motionReloadTriggered = true;
-    s_lastShakeTime = SDL_GetTicks();
+    s_lastShakeTime = GetTicksMs();
     
 #if MOTION_PATCHES_DEBUG_LOGGING
     LOGFN("[MotionPatch] Motion reload triggered!");
@@ -373,7 +381,7 @@ void UpdateMotionReloadDetection()
     constexpr uint64_t SHAKE_TIMEOUT_MS = 500;     // Time window for shake detection
     constexpr uint64_t SHAKE_COOLDOWN_MS = 200;    // Cooldown after triggering
     
-    uint64_t now = SDL_GetTicks();
+    uint64_t now = GetTicksMs();
     
     // Cooldown after reload to prevent retriggering
     if (s_lastShakeTime > 0 && (now - s_lastShakeTime) < SHAKE_COOLDOWN_MS) {

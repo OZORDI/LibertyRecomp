@@ -25,7 +25,7 @@ inline rex::system::KernelState* GetKernelState() {
     return rex::Runtime::instance()->kernel_state();
 }
 
-inline rex::runtime::Processor* GetProcessor() {
+inline rex::runtime::FunctionDispatcher* GetProcessor() {
     return rex::Runtime::instance()->function_dispatcher();
 }
 

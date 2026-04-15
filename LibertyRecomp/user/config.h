@@ -34,6 +34,8 @@ public:
 #define CONFIG_LOCK_CALLBACK(name)  if (name.LockCallback) name.LockCallback(&name)
 #define CONFIG_APPLY_CALLBACK(name) if (name.ApplyCallback) name.ApplyCallback(&name)
 
+// Desktop-only: SDL window-position sentinel. Ignored on PS4/Switch builds
+// where window state/position fields are unused (full-screen compositor).
 #define WINDOWPOS_CENTRED        0x2FFF0000
 
 extern std::vector<IConfigDef*> g_configDefinitions;
@@ -82,6 +84,9 @@ enum class EChannelConfiguration : uint32_t
     Surround
 };
 
+// NOTE: PS4 (GNM/GNMX) and Switch (NVN) have no dedicated enum entries.
+// LibertyRecomp uses Vulkan on both consoles, so `Vulkan` is the effective
+// default on those platforms and no new enum values are required.
 enum class EGraphicsAPI : uint32_t
 {
     Auto,
@@ -94,6 +99,8 @@ enum class EGraphicsAPI : uint32_t
     Vulkan
 };
 
+// Desktop-only. Consoles always run a single full-screen surface and ignore
+// this field; the corresponding config entries are hidden from the menu.
 enum class EWindowState : uint32_t
 {
     Normal,
@@ -242,14 +249,17 @@ enum class EChromaticAberration : uint32_t
     Strong      // Heavy lens distortion
 };
 
+// NOTE: No console-specific upscaler entries. PS4 and Switch fall back to
+// FSR1 (portable, shader-based) or Off; FSR3/DLSS/XeSS/MetalFX are unavailable
+// on those platforms. No new enum values required.
 enum class EUpscaler : uint32_t
 {
-    Off,        // Native resolution
-    FSR1,       // AMD FidelityFX Super Resolution 1.0
-    FSR3,       // AMD FidelityFX Super Resolution 3.0 (Frame Gen)
-    DLSS,       // NVIDIA Deep Learning Super Sampling
-    XeSS,       // Intel Xe Super Sampling
-    MetalFX     // Apple MetalFX (macOS only)
+    Off,        // Native resolution (all platforms)
+    FSR1,       // AMD FSR 1.0 — portable shader, works on PS4 and Switch too
+    FSR3,       // AMD FSR 3.0 + Frame Gen — desktop only
+    DLSS,       // NVIDIA DLSS — desktop only (RTX GPUs)
+    XeSS,       // Intel XeSS — desktop only
+    MetalFX     // Apple MetalFX — macOS only (Apple Silicon / Intel Mac)
 };
 
 enum class EUpscaleQuality : uint32_t

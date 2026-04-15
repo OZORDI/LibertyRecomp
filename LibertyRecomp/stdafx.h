@@ -36,13 +36,43 @@ using Microsoft::WRL::ComPtr;
 #include <zstd.h>
 #include <stb_image.h>
 #include <blockingconcurrentqueue.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <SDL3/SDL.h>
 // SDL3_mixer not yet integrated — embedded_player.cpp has #if 0 guards
 // #include <SDL3_mixer/SDL_mixer.h>
+#else
+// Console builds don't use SDL3 — provide stub types for config_def.h key bindings.
+// Values match SDL3 USB HID scancodes for config file interoperability.
+using SDL_Scancode = int;
+#define SDL_SCANCODE_UNKNOWN   0
+#define SDL_SCANCODE_A         4
+#define SDL_SCANCODE_C         6
+#define SDL_SCANCODE_D         7
+#define SDL_SCANCODE_E         8
+#define SDL_SCANCODE_F         9
+#define SDL_SCANCODE_G        10
+#define SDL_SCANCODE_H        11
+#define SDL_SCANCODE_Q        20
+#define SDL_SCANCODE_R        21
+#define SDL_SCANCODE_S        22
+#define SDL_SCANCODE_T        23
+#define SDL_SCANCODE_UP       82
+#define SDL_SCANCODE_V        25
+#define SDL_SCANCODE_W        26
+#define SDL_SCANCODE_X        27
+#define SDL_SCANCODE_Z        29
+#define SDL_SCANCODE_ESCAPE   41
+#define SDL_SCANCODE_SPACE    44
+#define SDL_SCANCODE_GRAVE    53
+#define SDL_SCANCODE_LCTRL   224
+#define SDL_SCANCODE_LSHIFT  225
+#endif
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <implot.h>
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <backends/imgui_impl_sdl3.h>
+#endif
 #include <cstddef>
 #include <smolv.h>
 #include <set>

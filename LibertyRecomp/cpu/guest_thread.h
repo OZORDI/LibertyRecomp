@@ -3,8 +3,15 @@
 #include <kernel/xdm.h>
 #include "ppc_context.h"
 
-// Use pthreads directly on macOS to be able to increase default stack size.
-#ifdef __APPLE__
+// Use pthreads directly on macOS, PS4 (Orbis), and Switch (libnx) so we can
+// set an 8 MiB stack via pthread_attr_setstacksize for Xbox 360 compatibility.
+//   - macOS: std::thread default stack is only 512 KiB; GTA IV needs more.
+//   - PS4 (Orbis): FreeBSD-based userland provides standard POSIX pthreads;
+//     scePthread* wrappers also exist but pthread_* works directly.
+//   - Switch (libnx/newlib): default std::thread stack (~1 MiB) is too tight
+//     for 512 KiB guest stack plus host overhead (~64 KiB); force 8 MiB.
+#if defined(__APPLE__) || defined(__ORBIS__) || defined(LIBERTY_RECOMP_PS4) || \
+    defined(__SWITCH__) || defined(LIBERTY_RECOMP_NX)
 #define USE_PTHREAD 1
 #endif
 

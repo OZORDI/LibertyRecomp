@@ -11,12 +11,65 @@
 #include <user/config.h>
 #include <patches/gta4_ds4_patches.h>     // Our header with TouchpadGesture enum
 #include <patches/gta4_motion_patches.h>  // For VehicleState
-#include <SDL3/SDL.h>
 #include <cmath>
 #include <cstring>
 #include <algorithm>
 
+// PS4 uses libScePad directly for pad input — SDL is not available.
+// The DS4 features here (lightbar color, touchpad gestures, enhanced haptics)
+// are cosmetic enhancements layered on top of SDL's gamepad API.
+// On PS4, the system firmware handles lightbar and basic haptics natively,
+// so these patches are disabled. On Switch (NX), SDL is available but the
+// controller lacks a lightbar/touchpad, so these features are also stubbed.
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#include <SDL3/SDL.h>
+#endif
+
 namespace DS4Patches {
+
+#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+// ============================================================================
+// Stub implementations for PS4 / Switch
+// ============================================================================
+// On PS4, the system manages the lightbar and basic rumble via libScePad.
+// On Switch, there is no lightbar or touchpad. Stub all public entry points
+// so the rest of the codebase compiles without #ifdef at every call site.
+
+void UpdateLightBar() {}
+void SetLightBarOverride(uint8_t, uint8_t, uint8_t) {}
+void ClearLightBarOverride() {}
+void GetLightBarColor(uint8_t* r, uint8_t* g, uint8_t* b) { if (r) *r = 0; if (g) *g = 0; if (b) *b = 255; }
+void OnWantedLevelChanged(int) {}
+void OnHealthChanged(int, int) {}
+void OnPlayerDeath() {}
+void OnPlayerRespawn() {}
+TouchpadGesture GetLastGesture() { return TouchpadGesture::None; }
+bool WasGestureDetected(TouchpadGesture) { return false; }
+void ChangeRadioStation(int) {}
+void CycleWeapon(int) {}
+void TriggerExplosionHaptic(float) {}
+void OnExplosion(float, float, float, float, int) {}
+void TriggerImpactHaptic(float) {}
+void OnVehicleHealthChanged(int, int) {}
+void TriggerGunfireHaptic(float) {}
+void OnNearbyGunfire(float) {}
+void SetWeatherHaptic(bool, float) {}
+void OnWeatherChanged(int) {}
+void TriggerGearChangeHaptic() {}
+void OnVehicleSpeedUpdate(float) {}
+void ToggleCinematicCamera() {}
+bool IsCameraTogglePending() { return false; }
+void ClearCameraTogglePending() {}
+void SetPlayerPosition(float, float, float) {}
+void Init() { LOG_INFO("GTA IV DS4 patches: stubbed on this platform (no SDL gamepad)"); }
+void Update() {}
+
+} // namespace DS4Patches
+
+#else // Desktop platforms with SDL
+// ============================================================================
+// Full SDL-based DS4 implementation
+// ============================================================================
 
 // ============================================================================
 // State Tracking
@@ -744,9 +797,13 @@ void Update()
 
 } // namespace DS4Patches
 
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+
 // ============================================================================
 // PPC Function Hooks for Game State Tracking
 // ============================================================================
+
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 
 // Hook for ALTER_WANTED_LEVEL (sub_82578B80)
 // Called when the game changes the player's wanted level
@@ -991,3 +1048,5 @@ PPC_FUNC_HOOK(sub_825A2518)
     // Call original function
     __imp__sub_825A2518(ctx, base);
 }
+
+#endif // !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX

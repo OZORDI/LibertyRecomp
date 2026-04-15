@@ -33,12 +33,21 @@
     <key>MinimumOSVersion</key>
     <string>16.0</string>
 
-    <!-- Required capabilities: 64-bit ARM + Metal -->
+    <!-- Required capabilities: 64-bit ARM + Metal.
+         NOTE: 'gamecontroller' is NOT a valid UIRequiredDeviceCapabilities value
+         and was removed. Controller support is advertised via
+         GCSupportedGameControllers below. -->
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>
         <string>metal</string>
-        <string>gamecontroller</string>
+    </array>
+
+    <!-- Supported device families: 1 = iPhone, 2 = iPad -->
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>1</integer>
+        <integer>2</integer>
     </array>
 
     <!-- Supported orientations (landscape only for a game) -->
@@ -75,15 +84,36 @@
         <true/>
     </dict>
 
-    <!-- Game controller hint -->
+    <!-- Game Controller framework:
+         - GCSupportsControllerUserInteraction lets connected MFi / Xbox / DualShock /
+           DualSense controllers drive system UI (e.g. focus navigation) without the app
+           needing to handle every event.
+         - GCSupportedGameControllers declares the profiles we can consume; we list
+           ExtendedGamepad (all modern controllers: Xbox Series, DualShock 4, DualSense,
+           MFi Extended) and MicroGamepad (Siri Remote on Apple TV / iPad companion). -->
     <key>GCSupportsControllerUserInteraction</key>
     <true/>
     <key>GCSupportedGameControllers</key>
     <array>
         <dict>
             <key>ProfileName</key>
-            <string>Extended Gamepad</string>
+            <string>ExtendedGamepad</string>
         </dict>
+        <dict>
+            <key>ProfileName</key>
+            <string>MicroGamepad</string>
+        </dict>
+    </array>
+
+    <!-- Usage descriptions (required by App Store review when the matching APIs
+         are linked). Local networking covers LAN session discovery / peer-to-peer
+         multiplayer via Bonjour/mDNS, which iOS 14+ gates behind this prompt. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Liberty Recompiled uses your local network to discover and connect to nearby players for LAN multiplayer sessions.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_libertyrecomp._tcp</string>
+        <string>_libertyrecomp._udp</string>
     </array>
 </dict>
 </plist>

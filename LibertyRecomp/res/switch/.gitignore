@@ -1,0 +1,8 @@
+# The real game/dlc/key payload is staged into romfs/ per build and is
+# explicitly excluded from source control. Only .gitkeep markers are tracked.
+romfs/game/*
+!romfs/game/.gitkeep
+romfs/dlc/*
+!romfs/dlc/.gitkeep
+romfs/aes_key.bin
+romfs/manifest.json

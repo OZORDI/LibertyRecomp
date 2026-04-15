@@ -18,7 +18,7 @@
 #include "../cpu/ppc_context.h"
 
 #include <memory>
-#include <rex/runtime/thread_state.h>
+#include <rex/system/thread_state.h>
 #include <rex/runtime.h>
 
 namespace rex {

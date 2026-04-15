@@ -15,6 +15,8 @@ namespace os::registry
 #include <os/win32/registry_win32.inl>
 #elif defined(__linux__)
 #include <os/linux/registry_linux.inl>
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !defined(__ORBIS__)
 #include <os/macos/registry_macos.inl>
+#elif defined(__ORBIS__)
+#include <os/ps4/registry_ps4.inl>
 #endif

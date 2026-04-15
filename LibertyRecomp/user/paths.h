@@ -27,12 +27,34 @@ inline std::filesystem::path GetGamePath()
 #endif
 }
 
+/// On PS4, the save directory is the SCE SaveData mount point (e.g. "/savedata0").
+/// This global is set by SaveSystem::Initialize() when the container is mounted.
+/// Declared here so GetSavePath() can read it without pulling in save_system.h.
+#ifdef LIBERTY_RECOMP_PS4
+inline std::string g_ps4SaveMountPoint;
+#endif
+
+/// On Switch, the save directory is the libnx fsdev mount point (typically "save:/").
+/// This global is set by SaveSystem::Initialize() after fsdevMountSaveData succeeds,
+/// and consumed by GetSavePath() so stdio-based I/O resolves through the journalled
+/// save-data container instead of the read-only romfs/user path.
+#ifdef LIBERTY_RECOMP_NX
+inline std::string g_switchSaveMountPoint;
+#endif
+
 inline std::filesystem::path GetSavePath(bool checkForMods)
 {
     if (checkForMods && !ModLoader::s_saveFilePath.empty())
         return ModLoader::s_saveFilePath.parent_path();
-    else
-        return GetUserPath() / "save";
+#ifdef LIBERTY_RECOMP_PS4
+    if (!g_ps4SaveMountPoint.empty())
+        return std::filesystem::path(g_ps4SaveMountPoint);
+#endif
+#ifdef LIBERTY_RECOMP_NX
+    if (!g_switchSaveMountPoint.empty())
+        return std::filesystem::path(g_switchSaveMountPoint);
+#endif
+    return GetUserPath() / "save";
 }
 
 // Returned file name may not necessarily be
@@ -51,10 +73,24 @@ static std::string toLower(std::string str) {
 };
 
 inline void BuildPathCache(const std::string& gamePath) {
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(gamePath)) {
+    std::error_code ec;
+    constexpr size_t kMaxEntries =
+#if defined(__ORBIS__) || defined(__SWITCH__)
+        // Console encrypted/romfs filesystems: cap iteration to avoid
+        // slow recursive enumeration on /app0 or romfs:/
+        8192;
+#else
+        SIZE_MAX; // Desktop: no practical limit
+#endif
+
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(gamePath, ec)) {
+        if (ec) break;
+        if (count >= kMaxEntries) break;
         std::string fullPath = entry.path().string();
         std::string key = toLower(fullPath);
         g_pathCache[key] = entry.path();
+        ++count;
     }
 }
 

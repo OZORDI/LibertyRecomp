@@ -86,7 +86,7 @@ CEntity
 
 ⚠️ **IMPORTANT**: All structures must match Xbox 360 memory layout!
 
-- Xbox 360 uses **big-endian** byte order (handled by XenonRecomp)
+- Xbox 360 uses **big-endian** byte order (handled by rexglue PPC memory ops)
 - Pointers are **32-bit** on Xbox 360
 - Alignment may differ from x86/x64
 
@@ -111,7 +111,7 @@ void ProcessPed(CPed* ped)
 ## References
 
 - GTA IV Xbox 360 default.xex (XEX2 format)
-- XenonRecomp analysis output (switch tables, function signatures)
+- rexglue codegen analysis output (switch tables, function signatures)
 - RAGE engine research community
 
 ## Status

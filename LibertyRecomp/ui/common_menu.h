@@ -1,6 +1,8 @@
 #pragma once
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
 #include <sdl_listener.h>
+#endif
 
 class CommonMenu
 {
@@ -21,6 +23,7 @@ class CommonMenu
     float m_descScrollTimer{};
     float m_descScrollDirection{ 1.0f };
 
+#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
     class CommonMenuInputListener : public SDLEventListener
     {
     public:
@@ -35,6 +38,9 @@ class CommonMenu
         }
     }
     m_inputListener{};
+#else
+    struct { float RightStickX{}; } m_inputListener{};
+#endif
 
     void resetDescScroll()
     {

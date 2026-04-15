@@ -1,3 +1,4 @@
+#ifdef LIBERTY_RECOMP_PS4
 // PS4 custom memory allocator for LibertyRecomp (OpenOrbis)
 // Modeled on Minecraft PS4's user_malloc.cpp (Sony SDK reference).
 // Must be called before ANY other allocation — do it first in ps4_main.cpp.
@@ -19,8 +20,9 @@
 
 // ── Heap state ───────────────────────────────────────────────────────────────
 
-static SceLibcMspace s_mspace   = nullptr;
-static off_t         s_memStart = 0;
+static SceLibcMspace s_mspace    = nullptr;
+static void*         s_mappedAddr = nullptr;
+static off_t         s_memStart  = 0;
 static size_t        s_memLength = 0;
 
 static constexpr size_t MB            = 1024ULL * 1024ULL;
@@ -69,6 +71,8 @@ extern "C" int user_malloc_init(void)
     if (res < 0)
         return 1;
 
+    s_mappedAddr = addr;
+
     // Create an mspace over the mapped region
     s_mspace = sceLibcMspaceCreate("LibertyHeap", addr, s_memLength, 0);
     if (!s_mspace)
@@ -85,6 +89,14 @@ extern "C" int user_malloc_finalize(void)
         if (res != 0)
             return 1;
         s_mspace = nullptr;
+    }
+
+    if (s_mappedAddr)
+    {
+        int res = sceKernelMunmap(s_mappedAddr, s_memLength);
+        if (res < 0)
+            return 1;
+        s_mappedAddr = nullptr;
     }
 
     if (s_memStart)
@@ -150,3 +162,4 @@ extern "C" size_t user_malloc_usable_size(void* ptr)
 {
     return sceLibcMspaceMallocUsableSize(ptr);
 }
+#endif // LIBERTY_RECOMP_PS4
