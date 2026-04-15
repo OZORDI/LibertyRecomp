@@ -51,7 +51,6 @@
 #endif
 #include <ui/main_menu.h>
 #include <mod/mod_loader.h>
-#include <preload_executable.h>
 #include <iostream>
 #include <app.h>
 #include <debugger.h>
@@ -358,8 +357,7 @@ int main(int argc, char *argv[])
 
     os::logger::Init();
 
-    PreloadContext preloadContext;
-    preloadContext.PreloadExecutable();
+    // preload_executable.cpp removed — was Windows-only, NOP elsewhere.
 
     bool forceInstaller = false;
     bool forceDLCInstaller = false;
@@ -904,43 +902,9 @@ int main(int argc, char *argv[])
         fflush(stdout);
     }
 
-    // ------------------------------------------------------------------
-    // Step 3: Diagnostic — compare xex_header_data against RexGlue's PE.
-    // The function dispatch table lives at base+0x831F0000+ (PPC_LOOKUP_FUNC),
-    // completely independent of this region.  RexGlue's LoadXexImage already
-    // wrote the correct PE data here AND resolved variable imports.
-    // We no longer overwrite with xex_header_data — that was destroying
-    // RexGlue's import resolution and potentially corrupting .data values.
-    // ------------------------------------------------------------------
+    // xex_header_data diff removed — was a diagnostic for an overlay
+    // we stopped applying. rexglue's LoadXexImage is authoritative.
     {
-        #include <kernel/xex_header_data.h>
-        const uint8_t* rexPE = reinterpret_cast<const uint8_t*>(g_memory.base + 0x82000000);
-        int diffCount = 0;
-        int importDiffs = 0;   // diffs in 0x700-0x950 (import slot range)
-        int dataDiffs = 0;     // diffs elsewhere
-        for (size_t i = 0; i < sizeof(xex_header_data); i++) {
-            if (rexPE[i] != xex_header_data[i]) {
-                diffCount++;
-                bool inImportRange = (i >= 0x700 && i < 0x950);
-                if (inImportRange) importDiffs++;
-                else dataDiffs++;
-                if (diffCount <= 20 && ::os::diag::ShouldEmit()) {
-                    printf("[HeaderDiff] offset=0x%05zX rex=0x%02X hdr=0x%02X %s\n",
-                           i, rexPE[i], xex_header_data[i],
-                           inImportRange ? "(IMPORT)" : "(DATA)");
-                }
-            }
-        }
-        printf("[Main] Header comparison: %d diffs (%d import, %d data) out of %zu bytes\n",
-               diffCount, importDiffs, dataDiffs, sizeof(xex_header_data));
-
-        // xex_header_data contains XEX header metadata, NOT .rdata section data.
-        // Applying it as overlay CORRUPTS vtables with ASCII string fragments
-        // (e.g. "DIAL", "- SA", "age:", "Stor"). DO NOT apply.
-        // RexGlue's PE decompression provides the correct .rdata content.
-        printf("[Main] RexGlue PE is authoritative — NOT overwriting with xex_header_data\n");
-        fflush(stdout);
-
         // GPU context GOT entry — keep this patch.
         // RexGlue may not resolve this specific import (ordinal 446).
         constexpr uint32_t GOT_GPU_CONTEXT = 0x82000768;

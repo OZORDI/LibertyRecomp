@@ -1,28 +1,9 @@
 #pragma once
 
+// Trimmed from a kitchen-sink Sonic '06 / Unleashed header. Only RAGE
+// forward-decls + Liberty.inl macros (LIBERTY_INSERT_PADDING, etc.) are
+// actually consumed by patches + gpu/video.cpp; boost/hk330/stdx/d3dxb
+// have been removed along with those subtrees.
+
 #include "RAGE/RAGE.h"
-#include "boost/smart_ptr/make_shared_object.h"
-#include "boost/smart_ptr/shared_ptr.h"
-#include "d3dxb.h"
-#include "hk330/hkArray.h"
-#include "hk330/hkReferencedObject.h"
-#include "hk330/hkpBroadPhaseHandle.h"
-#include "hk330/hkpCdBody.h"
-#include "hk330/hkpCollidable.h"
-#include "hk330/hkpCollidableCollidableFilter.h"
-#include "hk330/hkpCollisionFilter.h"
-#include "hk330/hkpEntity.h"
-#include "hk330/hkpLinkedCollidable.h"
-#include "hk330/hkpPhantom.h"
-#include "hk330/hkpProperty.h"
-#include "hk330/hkpRayCollidableFilter.h"
-#include "hk330/hkpRayShapeCollectionFilter.h"
-#include "hk330/hkpRigidBody.h"
-#include "hk330/hkpShape.h"
-#include "hk330/hkpShapeCollectionFilter.h"
-#include "hk330/hkpTypedBroadPhaseHandle.h"
-#include "hk330/hkpWorld.h"
-#include "hk330/hkpWorldObject.h"
-#include "stdx/string.h"
-#include "stdx/vector.h"
-#include "stdx/wstring.h"
+#include "Liberty.inl"

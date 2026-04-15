@@ -1,10 +1,8 @@
 #pragma once
-// RexGlue's PPC types are authoritative.
-// LibertyRecompLib/ppc/ppc_context.h is legacy (kept but not used).
-//
-// ppc_config.h must be included before context.h so PPC_LOOKUP_FUNC
-// and PPC_CALL_INDIRECT_FUNC resolve to the real function table macros.
-#include "ppc_config.h"
+// RexGlue's PPC types are authoritative. Previously Liberty had its own
+// ppc_config.h shim that forwarded to gta4-recomp's generated
+// gta4_config.h — consumers now include that directly.
+#include "../../glue/gta4-recomp/generated/gta4_config.h"
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
 

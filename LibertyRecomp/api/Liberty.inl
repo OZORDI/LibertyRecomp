@@ -22,7 +22,7 @@ constexpr double DEG2RAD = 0.01745329238474369;
     static_assert(sizeof(type) == size)
 
 #define LIBERTY_VIRTUAL_FUNCTION(returnType, virtualIndex, ...) \
-    GuestToHostFunction<returnType>(*(be<uint32_t>*)(g_memory.Translate(*(be<uint32_t>*)(this) + (4 * virtualIndex))), __VA_ARGS__)
+    LibertyGuestToHostFunction<returnType>(*(be<uint32_t>*)(g_memory.Translate(*(be<uint32_t>*)(this) + (4 * virtualIndex))), __VA_ARGS__)
 
 struct liberty_null_ctor {};
 

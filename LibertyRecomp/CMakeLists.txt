@@ -151,7 +151,7 @@ set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
                                  #   XamNotifyEnqueueEvent
     "kernel/lod_hooks.cpp"       # LOD rendering distance tuning
     "kernel/button_prompts.cpp"  # input UI (button prompt glyphs)
-    "kernel/io/texture_convert.cpp"  # rendering — texture format conversion
+    # Removed: io/texture_convert — no external callers
 )
 
 set(LIBERTY_RECOMP_LOCALE_CXX_SOURCES
@@ -393,7 +393,6 @@ set(LIBERTY_RECOMP_USER_CXX_SOURCES
     "user/achievement_data.cpp"
     "user/achievement_manager.cpp"
     "user/config.cpp"
-    "user/persistent_storage_manager.cpp"  # GTA IV save data handling
     "user/registry.cpp"
     "user/paths.cpp"
 )
@@ -402,15 +401,10 @@ set(LIBERTY_RECOMP_MOD_CXX_SOURCES
     "mod/mod_loader.cpp"
 )
 
-set(LIBERTY_RECOMP_UTILS_CXX_SOURCES
-    "utils/bit_stream.cpp"
-    "utils/ring_buffer.cpp"
-)
+# utils/ removed — rexglue provides rex::memory::RingBuffer + rex::stream::BitStream
 
-# RexGlue runtime integration (headers-only mode for now)
-set(LIBERTY_RECOMP_RUNTIME_CXX_SOURCES
-    # rex_adapter.h is header-only, no .cpp files yet
-)
+# runtime/ is header-only: only rex_thread_state.h is live; rest removed.
+set(LIBERTY_RECOMP_RUNTIME_CXX_SOURCES)
 
 set(LIBERTY_RECOMP_THIRDPARTY_SOURCES
     "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/imgui.cpp"
@@ -453,12 +447,11 @@ set_source_files_properties(${LIBERTY_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP
 
 set(LIBERTY_RECOMP_CXX_SOURCES
     "app.cpp"
-    "exports.cpp"
     "main.cpp"
-    "misc_impl.cpp"
-    "preload_executable.cpp"
     "stdafx.cpp"
     "version.cpp"
+    # Removed: exports.cpp (Sonic audio stub), misc_impl.cpp (wrong-address
+    # memcpy hooks), preload_executable.cpp (Windows-only, NOP elsewhere)
     
     ${LIBERTY_RECOMP_KERNEL_CXX_SOURCES}
     ${LIBERTY_RECOMP_LOCALE_CXX_SOURCES}
@@ -471,7 +464,6 @@ set(LIBERTY_RECOMP_CXX_SOURCES
     ${LIBERTY_RECOMP_UI_CXX_SOURCES}
     ${LIBERTY_RECOMP_INSTALL_CXX_SOURCES}
     ${LIBERTY_RECOMP_USER_CXX_SOURCES}
-    ${LIBERTY_RECOMP_UTILS_CXX_SOURCES}
     ${LIBERTY_RECOMP_MOD_CXX_SOURCES}
     ${LIBERTY_RECOMP_RUNTIME_CXX_SOURCES}
     ${LIBERTY_RECOMP_THIRDPARTY_SOURCES}

@@ -30,7 +30,7 @@ using Microsoft::WRL::ComPtr;
 #include <xxhash.h>
 #include <ankerl/unordered_dense.h>
 #include <ddspp.h>
-// RexGlue PPC types + function declarations (replaces legacy ppc_recomp_shared.h)
+// RexGlue PPC types + function declarations (shim forwards to gta4-recomp)
 #include "cpu/ppc_func_decls.h"
 #include <toml++/toml.hpp>
 #include <zstd.h>

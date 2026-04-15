@@ -6,7 +6,7 @@
 #include "memory.h"
 
 template <typename R, typename... T>
-constexpr std::tuple<T...> function_args(R(*)(T...)) noexcept
+constexpr std::tuple<T...> liberty_function_args(R(*)(T...)) noexcept
 {
     return std::tuple<T...>();
 }
@@ -20,7 +20,7 @@ static constexpr bool is_precise_v = std::is_same_v<T, float> || std::is_same_v<
 template<auto Func>
 struct arg_count_t
 {
-    static constexpr size_t value = std::tuple_size_v<decltype(function_args(Func))>;
+    static constexpr size_t value = std::tuple_size_v<decltype(liberty_function_args(Func))>;
 };
 
 template<typename TCallable, int I = 0, typename ...TArgs>
@@ -230,7 +230,7 @@ constexpr std::array<Argument, std::tuple_size_v<T1>> GatherFunctionArguments(co
 template<auto Func>
 constexpr std::array<Argument, arg_count_t<Func>::value> GatherFunctionArguments()
 {
-    return GatherFunctionArguments(function_args(Func));
+    return GatherFunctionArguments(liberty_function_args(Func));
 }
 
 template<auto Func, size_t I>
@@ -240,42 +240,46 @@ struct arg_ordinal_t
 };
 
 template<auto Func, int I = 0, typename ...TArgs>
-void _translate_args_to_host(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>&) noexcept
+void _liberty_translate_args_to_host(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>&) noexcept
     requires (I >= sizeof...(TArgs))
 {
 }
 
 template <auto Func, int I = 0, typename ...TArgs>
-std::enable_if_t<(I < sizeof...(TArgs)), void> _translate_args_to_host(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>& tpl) noexcept
+std::enable_if_t<(I < sizeof...(TArgs)), void> _liberty_translate_args_to_host(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>& tpl) noexcept
 {
     using T = std::tuple_element_t<I, std::remove_reference_t<decltype(tpl)>>;
     std::get<I>(tpl) = ArgTranslator::GetValue<T>(ctx, base, arg_ordinal_t<Func, I>::value);
 
-    _translate_args_to_host<Func, I + 1>(ctx, base, tpl);
+    _liberty_translate_args_to_host<Func, I + 1>(ctx, base, tpl);
 }
 
 template<int I = 0, typename ...TArgs>
-void _translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>&) noexcept
+void _liberty_translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>&) noexcept
     requires (I >= sizeof...(TArgs))
 {
 }
 
 template <int I = 0, typename ...TArgs>
-std::enable_if_t<(I < sizeof...(TArgs)), void> _translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>& tpl) noexcept
+std::enable_if_t<(I < sizeof...(TArgs)), void> _liberty_translate_args_to_guest(PPCContext& ctx, uint8_t* base, std::tuple<TArgs...>& tpl) noexcept
 {
     using T = std::tuple_element_t<I, std::remove_reference_t<decltype(tpl)>>;
     ArgTranslator::SetValue<T>(ctx, base, GatherFunctionArguments(std::tuple<TArgs...>{})[I].ordinal, std::get<I>(tpl));
 
-    _translate_args_to_guest<I + 1>(ctx, base, tpl);
+    _liberty_translate_args_to_guest<I + 1>(ctx, base, tpl);
 }
 
+// Liberty's host-to-guest bridge — renamed from HostToGuestFunction to avoid
+// conflicting with rex::ppc::HostToGuestFunction now that rex/ppc.h is
+// pulled in transitively via gta4-recomp headers. Liberty's version uses
+// different argument translation semantics tied to `_liberty_translate_args_to_host`.
 template<auto Func>
-PPC_FUNC(HostToGuestFunction)
+PPC_FUNC(LibertyHostToGuestFunction)
 {
-    using ret_t = decltype(std::apply(Func, function_args(Func)));
+    using ret_t = decltype(std::apply(Func, liberty_function_args(Func)));
 
-    auto args = function_args(Func);
-    _translate_args_to_host<Func>(ctx, base, args);
+    auto args = liberty_function_args(Func);
+    _liberty_translate_args_to_host<Func>(ctx, base, args);
 
     if constexpr (std::is_same_v<ret_t, void>)
     {
@@ -308,7 +312,7 @@ PPC_FUNC(HostToGuestFunction)
 }
 
 template<typename T, typename TFunction, typename... TArgs>
-T GuestToHostFunction(const TFunction& func, TArgs&&... argv)
+T LibertyGuestToHostFunction(const TFunction& func, TArgs&&... argv)
 {
     auto args = std::make_tuple(std::forward<TArgs>(argv)...);
     auto& currentCtx = *GetPPCContext();
@@ -318,7 +322,7 @@ T GuestToHostFunction(const TFunction& func, TArgs&&... argv)
     newCtx.r13 = currentCtx.r13;
     newCtx.fpscr = currentCtx.fpscr;
 
-    _translate_args_to_guest(newCtx, g_memory.base, args);
+    _liberty_translate_args_to_guest(newCtx, g_memory.base, args);
 
     SetPPCContext(newCtx);
 
@@ -354,7 +358,7 @@ T GuestToHostFunction(const TFunction& func, TArgs&&... argv)
 #define PPC_FUNC_HOOK(x) extern "C" PPC_FUNC(x)
 
 #define GUEST_FUNCTION_HOOK(subroutine, function) \
-    extern "C" PPC_FUNC(subroutine) { HostToGuestFunction<function>(ctx, base); }
+    extern "C" PPC_FUNC(subroutine) { LibertyHostToGuestFunction<function>(ctx, base); }
 
 #define GUEST_FUNCTION_STUB(subroutine) \
     extern "C" PPC_FUNC(subroutine) { }
