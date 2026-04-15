@@ -246,8 +246,7 @@ void HostStartup()
 // Forward declarations from imports.cpp
 void InitKernelMainThread();
 
-// Xenon memory initialization
-#include <kernel/xenon_memory.h>
+// Xenon memory initialization handled by rexglue LoadXexImage.
 
 // Name inspired from nt's entry point
 void KiSystemStartup()

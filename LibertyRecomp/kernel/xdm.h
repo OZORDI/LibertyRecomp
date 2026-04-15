@@ -1,10 +1,224 @@
 #pragma once
 
-// Shim header — Liberty's custom kernel layer was removed (rexglue provides
-// Xbox 360 kernel services natively). This header now re-exports the
-// equivalent constants from rexglue's xtypes.
-//
-// If you're adding NEW code, prefer including rex/system/xtypes.h directly.
+#include "heap.h"
+#include "memory.h"
 
-#include <cstdint>
-#include <rex/system/xtypes.h>
+#define OBJECT_SIGNATURE           (uint32_t)'XBOX'
+#define GUEST_INVALID_HANDLE_VALUE 0xFFFFFFFF
+
+#ifndef _WIN32
+
+#define S_OK                       0x00000000
+#define FALSE                      0x00000000
+#define TRUE                       0x00000001
+#define STATUS_SUCCESS             0x00000000
+#define STATUS_WAIT_0              0x00000000
+#define STATUS_USER_APC            0x000000C0
+#define STATUS_TIMEOUT             0x00000102
+#define STATUS_NOT_IMPLEMENTED     0xC0000002
+#define STATUS_SEMAPHORE_LIMIT_EXCEEDED             0xC0000047
+#define STATUS_FAIL_CHECK          0xC0000229
+#define INFINITE                   0xFFFFFFFF
+#define FILE_ATTRIBUTE_DIRECTORY   0x00000010  
+#define FILE_ATTRIBUTE_NORMAL      0x00000080  
+#define GENERIC_READ               0x80000000
+#define GENERIC_WRITE              0x40000000
+#define FILE_READ_DATA             0x0001
+#define FILE_SHARE_READ            0x00000001  
+#define FILE_SHARE_WRITE           0x00000002
+#define CREATE_NEW                 1
+#define CREATE_ALWAYS              2
+#define OPEN_EXISTING              3
+#define INVALID_FILE_SIZE          0xFFFFFFFF
+#define INVALID_SET_FILE_POINTER   0xFFFFFFFF
+#define INVALID_FILE_ATTRIBUTES    0xFFFFFFFF
+#define FILE_BEGIN                 0
+#define FILE_CURRENT               1
+#define FILE_END                   2
+#define ERROR_NO_MORE_FILES        0x12
+#define ERROR_NO_SUCH_USER         0x525
+#define ERROR_SUCCESS              0x0
+#define ERROR_FILE_NOT_FOUND       0x2
+#define ERROR_PATH_NOT_FOUND       0x3
+#define ERROR_ACCESS_DENIED        0x5
+#define ERROR_INVALID_HANDLE       0x6
+#define ERROR_INVALID_PARAMETER    0x57
+#define ERROR_INVALID_NAME         0x7B
+#define ERROR_HANDLE_EOF           0x26
+#define ERROR_ALREADY_EXISTS       0xB7
+#define ERROR_FILE_EXISTS          0x50
+#define ERROR_CALL_NOT_IMPLEMENTED 0x78
+#define ERROR_BAD_ARGUMENTS        0xA0
+#define ERROR_TOO_MANY_POSTS       0x12A
+#define ERROR_DEVICE_NOT_CONNECTED 0x48F
+#define ERROR_EMPTY                0x0
+#define PAGE_READWRITE             0x04
+
+// XINPUT_KEYSTROKE flags
+#define XINPUT_KEYSTROKE_KEYDOWN   0x0001
+#define XINPUT_KEYSTROKE_KEYUP     0x0002
+#define XINPUT_KEYSTROKE_REPEAT    0x0004
+
+// Xbox 360 Virtual Key codes for gamepad
+#define VK_PAD_A                   0x5800
+#define VK_PAD_B                   0x5801
+#define VK_PAD_X                   0x5802
+#define VK_PAD_Y                   0x5803
+#define VK_PAD_RSHOULDER           0x5804
+#define VK_PAD_LSHOULDER           0x5805
+#define VK_PAD_LTRIGGER            0x5806
+#define VK_PAD_RTRIGGER            0x5807
+#define VK_PAD_DPAD_UP             0x5810
+#define VK_PAD_DPAD_DOWN           0x5811
+#define VK_PAD_DPAD_LEFT           0x5812
+#define VK_PAD_DPAD_RIGHT          0x5813
+#define VK_PAD_START               0x5814
+#define VK_PAD_BACK                0x5815
+#define VK_PAD_LTHUMB_PRESS        0x5816
+#define VK_PAD_RTHUMB_PRESS        0x5817
+
+// Standard keyboard virtual keys (Windows VK codes)
+#define VK_BACK                    0x08
+#define VK_TAB                     0x09
+#define VK_RETURN                  0x0D
+#define VK_SHIFT                   0x10
+#define VK_CONTROL                 0x11
+#define VK_ESCAPE                  0x1B
+#define VK_SPACE                   0x20
+#define VK_LEFT                    0x25
+#define VK_UP                      0x26
+#define VK_RIGHT                   0x27
+#define VK_DOWN                    0x28
+#define VK_DELETE                  0x2E
+
+// XINPUT_KEYSTROKE structure (8 bytes, big-endian for Xbox 360)
+typedef struct _XINPUT_KEYSTROKE {
+    be<uint16_t> VirtualKey;
+    be<uint16_t> Unicode;
+    be<uint16_t> Flags;
+    uint8_t UserIndex;
+    uint8_t HidCode;
+} XINPUT_KEYSTROKE;
+
+static_assert(sizeof(XINPUT_KEYSTROKE) == 8);
+
+
+
+typedef union _LARGE_INTEGER {
+    struct {
+        uint32_t LowPart;
+        int32_t HighPart;
+    };
+    struct {
+        uint32_t LowPart;
+        int32_t HighPart;
+    } u;
+    int64_t QuadPart;
+} LARGE_INTEGER;
+
+static_assert(sizeof(LARGE_INTEGER) == 8);
+
+typedef struct _FILETIME
+{
+    uint32_t dwLowDateTime;
+    uint32_t dwHighDateTime;
+} FILETIME;
+
+static_assert(sizeof(FILETIME) == 8);
+
+typedef struct _WIN32_FIND_DATAA
+{
+    uint32_t dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    uint32_t nFileSizeHigh;
+    uint32_t nFileSizeLow;
+    uint32_t dwReserved0;
+    uint32_t dwReserved1;
+    char cFileName[260];
+    char cAlternateFileName[14];
+} WIN32_FIND_DATAA;
+
+static_assert(sizeof(WIN32_FIND_DATAA) == 320);
+
+#endif
+
+struct KernelObject
+{
+    virtual ~KernelObject() 
+    {
+    }
+
+    virtual uint32_t Wait(uint32_t timeout) 
+    {
+        assert(false && "Wait not implemented for this kernel object.");
+        return STATUS_TIMEOUT;
+    }
+};
+
+template<typename T, typename... Args>
+inline T* CreateKernelObject(Args&&... args)
+{
+    static_assert(std::is_base_of_v<KernelObject, T>);
+    return g_userHeap.AllocPhysical<T>(std::forward<Args>(args)...);
+}
+
+template<typename T = KernelObject>
+inline T* GetKernelObject(uint32_t handle)
+{
+    assert(handle != GUEST_INVALID_HANDLE_VALUE);
+    return reinterpret_cast<T*>(g_memory.Translate(handle));
+}
+
+uint32_t GetKernelHandle(KernelObject* obj);
+
+void DestroyKernelObject(KernelObject* obj);
+void DestroyKernelObject(uint32_t handle);
+
+// Object table functions - host-side storage to avoid guest memory corruption
+KernelObject* LookupKernelObject(uint32_t guestAddr);
+void RegisterKernelObject(uint32_t guestAddr, KernelObject* obj);
+void UnregisterKernelObject(KernelObject* obj);
+
+bool IsKernelObject(uint32_t handle);
+bool IsKernelObject(void* obj);
+
+bool IsInvalidKernelObject(void* obj);
+
+template<typename T = void>
+inline T* GetInvalidKernelObject()
+{
+    return reinterpret_cast<T*>(g_memory.Translate(GUEST_INVALID_HANDLE_VALUE));
+}
+
+extern Mutex g_kernelLock;
+
+template<typename T>
+inline T* QueryKernelObject(XDISPATCHER_HEADER& header)
+{
+    std::lock_guard guard{ g_kernelLock };
+    uint32_t guestAddr = g_memory.MapVirtual(&header);
+    
+    // Look up in host-side table instead of reading from guest memory
+    KernelObject* existing = LookupKernelObject(guestAddr);
+    if (existing != nullptr)
+        return static_cast<T*>(existing);
+    
+    // Create new object and register in table
+    auto* obj = CreateKernelObject<T>(reinterpret_cast<typename T::guest_type*>(&header));
+    RegisterKernelObject(guestAddr, obj);
+    return obj;
+}
+
+// Get object without initialisation
+template<typename T>
+inline T* TryQueryKernelObject(XDISPATCHER_HEADER& header)
+{
+    std::lock_guard guard{ g_kernelLock };
+    uint32_t guestAddr = g_memory.MapVirtual(&header);
+    KernelObject* existing = LookupKernelObject(guestAddr);
+    if (existing == nullptr)
+        return nullptr;
+    return static_cast<T*>(existing);
+}

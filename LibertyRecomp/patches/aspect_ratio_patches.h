@@ -8,11 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <xxhash.h>
-#include <unordered_dense.h>
-
-// xxHashMap alias used by gta4_aspect_ratio_patches.cpp
-template <typename V>
-using xxHashMap = ankerl::unordered_dense::map<XXH64_hash_t, V>;
+#include <xxHashMap.h>
 
 struct CsdModifier
 {

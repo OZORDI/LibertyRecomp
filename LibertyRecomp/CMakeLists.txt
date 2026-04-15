@@ -134,17 +134,21 @@ set(LIBERTY_RECOMP_PRECOMPILED_HEADERS
 
 set(LIBERTY_RECOMP_KERNEL_CXX_SOURCES
     # Remaining kernel files — thin adapters over rexglue runtime.
-    # All duplicated subsystems (xam, xdm, xenon_memory, vfs, crt_init,
-    # save_system, user_profile, menu_hooks, mod_overlay, game_init,
-    # game_fixes, network/p2p/http/gxt/rpf/img_loader) have been removed —
-    # rexglue provides these natively via src/kernel/{xam,xboxkrnl,crt}
-    # and src/filesystem. Do NOT re-add them.
-    # kernel/imports.cpp removed — it contained audio + misc non-A/I/R
-    # hooks; audio moved to rexglue, misc hooks deleted.
-    "kernel/heap.cpp"            # thin adapter (96 lines) over rexglue heap
-    "kernel/memory.cpp"          # thin adapter (212 lines) — exposes g_memory
-                                 #   with .base and .Translate(guest_addr) used
-                                 #   pervasively by patches and main.cpp
+    # Duplicated subsystems (xam, xenon_memory, vfs, crt_init, save_system,
+    # user_profile, menu_hooks, mod_overlay, game_init, game_fixes, network/
+    # p2p/http/gxt/rpf/img_loader, kernel/imports, apu/) have been removed —
+    # rexglue provides these natively via src/kernel/{xam,xboxkrnl,crt},
+    # src/filesystem, src/audio. Do NOT re-add them.
+    "kernel/heap.cpp"            # thin adapter over rexglue heap
+    "kernel/memory.cpp"          # thin adapter — exposes g_memory with .base
+                                 #   and .Translate(guest_addr) used by patches
+    "kernel/xdm.cpp"             # Liberty KernelObject table (g_kernelLock,
+                                 #   LookupKernelObject...) — consumed by
+                                 #   cpu/guest_thread; TODO migrate to rex
+    "kernel/compat_stubs.cpp"    # no-op stubs for symbols orphaned by
+                                 #   imports.cpp removal: InitKernelMainThread,
+                                 #   KernelPhase_EnterRuntime, sub_821966D0_hook,
+                                 #   XamNotifyEnqueueEvent
     "kernel/lod_hooks.cpp"       # LOD rendering distance tuning
     "kernel/button_prompts.cpp"  # input UI (button prompt glyphs)
     "kernel/io/texture_convert.cpp"  # rendering — texture format conversion
@@ -343,7 +347,6 @@ set(LIBERTY_RECOMP_UI_CXX_SOURCES
     "ui/imgui_utils.cpp"
     "ui/main_menu.cpp"             # Main menu launcher (GTA IV style)
     "ui/message_window_stub.cpp"   # Stub - GTA IV version needed
-    "ui/network_status_overlay.cpp"
     "ui/options_menu_stub.cpp"     # Stub - GTA IV version needed
 )
 # Installer wizard — desktop only (uses NFD file dialogs)
