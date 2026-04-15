@@ -328,12 +328,15 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
 
     # Rendering
     "patches/gta4_aspect_ratio_patches.cpp"
-    "patches/grm_setup_patches.cpp"          # rage::grmSetup singleton
     "patches/postfx_hooks.cpp"               # PostFX (bloom, sun shafts)
-    "patches/scene_render_patches.cpp"       # Scene render pipeline
-    "patches/render_phase_patches.cpp"       # RAGE render phase system
     "patches/shader_collection_patches.cpp"  # fiCollection shader VFS mount chain
-    "patches/shader_factory_patches.cpp"     # grmShaderFactory device guard bypass
+    # Removed (interfered with rexglue):
+    # "patches/grm_setup_patches.cpp"        # force-wrote grmSetup initState
+    # "patches/scene_render_patches.cpp"     # duplicate sub_828C1228 hook
+    # "patches/render_phase_patches.cpp"     # mislabeled __imp__ bypasses
+    #                                        #   (SetVertexShader called as
+    #                                        #   SetScissorRect per frame)
+    # "patches/shader_factory_patches.cpp"   # partial DEVICE_SENTINEL trick
 )
 
 set(LIBERTY_RECOMP_UI_CXX_SOURCES
