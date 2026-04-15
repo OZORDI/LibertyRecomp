@@ -30,8 +30,8 @@ using Microsoft::WRL::ComPtr;
 #include <xxhash.h>
 #include <ankerl/unordered_dense.h>
 #include <ddspp.h>
-// RexGlue PPC types + function declarations (shim forwards to gta4-recomp)
-#include "cpu/ppc_func_decls.h"
+// RexGlue PPC types + gta4-recomp function declarations
+#include "../glue/gta4-recomp/generated/gta4_init.h"
 #include <toml++/toml.hpp>
 #include <zstd.h>
 #include <stb_image.h>
