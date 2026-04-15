@@ -291,9 +291,13 @@ void KiSystemStartup()
     // XAudioInitializeSystem(); // Removed: RexGlue SDL audio handles this
 }
 
+// Static buffer keeps the XEX bytes alive for the lifetime of XDBFWrapper
+// so we don't hand out pointers into a stack-local std::vector.
+static std::vector<uint8_t> g_xexFileBuffer;
+
 uint32_t LdrLoadModule(const std::filesystem::path &path)
 {
-    const auto loadResult = LoadFile(path);
+    auto loadResult = LoadFile(path);
     if (loadResult.empty())
     {
         assert("Failed to load module" && false);
@@ -302,16 +306,25 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
 
     const auto image = Image::ParseImage(loadResult.data(), loadResult.size());
 
-    // Write PE to guest memory so we can extract XDBF from guest addresses.
-    // LoadXexImage will overwrite this with its own PE decompression later,
-    // but we need the image in memory now for the XDBF wrapper.
-    memcpy(g_memory.Translate(image.base), image.data.get(), image.size);
-    g_xdbfWrapper = XDBFWrapper(static_cast<uint8_t*>(g_memory.Translate(image.resource_offset)), image.resource_size);
-
-    // NOTE: Collision fix, worker globals zeroing, .rdata protection all
-    // removed — RexGlue's LoadXexImage overwrites guest memory with the
-    // correct PE data and handles BSS zeroing.  Those patches were
-    // overwritten anyway and are no longer needed.
+    // Feed XDBFWrapper from the RAW FILE BYTES, not guest memory. Previously
+    // Liberty memcpy'd the whole decompressed PE into guest memory just so
+    // XDBFWrapper could point at image.resource_offset inside g_memory.base —
+    // but rexglue's LoadXexImage then overwrote that same region immediately
+    // afterwards, making the memcpy a pure waste (plus it was running before
+    // rexglue finished setting up its own PE layout).
+    //
+    // image.data is a unique_ptr<uint8_t[]> into a stack-local parsed view;
+    // the ParseImage helper in xenon_image.cpp copies the decompressed PE
+    // into image.data with image.resource_offset as the byte offset of XDBF
+    // within that buffer. Hand XDBFWrapper a pointer into g_xexFileBuffer
+    // instead.
+    g_xexFileBuffer.assign(image.data.get(), image.data.get() + image.size);
+    const uint32_t xdbfOffset = image.resource_offset - image.base;
+    if (xdbfOffset + image.resource_size <= g_xexFileBuffer.size())
+    {
+        g_xdbfWrapper = XDBFWrapper(g_xexFileBuffer.data() + xdbfOffset,
+                                    image.resource_size);
+    }
 
     return image.entry_point;
 }
@@ -558,15 +571,11 @@ int main(int argc, char *argv[])
             std::move(rexConfig));
         fprintf(stderr, "[Main] Setup() returned 0x%08X\n", rt_status);
 
-        // Xbox 360 timebase runs at exactly 50MHz.
-        // Must be set before any PPC_QUERY_TIMEBASE() call fires, so the game's
-        // timing math (loading-screen task advancement in sub_82143DC8) gets the
-        // correct elapsed-time values.  Without this, guest_tick_frequency_ defaults
-        // to the host CPU frequency (~1-4GHz), causing the 1/50M scaling constant
-        // baked into the game to return effectively-zero milliseconds and every
-        // time-gated loading task spins forever at state=0.
+        // Xbox 360 timebase = exactly 50 MHz. Must be explicit because Liberty
+        // drives rex::Runtime directly (not via rex::ReXApp), so ReXApp's
+        // defaults don't fire and the Clock would otherwise default to host CPU
+        // freq, breaking time-gated loading tasks.
         rex::chrono::Clock::set_guest_tick_frequency(50000000ULL);
-        fprintf(stderr, "[Main] Guest tick frequency set to 50MHz (Xbox 360 timebase)\n");
 
         if (rt_status != 0 /* X_STATUS_SUCCESS */) {
             fprintf(stderr, "[Main] FATAL: rex::Runtime::Setup() failed with 0x%08X\n", rt_status);
@@ -574,13 +583,14 @@ int main(int argc, char *argv[])
             std::_Exit(1);
         }
 
-        // Initialize rexcrt heap with the Runtime's Memory (matches rex_app.cpp pattern).
-        // Must be after Setup() so runtime_->memory() is valid.
+        // rexcrt heap init. Same reason as above — rex_app.cpp normally handles
+        // this for ReXApp-derived apps, but Liberty owns its own main() so we
+        // have to call it ourselves. Without this rexcrt_RtlAllocateHeap fails
+        // with "kernel memory is null" on every guest alloc → SIGBUS.
         if (!rex::kernel::crt::InitHeap(FLAGS_rexcrt_heap_size_mb, s_rexRuntime->memory())) {
             fprintf(stderr, "[Main] FATAL: rexcrt heap init failed\n");
             std::_Exit(1);
         }
-        fprintf(stderr, "[Main] rexcrt heap initialized (%u MB)\n", FLAGS_rexcrt_heap_size_mb);
         // DIAG: verify xstart is registered after Setup().
         // Gated by LIBERTY_VERBOSE_DIAG env var — silent in normal runs.
         if (::os::diag::ShouldEmit()) {
@@ -628,22 +638,15 @@ int main(int argc, char *argv[])
             fs->RegisterSymbolicLink("xbox360:", "\\Device\\Harddisk0\\Partition1\\xbox360");
             // X: drive prefix used by some game code
             fs->RegisterSymbolicLink("x:", "\\Device\\Harddisk0\\Partition1");
-            // update:\path -> \Device\Harddisk0\Partition1\update\path
-            // GTA IV v8 title update content (effects, text, shaders)
-            fs->RegisterSymbolicLink("update:", "\\Device\\Harddisk0\\Partition1\\update");
-            // Register writable cache device for Xbox 360 temp/scratch storage
-            auto cachePath = GetUserPath() / "cache";
-            std::filesystem::create_directories(cachePath);
-            auto cacheDevice = std::make_unique<rex::filesystem::HostPathDevice>(
-                "\\Device\\CachePartition", cachePath, /*read_only=*/false);
-            if (cacheDevice->Initialize()) {
-                fs->RegisterDevice(std::move(cacheDevice));
-                fs->RegisterSymbolicLink("cache:", "\\Device\\CachePartition");
-                fs->RegisterSymbolicLink("cache1:", "\\Device\\CachePartition");
-                printf("[Main] Registered cache: device at %s\n", cachePath.string().c_str());
-            } else {
-                printf("[Main] WARNING: Failed to initialize cache device\n");
-            }
+            // update: symlink removed — rex::Runtime::SetupVfs()
+            // (runtime.cpp:272) already registers it. Liberty's override was
+            // racing with rex's via std::multimap::insert (order-dependent
+            // first-match in FindSymbolicLink).
+            //
+            // cache:/cache1: devices removed — rexglue's runtime.cpp:292-294
+            // explicitly documents: "Do NOT register a device for cache:
+            // paths... Games handle 'device not found' gracefully but don't
+            // handle NAME_COLLISION well. Let cache: fail cleanly."
 
             // Register writable save device for PS4 (SCE savedata mount at /savedata0/)
 #ifdef LIBERTY_RECOMP_PS4
@@ -864,25 +867,11 @@ int main(int argc, char *argv[])
     {
         auto* rt = rex::Runtime::instance();
 
-#if defined(LIBERTY_RECOMP_EMBEDDED_ASSETS)
-        auto gameDir = EmbeddedAssets::GetGameRoot();
-#else
-        auto gameDir = modulePath.parent_path();
-#endif
-        printf("[Main] Setting up RexGlue VFS: %s\n", gameDir.string().c_str()); fflush(stdout);
-
-        auto device = std::make_unique<rex::filesystem::HostPathDevice>(
-            "\\Device\\Harddisk0\\Partition1", gameDir, /*read_only=*/true);
-        if (!device->Initialize()) {
-            printf("[Main] FATAL: Failed to initialize VFS host device\n");
-            fflush(stdout);
-            printf("[EXIT-TRACE] main.cpp:755 calling _Exit\n"); fflush(stdout);
-            std::_Exit(1);
-        }
-        rt->file_system()->RegisterDevice(std::move(device));
-        rt->file_system()->RegisterSymbolicLink("game:", "\\Device\\Harddisk0\\Partition1");
-        rt->file_system()->RegisterSymbolicLink("d:", "\\Device\\Harddisk0\\Partition1");
-        printf("[Main] RexGlue VFS ready\n"); fflush(stdout);
+        // VFS setup removed — rex::Runtime::SetupVfs() (runtime.cpp:253-262)
+        // already registers the HostPathDevice at \Device\Harddisk0\Partition1
+        // plus symlinks for game: and d: during Runtime construction. Liberty's
+        // duplicate block was re-inserting a second HostPathDevice + re-binding
+        // the symlinks every boot.
 
         rex::X_STATUS xst = rt->LoadXexImage("game:\\default.xex");
         if (xst != 0) {
@@ -984,8 +973,8 @@ int main(int argc, char *argv[])
         printf("[EXIT-TRACE] main.cpp:884 calling _Exit\n"); fflush(stdout);
         std::_Exit(1);
     }
-    printf("[Main] Main XThread launched via RexGlue (handle=0x%08X)\n",
-           main_xthread->handle()); fflush(stdout);
+    // rexglue's own XThread::Execute log already covers this; suppress the
+    // duplicate printf (was polluting stdout with an untagged line).
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)
     os::discord::SetState(os::discord::GameState::InGame);
 #endif
