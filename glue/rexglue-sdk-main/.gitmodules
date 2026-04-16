@@ -6,7 +6,8 @@
 	url = https://github.com/KhronosGroup/glslang.git
 [submodule "thirdparty/FFmpeg"]
 	path = thirdparty/FFmpeg
-	url = https://github.com/xenia-project/FFmpeg.git
+	url = https://github.com/wmarti/FFmpeg.git
+	branch = xenia-ffmpeg-canary-full
 [submodule "thirdparty/tomlplusplus"]
 	path = thirdparty/tomlplusplus
 	url = https://github.com/marzer/tomlplusplus.git
@@ -43,10 +44,6 @@
 [submodule "thirdparty/imgui"]
 	path = thirdparty/imgui
 	url = https://github.com/ocornut/imgui.git
-[submodule "thirdparty/sdl2"]
-	path = thirdparty/sdl2
-	url = https://github.com/libsdl-org/SDL.git
-	branch = release-2.32.x
 [submodule "thirdparty/spirv-tools"]
 	path = thirdparty/spirv-tools
 	url = https://github.com/KhronosGroup/SPIRV-Tools.git
@@ -56,3 +53,16 @@
 [submodule "thirdparty/cli11"]
 	path = thirdparty/cli11
 	url = https://github.com/CLIUtils/CLI11
+[submodule "thirdparty/o1heap"]
+	path = thirdparty/o1heap
+	url = https://github.com/pavel-kirienko/o1heap.git
+[submodule "thirdparty/sdl3"]
+	path = thirdparty/sdl3
+	url = https://github.com/libsdl-org/SDL
+	branch = release-3.4.x
+[submodule "thirdparty/inja"]
+	path = thirdparty/inja
+	url = https://github.com/pantor/inja.git
+[submodule "thirdparty/tracy"]
+	path = thirdparty/tracy
+	url = https://github.com/wolfpld/tracy.git

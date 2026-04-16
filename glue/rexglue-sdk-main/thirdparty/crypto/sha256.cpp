@@ -9,11 +9,17 @@
 
 // big endian architectures need #define __BYTE_ORDER __BIG_ENDIAN
 #ifndef _MSC_VER
-#  ifdef __APPLE__
-#    include <machine/endian.h>
-#  else
-#    include <endian.h>
-#  endif
+#if defined(__APPLE__)
+#include <machine/endian.h>
+#ifndef __BYTE_ORDER
+#define __BYTE_ORDER BYTE_ORDER
+#endif
+#ifndef __BIG_ENDIAN
+#define __BIG_ENDIAN BIG_ENDIAN
+#endif
+#else
+#include <endian.h>
+#endif
 #endif
 
 namespace sha256 {

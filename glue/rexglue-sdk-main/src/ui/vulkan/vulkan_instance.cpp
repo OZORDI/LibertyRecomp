@@ -9,6 +9,9 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <algorithm>
+#include <array>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -16,6 +19,7 @@
 #include <vector>
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/vulkan/instance.h>
@@ -26,6 +30,51 @@ REXCVAR_DEFINE_BOOL(vulkan_log_debug_messages, true, "UI/Vulkan", "Log Vulkan de
 namespace rex {
 namespace ui {
 namespace vulkan {
+
+#if REX_PLATFORM_MAC
+namespace {
+
+bool LoadMacVulkanLoader(platform::DynamicLibrary& loader) {
+  if (loader.Load(platform::lib_names::kVulkanLoader)) {
+    return true;
+  }
+
+  const auto exe_dir = rex::filesystem::GetExecutableFolder();
+  const std::array<const char*, 4> fallback_names = {
+      "libMoltenVKd.dylib",
+      "libMoltenVKd.1.dylib",
+      "libMoltenVK.dylib",
+      "libMoltenVK.1.dylib",
+  };
+  for (const char* fallback_name : fallback_names) {
+    if (loader.Load(exe_dir / fallback_name)) {
+      return true;
+    }
+  }
+
+  std::vector<std::filesystem::path> versioned_candidates;
+  for (const auto& entry : std::filesystem::directory_iterator(exe_dir)) {
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    const auto filename = entry.path().filename().string();
+    if (!filename.starts_with("libMoltenVK") || entry.path().extension() != ".dylib") {
+      continue;
+    }
+    versioned_candidates.push_back(entry.path());
+  }
+  std::sort(versioned_candidates.begin(), versioned_candidates.end());
+  for (const auto& candidate : versioned_candidates) {
+    if (loader.Load(candidate)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+}  // namespace
+#endif
 
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
@@ -40,7 +89,13 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   Functions& ifn = vulkan_instance->functions_;
 
   bool functions_loaded = true;
-  if (!vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader)) {
+  bool loader_loaded = false;
+#if REX_PLATFORM_MAC
+  loader_loaded = LoadMacVulkanLoader(vulkan_instance->loader_);
+#else
+  loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
+#endif
+  if (!loader_loaded) {
     REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
     return nullptr;
   }
@@ -96,9 +151,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   // #129.
   requested_extensions.emplace("VK_EXT_debug_utils",
                                &vulkan_instance->extensions_.ext_EXT_debug_utils);
+#if REX_PLATFORM_MAC
   // #395.
-  requested_extensions.emplace("VK_KHR_portability_enumeration",
+  requested_extensions.emplace(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
                                &vulkan_instance->extensions_.ext_KHR_portability_enumeration);
+#endif
   if (with_surface) {
     // #1.
     requested_extensions.emplace("VK_KHR_surface", &vulkan_instance->extensions_.ext_KHR_surface);
@@ -116,6 +173,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     // #10.
     requested_extensions.emplace("VK_KHR_win32_surface",
                                  &vulkan_instance->extensions_.ext_KHR_win32_surface);
+#endif
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    // #218.
+    requested_extensions.emplace("VK_EXT_metal_surface",
+                                 &vulkan_instance->extensions_.ext_EXT_metal_surface);
 #endif
   }
 
@@ -301,12 +363,14 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instance_create_info.pNext = nullptr;
   instance_create_info.flags = 0;
+#if REX_PLATFORM_MAC
   // VK_KHR_get_physical_device_properties2 is needed to get the portability
   // subset features.
   if (vulkan_instance->extensions_.ext_KHR_portability_enumeration &&
       vulkan_instance->extensions_.ext_1_1_KHR_get_physical_device_properties2) {
     instance_create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   }
+#endif
   instance_create_info.pApplicationInfo = &application_info;
   instance_create_info.enabledLayerCount = uint32_t(enabled_layers.size());
   instance_create_info.ppEnabledLayerNames = enabled_layers.data();
@@ -380,6 +444,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
 #include <rex/ui/vulkan/functions/instance_khr_win32_surface.inc>
   }
 #endif
+#ifdef VK_USE_PLATFORM_METAL_EXT
+  if (vulkan_instance->extensions_.ext_EXT_metal_surface) {
+#include <rex/ui/vulkan/functions/instance_ext_metal_surface.inc>
+  }
+#endif
   if (vulkan_instance->extensions_.ext_KHR_surface) {
 #include <rex/ui/vulkan/functions/instance_khr_surface.inc>
   }
@@ -424,7 +493,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   if (vulkan_instance->extensions_.ext_EXT_debug_utils && REXCVAR_GET(vulkan_log_debug_messages)) {
     VkDebugUtilsMessengerCreateInfoEXT debug_utils_messenger_create_info = {
         VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
-    auto gpu_logger = rex::GetLogger(rex::log::GPU);
+    auto gpu_logger = rex::GetLogger(rex::log::gpu());
     if (gpu_logger) {
       if (gpu_logger->should_log(spdlog::level::debug)) {
         debug_utils_messenger_create_info.messageSeverity |=

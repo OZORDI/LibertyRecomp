@@ -13,7 +13,8 @@
 
 #pragma once
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__ORBIS__) || defined(LIBERTY_RECOMP_PS4) || \
+    defined(__SWITCH__) || defined(LIBERTY_RECOMP_NX)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 1.  std::move_only_function<R(Args...)>
@@ -125,8 +126,11 @@ namespace std::chrono {  // NOLINT(cert-dcl58-cpp) — intentional std extension
 #endif
 
 // Guard: only inject if it hasn't been defined by the standard library.
+// GCC 15+ (devkitPro) already provides clock_time_conversion in C++20 mode.
+#if !defined(__GLIBCXX__) || (__cplusplus < 202002L)
 template <typename _DestClock, typename _SourceClock>
 struct clock_time_conversion {};                       // primary template — empty, per standard
+#endif
 
 }  // namespace std::chrono
 
@@ -141,6 +145,9 @@ struct clock_time_conversion {};                       // primary template — e
 //       (b)  Direct clock_time_conversion<D,S>() operator defined
 //       (c)  Via system_clock as intermediate
 // ──────────────────────────────────────────────────────────────────────────────
+
+// GCC 15+ (devkitPro) already provides clock_cast in C++20 mode.
+#if !defined(__GLIBCXX__) || (__cplusplus < 202002L)
 
 namespace std::chrono {  // NOLINT(cert-dcl58-cpp)
 
@@ -176,6 +183,8 @@ auto clock_cast(const std::chrono::time_point<SourceClock, Duration>& t)
     }
 }
 
-}  // namespace std::chrono
+}
 
-#endif  // __APPLE__
+#endif  // !__GLIBCXX__
+
+#endif  // __APPLE__ || __ORBIS__ || LIBERTY_RECOMP_PS4 || __SWITCH__ || LIBERTY_RECOMP_NX

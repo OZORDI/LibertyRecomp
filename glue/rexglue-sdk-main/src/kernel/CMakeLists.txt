@@ -54,12 +54,13 @@ set(REXKERNEL_SOURCES
     xboxkrnl/xboxkrnl_video.cpp
     xboxkrnl/xboxkrnl_xconfig.cpp
     xboxkrnl/xboxkrnl_audio.cpp
-    $<$<NOT:$<BOOL:${APPLE}>>:xboxkrnl/xboxkrnl_audio_xma.cpp>
+    xboxkrnl/xboxkrnl_audio_xma.cpp
 
     crt/heap.cpp
     crt/file.cpp
     crt/memory.cpp
     crt/string.cpp
+    crt/threading.cpp
 )
 
 add_library(rexkernel STATIC ${REXKERNEL_SOURCES})
@@ -71,7 +72,6 @@ target_include_directories(rexkernel PUBLIC
 )
 target_include_directories(rexkernel PRIVATE
     ${REXGLUE_ROOT}/thirdparty
-    ${REXGLUE_ROOT}/thirdparty/imgui
 )
 
 target_link_libraries(rexkernel
@@ -81,6 +81,10 @@ target_link_libraries(rexkernel
         rexgraphics
         rexinput
         rexaudio
-        $<IF:$<TARGET_EXISTS:rexglue_o1heap>,rexglue_o1heap,o1heap>
+        # Use rexglue's own o1heap (v3 with O1HEAP_ALIGNMENT = 4*sizeof(void*)
+        # and o1heapReallocate). LibertyRecomp's top-level project may define
+        # an older 'o1heap' target (v2) for tooling; we always link the
+        # rexglue-owned target by its real name to avoid the conflict.
+        rexglue_o1heap
 )
 

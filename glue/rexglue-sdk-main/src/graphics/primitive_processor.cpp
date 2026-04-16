@@ -250,7 +250,7 @@ void PrimitiveProcessor::ShutdownCommon() {
     // Clear the cache if it has ever been used and unregister the invalidation
     // callback.
     {
-      auto global_lock = global_critical_region_.Acquire();
+      std::lock_guard<std::mutex> cache_lock(cache_mutex_);
       cache_map_.clear();
       cache_bucket_free_first_entry_ = SIZE_MAX;
       std::memset(cache_buckets_non_empty_l1_, 0, sizeof(cache_buckets_non_empty_l1_));
@@ -267,7 +267,7 @@ void PrimitiveProcessor::ClearPerFrameCache() {
     // Only do clearing if cache has ever been used.
     return;
   }
-  auto global_lock = global_critical_region_.Acquire();
+  std::lock_guard<std::mutex> cache_lock(cache_mutex_);
   for (const std::pair<CacheKey, size_t>& cache_map_entry : cache_map_) {
     cache_entry_pool_[cache_map_entry.second].free_next = cache_bucket_free_first_entry_;
     cache_bucket_free_first_entry_ = cache_map_entry.second;
@@ -881,6 +881,39 @@ bool PrimitiveProcessor::Process(ProcessingResult& result_out) {
           }
         }
       }
+
+      // For host vertex shader types that don't support manually reading 32-bit
+      // guest DMA indices in the shader path on some backends (notably Vulkan
+      // without fullDrawIndexUint32), pre-convert to host-endian 24-bit indices.
+      if (cacheable.index_buffer_type == ProcessedIndexBufferType::kGuestDMA &&
+          guest_index_format == xenos::IndexFormat::kInt32 && !full_32bit_vertex_indices_used_ &&
+          host_vertex_shader_type != Shader::HostVertexShaderType::kVertex) {
+        trace_writer_.WriteMemoryRead(guest_index_base, guest_index_buffer_needed_bytes);
+        // No primitive-type conversion, just index normalization.
+        CacheTransaction cache_transaction(
+            *this, CacheKey(guest_index_base, guest_draw_vertex_count, guest_index_format,
+                            guest_index_endian, guest_primitive_reset_enabled,
+                            xenos::PrimitiveType::kNone, true));
+        if (cache_transaction.GetFoundResult()) {
+          cacheable = *cache_transaction.GetFoundResult();
+        } else {
+          auto guest_indices = memory_.TranslatePhysical<const uint32_t*>(guest_index_base);
+          auto host_indices =
+              reinterpret_cast<uint32_t*>(RequestHostConvertedIndexBufferForCurrentFrame(
+                  xenos::IndexFormat::kInt32, guest_draw_vertex_count, true, guest_index_base,
+                  cacheable.host_index_buffer_handle));
+          if (!host_indices) {
+            return false;
+          }
+          for (uint32_t i = 0; i < guest_draw_vertex_count; ++i) {
+            host_indices[i] =
+                xenos::GpuSwap(guest_indices[i], guest_index_endian) & xenos::kVertexIndexMask;
+          }
+          cacheable.index_buffer_type = ProcessedIndexBufferType::kHostConverted;
+          cacheable.host_shader_index_endian = xenos::Endian::kNone;
+          cache_transaction.SetNewResult(cacheable);
+        }
+      }
     }
   }
 
@@ -903,6 +936,7 @@ bool PrimitiveProcessor::Process(ProcessingResult& result_out) {
   result_out.host_primitive_type = host_primitive_type;
   result_out.host_vertex_shader_type = host_vertex_shader_type;
   result_out.tessellation_mode = tessellation_mode;
+  result_out.guest_draw_vertex_count = guest_draw_vertex_count;
   result_out.host_draw_vertex_count = cacheable.host_draw_vertex_count;
   result_out.line_loop_closing_index = line_loop_closing_index;
   result_out.index_buffer_type = cacheable.index_buffer_type;
@@ -1317,7 +1351,7 @@ PrimitiveProcessor::CacheTransaction::CacheTransaction(PrimitiveProcessor& proce
       (key_.format == xenos::IndexFormat::kInt16 ? sizeof(uint16_t) : sizeof(uint32_t)) *
       key_.count;
   {
-    auto global_lock = processor_.global_critical_region_.Acquire();
+    std::lock_guard<std::mutex> cache_lock(processor_.cache_mutex_);
     auto cache_map_it = processor_.cache_map_.find(key_);
     if (cache_map_it != processor_.cache_map_.end()) {
       result_ = processor_.cache_entry_pool_[cache_map_it->second].result;
@@ -1348,7 +1382,7 @@ PrimitiveProcessor::CacheTransaction::~CacheTransaction() {
     return;
   }
 
-  auto global_lock = processor_.global_critical_region_.Acquire();
+  std::lock_guard<std::mutex> cache_lock(processor_.cache_mutex_);
 
   processor_.cache_currently_processing_base_ = 0;
   processor_.cache_currently_processing_size_bytes_ = 0;
@@ -1388,7 +1422,7 @@ PrimitiveProcessor::CacheTransaction::~CacheTransaction() {
       } else {
         new_entry.buckets_next[link_index] = SIZE_MAX;
         bucket_non_empty_l1_ref |= bucket_non_empty_l1_bit;
-        processor_.UpdateCacheBucketsNonEmptyL2(bucket_index >> 6, global_lock);
+        processor_.UpdateCacheBucketsNonEmptyL2(bucket_index >> 6, cache_lock);
       }
       bucket_first_entry_ref = new_entry_index;
     }
@@ -1421,7 +1455,7 @@ std::pair<uint32_t, uint32_t> PrimitiveProcessor::MemoryInvalidationCallback(
   uint32_t bucket_l1_bits_index_last = bucket_index_last >> 6;
   uint32_t bucket_l2_bits_index_first = bucket_index_first >> 12;
   uint32_t bucket_l2_bits_index_last = bucket_index_last >> 12;
-  auto global_lock = global_critical_region_.Acquire();
+  std::lock_guard<std::mutex> cache_lock(cache_mutex_);
   for (uint32_t bucket_l2_bits_index = bucket_l2_bits_index_first;
        bucket_l2_bits_index <= bucket_l2_bits_index_last; ++bucket_l2_bits_index) {
     uint64_t bucket_l2_bits_mask = UINT64_MAX;
@@ -1511,7 +1545,7 @@ std::pair<uint32_t, uint32_t> PrimitiveProcessor::MemoryInvalidationCallback(
                     // empty now.
                     cache_buckets_non_empty_l1_[entry_bucket_index >> 6] &=
                         ~(uint64_t(1) << (entry_bucket_index & 63));
-                    UpdateCacheBucketsNonEmptyL2(entry_bucket_index >> 6, global_lock);
+                    UpdateCacheBucketsNonEmptyL2(entry_bucket_index >> 6, cache_lock);
                   }
                 }
                 if (entry_link_next != SIZE_MAX) {

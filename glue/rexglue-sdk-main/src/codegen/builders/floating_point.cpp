@@ -9,7 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "../builder_context.h"
+#include "builder_context.h"
 #include "helpers.h"
 
 namespace rex::codegen {
@@ -72,6 +72,16 @@ bool build_fctidz(BuilderContext& ctx) {
       "\t{0}.s64 = std::isnan({1}.f64) ? int64_t(0x8000000000000000ULL) : "
       "({1}.f64 > double(LLONG_MAX)) ? LLONG_MAX : "
       "simde_mm_cvttsd_si64(simde_mm_load_sd(&{1}.f64));",
+      ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]));
+  return true;
+}
+
+bool build_fctiw(BuilderContext& ctx) {
+  ctx.emit_set_flush_mode(false);
+  ctx.println(
+      "\t{0}.s64 = std::isnan({1}.f64) ? int64_t(0x80000000U) : "
+      "({1}.f64 > double(INT_MAX)) ? INT_MAX : "
+      "simde_mm_cvtsd_si32(simde_mm_load_sd(&{1}.f64));",
       ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]));
   return true;
 }

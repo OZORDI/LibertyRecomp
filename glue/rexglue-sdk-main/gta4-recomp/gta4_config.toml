@@ -1,0 +1,139 @@
+# GTA4 - ReXGlue Codegen Configuration
+# Xbox 360 Static Recompilation - v8 (0.0.8.5)
+
+project_name = "gta4"
+file_path = "assets/default.xex"
+patched_file_path = "assets/default_v8.xex"
+out_directory_path = "generated"
+
+skip_lr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+skip_msr = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+[analysis]
+max_jump_extension = 65536
+data_region_threshold = 16
+large_function_threshold = 1048576
+
+# rexcrt: Replace statically-linked PPC CRT functions with native implementations.
+# Addresses verified via IDA Pro Hex-Rays decompilation + xref tracing.
+# Format: FunctionName = guest_address
+[rexcrt]
+# String/memory CRT (verified PR #180 — corrected pass 2)
+memset   = 0x82A11D08   # 255 xrefs - extsb fill byte + stb loop + VMX vspltb fast path
+memcpy   = 0x82A11940   # 183 xrefs - alignment-aware ld/std copy + dcbz128 prefetch
+_stricmp = 0x829FFCF0   # 477 xrefs - A-Z case folding (cmpwi 0x41/0x5A + ori r6,r6,0x20)
+strncmp  = 0x82A00C40   # 113 xrefs - byte compare with count (subfc. + bdnzf null-stop)
+strncpy  = 0x82A00BA0   # 101 xrefs - copy with null-pad remainder
+strchr   = 0x82A00B60   #  34 xrefs - lbz + cmpwi null + cmpw char match + lbzu advance
+XMemCpy  = 0x82A18CD0   #   1 xref  - VMX 128-byte streaming copy with dcbz128 (called from single hot path)
+strtok   = 0x82A01DE8   # token parser with static state (TLS-based on 360)
+strrchr  = 0x82A02100   #  30 xrefs - forward scan saving last match position, returns ptr or NULL
+strstr   = 0x829FFAD0   #  25 xrefs - nested byte-compare loops for substring search
+
+# Heap CRT (verified via Hex-Rays: takes heap_handle, flags, size/ptr)
+RtlAllocateHeap  = 0x82A17180  # 6 callers - 2196 bytes, manages free-lists + NtAllocateVirtualMemory
+RtlFreeHeap      = 0x82A17A68  # 5 callers - 660 bytes, coalesces blocks + NtFreeVirtualMemory
+RtlSizeHeap      = 0x82A16418  # 2 callers - 168 bytes, reads block header size
+RtlReAllocateHeap = 0x82A17D50 # 3 callers - 2108 bytes, alloc+copy+free internally
+
+# File CRT (verified via Hex-Rays + NT import xref tracing)
+CreateFileA        = 0x82A131B0
+ReadFile           = 0x82A12958
+WriteFile          = 0x82A13618
+CloseHandle        = 0x82A11F68
+SetFilePointer     = 0x82A127E0
+GetFileSizeEx      = 0x82A14918
+GetFileSize        = 0x82A125D0
+SetEndOfFile       = 0x82A14C68
+DeleteFileA        = 0x82A14D10
+MoveFileA          = 0x82A14DC8
+SetFileAttributesA = 0x82A14B30
+GetFileAttributesA = 0x82A14AC8
+SetFileTime        = 0x82A14A18
+FindFirstFileA     = 0x82A14988   # was 0x82A19F88 (NT-level NtQueryDirectoryFile wrapper, wrong layer)
+FindNextFileA      = 0x82A1A100
+FlushFileBuffers   = 0x82A188E0   # thin wrapper calling NtFlushBuffersFile
+CreateDirectoryA   = 0x82A14E98   # NtCreateFile + FILE_DIRECTORY_FILE, returns 1/0
+RemoveDirectoryA   = 0x82A1A160
+
+[functions]
+# NOTE (2026-04-01): 13 of 14 original entries were verified as BAD addresses
+# by reading raw PPC bytes from default.bin. They pointed to mid-function code,
+# epilogues, blr instructions, VMX loop bodies, or outside .text entirely.
+# The codegen generated broken "functions" from these — executing from random
+# mid-function points. All 13 removed. See docs/rendering_research.md.
+#
+# Original bad entries (DO NOT RE-ADD):
+#   0x8217C108 — mid-function lis (no prologue)
+#   0x82A77E28 — outside .text (epilogue in padding)
+#   0x8219E410 — mid-function VMX instruction
+#   0x8219ACA0 — mid-function rlwinm (codegen fabricated synthetic stub)
+#   0x828764B8 — switch/case jump table dispatch (lwzx/mtctr/bctr)
+#   0x82A6C218 — mid-function addi (real entry at 0x82A6C208)
+#   0x82A69CC8 — mid-function addi
+#   0x82A69CA8 — epilogue lwz r12
+#   0x82A69C68 — mid-epilogue bl __restgprlr
+#   0x82A69428 — literal blr instruction
+#   0x82A69328 — mid-function addi
+#   0x82A69308 — epilogue lwz r12
+#   0x82A692C8 — mid-epilogue bl __restgprlr
+#
+# v8 cross-function branch targets — other functions (0x8217C5A8, 0x827BAC18,
+# 0x821A2EDC) branch directly to these mid-function addresses. The codegen
+# requires them as function entries so branches resolve. The real parent
+# Cross-function branch targets: other functions branch directly to these
+# mid-function addresses. Required by codegen to resolve the call graph.
+"0x8217C108" = {}   # branch target from sub_8217C5A8
+"0x82A77E28" = {}   # tail-call thunk: b sub_82812248
+"0x8219E410" = {}   # branch target from sub_821A2EDC
+
+# REMOVED: 9 CRT ctor entries (0x82A6xxxx) — proven redundant.
+# Codegen auto-discovers all 1447 CRT constructors without explicit entries.
+
+# Mid-function vtable dispatchers — NOT restored (genuinely mid-function)
+# 0x8219ACA0 and 0x828764B8 were mid-function offsets, not CRT ctors
+
+# CRT function boundaries: force codegen to split these out as separate functions
+# (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
+"0x82A11D08" = { name = "memset" }
+"0x82A11940" = { name = "memcpy" }
+"0x829FFCF0" = { name = "_stricmp" }
+"0x82A00C40" = { name = "strncmp" }
+"0x82A00BA0" = { name = "strncpy" }
+"0x82A00B60" = { name = "strchr" }
+"0x82A18CD0" = { name = "XMemCpy" }
+"0x82A01DE8" = { name = "strtok" }
+"0x82A02100" = { name = "strrchr" }
+"0x829FFAD0" = { name = "strstr" }
+
+# Heap CRT function boundaries
+"0x82A17180" = { name = "RtlAllocateHeap" }
+"0x82A17A68" = { name = "RtlFreeHeap" }
+"0x82A16418" = { name = "RtlSizeHeap" }
+"0x82A17D50" = { name = "RtlReAllocateHeap" }
+
+# File CRT function boundaries
+"0x82A131B0" = { name = "CreateFileA" }
+"0x82A12958" = { name = "ReadFile" }
+"0x82A13618" = { name = "WriteFile" }
+"0x82A11F68" = { name = "CloseHandle" }
+"0x82A127E0" = { name = "SetFilePointer" }
+"0x82A14918" = { name = "GetFileSizeEx" }
+"0x82A125D0" = { name = "GetFileSize" }
+"0x82A14C68" = { name = "SetEndOfFile" }
+"0x82A14D10" = { name = "DeleteFileA" }
+"0x82A14DC8" = { name = "MoveFileA" }
+"0x82A14B30" = { name = "SetFileAttributesA" }
+"0x82A14AC8" = { name = "GetFileAttributesA" }
+"0x82A14A18" = { name = "SetFileTime" }
+"0x82A14988" = { name = "FindFirstFileA" }  # was 0x82A19F88 (NT-level, wrong)
+"0x82A1A100" = { name = "FindNextFileA" }
+"0x82A188E0" = { name = "FlushFileBuffers" }
+"0x82A14E98" = { name = "CreateDirectoryA" }
+"0x82A1A160" = { name = "RemoveDirectoryA" }

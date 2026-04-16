@@ -269,7 +269,7 @@
                     "type": "STRING"
                 },
                 "ANDROID_PLATFORM": {
-                    "value": "android-26",
+                    "value": "android-28",
                     "type": "STRING"
                 },
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
@@ -280,6 +280,14 @@
                     "value": "ON",
                     "type": "BOOL"
                 }
+            },
+            "environment": {
+                "ANDROID_NDK": "$penv{ANDROID_NDK}"
+            },
+            "condition": {
+                "type": "inList",
+                "string": "${hostSystemName}",
+                "list": ["Darwin", "Linux"]
             }
         },
         {
@@ -321,6 +329,14 @@
                     "value": "ON",
                     "type": "BOOL"
                 }
+            },
+            "environment": {
+                "OO_PS4_TOOLCHAIN": "$penv{OO_PS4_TOOLCHAIN}"
+            },
+            "condition": {
+                "type": "inList",
+                "string": "${hostSystemName}",
+                "list": ["Darwin", "Linux"]
             }
         },
         {
@@ -358,10 +374,30 @@
                     "value": "${sourceDir}/tools/local_game_payload",
                     "type": "PATH"
                 },
+                "LIBERTY_RECOMP_EMBEDDED_DLC_PATH": {
+                    "value": "${sourceDir}/tools/local_game_payload/dlc",
+                    "type": "PATH"
+                },
+                "LIBERTY_RECOMP_EMBEDDED_AES_KEY": {
+                    "value": "${sourceDir}/tools/local_game_payload/aes_key.bin",
+                    "type": "FILEPATH"
+                },
                 "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
                     "value": "ON",
                     "type": "BOOL"
+                },
+                "LIBERTY_SWITCH_ROMFS_DIR": {
+                    "value": "${sourceDir}/out/build/${presetName}/switch_romfs",
+                    "type": "PATH"
                 }
+            },
+            "environment": {
+                "DEVKITPRO": "$penv{DEVKITPRO}"
+            },
+            "condition": {
+                "type": "inList",
+                "string": "${hostSystemName}",
+                "list": ["Darwin", "Linux"]
             }
         },
         {
@@ -380,5 +416,27 @@
                 "CMAKE_BUILD_TYPE": "Release"
             }
         }
+    ],
+    "buildPresets": [
+        { "name": "x64-Clang-Debug",          "configurePreset": "x64-Clang-Debug" },
+        { "name": "x64-Clang-RelWithDebInfo", "configurePreset": "x64-Clang-RelWithDebInfo" },
+        { "name": "x64-Clang-Release",        "configurePreset": "x64-Clang-Release" },
+        { "name": "arm64-Clang-Debug",          "configurePreset": "arm64-Clang-Debug" },
+        { "name": "arm64-Clang-RelWithDebInfo", "configurePreset": "arm64-Clang-RelWithDebInfo" },
+        { "name": "arm64-Clang-Release",        "configurePreset": "arm64-Clang-Release" },
+        { "name": "linux-debug",          "configurePreset": "linux-debug" },
+        { "name": "linux-relwithdebinfo", "configurePreset": "linux-relwithdebinfo" },
+        { "name": "linux-release",        "configurePreset": "linux-release" },
+        { "name": "macos-debug",          "configurePreset": "macos-debug" },
+        { "name": "macos-relwithdebinfo", "configurePreset": "macos-relwithdebinfo" },
+        { "name": "macos-release",        "configurePreset": "macos-release" },
+        { "name": "ios-debug",   "configurePreset": "ios-debug" },
+        { "name": "ios-release", "configurePreset": "ios-release" },
+        { "name": "android-debug",   "configurePreset": "android-debug" },
+        { "name": "android-release", "configurePreset": "android-release" },
+        { "name": "ps4-debug",   "configurePreset": "ps4-debug" },
+        { "name": "ps4-release", "configurePreset": "ps4-release" },
+        { "name": "switch-debug",   "configurePreset": "switch-debug" },
+        { "name": "switch-release", "configurePreset": "switch-release" }
     ]
 }

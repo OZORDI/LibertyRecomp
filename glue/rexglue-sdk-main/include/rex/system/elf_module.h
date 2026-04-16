@@ -24,7 +24,7 @@ namespace rex::runtime {
 // ELF module: Used to load libxenon executables.
 class ElfModule : public Module {
  public:
-  ElfModule(Processor* processor, rex::system::KernelState* kernel_state);
+  ElfModule(FunctionDispatcher* function_dispatcher, rex::system::KernelState* kernel_state);
   virtual ~ElfModule();
 
   bool loaded() const { return loaded_; }
@@ -41,13 +41,9 @@ class ElfModule : public Module {
             size_t elf_length);
   bool Unload();
 
- protected:
-  std::unique_ptr<Function> CreateFunction(uint32_t address) override;
-
  private:
   std::string name_;
   std::string path_;
-  rex::system::KernelState* kernel_state_;
 
   bool loaded_ = false;
   std::vector<uint8_t> elf_header_mem_;  // Holds the ELF header

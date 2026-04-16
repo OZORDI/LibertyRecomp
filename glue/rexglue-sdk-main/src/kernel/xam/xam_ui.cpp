@@ -21,8 +21,9 @@
 REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
                     "Don't display any UI, using defaults for prompts as needed");
 #include <rex/kernel/xam/private.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/kernel/xam/keyboard_dialog.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/xtypes.h>
 #include <rex/thread.h>
 #include <rex/ui/imgui_dialog.h>
@@ -79,14 +80,14 @@ X_RESULT xeXamDispatchDialog(T* dialog, std::function<X_RESULT(T*)> close_callba
                              uint32_t overlapped) {
   auto pre = []() {
     // Broadcast XN_SYS_UI = true
-    kernel_state()->BroadcastNotification(0x9, true);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, true);
   };
   auto run = [dialog, close_callback]() -> X_RESULT {
     X_RESULT result;
     dialog->set_close_callback(
         [&dialog, &result, &close_callback]() { result = close_callback(dialog); });
     rex::thread::Fence fence;
-    rex::ui::WindowedAppContext* app_context = kernel_state()->emulator()->app_context();
+    rex::ui::WindowedAppContext* app_context = REX_KERNEL_STATE()->emulator()->app_context();
     if (app_context &&
         app_context->CallInUIThreadSynchronous([&dialog, &fence]() { dialog->Then(&fence); })) {
       ++xam_dialogs_shown_;
@@ -101,7 +102,7 @@ X_RESULT xeXamDispatchDialog(T* dialog, std::function<X_RESULT(T*)> close_callba
   auto post = []() {
     rex::thread::Sleep(std::chrono::milliseconds(100));
     // Broadcast XN_SYS_UI = false
-    kernel_state()->BroadcastNotification(0x9, false);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, false);
   };
   if (!overlapped) {
     pre();
@@ -109,7 +110,7 @@ X_RESULT xeXamDispatchDialog(T* dialog, std::function<X_RESULT(T*)> close_callba
     post();
     return result;
   } else {
-    kernel_state()->CompleteOverlappedDeferred(run, overlapped, pre, post);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferred(run, overlapped, pre, post);
     return X_ERROR_IO_PENDING;
   }
 }
@@ -120,10 +121,10 @@ X_RESULT xeXamDispatchDialogEx(T* dialog,
                                uint32_t overlapped) {
   auto pre = []() {
     // Broadcast XN_SYS_UI = true
-    kernel_state()->BroadcastNotification(0x9, true);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, true);
   };
   auto run = [dialog, close_callback](uint32_t& extended_error, uint32_t& length) -> X_RESULT {
-    rex::ui::WindowedAppContext* app_context = kernel_state()->emulator()->app_context();
+    rex::ui::WindowedAppContext* app_context = REX_KERNEL_STATE()->emulator()->app_context();
     X_RESULT result;
     dialog->set_close_callback([&dialog, &result, &extended_error, &length, &close_callback]() {
       result = close_callback(dialog, extended_error, length);
@@ -143,7 +144,7 @@ X_RESULT xeXamDispatchDialogEx(T* dialog,
   auto post = []() {
     rex::thread::Sleep(std::chrono::milliseconds(100));
     // Broadcast XN_SYS_UI = false
-    kernel_state()->BroadcastNotification(0x9, false);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, false);
   };
   if (!overlapped) {
     pre();
@@ -153,7 +154,7 @@ X_RESULT xeXamDispatchDialogEx(T* dialog,
     // TODO(gibbed): do something with extended_error/length?
     return result;
   } else {
-    kernel_state()->CompleteOverlappedDeferredEx(run, overlapped, pre, post);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredEx(run, overlapped, pre, post);
     return X_ERROR_IO_PENDING;
   }
 }
@@ -162,13 +163,13 @@ X_RESULT xeXamDispatchHeadless(std::function<X_RESULT()> run_callback, uint32_t 
   auto pre = []() {
     REXKRNL_DEBUG("xeXamDispatchHeadless: Broadcasting XN_SYS_UI = true");
     // Broadcast XN_SYS_UI = true
-    kernel_state()->BroadcastNotification(0x9, true);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, true);
   };
   auto post = []() {
     rex::thread::Sleep(std::chrono::milliseconds(100));
     REXKRNL_DEBUG("xeXamDispatchHeadless: Broadcasting XN_SYS_UI = false");
     // Broadcast XN_SYS_UI = false
-    kernel_state()->BroadcastNotification(0x9, false);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, false);
   };
   if (!overlapped) {
     pre();
@@ -176,7 +177,7 @@ X_RESULT xeXamDispatchHeadless(std::function<X_RESULT()> run_callback, uint32_t 
     post();
     return result;
   } else {
-    kernel_state()->CompleteOverlappedDeferred(run_callback, overlapped, pre, post);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferred(run_callback, overlapped, pre, post);
     return X_ERROR_IO_PENDING;
   }
 }
@@ -185,12 +186,12 @@ X_RESULT xeXamDispatchHeadlessEx(std::function<X_RESULT(uint32_t&, uint32_t&)> r
                                  uint32_t overlapped) {
   auto pre = []() {
     // Broadcast XN_SYS_UI = true
-    kernel_state()->BroadcastNotification(0x9, true);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, true);
   };
   auto post = []() {
     rex::thread::Sleep(std::chrono::milliseconds(100));
     // Broadcast XN_SYS_UI = false
-    kernel_state()->BroadcastNotification(0x9, false);
+    REX_KERNEL_STATE()->BroadcastNotification(0x9, false);
   };
   if (!overlapped) {
     pre();
@@ -200,12 +201,12 @@ X_RESULT xeXamDispatchHeadlessEx(std::function<X_RESULT(uint32_t&, uint32_t&)> r
     // TODO(gibbed): do something with extended_error/length?
     return result;
   } else {
-    kernel_state()->CompleteOverlappedDeferredEx(run_callback, overlapped, pre, post);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredEx(run_callback, overlapped, pre, post);
     return X_ERROR_IO_PENDING;
   }
 }
 
-ppc_u32_result_t XamIsUIActive_entry() {
+u32 XamIsUIActive_entry() {
   return xeXamIsUIActive();
 }
 
@@ -266,11 +267,9 @@ class MessageBoxDialog : public XamDialog {
 };
 
 // https://www.se7ensins.com/forums/threads/working-xshowmessageboxui.844116/
-ppc_u32_result_t XamShowMessageBoxUI_entry(ppc_u32_t user_index, ppc_pchar16_t title_ptr,
-                                           ppc_pchar16_t text_ptr, ppc_u32_t button_count,
-                                           ppc_pu32_t button_ptrs, ppc_u32_t active_button,
-                                           ppc_u32_t flags, ppc_pu32_t result_ptr,
-                                           ppc_pvoid_t overlapped) {
+u32 XamShowMessageBoxUI_entry(u32 user_index, mapped_wstring title_ptr, mapped_wstring text_ptr,
+                              u32 button_count, mapped_u32 button_ptrs, u32 active_button,
+                              u32 flags, mapped_u32 result_ptr, mapped_void overlapped) {
   REXKRNL_DEBUG(
       "XamShowMessageBoxUI({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X})",
       uint32_t(user_index), title_ptr.guest_address(), text_ptr.guest_address(),
@@ -287,7 +286,7 @@ ppc_u32_result_t XamShowMessageBoxUI_entry(ppc_u32_t user_index, ppc_pchar16_t t
   for (uint32_t i = 0; i < button_count; ++i) {
     uint32_t button_ptr = button_ptrs[i];
     auto button = rex::memory::load_and_swap<std::u16string>(
-        kernel_state()->memory()->TranslateVirtual(button_ptr));
+        REX_KERNEL_MEMORY()->TranslateVirtual(button_ptr));
     buttons.push_back(rex::string::to_utf8(button));
   }
 
@@ -319,7 +318,7 @@ ppc_u32_result_t XamShowMessageBoxUI_entry(ppc_u32_t user_index, ppc_pchar16_t t
       *result_ptr = dialog->chosen_button();
       return X_ERROR_SUCCESS;
     };
-    const Runtime* emulator = kernel_state()->emulator();
+    const Runtime* emulator = REX_KERNEL_STATE()->emulator();
     ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
     if (imgui_drawer) {
       result = xeXamDispatchDialog<MessageBoxDialog>(
@@ -417,10 +416,9 @@ class KeyboardInputDialog : public XamDialog {
 };
 
 // https://www.se7ensins.com/forums/threads/release-how-to-use-xshowkeyboardui-release.906568/
-ppc_u32_result_t XamShowKeyboardUI_entry(ppc_u32_t user_index, ppc_u32_t flags,
-                                         ppc_pchar16_t default_text, ppc_pchar16_t title,
-                                         ppc_pchar16_t description, ppc_pchar16_t buffer,
-                                         ppc_u32_t buffer_length, ppc_pvoid_t overlapped) {
+u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, mapped_wstring default_text,
+                            mapped_wstring title, mapped_wstring description, mapped_wstring buffer,
+                            u32 buffer_length, mapped_void overlapped) {
   REXKRNL_DEBUG("XamShowKeyboardUI({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X})",
                 uint32_t(user_index), uint32_t(flags), default_text.guest_address(),
                 title.guest_address(), description.guest_address(), buffer.guest_address(),
@@ -461,14 +459,56 @@ ppc_u32_result_t XamShowKeyboardUI_entry(ppc_u32_t user_index, ppc_u32_t flags,
         return X_ERROR_SUCCESS;
       }
     };
-    const Runtime* emulator = kernel_state()->emulator();
+    const Runtime* emulator = REX_KERNEL_STATE()->emulator();
     ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
+
+    // Read and convert title/description/default_text from guest memory as utf16 to utf8 strings
+    std::string title_str = title
+                                ? rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+                                      REX_KERNEL_MEMORY()->TranslateVirtual(title.guest_address())))
+                                : "";
+    std::string desc_str =
+        description ? rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+                          REX_KERNEL_MEMORY()->TranslateVirtual(description.guest_address())))
+                    : "";
+    std::string def_text_str =
+        default_text ? rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+                           REX_KERNEL_MEMORY()->TranslateVirtual(default_text.guest_address())))
+                     : "";
+
+    // Prefer a platform-native keyboard dialog backend (PS4 sceImeDialog,
+    // Switch swkbd, iOS UIAlertController, Android AlertDialog) when one is
+    // registered. These backends block until the user confirms/cancels.
+    if (HasKeyboardDialogBackend()) {
+      KeyboardDialogParams kp;
+      kp.title = title_str;
+      kp.description = desc_str;
+      kp.default_text = def_text_str;
+      kp.max_length = buffer_length;
+      kp.flags = static_cast<uint32_t>(flags);
+      auto run = [kp, buffer, buffer_length](uint32_t& extended_error,
+                                             uint32_t& length) -> X_RESULT {
+        KeyboardDialogResult r = ShowKeyboardDialogEx(kp);
+        if (!r.accepted) {
+          extended_error = X_ERROR_CANCELLED;
+          length = 0;
+          return X_ERROR_SUCCESS;
+        }
+        auto text16 = rex::string::to_utf16(r.text);
+        rex::string::util_copy_and_swap_truncating(buffer, text16, buffer_length);
+        extended_error = X_ERROR_SUCCESS;
+        length = 0;
+        return X_ERROR_SUCCESS;
+      };
+      result = xeXamDispatchHeadlessEx(run, overlapped.guest_address());
+      return result;
+    }
+
     if (imgui_drawer) {
+      uint32_t buffer_length_safe = buffer_length + 1;  // +1 for null terminator, just in case
       result = xeXamDispatchDialogEx<KeyboardInputDialog>(
-          new KeyboardInputDialog(imgui_drawer, title ? rex::string::to_utf8(title.value()) : "",
-                                  description ? rex::string::to_utf8(description.value()) : "",
-                                  default_text ? rex::string::to_utf8(default_text.value()) : "",
-                                  buffer_length),
+          new KeyboardInputDialog(imgui_drawer, title_str, desc_str, def_text_str,
+                                  buffer_length_safe),
           close, overlapped.guest_address());
     } else {
       // Fallback to headless
@@ -486,9 +526,9 @@ ppc_u32_result_t XamShowKeyboardUI_entry(ppc_u32_t user_index, ppc_u32_t flags,
   return result;
 }
 
-ppc_u32_result_t XamShowDeviceSelectorUI_entry(ppc_u32_t user_index, ppc_u32_t content_type,
-                                               ppc_u32_t content_flags, ppc_u64_t total_requested,
-                                               ppc_pu32_t device_id_ptr, ppc_pvoid_t overlapped) {
+u32 XamShowDeviceSelectorUI_entry(u32 user_index, u32 content_type, u32 content_flags,
+                                  u64 total_requested, mapped_u32 device_id_ptr,
+                                  mapped_void overlapped) {
   REXKRNL_DEBUG("XamShowDeviceSelectorUI({:08X}, {:08X}, {:08X}, {:016X}, {:08X}, {:08X})",
                 uint32_t(user_index), uint32_t(content_type), uint32_t(content_flags),
                 uint64_t(total_requested), device_id_ptr.guest_address(),
@@ -502,11 +542,11 @@ ppc_u32_result_t XamShowDeviceSelectorUI_entry(ppc_u32_t user_index, ppc_u32_t c
       overlapped.guest_address());
 }
 
-void XamShowDirtyDiscErrorUI_entry(ppc_u32_t user_index) {
+void XamShowDirtyDiscErrorUI_entry(u32 user_index) {
   REXKRNL_ERROR("XamShowDirtyDiscErrorUI called! user_index={}", uint32_t(user_index));
   REXKRNL_ERROR("This indicates a disc/file read error - check that all game files exist");
 
-  const Runtime* emulator = kernel_state()->emulator();
+  const Runtime* emulator = REX_KERNEL_STATE()->emulator();
   ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
   if (imgui_drawer) {
     xeXamDispatchDialog<MessageBoxDialog>(
@@ -528,11 +568,11 @@ void XamShowDirtyDiscErrorUI_entry(ppc_u32_t user_index) {
   exit(1);
 }
 
-ppc_u32_result_t XamShowPartyUI_entry(ppc_unknown_t r3, ppc_unknown_t r4) {
+u32 XamShowPartyUI_entry(u32 r3, u32 r4) {
   return X_ERROR_FUNCTION_FAILED;
 }
 
-ppc_u32_result_t XamShowCommunitySessionsUI_entry(ppc_unknown_t r3, ppc_unknown_t r4) {
+u32 XamShowCommunitySessionsUI_entry(u32 r3, u32 r4) {
   return X_ERROR_FUNCTION_FAILED;
 }
 
@@ -550,134 +590,134 @@ uint32_t XamShowMessageBoxUIEx_entry() {
 }  // namespace kernel
 }  // namespace rex
 
-XAM_EXPORT(__imp__XamIsUIActive, rex::kernel::xam::XamIsUIActive_entry)
-XAM_EXPORT(__imp__XamShowMessageBoxUI, rex::kernel::xam::XamShowMessageBoxUI_entry)
-XAM_EXPORT(__imp__XamShowKeyboardUI, rex::kernel::xam::XamShowKeyboardUI_entry)
-XAM_EXPORT(__imp__XamShowDeviceSelectorUI, rex::kernel::xam::XamShowDeviceSelectorUI_entry)
-XAM_EXPORT(__imp__XamShowDirtyDiscErrorUI, rex::kernel::xam::XamShowDirtyDiscErrorUI_entry)
-XAM_EXPORT(__imp__XamShowPartyUI, rex::kernel::xam::XamShowPartyUI_entry)
-XAM_EXPORT(__imp__XamShowCommunitySessionsUI, rex::kernel::xam::XamShowCommunitySessionsUI_entry)
-XAM_EXPORT(__imp__XamShowMessageBoxUIEx, rex::kernel::xam::XamShowMessageBoxUIEx_entry)
+REX_EXPORT(__imp__XamIsUIActive, rex::kernel::xam::XamIsUIActive_entry)
+REX_EXPORT(__imp__XamShowMessageBoxUI, rex::kernel::xam::XamShowMessageBoxUI_entry)
+REX_EXPORT(__imp__XamShowKeyboardUI, rex::kernel::xam::XamShowKeyboardUI_entry)
+REX_EXPORT(__imp__XamShowDeviceSelectorUI, rex::kernel::xam::XamShowDeviceSelectorUI_entry)
+REX_EXPORT(__imp__XamShowDirtyDiscErrorUI, rex::kernel::xam::XamShowDirtyDiscErrorUI_entry)
+REX_EXPORT(__imp__XamShowPartyUI, rex::kernel::xam::XamShowPartyUI_entry)
+REX_EXPORT(__imp__XamShowCommunitySessionsUI, rex::kernel::xam::XamShowCommunitySessionsUI_entry)
+REX_EXPORT(__imp__XamShowMessageBoxUIEx, rex::kernel::xam::XamShowMessageBoxUIEx_entry)
 
-XAM_EXPORT_STUB(__imp__XamIsGuideDisabled);
-XAM_EXPORT_STUB(__imp__XamIsMessageBoxActive);
-XAM_EXPORT_STUB(__imp__XamIsNuiUIActive);
-XAM_EXPORT_STUB(__imp__XamIsSysUiInvokedByTitle);
-XAM_EXPORT_STUB(__imp__XamIsSysUiInvokedByXenonButton);
-XAM_EXPORT_STUB(__imp__XamIsUIThread);
-XAM_EXPORT_STUB(__imp__XamNavigate);
-XAM_EXPORT_STUB(__imp__XamNavigateBack);
-XAM_EXPORT_STUB(__imp__XamOverrideHudOpenType);
-XAM_EXPORT_STUB(__imp__XamShowAchievementDetailsUI);
-XAM_EXPORT_STUB(__imp__XamShowAchievementsUI);
-XAM_EXPORT_STUB(__imp__XamShowAchievementsUIEx);
-XAM_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
-XAM_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
-XAM_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
-XAM_EXPORT_STUB(__imp__XamShowAvatarMiniCreatorUI);
-XAM_EXPORT_STUB(__imp__XamShowBadDiscErrorUI);
-XAM_EXPORT_STUB(__imp__XamShowBeaconsUI);
-XAM_EXPORT_STUB(__imp__XamShowBrandedKeyboardUI);
-XAM_EXPORT_STUB(__imp__XamShowChangeGamerTileUI);
-XAM_EXPORT_STUB(__imp__XamShowComplaintUI);
-XAM_EXPORT_STUB(__imp__XamShowCreateProfileUI);
-XAM_EXPORT_STUB(__imp__XamShowCreateProfileUIEx);
-XAM_EXPORT_STUB(__imp__XamShowCsvTransitionUI);
-XAM_EXPORT_STUB(__imp__XamShowCustomMessageComposeUI);
-XAM_EXPORT_STUB(__imp__XamShowCustomPlayerListUI);
-XAM_EXPORT_STUB(__imp__XamShowDirectAcquireUI);
-XAM_EXPORT_STUB(__imp__XamShowEditProfileUI);
-XAM_EXPORT_STUB(__imp__XamShowFirstRunWelcomeUI);
-XAM_EXPORT_STUB(__imp__XamShowFitnessBodyProfileUI);
-XAM_EXPORT_STUB(__imp__XamShowFitnessClearUI);
-XAM_EXPORT_STUB(__imp__XamShowFitnessWarnAboutPrivacyUI);
-XAM_EXPORT_STUB(__imp__XamShowFitnessWarnAboutTimeUI);
-XAM_EXPORT_STUB(__imp__XamShowFofUI);
-XAM_EXPORT_STUB(__imp__XamShowForcedNameChangeUI);
-XAM_EXPORT_STUB(__imp__XamShowFriendRequestUI);
-XAM_EXPORT_STUB(__imp__XamShowFriendsUI);
-XAM_EXPORT_STUB(__imp__XamShowFriendsUIp);
-XAM_EXPORT_STUB(__imp__XamShowGameInviteUI);
-XAM_EXPORT_STUB(__imp__XamShowGameVoiceChannelUI);
-XAM_EXPORT_STUB(__imp__XamShowGamerCardUI);
-XAM_EXPORT_STUB(__imp__XamShowGamerCardUIForXUID);
-XAM_EXPORT_STUB(__imp__XamShowGamerCardUIForXUIDp);
-XAM_EXPORT_STUB(__imp__XamShowGamesUI);
-XAM_EXPORT_STUB(__imp__XamShowGenericOnlineAppUI);
-XAM_EXPORT_STUB(__imp__XamShowGoldUpgradeUI);
-XAM_EXPORT_STUB(__imp__XamShowGraduateUserUI);
-XAM_EXPORT_STUB(__imp__XamShowGuideUI);
-XAM_EXPORT_STUB(__imp__XamShowJoinPartyUI);
-XAM_EXPORT_STUB(__imp__XamShowJoinSessionByIdInProgressUI);
-XAM_EXPORT_STUB(__imp__XamShowJoinSessionInProgressUI);
-XAM_EXPORT_STUB(__imp__XamShowKeyboardUIMessenger);
-XAM_EXPORT_STUB(__imp__XamShowLiveSignupUI);
-XAM_EXPORT_STUB(__imp__XamShowLiveUpsellUI);
-XAM_EXPORT_STUB(__imp__XamShowLiveUpsellUIEx);
-XAM_EXPORT_STUB(__imp__XamShowMarketplaceDownloadItemsUI);
-XAM_EXPORT_STUB(__imp__XamShowMarketplaceGetOrderReceipts);
-XAM_EXPORT_STUB(__imp__XamShowMarketplacePurchaseOrderUI);
-XAM_EXPORT_STUB(__imp__XamShowMarketplacePurchaseOrderUIEx);
-XAM_EXPORT_STUB(__imp__XamShowMarketplaceUI);
-XAM_EXPORT_STUB(__imp__XamShowMarketplaceUIEx);
-XAM_EXPORT_STUB(__imp__XamShowMessageBox);
-XAM_EXPORT_STUB(__imp__XamShowMessageComposeUI);
-XAM_EXPORT_STUB(__imp__XamShowMessagesUI);
-XAM_EXPORT_STUB(__imp__XamShowMessagesUIEx);
-XAM_EXPORT_STUB(__imp__XamShowMessengerUI);
-XAM_EXPORT_STUB(__imp__XamShowMultiplayerUpgradeUI);
-XAM_EXPORT_STUB(__imp__XamShowNetworkStorageSyncUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiAchievementsUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiCommunitySessionsUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiControllerRequiredUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiDeviceSelectorUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiDirtyDiscErrorUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiFriendRequestUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiFriendsUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiGameInviteUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiGamerCardUIForXUID);
-XAM_EXPORT_STUB(__imp__XamShowNuiGamesUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiGuideUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiHardwareRequiredUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiJoinSessionInProgressUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiMarketplaceDownloadItemsUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiMarketplaceUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiMessageBoxUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiMessagesUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiPartyUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiSigninUI);
-XAM_EXPORT_STUB(__imp__XamShowNuiVideoRichPresenceUI);
-XAM_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUI);
-XAM_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUIEx);
-XAM_EXPORT_STUB(__imp__XamShowOptionsUI);
-XAM_EXPORT_STUB(__imp__XamShowPamUI);
-XAM_EXPORT_STUB(__imp__XamShowPartyInviteUI);
-XAM_EXPORT_STUB(__imp__XamShowPartyJoinInProgressUI);
-XAM_EXPORT_STUB(__imp__XamShowPasscodeVerifyUI);
-XAM_EXPORT_STUB(__imp__XamShowPasscodeVerifyUIEx);
-XAM_EXPORT_STUB(__imp__XamShowPaymentOptionsUI);
-XAM_EXPORT_STUB(__imp__XamShowPersonalizationUI);
-XAM_EXPORT_STUB(__imp__XamShowPlayerReviewUI);
-XAM_EXPORT_STUB(__imp__XamShowPlayersUI);
-XAM_EXPORT_STUB(__imp__XamShowPrivateChatInviteUI);
-XAM_EXPORT_STUB(__imp__XamShowQuickChatUI);
-XAM_EXPORT_STUB(__imp__XamShowQuickChatUIp);
-XAM_EXPORT_STUB(__imp__XamShowQuickLaunchUI);
-XAM_EXPORT_STUB(__imp__XamShowRecentMessageUI);
-XAM_EXPORT_STUB(__imp__XamShowRecentMessageUIEx);
-XAM_EXPORT_STUB(__imp__XamShowReputationUI);
-XAM_EXPORT_STUB(__imp__XamShowSigninUIEx);
-XAM_EXPORT_STUB(__imp__XamShowSigninUIp);
-XAM_EXPORT_STUB(__imp__XamShowSignupCreditCardUI);
-XAM_EXPORT_STUB(__imp__XamShowSocialPostUI);
-XAM_EXPORT_STUB(__imp__XamShowStorePickerUI);
-XAM_EXPORT_STUB(__imp__XamShowTFAUI);
-XAM_EXPORT_STUB(__imp__XamShowTermsOfUseUI);
-XAM_EXPORT_STUB(__imp__XamShowUpdaterUI);
-XAM_EXPORT_STUB(__imp__XamShowVideoChatInviteUI);
-XAM_EXPORT_STUB(__imp__XamShowVideoRichPresenceUI);
-XAM_EXPORT_STUB(__imp__XamShowVoiceMailUI);
-XAM_EXPORT_STUB(__imp__XamShowVoiceSettingsUI);
-XAM_EXPORT_STUB(__imp__XamShowWhatsOnUI);
-XAM_EXPORT_STUB(__imp__XamShowWordRegisterUI);
-XAM_EXPORT_STUB(__imp__XamSysUiDisableAutoClose);
+REX_EXPORT_STUB(__imp__XamIsGuideDisabled);
+REX_EXPORT_STUB(__imp__XamIsMessageBoxActive);
+REX_EXPORT_STUB(__imp__XamIsNuiUIActive);
+REX_EXPORT_STUB(__imp__XamIsSysUiInvokedByTitle);
+REX_EXPORT_STUB(__imp__XamIsSysUiInvokedByXenonButton);
+REX_EXPORT_STUB(__imp__XamIsUIThread);
+REX_EXPORT_STUB(__imp__XamNavigate);
+REX_EXPORT_STUB(__imp__XamNavigateBack);
+REX_EXPORT_STUB(__imp__XamOverrideHudOpenType);
+REX_EXPORT_STUB(__imp__XamShowAchievementDetailsUI);
+REX_EXPORT_STUB(__imp__XamShowAchievementsUI);
+REX_EXPORT_STUB(__imp__XamShowAchievementsUIEx);
+REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
+REX_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
+REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
+REX_EXPORT_STUB(__imp__XamShowAvatarMiniCreatorUI);
+REX_EXPORT_STUB(__imp__XamShowBadDiscErrorUI);
+REX_EXPORT_STUB(__imp__XamShowBeaconsUI);
+REX_EXPORT_STUB(__imp__XamShowBrandedKeyboardUI);
+REX_EXPORT_STUB(__imp__XamShowChangeGamerTileUI);
+REX_EXPORT_STUB(__imp__XamShowComplaintUI);
+REX_EXPORT_STUB(__imp__XamShowCreateProfileUI);
+REX_EXPORT_STUB(__imp__XamShowCreateProfileUIEx);
+REX_EXPORT_STUB(__imp__XamShowCsvTransitionUI);
+REX_EXPORT_STUB(__imp__XamShowCustomMessageComposeUI);
+REX_EXPORT_STUB(__imp__XamShowCustomPlayerListUI);
+REX_EXPORT_STUB(__imp__XamShowDirectAcquireUI);
+REX_EXPORT_STUB(__imp__XamShowEditProfileUI);
+REX_EXPORT_STUB(__imp__XamShowFirstRunWelcomeUI);
+REX_EXPORT_STUB(__imp__XamShowFitnessBodyProfileUI);
+REX_EXPORT_STUB(__imp__XamShowFitnessClearUI);
+REX_EXPORT_STUB(__imp__XamShowFitnessWarnAboutPrivacyUI);
+REX_EXPORT_STUB(__imp__XamShowFitnessWarnAboutTimeUI);
+REX_EXPORT_STUB(__imp__XamShowFofUI);
+REX_EXPORT_STUB(__imp__XamShowForcedNameChangeUI);
+REX_EXPORT_STUB(__imp__XamShowFriendRequestUI);
+REX_EXPORT_STUB(__imp__XamShowFriendsUI);
+REX_EXPORT_STUB(__imp__XamShowFriendsUIp);
+REX_EXPORT_STUB(__imp__XamShowGameInviteUI);
+REX_EXPORT_STUB(__imp__XamShowGameVoiceChannelUI);
+REX_EXPORT_STUB(__imp__XamShowGamerCardUI);
+REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUID);
+REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUIDp);
+REX_EXPORT_STUB(__imp__XamShowGamesUI);
+REX_EXPORT_STUB(__imp__XamShowGenericOnlineAppUI);
+REX_EXPORT_STUB(__imp__XamShowGoldUpgradeUI);
+REX_EXPORT_STUB(__imp__XamShowGraduateUserUI);
+REX_EXPORT_STUB(__imp__XamShowGuideUI);
+REX_EXPORT_STUB(__imp__XamShowJoinPartyUI);
+REX_EXPORT_STUB(__imp__XamShowJoinSessionByIdInProgressUI);
+REX_EXPORT_STUB(__imp__XamShowJoinSessionInProgressUI);
+REX_EXPORT_STUB(__imp__XamShowKeyboardUIMessenger);
+REX_EXPORT_STUB(__imp__XamShowLiveSignupUI);
+REX_EXPORT_STUB(__imp__XamShowLiveUpsellUI);
+REX_EXPORT_STUB(__imp__XamShowLiveUpsellUIEx);
+REX_EXPORT_STUB(__imp__XamShowMarketplaceDownloadItemsUI);
+REX_EXPORT_STUB(__imp__XamShowMarketplaceGetOrderReceipts);
+REX_EXPORT_STUB(__imp__XamShowMarketplacePurchaseOrderUI);
+REX_EXPORT_STUB(__imp__XamShowMarketplacePurchaseOrderUIEx);
+REX_EXPORT_STUB(__imp__XamShowMarketplaceUI);
+REX_EXPORT_STUB(__imp__XamShowMarketplaceUIEx);
+REX_EXPORT_STUB(__imp__XamShowMessageBox);
+REX_EXPORT_STUB(__imp__XamShowMessageComposeUI);
+REX_EXPORT_STUB(__imp__XamShowMessagesUI);
+REX_EXPORT_STUB(__imp__XamShowMessagesUIEx);
+REX_EXPORT_STUB(__imp__XamShowMessengerUI);
+REX_EXPORT_STUB(__imp__XamShowMultiplayerUpgradeUI);
+REX_EXPORT_STUB(__imp__XamShowNetworkStorageSyncUI);
+REX_EXPORT_STUB(__imp__XamShowNuiAchievementsUI);
+REX_EXPORT_STUB(__imp__XamShowNuiCommunitySessionsUI);
+REX_EXPORT_STUB(__imp__XamShowNuiControllerRequiredUI);
+REX_EXPORT_STUB(__imp__XamShowNuiDeviceSelectorUI);
+REX_EXPORT_STUB(__imp__XamShowNuiDirtyDiscErrorUI);
+REX_EXPORT_STUB(__imp__XamShowNuiFriendRequestUI);
+REX_EXPORT_STUB(__imp__XamShowNuiFriendsUI);
+REX_EXPORT_STUB(__imp__XamShowNuiGameInviteUI);
+REX_EXPORT_STUB(__imp__XamShowNuiGamerCardUIForXUID);
+REX_EXPORT_STUB(__imp__XamShowNuiGamesUI);
+REX_EXPORT_STUB(__imp__XamShowNuiGuideUI);
+REX_EXPORT_STUB(__imp__XamShowNuiHardwareRequiredUI);
+REX_EXPORT_STUB(__imp__XamShowNuiJoinSessionInProgressUI);
+REX_EXPORT_STUB(__imp__XamShowNuiMarketplaceDownloadItemsUI);
+REX_EXPORT_STUB(__imp__XamShowNuiMarketplaceUI);
+REX_EXPORT_STUB(__imp__XamShowNuiMessageBoxUI);
+REX_EXPORT_STUB(__imp__XamShowNuiMessagesUI);
+REX_EXPORT_STUB(__imp__XamShowNuiPartyUI);
+REX_EXPORT_STUB(__imp__XamShowNuiSigninUI);
+REX_EXPORT_STUB(__imp__XamShowNuiVideoRichPresenceUI);
+REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUI);
+REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUIEx);
+REX_EXPORT_STUB(__imp__XamShowOptionsUI);
+REX_EXPORT_STUB(__imp__XamShowPamUI);
+REX_EXPORT_STUB(__imp__XamShowPartyInviteUI);
+REX_EXPORT_STUB(__imp__XamShowPartyJoinInProgressUI);
+REX_EXPORT_STUB(__imp__XamShowPasscodeVerifyUI);
+REX_EXPORT_STUB(__imp__XamShowPasscodeVerifyUIEx);
+REX_EXPORT_STUB(__imp__XamShowPaymentOptionsUI);
+REX_EXPORT_STUB(__imp__XamShowPersonalizationUI);
+REX_EXPORT_STUB(__imp__XamShowPlayerReviewUI);
+REX_EXPORT_STUB(__imp__XamShowPlayersUI);
+REX_EXPORT_STUB(__imp__XamShowPrivateChatInviteUI);
+REX_EXPORT_STUB(__imp__XamShowQuickChatUI);
+REX_EXPORT_STUB(__imp__XamShowQuickChatUIp);
+REX_EXPORT_STUB(__imp__XamShowQuickLaunchUI);
+REX_EXPORT_STUB(__imp__XamShowRecentMessageUI);
+REX_EXPORT_STUB(__imp__XamShowRecentMessageUIEx);
+REX_EXPORT_STUB(__imp__XamShowReputationUI);
+REX_EXPORT_STUB(__imp__XamShowSigninUIEx);
+REX_EXPORT_STUB(__imp__XamShowSigninUIp);
+REX_EXPORT_STUB(__imp__XamShowSignupCreditCardUI);
+REX_EXPORT_STUB(__imp__XamShowSocialPostUI);
+REX_EXPORT_STUB(__imp__XamShowStorePickerUI);
+REX_EXPORT_STUB(__imp__XamShowTFAUI);
+REX_EXPORT_STUB(__imp__XamShowTermsOfUseUI);
+REX_EXPORT_STUB(__imp__XamShowUpdaterUI);
+REX_EXPORT_STUB(__imp__XamShowVideoChatInviteUI);
+REX_EXPORT_STUB(__imp__XamShowVideoRichPresenceUI);
+REX_EXPORT_STUB(__imp__XamShowVoiceMailUI);
+REX_EXPORT_STUB(__imp__XamShowVoiceSettingsUI);
+REX_EXPORT_STUB(__imp__XamShowWhatsOnUI);
+REX_EXPORT_STUB(__imp__XamShowWordRegisterUI);
+REX_EXPORT_STUB(__imp__XamSysUiDisableAutoClose);

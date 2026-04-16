@@ -125,6 +125,12 @@ struct FileInfo {
 bool GetInfo(const std::filesystem::path& path, FileInfo* out_info);
 std::vector<FileInfo> ListFiles(const std::filesystem::path& path);
 
+// Commits any pending writes for a libnx save-data mount to flash so they
+// persist across reboots. On non-Switch platforms this is a no-op. The
+// |mount_name| should be the libnx fsdev device name (the part before ':',
+// e.g. "save" for "save:/foo").
+void CommitSaveMount(const std::string& mount_name);
+
 #if REX_PLATFORM_ANDROID
 void AndroidInitialize();
 void AndroidShutdown();

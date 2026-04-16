@@ -27,8 +27,17 @@
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <netinet/ip.h>
+// Note: <netinet/ip.h> intentionally not included — xsocket.cpp does not
+// reference any raw IP header types (struct ip/iphdr) or IPTOS_* constants,
+// and libnx (Switch) does not ship this header. IPPROTO_TCP/UDP come from
+// <netinet/in.h>.
 #include <sys/socket.h>
+#ifdef IPPROTO_TCP
+#undef IPPROTO_TCP
+#endif
+#ifdef IPPROTO_UDP
+#undef IPPROTO_UDP
+#endif
 #endif
 
 namespace rex::system {
@@ -41,11 +50,6 @@ XSocket::XSocket(KernelState* kernel_state, uint64_t native_handle)
 XSocket::~XSocket() {
   Close();
 }
-
-// Undefine system macros that conflict with Protocol enum members
-#undef IPPROTO_TCP
-#undef IPPROTO_UDP
-#undef IPPROTO_VDP
 
 X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
   af_ = af;

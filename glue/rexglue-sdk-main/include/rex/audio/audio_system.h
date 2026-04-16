@@ -17,7 +17,7 @@
 #include <rex/kernel.h>
 #include <rex/memory.h>
 #include <rex/system/interfaces/audio.h>
-#include <rex/system/processor.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/system/xthread.h>
 #include <rex/thread.h>
 #include <rex/thread/mutex.h>
@@ -31,19 +31,15 @@ namespace rex::audio {
 constexpr memory::fourcc_t kAudioSaveSignature = memory::make_fourcc("XAUD");
 
 class AudioDriver;
-#ifndef __APPLE__
 class XmaDecoder;
-#endif
 
 class AudioSystem : public system::IAudioSystem {
  public:
   virtual ~AudioSystem();
 
   memory::Memory* memory() const { return memory_; }
-  runtime::Processor* processor() const { return processor_; }
-#ifndef __APPLE__
+  runtime::FunctionDispatcher* function_dispatcher() const { return function_dispatcher_; }
   XmaDecoder* xma_decoder() const { return xma_decoder_.get(); }
-#endif
 
   virtual X_STATUS Setup(system::KernelState* kernel_state);
   virtual void Shutdown();
@@ -60,7 +56,7 @@ class AudioSystem : public system::IAudioSystem {
   void Resume();
 
  protected:
-  explicit AudioSystem(runtime::Processor* processor);
+  explicit AudioSystem(runtime::FunctionDispatcher* function_dispatcher);
 
   virtual void Initialize();
 
@@ -70,15 +66,12 @@ class AudioSystem : public system::IAudioSystem {
                                 AudioDriver** out_driver) = 0;
   virtual void DestroyDriver(AudioDriver* driver) = 0;
 
-  // TODO(gibbed): respect XAUDIO2_MAX_QUEUED_BUFFERS somehow (ie min(64,
-  // XAUDIO2_MAX_QUEUED_BUFFERS))
-  // static const size_t kMaximumQueuedFrames = 64;
+  static constexpr size_t kMaximumQueuedFrames = 64;
 
   memory::Memory* memory_ = nullptr;
-  runtime::Processor* processor_ = nullptr;
-#ifndef __APPLE__
+  runtime::FunctionDispatcher* function_dispatcher_ = nullptr;
   std::unique_ptr<XmaDecoder> xma_decoder_;
-#endif
+  uint32_t queued_frames_;
 
   std::atomic<bool> worker_running_ = {false};
   system::object_ref<system::XHostThread> worker_thread_;

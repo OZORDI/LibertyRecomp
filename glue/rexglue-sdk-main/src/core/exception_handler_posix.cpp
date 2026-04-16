@@ -11,7 +11,7 @@
 
 #include <rex/exception_handler.h>
 
-#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS4 || REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
 
 #include <signal.h>
 
@@ -23,26 +23,13 @@
 #include <rex/math.h>
 #include <rex/platform.h>
 
-#ifdef __APPLE__
-// macOS requires _XOPEN_SOURCE for ucontext_t.
-// We define it locally so we don't pollute every translation unit.
-#  ifndef _XOPEN_SOURCE
-#    define _XOPEN_SOURCE 700
-#    include <ucontext.h>
-#    undef _XOPEN_SOURCE
-#  else
-#    include <ucontext.h>
-#  endif
-#else
 #include <ucontext.h>
-#endif
 
 namespace rex::arch {
 
 bool signal_handlers_installed_ = false;
 struct sigaction original_sigill_handler_;
 struct sigaction original_sigsegv_handler_;
-struct sigaction original_sigbus_handler_;
 
 // This can be as large as needed, but isn't often needed.
 // As we will be sometimes firing many exceptions we want to avoid having to
@@ -55,12 +42,7 @@ std::pair<ExceptionHandler::Handler, void*> handlers_[kMaxHandlerCount];
 
 static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
                                      void* signal_context) {
-#ifdef __APPLE__
-  // On macOS, uc_mcontext is already a pointer (mcontext_t = __darwin_mcontext64*).
-  mcontext_t mcontext = reinterpret_cast<ucontext_t*>(signal_context)->uc_mcontext;
-#else
   mcontext_t& mcontext = reinterpret_cast<ucontext_t*>(signal_context)->uc_mcontext;
-#endif
 
   HostThreadContext thread_context;
 
@@ -88,26 +70,9 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
   std::memcpy(thread_context.xmm_registers, mcontext.fpregs->_xmm,
               sizeof(thread_context.xmm_registers));
 #elif REX_ARCH_ARM64
-#  ifdef __APPLE__
-  // macOS ARM64: mcontext is a pointer; register state lives in ss/ns sub-structs.
-  // __darwin_arm_thread_state64::__x holds x0–x28 (29 regs); __fp=x29, __lr=x30.
-  std::memcpy(thread_context.x, mcontext->__ss.__x, sizeof(mcontext->__ss.__x));
-  thread_context.x[29] = reinterpret_cast<uint64_t>(__darwin_arm_thread_state64_get_fp(mcontext->__ss));   // x29 / fp
-  thread_context.x[30] = reinterpret_cast<uint64_t>(__darwin_arm_thread_state64_get_lr_fptr(mcontext->__ss)); // x30 / lr
-  thread_context.sp     = reinterpret_cast<uint64_t>(__darwin_arm_thread_state64_get_sp(mcontext->__ss));
-  thread_context.pc     = reinterpret_cast<uint64_t>(__darwin_arm_thread_state64_get_pc_fptr(mcontext->__ss));
-  thread_context.pstate = mcontext->__ss.__cpsr;
-  // NEON/FP state is directly accessible — no extension scanning needed.
-  thread_context.fpsr = mcontext->__ns.__fpsr;
-  thread_context.fpcr = mcontext->__ns.__fpcr;
-  std::memcpy(thread_context.v, mcontext->__ns.__v, sizeof(thread_context.v));
-  // ESR is not directly exposed in macOS ucontext; mark unavailable.
-  void* mcontext_esr = nullptr;  // always null on macOS
-#  else
-  // Linux ARM64: mcontext is a value; registers in flat arrays + extensions.
   std::memcpy(thread_context.x, mcontext.regs, sizeof(thread_context.x));
-  thread_context.sp     = mcontext.sp;
-  thread_context.pc     = mcontext.pc;
+  thread_context.sp = mcontext.sp;
+  thread_context.pc = mcontext.pc;
   thread_context.pstate = mcontext.pstate;
   struct fpsimd_context* mcontext_fpsimd = nullptr;
   struct esr_context* mcontext_esr = nullptr;
@@ -133,7 +98,6 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     thread_context.fpcr = mcontext_fpsimd->fpcr;
     std::memcpy(thread_context.v, mcontext_fpsimd->vregs, sizeof(thread_context.v));
   }
-#  endif  // __APPLE__
 #endif  // REX_ARCH
 
   Exception ex;
@@ -141,26 +105,6 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     case SIGILL:
       ex.InitializeIllegalInstruction(&thread_context);
       break;
-    case SIGBUS:
-      // macOS delivers SIGBUS (not SIGSEGV) for writes to PROT_NONE shared
-      // memory regions — including guest stack guard pages mapped via mmap.
-#if defined(__APPLE__) && REX_ARCH_ARM64
-    {
-      // On macOS ARM64, SIGBUS is exclusively delivered for writes to
-      // PROT_NONE pages (guard pages, unmapped shared memory). ESR is
-      // unavailable, and IsArm64LoadPrefetchStore may fail for certain
-      // compiler-generated store variants, silently setting kUnknown in
-      // release builds (NDEBUG makes assert_always a no-op). Hardcode
-      // kWrite to ensure the MMIOHandler chain processes these faults.
-      Exception::AccessViolationOperation access_violation_operation =
-          Exception::AccessViolationOperation::kWrite;
-      ex.InitializeAccessViolation(&thread_context,
-                                   reinterpret_cast<uint64_t>(signal_info->si_addr),
-                                   access_violation_operation);
-    } break;
-#else
-      // Non-Apple or non-ARM64: fall through to SIGSEGV instruction decoding.
-#endif
     case SIGSEGV: {
       Exception::AccessViolationOperation access_violation_operation;
 #if REX_ARCH_AMD64
@@ -174,15 +118,11 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
       // Exception Level, 0b100101 without a change in the Exception Level),
       // bit 6 is 0 for reading from a memory location, 1 for writing to a
       // memory location.
-#  ifndef __APPLE__  // esr_context is Linux-only; on macOS mcontext_esr is always nullptr
       if (mcontext_esr && ((mcontext_esr->esr >> 26) & 0b111110) == 0b100100) {
         access_violation_operation = (mcontext_esr->esr & (UINT64_C(1) << 6))
                                          ? Exception::AccessViolationOperation::kWrite
                                          : Exception::AccessViolationOperation::kRead;
       } else {
-#  else
-      {
-#  endif
         // Determine the memory access direction based on which instruction has
         // requested it.
         // esr_context may be unavailable on certain hosts (for instance, on
@@ -192,12 +132,7 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
         // On AArch64 (unlike on AArch32), the program counter is the address of
         // the currently executing instruction.
         bool instruction_is_store;
-#  ifdef __APPLE__
-        const uint64_t _fault_pc = reinterpret_cast<uint64_t>(__darwin_arm_thread_state64_get_pc(mcontext->__ss));
-#  else
-        const uint64_t _fault_pc = mcontext.pc;
-#  endif
-        if (IsArm64LoadPrefetchStore(*reinterpret_cast<const uint32_t*>(_fault_pc),
+        if (IsArm64LoadPrefetchStore(*reinterpret_cast<const uint32_t*>(mcontext.pc),
                                      instruction_is_store)) {
           access_violation_operation = instruction_is_store
                                            ? Exception::AccessViolationOperation::kWrite
@@ -247,35 +182,13 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
       }
 #elif REX_ARCH_ARM64
       uint32_t modified_register_index;
-#  ifdef __APPLE__
-      uint32_t modified_x_registers_remaining = ex.modified_x_registers();
-      while (rex::bit_scan_forward(modified_x_registers_remaining, &modified_register_index)) {
-        modified_x_registers_remaining &= ~(UINT32_C(1) << modified_register_index);
-        if (modified_register_index < 29) {
-          mcontext->__ss.__x[modified_register_index] = thread_context.x[modified_register_index];
-        }
-      }
-      __darwin_arm_thread_state64_set_sp(mcontext->__ss, reinterpret_cast<void*>(thread_context.sp));
-      __darwin_arm_thread_state64_set_pc_fptr(mcontext->__ss, reinterpret_cast<void*>(thread_context.pc));
-      mcontext->__ss.__cpsr = thread_context.pstate;
-      mcontext->__ns.__fpsr = thread_context.fpsr;
-      mcontext->__ns.__fpcr = thread_context.fpcr;
-      {
-        uint32_t modified_v_registers_remaining = ex.modified_v_registers();
-        while (rex::bit_scan_forward(modified_v_registers_remaining, &modified_register_index)) {
-          modified_v_registers_remaining &= ~(UINT32_C(1) << modified_register_index);
-          std::memcpy(&mcontext->__ns.__v[modified_register_index],
-                      &thread_context.v[modified_register_index], sizeof(vec128_t));
-        }
-      }
-#  else
       uint32_t modified_x_registers_remaining = ex.modified_x_registers();
       while (rex::bit_scan_forward(modified_x_registers_remaining, &modified_register_index)) {
         modified_x_registers_remaining &= ~(UINT32_C(1) << modified_register_index);
         mcontext.regs[modified_register_index] = thread_context.x[modified_register_index];
       }
-      mcontext.sp     = thread_context.sp;
-      mcontext.pc     = thread_context.pc;
+      mcontext.sp = thread_context.sp;
+      mcontext.pc = thread_context.pc;
       mcontext.pstate = thread_context.pstate;
       if (mcontext_fpsimd) {
         mcontext_fpsimd->fpsr = thread_context.fpsr;
@@ -288,7 +201,6 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
           mcontext.regs[modified_register_index] = thread_context.x[modified_register_index];
         }
       }
-#  endif  // __APPLE__
 #endif  // REX_ARCH
       return;
     }
@@ -296,11 +208,7 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
 }
 
 void ExceptionHandler::Install(Handler fn, void* data) {
-  // Always (re)install signal handlers to ensure ExceptionHandlerCallback
-  // is the active handler. seh_initialize() runs before MMIOHandler::Install()
-  // and overwrites signal handlers with its own SEH handler. Re-installing
-  // here guarantees ExceptionHandlerCallback takes priority over SEH.
-  {
+  if (!signal_handlers_installed_) {
     struct sigaction signal_handler;
 
     std::memset(&signal_handler, 0, sizeof(signal_handler));
@@ -312,9 +220,6 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     }
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
-    }
-    if (sigaction(SIGBUS, &signal_handler, &original_sigbus_handler_) != 0) {
-      assert_always("Failed to install new SIGBUS handler");
     }
     signal_handlers_installed_ = true;
   }
@@ -356,9 +261,6 @@ void ExceptionHandler::Uninstall(Handler fn, void* data) {
       if (sigaction(SIGSEGV, &original_sigsegv_handler_, NULL) != 0) {
         assert_always("Failed to restore original SIGSEGV handler");
       }
-      if (sigaction(SIGBUS, &original_sigbus_handler_, NULL) != 0) {
-        assert_always("Failed to restore original SIGBUS handler");
-      }
       signal_handlers_installed_ = false;
     }
   }
@@ -366,4 +268,4 @@ void ExceptionHandler::Uninstall(Handler fn, void* data) {
 
 }  // namespace rex::arch
 
-#endif  // REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+#endif  // REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS4 || REX_PLATFORM_IOS || REX_PLATFORM_ANDROID

@@ -13,13 +13,32 @@
 #include <iterator>
 
 #include <rex/assert.h>
-#include <rex/chrono/clock.h>
+#include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/presenter.h>
 #include <rex/ui/window.h>
 
 #include <imgui.h>
+
+REXCVAR_DEFINE_INT32(window_width, 0, "UI/Window",
+                     "Startup window width in logical pixels (0 = use app default)")
+    .range(0, 8192)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_INT32(window_height, 0, "UI/Window",
+                     "Startup window height in logical pixels (0 = use app default)")
+    .range(0, 8192)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(fullscreen, false, "UI/Window", "Start the window in fullscreen mode")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_INT32(monitor, 0, "UI/Window",
+                     "Monitor index to display on (0 = default, 1 = primary, 2 = "
+                     "second monitor, etc.)")
+    .range(0, 16)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rex {
 namespace ui {

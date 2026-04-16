@@ -15,11 +15,13 @@
 
 namespace rex::audio::sdl {
 
-std::unique_ptr<AudioSystem> SDLAudioSystem::Create(runtime::Processor* processor) {
-  return std::make_unique<SDLAudioSystem>(processor);
+std::unique_ptr<AudioSystem> SDLAudioSystem::Create(
+    runtime::FunctionDispatcher* function_dispatcher) {
+  return std::make_unique<SDLAudioSystem>(function_dispatcher);
 }
 
-SDLAudioSystem::SDLAudioSystem(runtime::Processor* processor) : AudioSystem(processor) {}
+SDLAudioSystem::SDLAudioSystem(runtime::FunctionDispatcher* function_dispatcher)
+    : AudioSystem(function_dispatcher) {}
 
 SDLAudioSystem::~SDLAudioSystem() {}
 

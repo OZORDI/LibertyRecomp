@@ -16,11 +16,12 @@
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
 #include <rex/memory.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/info/file.h>
 #include <rex/system/info/volume.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/util/string_utils.h>
 #include <rex/system/xevent.h>
 #include <rex/system/xfile.h>
 #include <rex/system/xiocompletion.h>
@@ -31,6 +32,51 @@
 
 namespace rex::kernel::xboxkrnl {
 using namespace rex::system;
+
+static bool IsValidPath(const std::string_view s, bool is_pattern) {
+  // TODO(gibbed): validate path components individually.
+  bool got_asterisk = false;
+  for (const auto& c : s) {
+    if (c <= 31 || c >= 127) {
+      return false;
+    }
+    if (got_asterisk) {
+      if (c != '.') {
+        return false;
+      }
+      got_asterisk = false;
+    }
+    switch (c) {
+      case '"':
+      case '+':
+      case ',':
+      case ';':
+      case '<':
+      case '=':
+      case '>':
+      case '|': {
+        return false;
+      }
+      case '*': {
+        if (!is_pattern) {
+          return false;
+        }
+        got_asterisk = true;
+        break;
+      }
+      case '?': {
+        if (!is_pattern) {
+          return false;
+        }
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+  return true;
+}
 
 uint32_t GetQueryFileInfoMinimumLength(uint32_t info_class) {
   switch (info_class) {
@@ -58,10 +104,8 @@ uint32_t GetQueryFileInfoMinimumLength(uint32_t info_class) {
   }
 }
 
-ppc_u32_result_t NtQueryInformationFile_entry(ppc_u32_t file_handle,
-                                              ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr,
-                                              ppc_pvoid_t info_ptr, ppc_u32_t info_length,
-                                              ppc_u32_t info_class) {
+u32 NtQueryInformationFile_entry(u32 file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr,
+                                 mapped_void info_ptr, u32 info_length, u32 info_class) {
   uint32_t minimum_length = GetQueryFileInfoMinimumLength(info_class);
   if (!minimum_length) {
     return X_STATUS_INVALID_INFO_CLASS;
@@ -71,7 +115,7 @@ ppc_u32_result_t NtQueryInformationFile_entry(ppc_u32_t file_handle,
     return X_STATUS_INFO_LENGTH_MISMATCH;
   }
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     return X_STATUS_INVALID_HANDLE;
   }
@@ -97,10 +141,11 @@ ppc_u32_result_t NtQueryInformationFile_entry(ppc_u32_t file_handle,
       break;
     }
     case XFileSectorInformation: {
-      // TODO(benvanik): return sector this file's on.
-      REXKRNL_ERROR("NtQueryInformationFile(XFileSectorInformation) unimplemented");
-      status = X_STATUS_INVALID_PARAMETER;
-      out_length = 0;
+      REXKRNL_DEBUG("Stub XFileSectorInformation!");
+      auto info = info_ptr.as<uint32_t*>();
+      size_t fname_hash = rex::memory::hash_combine(82589933LL, file->path());
+      *info = static_cast<uint32_t>(fname_hash ^ (fname_hash >> 32));
+      out_length = sizeof(uint32_t);
       break;
     }
     case XFileXctdCompressionInformation: {
@@ -157,21 +202,24 @@ ppc_u32_result_t NtQueryInformationFile_entry(ppc_u32_t file_handle,
 
 uint32_t GetSetFileInfoMinimumLength(uint32_t info_class) {
   switch (info_class) {
+    case XFileRenameInformation:
+      return sizeof(X_FILE_RENAME_INFORMATION);
     case XFileDispositionInformation:
       return sizeof(X_FILE_DISPOSITION_INFORMATION);
     case XFilePositionInformation:
       return sizeof(X_FILE_POSITION_INFORMATION);
     case XFileCompletionInformation:
       return sizeof(X_FILE_COMPLETION_INFORMATION);
+    case XFileAllocationInformation:
+      return sizeof(X_FILE_ALLOCATION_INFORMATION);
+    case XFileEndOfFileInformation:
+      return sizeof(X_FILE_END_OF_FILE_INFORMATION);
     // TODO(gibbed): structures to get the size of.
     case XFileModeInformation:
     case XFileIoPriorityInformation:
       return 4;
-    case XFileAllocationInformation:
-    case XFileEndOfFileInformation:
     case XFileMountPartitionInformation:
       return 8;
-    case XFileRenameInformation:
     case XFileLinkInformation:
       return 16;
     case XFileBasicInformation:
@@ -183,10 +231,8 @@ uint32_t GetSetFileInfoMinimumLength(uint32_t info_class) {
   }
 }
 
-ppc_u32_result_t NtSetInformationFile_entry(ppc_u32_t file_handle,
-                                            ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                            ppc_pvoid_t info_ptr, ppc_u32_t info_length,
-                                            ppc_u32_t info_class) {
+u32 NtSetInformationFile_entry(u32 file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
+                               mapped_void info_ptr, u32 info_length, u32 info_class) {
   uint32_t minimum_length = GetSetFileInfoMinimumLength(info_class);
   if (!minimum_length) {
     return X_STATUS_INVALID_INFO_CLASS;
@@ -196,7 +242,7 @@ ppc_u32_result_t NtSetInformationFile_entry(ppc_u32_t file_handle,
     return X_STATUS_INFO_LENGTH_MISMATCH;
   }
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     return X_STATUS_INVALID_HANDLE;
   }
@@ -205,12 +251,37 @@ ppc_u32_result_t NtSetInformationFile_entry(ppc_u32_t file_handle,
   uint32_t out_length;
 
   switch (info_class) {
+    case XFileBasicInformation: {
+      auto info = info_ptr.as<X_FILE_BASIC_INFORMATION*>();
+
+      bool basic_result = true;
+      if (info->creation_time) {
+        basic_result &= file->entry()->SetCreateTimestamp(info->creation_time);
+      }
+
+      if (info->last_access_time) {
+        basic_result &= file->entry()->SetAccessTimestamp(info->last_access_time);
+      }
+
+      if (info->last_write_time) {
+        basic_result &= file->entry()->SetWriteTimestamp(info->last_write_time);
+      }
+
+      basic_result &= file->entry()->SetAttributes(info->attributes);
+      if (!basic_result) {
+        result = X_STATUS_UNSUCCESSFUL;
+      }
+
+      out_length = sizeof(*info);
+      break;
+    }
     case XFileDispositionInformation: {
-      // Used to set deletion flag. Which we don't support. Probably?
       auto info = info_ptr.as<X_FILE_DISPOSITION_INFORMATION*>();
       bool delete_on_close = info->delete_file ? true : false;
+      file->entry()->SetForDeletion(delete_on_close);
       out_length = 0;
-      REXKRNL_WARN("NtSetInformationFile ignoring delete on close: {}", delete_on_close);
+      REXKRNL_WARN("NtSetInformationFile set deleting flag for {} on close to: {}", file->name(),
+                   delete_on_close);
       break;
     }
     case XFilePositionInformation: {
@@ -219,9 +290,29 @@ ppc_u32_result_t NtSetInformationFile_entry(ppc_u32_t file_handle,
       out_length = sizeof(*info);
       break;
     }
+    case XFileRenameInformation: {
+      auto info = info_ptr.as<X_FILE_RENAME_INFORMATION*>();
+      auto target_path = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), &info->ansi_string);
+      if (!IsValidPath(target_path, false)) {
+        return X_STATUS_OBJECT_NAME_INVALID;
+      }
+
+      auto target_file_path = rex::to_path(target_path);
+      if (!target_file_path.has_filename()) {
+        return X_STATUS_INVALID_PARAMETER;
+      }
+
+      result = file->Rename(target_file_path);
+      out_length = sizeof(*info);
+      break;
+    }
     case XFileAllocationInformation: {
-      REXKRNL_WARN("NtSetInformationFile ignoring alloc");
-      out_length = 8;
+      auto info = info_ptr.as<X_FILE_ALLOCATION_INFORMATION*>();
+      result = file->SetLength(info->allocation_size);
+      out_length = sizeof(*info);
+
+      // Update the file entry information.
+      file->entry()->update();
       break;
     }
     case XFileEndOfFileInformation: {
@@ -239,7 +330,7 @@ ppc_u32_result_t NtSetInformationFile_entry(ppc_u32_t file_handle,
       auto handle = uint32_t(info->handle);
       auto key = uint32_t(info->key);
       out_length = sizeof(*info);
-      auto port = kernel_state()->object_table()->LookupObject<XIOCompletion>(handle);
+      auto port = REX_KERNEL_OBJECTS()->LookupObject<XIOCompletion>(handle);
       if (!port) {
         result = X_STATUS_INVALID_HANDLE;
       } else {
@@ -268,19 +359,19 @@ uint32_t GetQueryVolumeInfoMinimumLength(uint32_t info_class) {
       return sizeof(X_FILE_FS_VOLUME_INFORMATION);
     case XFileFsSizeInformation:
       return sizeof(X_FILE_FS_SIZE_INFORMATION);
+    case XFileFsDeviceInformation:
+      return sizeof(X_FILE_FS_DEVICE_INFORMATION);
     case XFileFsAttributeInformation:
       return sizeof(X_FILE_FS_ATTRIBUTE_INFORMATION);
-    // TODO(gibbed): structures to get the size of.
-    case XFileFsDeviceInformation:
-      return 8;
     default:
+      REXKRNL_WARN("Unimplemented Info Class: 0x{:08x}", info_class);
       return 0;
   }
 }
 
-ppc_u32_result_t NtQueryVolumeInformationFile_entry(
-    ppc_u32_t file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr, ppc_pvoid_t info_ptr,
-    ppc_u32_t info_length, ppc_u32_t info_class) {
+u32 NtQueryVolumeInformationFile_entry(u32 file_handle,
+                                       ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr,
+                                       mapped_void info_ptr, u32 info_length, u32 info_class) {
   uint32_t minimum_length = GetQueryVolumeInfoMinimumLength(info_class);
   if (!minimum_length) {
     return X_STATUS_INVALID_INFO_CLASS;
@@ -290,7 +381,7 @@ ppc_u32_result_t NtQueryVolumeInformationFile_entry(
     return X_STATUS_INFO_LENGTH_MISMATCH;
   }
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     return X_STATUS_INVALID_HANDLE;
   }
@@ -338,7 +429,14 @@ ppc_u32_result_t NtQueryVolumeInformationFile_entry(
       }
       break;
     }
-    case XFileFsDeviceInformation:
+    case XFileFsDeviceInformation: {
+      auto info = info_ptr.as<X_FILE_FS_DEVICE_INFORMATION*>();
+      REXKRNL_WARN("Stub XFileFsDeviceInformation!");
+      info->device_type = FILE_DEVICE_UNKNOWN;
+      info->characteristics = 0;
+      out_length = sizeof(X_FILE_FS_DEVICE_INFORMATION);
+      break;
+    }
     default: {
       // Unsupported, for now.
       assert_always();
@@ -357,7 +455,7 @@ ppc_u32_result_t NtQueryVolumeInformationFile_entry(
 
 }  // namespace rex::kernel::xboxkrnl
 
-XBOXKRNL_EXPORT(__imp__NtQueryInformationFile, rex::kernel::xboxkrnl::NtQueryInformationFile_entry)
-XBOXKRNL_EXPORT(__imp__NtSetInformationFile, rex::kernel::xboxkrnl::NtSetInformationFile_entry)
-XBOXKRNL_EXPORT(__imp__NtQueryVolumeInformationFile,
-                rex::kernel::xboxkrnl::NtQueryVolumeInformationFile_entry)
+REX_EXPORT(__imp__NtQueryInformationFile, rex::kernel::xboxkrnl::NtQueryInformationFile_entry)
+REX_EXPORT(__imp__NtSetInformationFile, rex::kernel::xboxkrnl::NtSetInformationFile_entry)
+REX_EXPORT(__imp__NtQueryVolumeInformationFile,
+           rex::kernel::xboxkrnl::NtQueryVolumeInformationFile_entry)

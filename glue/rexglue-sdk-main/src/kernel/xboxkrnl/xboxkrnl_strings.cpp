@@ -18,23 +18,24 @@
 
 #include <rex/logging.h>
 #include <rex/memory/utils.h>
-#include <rex/ppc/function.h>
+#include <rex/hook.h>
 #include <rex/system/flags.h>
 #include <rex/system/format.h>
 
 using namespace rex::system::format;
+using rex::memory::GuestPtr;
 
 //=============================================================================
 // DbgPrint / XamDbgPrint
 //=============================================================================
 
-extern "C" PPC_FUNC(__imp__DbgPrint) {
+REX_HOOK_RAW(__imp__DbgPrint) {
   uint32_t format_ptr = ctx.r3.u32;
   if (!format_ptr) {
     ctx.r3.u64 = 0;
     return;
   }
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   StackArgList args(ctx, base, 1);
   StringFormatData data(format);
@@ -52,13 +53,13 @@ extern "C" PPC_FUNC(__imp__DbgPrint) {
   ctx.r3.u64 = 0;  // NTSTATUS success
 }
 
-extern "C" PPC_FUNC(__imp__XamDbgPrint) {
+REX_HOOK_RAW(__imp__XamDbgPrint) {
   uint32_t format_ptr = ctx.r3.u32;
   if (!format_ptr) {
     ctx.r3.u64 = 0;
     return;
   }
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   StackArgList args(ctx, base, 1);
   StringFormatData data(format);
@@ -79,7 +80,7 @@ extern "C" PPC_FUNC(__imp__XamDbgPrint) {
 // sprintf / _snprintf (narrow, stack varargs)
 //=============================================================================
 
-extern "C" PPC_FUNC(__imp__sprintf) {
+REX_HOOK_RAW(__imp__sprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   uint32_t format_ptr = ctx.r4.u32;
 
@@ -88,8 +89,8 @@ extern "C" PPC_FUNC(__imp__sprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint8_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u8*>(base, buffer_ptr);
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   StackArgList args(ctx, base, 2);
   StringFormatData data(format);
@@ -104,7 +105,7 @@ extern "C" PPC_FUNC(__imp__sprintf) {
   ctx.r3.u64 = count;
 }
 
-extern "C" PPC_FUNC(__imp___snprintf) {
+REX_HOOK_RAW(__imp___snprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   int32_t buffer_count = static_cast<int32_t>(ctx.r4.u32);
   uint32_t format_ptr = ctx.r5.u32;
@@ -114,8 +115,8 @@ extern "C" PPC_FUNC(__imp___snprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint8_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u8*>(base, buffer_ptr);
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   StackArgList args(ctx, base, 3);
   StringFormatData data(format);
@@ -141,7 +142,7 @@ extern "C" PPC_FUNC(__imp___snprintf) {
 // swprintf / _snwprintf (wide, stack varargs)
 //=============================================================================
 
-extern "C" PPC_FUNC(__imp__swprintf) {
+REX_HOOK_RAW(__imp__swprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   uint32_t format_ptr = ctx.r4.u32;
 
@@ -150,8 +151,8 @@ extern "C" PPC_FUNC(__imp__swprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint16_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint16_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u16*>(base, buffer_ptr);
+  auto format = GuestPtr<const u16*>(base, format_ptr);
 
   StackArgList args(ctx, base, 2);
   WideStringFormatData data(format);
@@ -167,7 +168,7 @@ extern "C" PPC_FUNC(__imp__swprintf) {
   ctx.r3.u64 = count;
 }
 
-extern "C" PPC_FUNC(__imp___snwprintf) {
+REX_HOOK_RAW(__imp___snwprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   int32_t buffer_count = static_cast<int32_t>(ctx.r4.u32);
   uint32_t format_ptr = ctx.r5.u32;
@@ -177,8 +178,8 @@ extern "C" PPC_FUNC(__imp___snwprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint16_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint16_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u16*>(base, buffer_ptr);
+  auto format = GuestPtr<const u16*>(base, format_ptr);
 
   StackArgList args(ctx, base, 3);
   WideStringFormatData data(format);
@@ -206,7 +207,7 @@ extern "C" PPC_FUNC(__imp___snwprintf) {
 // vsprintf / _vsnprintf (narrow, va_list from memory)
 //=============================================================================
 
-extern "C" PPC_FUNC(__imp__vsprintf) {
+REX_HOOK_RAW(__imp__vsprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   uint32_t format_ptr = ctx.r4.u32;
   uint32_t arg_ptr = ctx.r5.u32;
@@ -216,8 +217,8 @@ extern "C" PPC_FUNC(__imp__vsprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint8_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u8*>(base, buffer_ptr);
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   ArrayArgList args(base, arg_ptr);
   StringFormatData data(format);
@@ -232,7 +233,7 @@ extern "C" PPC_FUNC(__imp__vsprintf) {
   ctx.r3.u64 = count;
 }
 
-extern "C" PPC_FUNC(__imp___vsnprintf) {
+REX_HOOK_RAW(__imp___vsnprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   int32_t buffer_count = static_cast<int32_t>(ctx.r4.u32);
   uint32_t format_ptr = ctx.r5.u32;
@@ -243,8 +244,8 @@ extern "C" PPC_FUNC(__imp___vsnprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint8_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint8_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u8*>(base, buffer_ptr);
+  auto format = GuestPtr<const u8*>(base, format_ptr);
 
   ArrayArgList args(base, arg_ptr);
   StringFormatData data(format);
@@ -269,7 +270,7 @@ extern "C" PPC_FUNC(__imp___vsnprintf) {
 // vswprintf / _vsnwprintf / _vscwprintf (wide, va_list from memory)
 //=============================================================================
 
-extern "C" PPC_FUNC(__imp__vswprintf) {
+REX_HOOK_RAW(__imp__vswprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   uint32_t format_ptr = ctx.r4.u32;
   uint32_t arg_ptr = ctx.r5.u32;
@@ -279,8 +280,8 @@ extern "C" PPC_FUNC(__imp__vswprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint16_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint16_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u16*>(base, buffer_ptr);
+  auto format = GuestPtr<const u16*>(base, format_ptr);
 
   ArrayArgList args(base, arg_ptr);
   WideStringFormatData data(format);
@@ -296,7 +297,7 @@ extern "C" PPC_FUNC(__imp__vswprintf) {
   ctx.r3.u64 = count;
 }
 
-extern "C" PPC_FUNC(__imp___vsnwprintf) {
+REX_HOOK_RAW(__imp___vsnwprintf) {
   uint32_t buffer_ptr = ctx.r3.u32;
   int32_t buffer_count = static_cast<int32_t>(ctx.r4.u32);
   uint32_t format_ptr = ctx.r5.u32;
@@ -307,8 +308,8 @@ extern "C" PPC_FUNC(__imp___vsnwprintf) {
     return;
   }
 
-  auto buffer = reinterpret_cast<uint16_t*>(PPC_RAW_ADDR(buffer_ptr));
-  auto format = reinterpret_cast<const uint16_t*>(PPC_RAW_ADDR(format_ptr));
+  auto buffer = GuestPtr<u16*>(base, buffer_ptr);
+  auto format = GuestPtr<const u16*>(base, format_ptr);
 
   ArrayArgList args(base, arg_ptr);
   WideStringFormatData data(format);
@@ -331,7 +332,7 @@ extern "C" PPC_FUNC(__imp___vsnwprintf) {
   ctx.r3.u64 = count;
 }
 
-extern "C" PPC_FUNC(__imp___vscwprintf) {
+REX_HOOK_RAW(__imp___vscwprintf) {
   uint32_t format_ptr = ctx.r3.u32;
   uint32_t arg_ptr = ctx.r4.u32;
 
@@ -340,7 +341,7 @@ extern "C" PPC_FUNC(__imp___vscwprintf) {
     return;
   }
 
-  auto format = reinterpret_cast<const uint16_t*>(PPC_RAW_ADDR(format_ptr));
+  auto format = GuestPtr<const u16*>(base, format_ptr);
 
   ArrayArgList args(base, arg_ptr);
   WideCountFormatData data(format);
@@ -354,6 +355,6 @@ extern "C" PPC_FUNC(__imp___vscwprintf) {
 // Export stubs
 //=============================================================================
 
-XBOXKRNL_EXPORT_STUB(__imp___scprintf);
-XBOXKRNL_EXPORT_STUB(__imp___scwprintf);
-XBOXKRNL_EXPORT_STUB(__imp___vscprintf);
+REX_EXPORT_STUB(__imp___scprintf);
+REX_EXPORT_STUB(__imp___scwprintf);
+REX_EXPORT_STUB(__imp___vscprintf);

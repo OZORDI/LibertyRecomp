@@ -10,17 +10,15 @@
  */
 
 #include <algorithm>
-#include <memory>
-
 #include <rex/logging.h>
 #include <rex/system/elf_module.h>
-#include <rex/system/processor.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/types.h>
 
 namespace rex::runtime {
 
-ElfModule::ElfModule(Processor* processor, system::KernelState* kernel_state)
-    : Module(processor), kernel_state_(kernel_state) {}
+ElfModule::ElfModule(FunctionDispatcher* function_dispatcher, system::KernelState* /*kernel_state*/)
+    : Module(function_dispatcher) {}
 
 ElfModule::~ElfModule() = default;
 
@@ -62,6 +60,7 @@ bool ElfModule::Load(const std::string_view name, const std::string_view path, c
                      size_t elf_length) {
   name_ = name;
   path_ = path;
+  (void)elf_length;
 
   uint8_t* pelf = (uint8_t*)elf_addr;
   elf32_ehdr* hdr = (elf32_ehdr*)(pelf + 0x0);
@@ -168,12 +167,6 @@ bool ElfModule::Unload() {
   // crack: Memory allocated for ELF segments remains - no deallocation
   loaded_ = false;
   return true;
-}
-
-std::unique_ptr<Function> ElfModule::CreateFunction(uint32_t address) {
-  // crack: No JIT backend - return nullptr (functions are statically compiled)
-  (void)address;
-  return nullptr;
 }
 
 }  // namespace rex::runtime

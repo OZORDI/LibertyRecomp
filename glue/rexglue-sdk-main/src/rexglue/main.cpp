@@ -19,6 +19,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/result.h>
+#include <rex/version.h>
 
 // Codegen flags (definitions in codegen_flags.cpp)
 REXCVAR_DECLARE(bool, force);
@@ -37,12 +38,17 @@ REXCVAR_DEFINE_STRING(app_root, "", "Init", "Project root directory for init com
 REXCVAR_DEFINE_STRING(app_desc, "", "Init", "Project description (optional)");
 REXCVAR_DEFINE_STRING(app_author, "", "Init", "Project author (optional)");
 REXCVAR_DEFINE_BOOL(sdk_example, false, "Init", "Create as SDK example (omit vcpkg.json)");
+REXCVAR_DEFINE_STRING(template_dir, "", "Init", "Custom template directory for overrides");
 
 using rex::Ok;
 using rex::Result;
 
+std::string GetTitleString() {
+  return fmt::format("ReXGlue v{} - Xbox 360 Recompilation Toolkit", REXGLUE_VERSION_STRING);
+}
+
 void PrintUsage() {
-  std::cerr << "ReXGlue - Xbox 360 Recompilation Toolkit\n\n";
+  std::cerr << GetTitleString() + "\n\n";
   std::cerr << "Usage: rexglue <command> [flags] [args]\n\n";
   std::cerr << "Commands:\n";
   std::cerr << "  codegen <config.toml>   Analyze XEX and generate C++ code\n";
@@ -55,6 +61,7 @@ void PrintUsage() {
 int main(int argc, char** argv) {
   auto remaining = rex::cvar::Init(argc, argv);
   rex::cvar::ApplyEnvironment();
+  rex::InitLoggingEarly();
 
   std::string command;
 
@@ -81,13 +88,13 @@ int main(int argc, char** argv) {
   std::map<std::string, std::string> category_levels;
   auto log_config = rex::BuildLogConfig(log_file_path.empty() ? nullptr : log_file_path.c_str(),
                                         level_str, category_levels);
+  log_config.log_to_console = true;  // CLI always logs to console
   rex::InitLogging(log_config);
 
   // Register callback for runtime level changes
   rex::RegisterLogLevelCallback();
 
-  // TODO(tomc): make the version dynamic (at least, not baked into a string)
-  REXLOG_INFO("ReXGlue v0.1.0 - Xbox 360 Recompilation Toolkit");
+  REXLOG_INFO(GetTitleString());
 
   // Set up CLI context
   rexglue::cli::CliContext ctx;
@@ -105,6 +112,7 @@ int main(int argc, char** argv) {
     opts.app_desc = REXCVAR_GET(app_desc);
     opts.app_author = REXCVAR_GET(app_author);
     opts.sdk_example = REXCVAR_GET(sdk_example);
+    opts.template_dir = REXCVAR_GET(template_dir);
     opts.force = ctx.force;
 
     if (opts.app_name.empty()) {
@@ -145,6 +153,7 @@ int main(int argc, char** argv) {
   } else if (command == "migrate") {
     rexglue::cli::MigrateOptions opts;
     opts.app_root = REXCVAR_GET(app_root);
+    opts.template_dir = REXCVAR_GET(template_dir);
     opts.force = ctx.force;
 
     if (opts.app_root.empty()) {

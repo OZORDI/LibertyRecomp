@@ -31,8 +31,16 @@ set(LIBERTY_RECOMP_METAL ON CACHE BOOL "Use Metal renderer" FORCE)
 set(LIBERTY_RECOMP_D3D12 OFF CACHE BOOL "" FORCE)
 set(LIBERTY_RECOMP_VULKAN OFF CACHE BOOL "" FORCE)
 
-# Point SDL2 at its iOS CMake integration
-set(SDL2_IOS ON CACHE BOOL "Build SDL2 for iOS" FORCE)
-
 # No installer wizard on iOS
 set(LIBERTY_RECOMP_EMBEDDED_ASSETS ON CACHE BOOL "Package assets at build time (no installer UI)" FORCE)
+
+# ── User-settable iOS signing ──────────────────────────────────────────────
+# Can be overridden via -D flags on the cmake command line or in the CMake GUI.
+# The DEVELOPMENT_TEAM is required for on-device builds; simulator builds work
+# without it. Find your Team ID at https://developer.apple.com/account (Membership).
+set(LIBERTY_IOS_DEVELOPMENT_TEAM ""
+    CACHE STRING "Apple Developer Team ID (e.g. ABCDE12345) — required for on-device builds")
+set(LIBERTY_IOS_BUNDLE_IDENTIFIER "com.libertyrecomp"
+    CACHE STRING "iOS bundle identifier (reverse-DNS, must match provisioning profile)")
+set(LIBERTY_IOS_PROVISIONING_PROFILE ""
+    CACHE STRING "Provisioning profile UUID (optional — leave blank for automatic signing)")

@@ -15,6 +15,13 @@
 namespace rex {
 namespace ui {
 
+#if REX_PLATFORM_MAC
+std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
+  return nullptr;
+}
+
+RenderDocAPI::~RenderDocAPI() = default;
+#else
 std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
   std::unique_ptr<RenderDocAPI> renderdoc_api(new RenderDocAPI());
 
@@ -43,6 +50,7 @@ std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
 RenderDocAPI::~RenderDocAPI() {
   library_.Close();
 }
+#endif
 
 }  // namespace ui
 }  // namespace rex

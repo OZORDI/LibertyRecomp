@@ -9,8 +9,8 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
-#include "stfs_container_device.h"
-#include "stfs_container_entry.h"
+#include <rex/filesystem/devices/stfs_container_device.h>
+#include <rex/filesystem/devices/stfs_container_entry.h>
 
 #include <algorithm>
 #include <queue>
@@ -36,6 +36,35 @@ StfsContainerDevice::StfsContainerDevice(const std::string_view mount_path,
 
 StfsContainerDevice::~StfsContainerDevice() {
   CloseFiles();
+}
+
+std::unique_ptr<StfsHeader> StfsContainerDevice::ReadPackageHeader(
+    const std::filesystem::path& file_path) {
+  if (!std::filesystem::exists(file_path)) {
+    return nullptr;
+  }
+
+  if (std::filesystem::file_size(file_path) < sizeof(StfsHeader)) {
+    return nullptr;
+  }
+
+  auto file = rex::filesystem::OpenFile(file_path, "rb");
+  if (!file) {
+    return nullptr;
+  }
+
+  auto header = std::make_unique<StfsHeader>();
+  if (fread(header.get(), sizeof(StfsHeader), 1, file) != 1) {
+    fclose(file);
+    return nullptr;
+  }
+  fclose(file);
+
+  if (!header->header.is_magic_valid()) {
+    return nullptr;
+  }
+
+  return header;
 }
 
 bool StfsContainerDevice::Initialize() {

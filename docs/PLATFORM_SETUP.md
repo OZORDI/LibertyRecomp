@@ -33,14 +33,40 @@ Desktop platforms (Windows, Linux, macOS) are covered in [BUILDING.md](BUILDING.
 # 1. Make sure Xcode command-line tools are installed
 xcode-select --install
 
-# 2. Configure (Xcode generator required for signing)
-cmake --preset ios-debug
+# 2. Configure + open Xcode in one step (recommended)
+./scripts/ios-setup.sh <YOUR_TEAM_ID>
+# e.g. ./scripts/ios-setup.sh ABCDE12345
 
-# 3. Open the generated .xcodeproj and set your signing identity
-open out/build/ios-debug/LibertyRecomp.xcodeproj
-
-# 4. Build & run on device or simulator from within Xcode
+# 3. Build & run on device or simulator from within Xcode
 ```
+
+Find your Team ID at <https://developer.apple.com/account> (Membership tab).
+The script wraps `cmake --preset ios-debug` with the signing cache variables
+pre-filled and then opens the generated `.xcodeproj`.
+
+### Manual Configure
+
+If you prefer to drive CMake directly:
+
+```bash
+cmake --preset ios-debug \
+      -DLIBERTY_IOS_DEVELOPMENT_TEAM=ABCDE12345 \
+      -DLIBERTY_IOS_BUNDLE_IDENTIFIER=com.libertyrecomp
+open out/build/ios-debug/LibertyRecomp.xcodeproj
+```
+
+### Signing Cache Variables
+
+|Variable|Default|Purpose|
+|-|-|-|
+|`LIBERTY_IOS_DEVELOPMENT_TEAM`|(empty)|10-char Apple Team ID. Required for on-device builds. Simulator works without it.|
+|`LIBERTY_IOS_BUNDLE_IDENTIFIER`|`com.libertyrecomp`|Bundle ID. Must match your provisioning profile.|
+|`LIBERTY_IOS_PROVISIONING_PROFILE`|(empty)|Optional profile UUID. Leave blank for automatic signing.|
+
+These feed the Xcode target attributes `DEVELOPMENT_TEAM`,
+`PRODUCT_BUNDLE_IDENTIFIER`, `CODE_SIGN_IDENTITY` (`iPhone Developer`), and
+`CODE_SIGN_STYLE` (`Automatic`), so the generated project signs itself
+without manual clicks in the Xcode UI.
 
 ### Key Details
 

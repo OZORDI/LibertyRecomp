@@ -26,7 +26,30 @@ namespace rex::stream {
 class ByteStream;
 }  // namespace rex::stream
 
+namespace rex::memory::detail {
+
+/// Compensates for Windows 64KB allocation granularity on the 0xE0 physical heap.
+/// The backing file maps the 0xE0 heap at a 0x1000-byte offset, but MapViewOfFileEx
+/// rounds down to 64KB boundaries. Linux mmap handles 4KB offsets natively.
+constexpr u32 PhysicalHostOffset([[maybe_unused]] u32 guest_addr) noexcept {
+#if REX_PLATFORM_WIN32
+  return (guest_addr >= 0xE0000000u) ? 0x1000u : 0u;
+#else
+  return 0u;
+#endif
+}
+
+}  // namespace rex::memory::detail
+
 namespace rex::memory {
+
+/// Lightweight guest-to-host pointer translation using the memory base.
+/// For hooks and kernel code operating with the base pointer directly.
+/// Same raw arithmetic as recompiled code; no Memory* or heap lookup needed.
+template <typename T = u8*>
+inline T GuestPtr(u8* base, u32 guest_address) noexcept {
+  return reinterpret_cast<T>(base + guest_address + detail::PhysicalHostOffset(guest_address));
+}
 
 class Memory;
 
@@ -135,6 +158,10 @@ class BaseHeap {
   uint32_t GetTotalPageCount();
   uint32_t GetUnreservedPageCount();
 
+  uint32_t total_page_count() const { return uint32_t(page_table_.size()); }
+  uint32_t unreserved_page_count() const { return unreserved_page_count_; }
+  uint32_t reserved_page_count() const { return total_page_count() - unreserved_page_count(); }
+
   // Allocates pages with the given properties and allocation strategy.
   // This can reserve and commit the pages as well as set protection modes.
   // This will fail if not enough contiguous pages can be found.
@@ -153,6 +180,11 @@ class BaseHeap {
   virtual bool AllocRange(uint32_t low_address, uint32_t high_address, uint32_t size,
                           uint32_t alignment, uint32_t allocation_type, uint32_t protect,
                           bool top_down, uint32_t* out_address);
+
+  // Allocates from the system portion of the heap (top of virtual heaps).
+  // Physical heaps delegate to regular Alloc since there is no split.
+  virtual bool AllocSystemHeap(uint32_t size, uint32_t alignment, uint32_t allocation_type,
+                               uint32_t protect, bool top_down, uint32_t* out_address);
 
   // Decommits pages in the given range.
   // Partial overlapping pages will also be decommitted.
@@ -200,8 +232,11 @@ class BaseHeap {
   uint32_t heap_base_;
   uint32_t heap_size_;
   uint32_t page_size_;
+  uint32_t page_size_shift_ = 0;
   uint32_t host_address_offset_;
+  uint32_t unreserved_page_count_ = 0;
   rex::thread::global_critical_region global_critical_region_;
+  std::recursive_mutex heap_mutex_;
   std::vector<PageEntry> page_table_;
 };
 
@@ -239,6 +274,8 @@ class PhysicalHeap : public BaseHeap {
   bool AllocRange(uint32_t low_address, uint32_t high_address, uint32_t size, uint32_t alignment,
                   uint32_t allocation_type, uint32_t protect, bool top_down,
                   uint32_t* out_address) override;
+  bool AllocSystemHeap(uint32_t size, uint32_t alignment, uint32_t allocation_type,
+                       uint32_t protect, bool top_down, uint32_t* out_address) override;
   bool Decommit(uint32_t address, uint32_t size) override;
   bool Release(uint32_t base_address, uint32_t* out_region_size = nullptr) override;
   bool Protect(uint32_t address, uint32_t size, uint32_t protect,
@@ -441,7 +478,7 @@ class Memory {
                            uint32_t system_heap_flags = kSystemHeapDefault);
 
   // Frees memory allocated with SystemHeapAlloc.
-  void SystemHeapFree(uint32_t address);
+  void SystemHeapFree(uint32_t address, uint32_t* out_region_size = nullptr);
 
   // Gets the heap for the address space containing the given address.
   const BaseHeap* LookupHeap(uint32_t address) const;
@@ -452,6 +489,11 @@ class Memory {
 
   // Gets the heap with the given properties.
   BaseHeap* LookupHeapByType(bool physical, uint32_t page_size);
+
+  // Aggregates page statistics across the given heaps.
+  void GetHeapsPageStatsSummary(const BaseHeap* const* provided_heaps, size_t heaps_count,
+                                uint32_t& unreserved_pages, uint32_t& reserved_pages,
+                                uint32_t& used_pages, uint32_t& reserved_bytes);
 
   // Gets the physical base heap.
   VirtualHeap* GetPhysicalHeap();
@@ -510,6 +552,7 @@ class Memory {
   uint32_t function_table_base_ = 0;  // Guest address of function table (IMAGE_BASE + IMAGE_SIZE)
   uint32_t function_code_base_ = 0;   // CODE_BASE for offset calculation
   uint32_t function_code_size_ = 0;   // CODE_SIZE for bounds checking
+  uint32_t function_thunk_reserve_ = 0;  // Extra space reserved for runtime thunks
 
   rex::memory::FileMappingHandle mapping_ = rex::memory::kFileMappingHandleInvalid;
   uint8_t* mapping_base_ = nullptr;

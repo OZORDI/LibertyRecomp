@@ -73,6 +73,7 @@ struct RecompilerConfig {
   std::string projectName = "rex";  ///< Project name for output files
   std::string filePath;             ///< Path to XEX/ELF file
   std::string outDirectoryPath;     ///< Output directory for generated code
+  std::string templateDir;          ///< Optional custom template directory for overrides
 
   // Patch file paths (TODO: implement patching workflow)
   std::string patchFilePath;
@@ -114,9 +115,17 @@ struct RecompilerConfig {
 
   /**
    * Load configuration from a TOML file.
+   *
+   * Supports an optional `includes` array for layered config. Paths in
+   * `includes` resolve relative to the including file's directory.  Merge
+   * semantics: scalars last-wins, keyed tables additive (same key = last
+   * wins), arrays-of-tables deduplicated by primary key, sets additive.
+   *
    * @param configFilePath Path to the TOML config file
+   * @return true on success, false on error (parse failure, circular
+   *         include, depth exceeded)
    */
-  void Load(const std::string_view& configFilePath);
+  bool Load(const std::string_view& configFilePath);
 
   /// Validation result containing warnings and errors.
   struct ValidationResult {

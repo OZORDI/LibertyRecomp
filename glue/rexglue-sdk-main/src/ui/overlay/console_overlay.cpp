@@ -11,7 +11,6 @@
  */
 #include <rex/ui/overlay/console_overlay.h>
 #include <rex/cvar.h>
-#include <rex/ui/keybinds.h>
 #include <imgui.h>
 #include <algorithm>
 #include <string>
@@ -39,21 +38,9 @@ static ImVec4 LevelColor(spdlog::level::level_enum level) {
 }
 
 ConsoleDialog::ConsoleDialog(ImGuiDrawer* imgui_drawer, std::shared_ptr<rex::LogCaptureSink> sink)
-    : ImGuiDialog(imgui_drawer), sink_(std::move(sink)) {
-  RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] { ToggleVisible(); });
-}
+    : ImGuiDialog(imgui_drawer), sink_(std::move(sink)) {}
 
-ConsoleDialog::~ConsoleDialog() {
-  UnregisterBind("bind_console");
-}
-
-void ConsoleDialog::ToggleVisible() {
-  visible_ = !visible_;
-  if (visible_) {
-    focus_input_next_frame_ = true;
-    scroll_to_bottom_ = true;
-  }
-}
+ConsoleDialog::~ConsoleDialog() {}
 
 void ConsoleDialog::RefreshCategories() {
   for (auto& entry : entries_) {
@@ -118,7 +105,7 @@ void ConsoleDialog::ExecuteCommand(std::string_view cmd) {
       std::string line = "  " + n;
       if (info)
         line += " = " + info->getter() + "  (" + info->description + ")";
-      entries_.push_back({spdlog::level::info, "console", line});
+      local_entries_.push_back({spdlog::level::info, "console", line});
     }
     return;
   }
@@ -129,10 +116,10 @@ void ConsoleDialog::ExecuteCommand(std::string_view cmd) {
     // No space: treat as "get" - show current value.
     std::string val = rex::cvar::GetFlagByName(cmd);
     if (val.empty() && !rex::cvar::GetFlagInfo(cmd)) {
-      entries_.push_back(
+      local_entries_.push_back(
           {spdlog::level::warn, "console", "[console] unknown cvar: " + std::string(cmd)});
     } else {
-      entries_.push_back(
+      local_entries_.push_back(
           {spdlog::level::info, "console", "[console] " + std::string(cmd) + " = " + val});
     }
     return;
@@ -144,22 +131,21 @@ void ConsoleDialog::ExecuteCommand(std::string_view cmd) {
     value.erase(value.begin());
 
   if (rex::cvar::SetFlagByName(name, value)) {
-    entries_.push_back({spdlog::level::info, "console", "[console] " + name + " = " + value});
+    local_entries_.push_back({spdlog::level::info, "console", "[console] " + name + " = " + value});
   } else {
-    entries_.push_back({spdlog::level::warn, "console", "[console] unknown cvar: " + name});
+    local_entries_.push_back({spdlog::level::warn, "console", "[console] unknown cvar: " + name});
   }
   scroll_to_bottom_ = true;
 }
 
 void ConsoleDialog::OnDraw(ImGuiIO& io) {
-  if (!visible_)
-    return;
-
   // Refresh entries if sink has new data.
   if (sink_) {
     uint64_t gen = sink_->generation();
     if (gen != last_generation_) {
       sink_->CopyEntries(entries_);
+      // Re-append console-local entries (command feedback) that aren't in the sink.
+      entries_.insert(entries_.end(), local_entries_.begin(), local_entries_.end());
       last_generation_ = gen;
       RefreshCategories();
     }
@@ -173,7 +159,7 @@ void ConsoleDialog::OnDraw(ImGuiIO& io) {
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
                            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar;
 
-  if (!ImGui::Begin("Console##rex", &visible_, flags)) {
+  if (!ImGui::Begin("Console##rex", nullptr, flags)) {
     ImGui::End();
     return;
   }

@@ -9,14 +9,36 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <algorithm>
+#include <cmath>
+
 #include <rex/dbg.h>
 #include <rex/input/flags.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
+#include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/input/nop/nop_input_driver.h>
 #include <rex/input/sdl/sdl_input_driver.h>
+#include <rex/input/xinput/xinput_input_driver.h>
 #include <rex/logging.h>
+#include <rex/platform.h>
+#if REX_PLATFORM_IOS
+#include "ios/ios_input_driver.h"
+#endif
+#if REX_PLATFORM_NX
+#include "switch/switch_input_driver.h"
+#endif
+#if REX_PLATFORM_ANDROID
+#include "android/android_input_driver.h"
+#endif
+#if REX_PLATFORM_PS4
+#include "ps4/ps4_input_driver.h"
+#endif
 
+REXCVAR_DEFINE_STRING(input_backend, "sdl", "Input", "Input backend: sdl, xinput")
+    .allowed({"sdl", "xinput"});
+
+REXCVAR_DEFINE_BOOL(guide_button, false, "Input", "Enable guide button pass-through");
 namespace rex::input {
 
 InputSystem::InputSystem(rex::ui::Window* window) : window_(window) {}
@@ -33,6 +55,19 @@ void InputSystem::Shutdown() {
 
 void InputSystem::AddDriver(std::unique_ptr<InputDriver> driver) {
   drivers_.push_back(std::move(driver));
+}
+
+void InputSystem::AttachWindow(rex::ui::Window* window) {
+  window_ = window;
+  for (auto& driver : drivers_) {
+    driver->OnWindowAvailable(window);
+  }
+}
+
+void InputSystem::SetActiveCallback(std::function<bool()> callback) {
+  for (auto& driver : drivers_) {
+    driver->set_is_active_callback(callback);
+  }
 }
 
 X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
@@ -56,16 +91,52 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
   SCOPE_profile_cpu_f("hid");
 
   bool any_connected = false;
+  bool first_result = true;
+  X_INPUT_STATE merged = {};
+
   for (auto& driver : drivers_) {
-    X_RESULT result = driver->GetState(user_index, out_state);
+    X_INPUT_STATE state = {};
+    X_RESULT result = driver->GetState(user_index, &state);
     if (result != X_ERROR_DEVICE_NOT_CONNECTED) {
       any_connected = true;
     }
     if (result == X_ERROR_SUCCESS) {
-      return result;
+      if (first_result) {
+        merged = state;
+        first_result = false;
+      } else {
+        // Merge: OR buttons, max triggers, max-magnitude sticks
+        merged.gamepad.buttons = static_cast<uint16_t>(merged.gamepad.buttons) |
+                                 static_cast<uint16_t>(state.gamepad.buttons);
+        merged.gamepad.left_trigger =
+            std::max(merged.gamepad.left_trigger, state.gamepad.left_trigger);
+        merged.gamepad.right_trigger =
+            std::max(merged.gamepad.right_trigger, state.gamepad.right_trigger);
+
+        auto merge_axis = [](int16_t a, int16_t b) -> int16_t {
+          return (std::abs(static_cast<int>(a)) >= std::abs(static_cast<int>(b))) ? a : b;
+        };
+        merged.gamepad.thumb_lx = merge_axis(merged.gamepad.thumb_lx, state.gamepad.thumb_lx);
+        merged.gamepad.thumb_ly = merge_axis(merged.gamepad.thumb_ly, state.gamepad.thumb_ly);
+        merged.gamepad.thumb_rx = merge_axis(merged.gamepad.thumb_rx, state.gamepad.thumb_rx);
+        merged.gamepad.thumb_ry = merge_axis(merged.gamepad.thumb_ry, state.gamepad.thumb_ry);
+
+        if (static_cast<uint32_t>(state.packet_number) >
+            static_cast<uint32_t>(merged.packet_number)) {
+          merged.packet_number = state.packet_number;
+        }
+      }
     }
   }
-  return any_connected ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
+
+  if (first_result) {
+    return any_connected ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
+  }
+
+  if (out_state) {
+    *out_state = merged;
+  }
+  return X_ERROR_SUCCESS;
 }
 
 X_RESULT InputSystem::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
@@ -105,9 +176,69 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
   auto input = std::make_unique<InputSystem>(nullptr);
 
   if (!tool_mode) {
-    auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0);
-    if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
-      input->AddDriver(std::move(sdl_driver));
+#if REX_PLATFORM_WIN32
+    if (REXCVAR_GET(input_backend) == "xinput") {
+      auto xinput_driver = std::make_unique<xinput::XinputInputDriver>(nullptr, 0);
+      if (xinput_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(xinput_driver));
+      }
+    }
+#endif
+
+    if (REXCVAR_GET(input_backend) == "sdl") {
+      auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0);
+      if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(sdl_driver));
+      }
+    }
+
+#if REX_PLATFORM_IOS
+    // iOS: add the GameController.framework driver alongside SDL so MFi
+    // pads, Xbox/PS/Switch controllers, and haptics all work natively.
+    {
+      auto ios_driver = std::make_unique<ios::IOSInputDriver>(nullptr, 0);
+      if (ios_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(ios_driver));
+      }
+    }
+#endif
+
+#if REX_PLATFORM_NX
+    // Switch: native libnx HID driver (Pro Controller, Joy-Cons, handheld).
+    {
+      auto nx_driver = std::make_unique<nx::SwitchInputDriver>(nullptr, 0);
+      if (nx_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(nx_driver));
+      }
+    }
+#endif
+
+#if REX_PLATFORM_ANDROID
+    // Android: NDK AInput / ASensor based gamepad driver. Events are pushed
+    // in by the host activity's onInputEvent() via HandleInputEvent().
+    {
+      auto android_driver =
+          std::make_unique<android::AndroidInputDriver>(nullptr, 0);
+      if (android_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(android_driver));
+      }
+    }
+#endif
+
+#if REX_PLATFORM_PS4
+    // PS4: native scePad (DualShock 4 / DualSense) driver.
+    {
+      auto ps4_driver = std::make_unique<ps4::PS4InputDriver>(nullptr, 0);
+      if (ps4_driver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(ps4_driver));
+      }
+    }
+#endif
+
+    // MnK driver (keyboard/mouse -> controller emulation)
+    auto mnk_driver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
+    if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
+      input->AddDriver(std::move(mnk_driver));
     }
   }
 

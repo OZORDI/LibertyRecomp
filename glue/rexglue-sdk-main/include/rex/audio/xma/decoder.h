@@ -22,7 +22,7 @@
 #include <rex/system/xthread.h>
 
 namespace rex::runtime {
-class Processor;
+class FunctionDispatcher;
 }  // namespace rex::runtime
 
 namespace rex::audio {
@@ -31,11 +31,11 @@ struct XMA_CONTEXT_DATA;
 
 class XmaDecoder {
  public:
-  explicit XmaDecoder(runtime::Processor* processor);
+  explicit XmaDecoder(runtime::FunctionDispatcher* function_dispatcher);
   ~XmaDecoder();
 
   memory::Memory* memory() const { return memory_; }
-  runtime::Processor* processor() const { return processor_; }
+  runtime::FunctionDispatcher* function_dispatcher() const { return function_dispatcher_; }
 
   X_STATUS Setup(system::KernelState* kernel_state);
   void Shutdown();
@@ -69,13 +69,13 @@ class XmaDecoder {
 
  protected:
   memory::Memory* memory_ = nullptr;
-  runtime::Processor* processor_ = nullptr;
+  runtime::FunctionDispatcher* function_dispatcher_ = nullptr;
 
   std::atomic<bool> worker_running_ = {false};
   system::object_ref<system::XHostThread> worker_thread_;
   std::unique_ptr<rex::thread::Event> work_event_ = nullptr;
 
-  bool paused_ = false;
+  std::atomic<bool> paused_ = false;
   rex::thread::Fence pause_fence_;   // Signaled when worker paused.
   rex::thread::Fence resume_fence_;  // Signaled when resume requested.
 

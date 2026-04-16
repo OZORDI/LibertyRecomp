@@ -16,8 +16,8 @@
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
 #include <rex/memory.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/info/file.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/util/string_utils.h>
@@ -69,9 +69,9 @@ static bool IsValidPath(const std::string_view s, bool is_pattern) {
       case '+':
       case ',':
       // case ':':
-      case ';':
+      // case ';':
       case '<':
-      case '=':
+      // case '=':
       case '>':
       // case '?':
       case '|': {
@@ -100,12 +100,11 @@ static bool IsValidPath(const std::string_view s, bool is_pattern) {
   return true;
 }
 
-ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_access,
-                                    ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attrs,
-                                    ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                    ppc_pu64_t allocation_size_ptr, ppc_u32_t file_attributes,
-                                    ppc_u32_t share_access, ppc_u32_t creation_disposition,
-                                    ppc_u32_t create_options) {
+u32 NtCreateFile_entry(mapped_u32 handle_out, u32 desired_access,
+                       ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attrs,
+                       ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, mapped_u64 allocation_size_ptr,
+                       u32 file_attributes, u32 share_access, u32 creation_disposition,
+                       u32 create_options) {
   // note used. maybe later
   // uint64_t allocation_size = 0;  // is this correct???
   // if (allocation_size_ptr) {
@@ -118,12 +117,12 @@ ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_acc
   }
   assert_not_null(handle_out);
 
-  auto object_name = kernel_memory()->TranslateVirtual<X_ANSI_STRING*>(object_attrs->name_ptr);
+  auto object_name = REX_KERNEL_MEMORY()->TranslateVirtual<X_ANSI_STRING*>(object_attrs->name_ptr);
 
   rex::filesystem::Entry* root_entry = nullptr;
 
   // Compute path, possibly attrs relative.
-  auto target_path = util::TranslateAnsiString(kernel_memory(), object_name);
+  auto target_path = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), object_name);
   REXKRNL_IMPORT_TRACE(
       "NtCreateFile", "path={} access={:#x} attrs={:#x} share={:#x} disp={:#x} options={:#x}",
       target_path, (uint32_t)desired_access, (uint32_t)file_attributes, (uint32_t)share_access,
@@ -136,8 +135,7 @@ ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_acc
 
   if (object_attrs->root_directory != 0xFFFFFFFD &&  // ObDosDevices
       object_attrs->root_directory != 0) {
-    auto root_file =
-        kernel_state()->object_table()->LookupObject<XFile>(object_attrs->root_directory);
+    auto root_file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(object_attrs->root_directory);
     assert_not_null(root_file);
     assert_true(root_file->type() == XObject::Type::File);
 
@@ -147,7 +145,7 @@ ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_acc
   // Attempt open (or create).
   rex::filesystem::File* vfs_file;
   rex::filesystem::FileAction file_action;
-  X_STATUS result = kernel_state()->file_system()->OpenFile(
+  X_STATUS result = REX_KERNEL_FS()->OpenFile(
       root_entry, target_path, rex::filesystem::FileDisposition((uint32_t)creation_disposition),
       desired_access, (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,
       (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0, &vfs_file, &file_action);
@@ -158,7 +156,7 @@ ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_acc
     // If true, desired_access SYNCHRONIZE flag must be set.
     bool synchronous = (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_ALERT) ||
                        (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_NONALERT);
-    file = object_ref<XFile>(new XFile(kernel_state(), vfs_file, synchronous));
+    file = object_ref<XFile>(new XFile(REX_KERNEL_STATE(), vfs_file, synchronous));
 
     // Handle ref is incremented, so return that.
     handle = file->handle();
@@ -175,24 +173,22 @@ ppc_u32_result_t NtCreateFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_acc
   } else {
     REXKRNL_IMPORT_RESULT("NtCreateFile", "{:#x} handle={:#x}", result, handle);
   }
-
   return result;
 }
 
-ppc_u32_result_t NtOpenFile_entry(ppc_pu32_t handle_out, ppc_u32_t desired_access,
-                                  ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attributes,
-                                  ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                  ppc_u32_t open_options) {
+u32 NtOpenFile_entry(mapped_u32 handle_out, u32 desired_access,
+                     ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attributes,
+                     ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, u32 open_options) {
   return NtCreateFile_entry(handle_out, desired_access, object_attributes, io_status_block, nullptr,
                             0, 0, static_cast<uint32_t>(rex::filesystem::FileDisposition::kOpen),
                             open_options);
 }
 
-ppc_u32_result_t NtReadFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
-                                  ppc_pvoid_t apc_routine_ptr, ppc_pvoid_t apc_context,
-                                  ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, ppc_pvoid_t buffer,
-                                  ppc_u32_t buffer_length, ppc_pu64_t byte_offset_ptr) {
+u32 NtReadFile_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_ptr,
+                     mapped_void apc_context, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
+                     mapped_void buffer, u32 buffer_length, mapped_u64 byte_offset_ptr) {
   uint64_t byte_offset = byte_offset_ptr ? static_cast<uint64_t>(*byte_offset_ptr) : 0;
+  const bool apc_requested = (static_cast<uint32_t>(apc_routine_ptr) & ~1u) != 0;
   REXKRNL_IMPORT_TRACE(
       "NtReadFile",
       "handle={:#x} event={:#x} apc={:#x} apc_ctx={:#x} iosb={:#x} buf={:#x} len={:#x} offset={}",
@@ -200,14 +196,15 @@ ppc_u32_result_t NtReadFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
       apc_context.guest_address(), io_status_block.guest_address(), buffer.guest_address(),
       (uint32_t)buffer_length, byte_offset_ptr ? (int64_t)byte_offset : -1);
   X_STATUS result = X_STATUS_SUCCESS;
+  bool apc_queued = false;
 
   bool signal_event = false;
-  auto ev = kernel_state()->object_table()->LookupObject<XEvent>(event_handle);
+  auto ev = REX_KERNEL_OBJECTS()->LookupObject<XEvent>(event_handle);
   if (event_handle && !ev) {
     result = X_STATUS_INVALID_HANDLE;
   }
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     result = X_STATUS_INVALID_HANDLE;
   }
@@ -228,14 +225,23 @@ ppc_u32_result_t NtReadFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
       // though were are completing immediately.
       // Low bit probably means do not queue to IO ports.
       if ((uint32_t)apc_routine_ptr & ~1) {
-        if (apc_context) {
+        if (apc_context && result == X_STATUS_SUCCESS) {
           auto thread = XThread::GetCurrentThread();
-          thread->EnqueueApc(static_cast<uint32_t>(apc_routine_ptr) & ~1u,
-                             apc_context.guest_address(), io_status_block.guest_address(), 0);
+          uint32_t apc_routine = static_cast<uint32_t>(apc_routine_ptr) & ~1u;
+          uint32_t apc_ctx = apc_context.guest_address();
+          uint32_t apc_arg1 = io_status_block.guest_address();
+          REXKRNL_IMPORT_TRACE("NtReadFile",
+                               "queue_apc thid={} normal={:#x} ctx={:#x} arg1={:#x} arg2=0",
+                               thread ? thread->thread_id() : 0, apc_routine, apc_ctx, apc_arg1);
+          thread->EnqueueApc(apc_routine, apc_ctx, apc_arg1, 0);
+          apc_queued = true;
+        } else {
+          REXKRNL_IMPORT_TRACE("NtReadFile", "skip_apc_queue (apc_ctx={:#x}, status={:#x})",
+                               apc_context.guest_address(), result);
         }
       }
 
-      if (!file->is_synchronous()) {
+      if (!file->is_synchronous() && result != X_STATUS_END_OF_FILE) {
         result = X_STATUS_PENDING;
       }
 
@@ -276,29 +282,32 @@ ppc_u32_result_t NtReadFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
   // Log detailed completion info for debugging async IO issues
   if (file) {
     REXKRNL_IMPORT_RESULT(
-        "NtReadFile", "{:#x} (sync={}, iosb_status={:#x}, iosb_info={}, ev_signaled={})", result,
-        file->is_synchronous(), io_status_block ? (uint32_t)io_status_block->status : 0xDEAD,
-        io_status_block ? (uint32_t)io_status_block->information : 0, ev && signal_event);
+        "NtReadFile",
+        "{:#x} (sync={}, iosb_status={:#x}, iosb_info={}, ev_signaled={}, apc_requested={}, "
+        "apc_queued={})",
+        result, file->is_synchronous(),
+        io_status_block ? (uint32_t)io_status_block->status : 0xDEAD,
+        io_status_block ? (uint32_t)io_status_block->information : 0, ev && signal_event,
+        apc_requested, apc_queued);
   } else {
-    REXKRNL_IMPORT_RESULT("NtReadFile", "{:#x}", result);
+    REXKRNL_IMPORT_RESULT("NtReadFile", "{:#x} (apc_requested={}, apc_queued={})", result,
+                          apc_requested, apc_queued);
   }
   return result;
 }
 
-ppc_u32_result_t NtReadFileScatter_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
-                                         ppc_pvoid_t apc_routine_ptr, ppc_pvoid_t apc_context,
-                                         ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                         ppc_pu32_t segment_array, ppc_u32_t length,
-                                         ppc_pu64_t byte_offset_ptr) {
+u32 NtReadFileScatter_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_ptr,
+                            mapped_void apc_context, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
+                            mapped_u32 segment_array, u32 length, mapped_u64 byte_offset_ptr) {
   X_STATUS result = X_STATUS_SUCCESS;
 
   bool signal_event = false;
-  auto ev = kernel_state()->object_table()->LookupObject<XEvent>(event_handle);
+  auto ev = REX_KERNEL_OBJECTS()->LookupObject<XEvent>(event_handle);
   if (event_handle && !ev) {
     result = X_STATUS_INVALID_HANDLE;
   }
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     result = X_STATUS_INVALID_HANDLE;
   }
@@ -370,21 +379,20 @@ ppc_u32_result_t NtReadFileScatter_entry(ppc_u32_t file_handle, ppc_u32_t event_
   return result;
 }
 
-ppc_u32_result_t NtWriteFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
-                                   ppc_fn_t apc_routine, ppc_pvoid_t apc_context,
-                                   ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, ppc_pvoid_t buffer,
-                                   ppc_u32_t buffer_length, ppc_pu64_t byte_offset_ptr) {
+u32 NtWriteFile_entry(u32 file_handle, u32 event_handle, u32 apc_routine, mapped_void apc_context,
+                      ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, mapped_void buffer,
+                      u32 buffer_length, mapped_u64 byte_offset_ptr) {
   X_STATUS result = X_STATUS_SUCCESS;
 
   // Grab event to signal.
   bool signal_event = false;
-  auto ev = kernel_state()->object_table()->LookupObject<XEvent>(event_handle);
+  auto ev = REX_KERNEL_OBJECTS()->LookupObject<XEvent>(event_handle);
   if (event_handle && !ev) {
     result = X_STATUS_INVALID_HANDLE;
   }
 
   // Grab file.
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
   if (!file) {
     result = X_STATUS_INVALID_HANDLE;
   }
@@ -445,10 +453,9 @@ ppc_u32_result_t NtWriteFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle
   return result;
 }
 
-ppc_u32_result_t NtCreateIoCompletion_entry(ppc_pu32_t out_handle, ppc_u32_t desired_access,
-                                            ppc_pvoid_t object_attribs,
-                                            ppc_u32_t num_concurrent_threads) {
-  auto completion = new XIOCompletion(kernel_state());
+u32 NtCreateIoCompletion_entry(mapped_u32 out_handle, u32 desired_access,
+                               mapped_void object_attribs, u32 num_concurrent_threads) {
+  auto completion = new XIOCompletion(REX_KERNEL_STATE());
   if (out_handle) {
     *out_handle = completion->handle();
   }
@@ -456,10 +463,9 @@ ppc_u32_result_t NtCreateIoCompletion_entry(ppc_pu32_t out_handle, ppc_u32_t des
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t NtSetIoCompletion_entry(ppc_u32_t handle, ppc_u32_t key_context,
-                                         ppc_u32_t apc_context, ppc_u32_t completion_status,
-                                         ppc_u32_t num_bytes) {
-  auto port = kernel_state()->object_table()->LookupObject<XIOCompletion>(handle);
+u32 NtSetIoCompletion_entry(u32 handle, u32 key_context, u32 apc_context, u32 completion_status,
+                            u32 num_bytes) {
+  auto port = REX_KERNEL_OBJECTS()->LookupObject<XIOCompletion>(handle);
   if (!port) {
     return X_STATUS_INVALID_HANDLE;
   }
@@ -475,14 +481,12 @@ ppc_u32_result_t NtSetIoCompletion_entry(ppc_u32_t handle, ppc_u32_t key_context
 }
 
 // Dequeues a packet from the completion port.
-ppc_u32_result_t NtRemoveIoCompletion_entry(ppc_u32_t handle, ppc_pu32_t key_context,
-                                            ppc_pu32_t apc_context,
-                                            ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                            ppc_pu64_t timeout) {
+u32 NtRemoveIoCompletion_entry(u32 handle, mapped_u32 key_context, mapped_u32 apc_context,
+                               ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, mapped_u64 timeout) {
   X_STATUS status = X_STATUS_SUCCESS;
   // uint32_t info = 0;
 
-  auto port = kernel_state()->object_table()->LookupObject<XIOCompletion>(handle);
+  auto port = REX_KERNEL_OBJECTS()->LookupObject<XIOCompletion>(handle);
   if (!port) {
     status = X_STATUS_INVALID_HANDLE;
   }
@@ -509,23 +513,22 @@ ppc_u32_result_t NtRemoveIoCompletion_entry(ppc_u32_t handle, ppc_pu32_t key_con
   return status;
 }
 
-ppc_u32_result_t NtQueryFullAttributesFile_entry(
-    ppc_ptr_t<X_OBJECT_ATTRIBUTES> obj_attribs,
-    ppc_ptr_t<X_FILE_NETWORK_OPEN_INFORMATION> file_info) {
-  auto object_name = kernel_memory()->TranslateVirtual<X_ANSI_STRING*>(obj_attribs->name_ptr);
-  auto path_str = util::TranslateAnsiString(kernel_memory(), object_name);
+u32 NtQueryFullAttributesFile_entry(ppc_ptr_t<X_OBJECT_ATTRIBUTES> obj_attribs,
+                                    ppc_ptr_t<X_FILE_NETWORK_OPEN_INFORMATION> file_info) {
+  auto object_name = REX_KERNEL_MEMORY()->TranslateVirtual<X_ANSI_STRING*>(obj_attribs->name_ptr);
+  auto path_str = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), object_name);
   REXKRNL_IMPORT_TRACE("NtQueryFullAttributesFile", "path={}", path_str);
 
   object_ref<XFile> root_file;
   if (obj_attribs->root_directory != 0xFFFFFFFD &&  // ObDosDevices
       obj_attribs->root_directory != 0) {
-    root_file = kernel_state()->object_table()->LookupObject<XFile>(obj_attribs->root_directory);
+    root_file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(obj_attribs->root_directory);
     assert_not_null(root_file);
     assert_true(root_file->type() == XObject::Type::File);
     assert_always();
   }
 
-  auto target_path = util::TranslateAnsiString(kernel_memory(), object_name);
+  auto target_path = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), object_name);
 
   // Enforce that the path is ASCII.
   if (!IsValidPath(target_path, false)) {
@@ -533,7 +536,7 @@ ppc_u32_result_t NtQueryFullAttributesFile_entry(
   }
 
   // Resolve the file using the virtual file system.
-  auto entry = kernel_state()->file_system()->ResolvePath(target_path);
+  auto entry = REX_KERNEL_FS()->ResolvePath(target_path);
   if (entry) {
     // Found.
     file_info->creation_time = entry->create_timestamp();
@@ -552,12 +555,11 @@ ppc_u32_result_t NtQueryFullAttributesFile_entry(
   return X_STATUS_NO_SUCH_FILE;
 }
 
-ppc_u32_result_t NtQueryDirectoryFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
-                                            ppc_fn_t apc_routine, ppc_pvoid_t apc_context,
-                                            ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
-                                            ppc_ptr_t<X_FILE_DIRECTORY_INFORMATION> file_info_ptr,
-                                            ppc_u32_t length, ppc_ptr_t<X_ANSI_STRING> file_name,
-                                            ppc_u32_t restart_scan) {
+u32 NtQueryDirectoryFile_entry(u32 file_handle, u32 event_handle, u32 apc_routine,
+                               mapped_void apc_context,
+                               ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
+                               ppc_ptr_t<X_FILE_DIRECTORY_INFORMATION> file_info_ptr, u32 length,
+                               ppc_ptr_t<X_ANSI_STRING> file_name, u32 restart_scan) {
   if (length < 72) {
     return X_STATUS_INFO_LENGTH_MISMATCH;
   }
@@ -565,8 +567,8 @@ ppc_u32_result_t NtQueryDirectoryFile_entry(ppc_u32_t file_handle, ppc_u32_t eve
   X_STATUS result = X_STATUS_UNSUCCESSFUL;
   uint32_t info = 0;
 
-  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
-  auto name = util::TranslateAnsiString(kernel_memory(), file_name);
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
+  auto name = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), file_name);
 
   // Enforce that the path is ASCII.
   if (!IsValidPath(name, true)) {
@@ -595,8 +597,7 @@ ppc_u32_result_t NtQueryDirectoryFile_entry(ppc_u32_t file_handle, ppc_u32_t eve
   return result;
 }
 
-ppc_u32_result_t NtFlushBuffersFile_entry(ppc_u32_t file_handle,
-                                          ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
+u32 NtFlushBuffersFile_entry(u32 file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
   auto result = X_STATUS_SUCCESS;
 
   if (io_status_block_ptr) {
@@ -608,8 +609,8 @@ ppc_u32_result_t NtFlushBuffersFile_entry(ppc_u32_t file_handle,
 }
 
 // https://docs.microsoft.com/en-us/windows/win32/devnotes/ntopensymboliclinkobject
-ppc_u32_result_t NtOpenSymbolicLinkObject_entry(ppc_pu32_t handle_out,
-                                                ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attrs) {
+u32 NtOpenSymbolicLinkObject_entry(mapped_u32 handle_out,
+                                   ppc_ptr_t<X_OBJECT_ATTRIBUTES> object_attrs) {
   if (!object_attrs) {
     return X_STATUS_INVALID_PARAMETER;
   }
@@ -617,9 +618,9 @@ ppc_u32_result_t NtOpenSymbolicLinkObject_entry(ppc_pu32_t handle_out,
 
   assert_true(object_attrs->attributes == 64);  // case insensitive
 
-  auto object_name = kernel_memory()->TranslateVirtual<X_ANSI_STRING*>(object_attrs->name_ptr);
+  auto object_name = REX_KERNEL_MEMORY()->TranslateVirtual<X_ANSI_STRING*>(object_attrs->name_ptr);
 
-  auto target_path = util::TranslateAnsiString(kernel_memory(), object_name);
+  auto target_path = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), object_name);
 
   // Enforce that the path is ASCII.
   if (!IsValidPath(target_path, false)) {
@@ -635,11 +636,11 @@ ppc_u32_result_t NtOpenSymbolicLinkObject_entry(ppc_pu32_t handle_out,
   }
 
   std::string link_path;
-  if (!kernel_state()->file_system()->FindSymbolicLink(target_path, link_path)) {
+  if (!REX_KERNEL_FS()->FindSymbolicLink(target_path, link_path)) {
     return X_STATUS_NO_SUCH_FILE;
   }
 
-  object_ref<XSymbolicLink> symlink(new XSymbolicLink(kernel_state()));
+  object_ref<XSymbolicLink> symlink(new XSymbolicLink(REX_KERNEL_STATE()));
   symlink->Initialize(target_path, link_path);
 
   *handle_out = symlink->handle();
@@ -648,37 +649,34 @@ ppc_u32_result_t NtOpenSymbolicLinkObject_entry(ppc_pu32_t handle_out,
 }
 
 // https://docs.microsoft.com/en-us/windows/win32/devnotes/ntquerysymboliclinkobject
-ppc_u32_result_t NtQuerySymbolicLinkObject_entry(ppc_u32_t handle,
-                                                 ppc_ptr_t<X_ANSI_STRING> target) {
-  auto symlink = kernel_state()->object_table()->LookupObject<XSymbolicLink>(handle);
+u32 NtQuerySymbolicLinkObject_entry(u32 handle, ppc_ptr_t<X_ANSI_STRING> target) {
+  auto symlink = REX_KERNEL_OBJECTS()->LookupObject<XSymbolicLink>(handle);
   if (!symlink) {
     return X_STATUS_NO_SUCH_FILE;
   }
   auto length = std::min(static_cast<size_t>(target->maximum_length), symlink->target().size());
   if (length > 0) {
-    auto target_buf = kernel_memory()->TranslateVirtual(target->pointer);
+    auto target_buf = REX_KERNEL_MEMORY()->TranslateVirtual(target->pointer);
     std::memcpy(target_buf, symlink->target().c_str(), length);
   }
   target->length = static_cast<uint16_t>(length);
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t FscGetCacheElementCount_entry(ppc_u32_t r3) {
+u32 FscGetCacheElementCount_entry(u32 r3) {
   return 0;
 }
 
-ppc_u32_result_t FscSetCacheElementCount_entry(ppc_u32_t unk_0, ppc_u32_t unk_1) {
+u32 FscSetCacheElementCount_entry(u32 unk_0, u32 unk_1) {
   // unk_0 = 0
   // unk_1 looks like a count? in what units? 256 is a common value
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t NtDeviceIoControlFile_entry(ppc_u32_t handle, ppc_u32_t event_handle,
-                                             ppc_u32_t apc_routine, ppc_u32_t apc_context,
-                                             ppc_u32_t io_status_block, ppc_u32_t io_control_code,
-                                             ppc_pvoid_t input_buffer, ppc_u32_t input_buffer_len,
-                                             ppc_pvoid_t output_buffer,
-                                             ppc_u32_t output_buffer_len) {
+u32 NtDeviceIoControlFile_entry(u32 handle, u32 event_handle, u32 apc_routine, u32 apc_context,
+                                u32 io_status_block, u32 io_control_code, mapped_void input_buffer,
+                                u32 input_buffer_len, mapped_void output_buffer,
+                                u32 output_buffer_len) {
   // Called by XMountUtilityDrive cache-mounting code
   // (checks if the returned values look valid, values below seem to pass the
   // checks)
@@ -710,120 +708,113 @@ ppc_u32_result_t NtDeviceIoControlFile_entry(ppc_u32_t handle, ppc_u32_t event_h
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t IoCreateDevice_entry(ppc_u32_t device_struct, ppc_u32_t r4, ppc_u32_t r5,
-                                      ppc_u32_t r6, ppc_u32_t r7, ppc_pu32_t out_struct) {
+u32 IoCreateDevice_entry(u32 device_struct, u32 r4, u32 r5, u32 r6, u32 r7, mapped_u32 out_struct) {
   // Called from XMountUtilityDrive XAM-task code
   // That code tries writing things to a pointer at out_struct+0x18
   // We'll alloc some scratch space for it so it doesn't cause any exceptions
 
   // 0x24 is guessed size from accesses to out_struct - likely incorrect
-  auto out_guest = kernel_memory()->SystemHeapAlloc(0x24);
+  auto out_guest = REX_KERNEL_MEMORY()->SystemHeapAlloc(0x24);
 
-  auto out = kernel_memory()->TranslateVirtual<uint8_t*>(out_guest);
+  auto out = REX_KERNEL_MEMORY()->TranslateVirtual<uint8_t*>(out_guest);
   memset(out, 0, 0x24);
 
   // XMountUtilityDrive writes some kind of header here
   // 0x1000 bytes should be enough to store it
-  auto out_guest2 = kernel_memory()->SystemHeapAlloc(0x1000);
+  auto out_guest2 = REX_KERNEL_MEMORY()->SystemHeapAlloc(0x1000);
   memory::store_and_swap(out + 0x18, out_guest2);
 
   *out_struct = out_guest;
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t IoDismountVolumeByFileHandle_entry(ppc_u32_t handle) {
+u32 IoDismountVolumeByFileHandle_entry(u32 handle) {
   REXKRNL_WARN("IoDismountVolumeByFileHandle({:#x}) - stub", (uint32_t)handle);
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t IoDismountVolumeByName_entry(ppc_ptr_t<X_ANSI_STRING> name) {
+u32 IoDismountVolumeByName_entry(ppc_ptr_t<X_ANSI_STRING> name) {
   REXKRNL_WARN("IoDismountVolumeByName - stub");
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t IoSynchronousDeviceIoControlRequest_entry(
-    ppc_u32_t ioctl, ppc_pvoid_t device_object, ppc_pvoid_t input_buffer, ppc_u32_t input_length,
-    ppc_pvoid_t output_buffer, ppc_u32_t output_length, ppc_pu32_t returned_length, ppc_u32_t unk) {
+u32 IoSynchronousDeviceIoControlRequest_entry(u32 ioctl, mapped_void device_object,
+                                              mapped_void input_buffer, u32 input_length,
+                                              mapped_void output_buffer, u32 output_length,
+                                              mapped_u32 returned_length, u32 unk) {
   REXKRNL_WARN("IoSynchronousDeviceIoControlRequest({:#x}) - stub", (uint32_t)ioctl);
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t StfsCreateDevice_entry(ppc_pvoid_t device_object, ppc_u32_t flags,
-                                        ppc_pu32_t out_device) {
+u32 StfsCreateDevice_entry(mapped_void device_object, u32 flags, mapped_u32 out_device) {
   REXKRNL_WARN("StfsCreateDevice - stub");
   // if (out_device) *out_device = 0;
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t StfsControlDevice_entry(ppc_pvoid_t device_object, ppc_u32_t ioctl,
-                                         ppc_pvoid_t input_buffer, ppc_u32_t input_length,
-                                         ppc_pvoid_t output_buffer, ppc_u32_t output_length) {
+u32 StfsControlDevice_entry(mapped_void device_object, u32 ioctl, mapped_void input_buffer,
+                            u32 input_length, mapped_void output_buffer, u32 output_length) {
   REXKRNL_WARN("StfsControlDevice({:#x}) - stub", (uint32_t)ioctl);
   return X_STATUS_SUCCESS;
 }
 
 }  // namespace rex::kernel::xboxkrnl
 
-XBOXKRNL_EXPORT(__imp__NtCreateFile, rex::kernel::xboxkrnl::NtCreateFile_entry)
-XBOXKRNL_EXPORT(__imp__NtOpenFile, rex::kernel::xboxkrnl::NtOpenFile_entry)
-XBOXKRNL_EXPORT(__imp__NtReadFile, rex::kernel::xboxkrnl::NtReadFile_entry)
-XBOXKRNL_EXPORT(__imp__NtReadFileScatter, rex::kernel::xboxkrnl::NtReadFileScatter_entry)
-XBOXKRNL_EXPORT(__imp__NtWriteFile, rex::kernel::xboxkrnl::NtWriteFile_entry)
-XBOXKRNL_EXPORT(__imp__NtCreateIoCompletion, rex::kernel::xboxkrnl::NtCreateIoCompletion_entry)
-XBOXKRNL_EXPORT(__imp__NtSetIoCompletion, rex::kernel::xboxkrnl::NtSetIoCompletion_entry)
-XBOXKRNL_EXPORT(__imp__NtRemoveIoCompletion, rex::kernel::xboxkrnl::NtRemoveIoCompletion_entry)
-XBOXKRNL_EXPORT(__imp__NtQueryFullAttributesFile,
-                rex::kernel::xboxkrnl::NtQueryFullAttributesFile_entry)
-XBOXKRNL_EXPORT(__imp__NtQueryDirectoryFile, rex::kernel::xboxkrnl::NtQueryDirectoryFile_entry)
-XBOXKRNL_EXPORT(__imp__NtFlushBuffersFile, rex::kernel::xboxkrnl::NtFlushBuffersFile_entry)
-XBOXKRNL_EXPORT(__imp__NtOpenSymbolicLinkObject,
-                rex::kernel::xboxkrnl::NtOpenSymbolicLinkObject_entry)
-XBOXKRNL_EXPORT(__imp__NtQuerySymbolicLinkObject,
-                rex::kernel::xboxkrnl::NtQuerySymbolicLinkObject_entry)
-XBOXKRNL_EXPORT(__imp__FscGetCacheElementCount,
-                rex::kernel::xboxkrnl::FscGetCacheElementCount_entry)
-XBOXKRNL_EXPORT(__imp__FscSetCacheElementCount,
-                rex::kernel::xboxkrnl::FscSetCacheElementCount_entry)
-XBOXKRNL_EXPORT(__imp__NtDeviceIoControlFile, rex::kernel::xboxkrnl::NtDeviceIoControlFile_entry)
-XBOXKRNL_EXPORT(__imp__IoCreateDevice, rex::kernel::xboxkrnl::IoCreateDevice_entry)
-XBOXKRNL_EXPORT(__imp__IoDismountVolumeByFileHandle,
-                rex::kernel::xboxkrnl::IoDismountVolumeByFileHandle_entry)
-XBOXKRNL_EXPORT(__imp__IoDismountVolumeByName, rex::kernel::xboxkrnl::IoDismountVolumeByName_entry)
-XBOXKRNL_EXPORT(__imp__IoSynchronousDeviceIoControlRequest,
-                rex::kernel::xboxkrnl::IoSynchronousDeviceIoControlRequest_entry)
-XBOXKRNL_EXPORT(__imp__StfsCreateDevice, rex::kernel::xboxkrnl::StfsCreateDevice_entry)
-XBOXKRNL_EXPORT(__imp__StfsControlDevice, rex::kernel::xboxkrnl::StfsControlDevice_entry)
+REX_EXPORT(__imp__NtCreateFile, rex::kernel::xboxkrnl::NtCreateFile_entry)
+REX_EXPORT(__imp__NtOpenFile, rex::kernel::xboxkrnl::NtOpenFile_entry)
+REX_EXPORT(__imp__NtReadFile, rex::kernel::xboxkrnl::NtReadFile_entry)
+REX_EXPORT(__imp__NtReadFileScatter, rex::kernel::xboxkrnl::NtReadFileScatter_entry)
+REX_EXPORT(__imp__NtWriteFile, rex::kernel::xboxkrnl::NtWriteFile_entry)
+REX_EXPORT(__imp__NtCreateIoCompletion, rex::kernel::xboxkrnl::NtCreateIoCompletion_entry)
+REX_EXPORT(__imp__NtSetIoCompletion, rex::kernel::xboxkrnl::NtSetIoCompletion_entry)
+REX_EXPORT(__imp__NtRemoveIoCompletion, rex::kernel::xboxkrnl::NtRemoveIoCompletion_entry)
+REX_EXPORT(__imp__NtQueryFullAttributesFile, rex::kernel::xboxkrnl::NtQueryFullAttributesFile_entry)
+REX_EXPORT(__imp__NtQueryDirectoryFile, rex::kernel::xboxkrnl::NtQueryDirectoryFile_entry)
+REX_EXPORT(__imp__NtFlushBuffersFile, rex::kernel::xboxkrnl::NtFlushBuffersFile_entry)
+REX_EXPORT(__imp__NtOpenSymbolicLinkObject, rex::kernel::xboxkrnl::NtOpenSymbolicLinkObject_entry)
+REX_EXPORT(__imp__NtQuerySymbolicLinkObject, rex::kernel::xboxkrnl::NtQuerySymbolicLinkObject_entry)
+REX_EXPORT(__imp__FscGetCacheElementCount, rex::kernel::xboxkrnl::FscGetCacheElementCount_entry)
+REX_EXPORT(__imp__FscSetCacheElementCount, rex::kernel::xboxkrnl::FscSetCacheElementCount_entry)
+REX_EXPORT(__imp__NtDeviceIoControlFile, rex::kernel::xboxkrnl::NtDeviceIoControlFile_entry)
+REX_EXPORT(__imp__IoCreateDevice, rex::kernel::xboxkrnl::IoCreateDevice_entry)
+REX_EXPORT(__imp__IoDismountVolumeByFileHandle,
+           rex::kernel::xboxkrnl::IoDismountVolumeByFileHandle_entry)
+REX_EXPORT(__imp__IoDismountVolumeByName, rex::kernel::xboxkrnl::IoDismountVolumeByName_entry)
+REX_EXPORT(__imp__IoSynchronousDeviceIoControlRequest,
+           rex::kernel::xboxkrnl::IoSynchronousDeviceIoControlRequest_entry)
+REX_EXPORT(__imp__StfsCreateDevice, rex::kernel::xboxkrnl::StfsCreateDevice_entry)
+REX_EXPORT(__imp__StfsControlDevice, rex::kernel::xboxkrnl::StfsControlDevice_entry)
 
-XBOXKRNL_EXPORT_STUB(__imp__IoAcquireDeviceObjectLock);
-XBOXKRNL_EXPORT_STUB(__imp__IoAllocateIrp);
-XBOXKRNL_EXPORT_STUB(__imp__IoBuildAsynchronousFsdRequest);
-XBOXKRNL_EXPORT_STUB(__imp__IoBuildDeviceIoControlRequest);
-XBOXKRNL_EXPORT_STUB(__imp__IoBuildSynchronousFsdRequest);
-XBOXKRNL_EXPORT_STUB(__imp__IoCallDriver);
-XBOXKRNL_EXPORT_STUB(__imp__IoCheckShareAccess);
-XBOXKRNL_EXPORT_STUB(__imp__IoCompleteRequest);
-XBOXKRNL_EXPORT_STUB(__imp__IoCreateFile);
-XBOXKRNL_EXPORT_STUB(__imp__IoDeleteDevice);
-XBOXKRNL_EXPORT_STUB(__imp__IoDismountVolume);
-XBOXKRNL_EXPORT_STUB(__imp__IoFreeIrp);
-XBOXKRNL_EXPORT_STUB(__imp__IoInitializeIrp);
-XBOXKRNL_EXPORT_STUB(__imp__IoInvalidDeviceRequest);
-XBOXKRNL_EXPORT_STUB(__imp__IoQueueThreadIrp);
-XBOXKRNL_EXPORT_STUB(__imp__IoReleaseDeviceObjectLock);
-XBOXKRNL_EXPORT_STUB(__imp__IoRemoveShareAccess);
-XBOXKRNL_EXPORT_STUB(__imp__IoSetIoCompletion);
-XBOXKRNL_EXPORT_STUB(__imp__IoSetShareAccess);
-XBOXKRNL_EXPORT_STUB(__imp__IoStartNextPacket);
-XBOXKRNL_EXPORT_STUB(__imp__IoStartNextPacketByKey);
-XBOXKRNL_EXPORT_STUB(__imp__IoStartPacket);
-XBOXKRNL_EXPORT_STUB(__imp__IoSynchronousFsdRequest);
-XBOXKRNL_EXPORT_STUB(__imp__NtDeleteFile);
-XBOXKRNL_EXPORT_STUB(__imp__NtSetSystemTime);
-XBOXKRNL_EXPORT_STUB(__imp__NtWriteFileGather);
-XBOXKRNL_EXPORT_STUB(__imp__IoAcquireCancelSpinLock);
-XBOXKRNL_EXPORT_STUB(__imp__IoReleaseCancelSpinLock);
-XBOXKRNL_EXPORT_STUB(__imp__NtCancelIoFile);
-XBOXKRNL_EXPORT_STUB(__imp__NtCancelIoFileEx);
-XBOXKRNL_EXPORT_STUB(__imp__SvodCreateDevice);
+REX_EXPORT_STUB(__imp__IoAcquireDeviceObjectLock);
+REX_EXPORT_STUB(__imp__IoAllocateIrp);
+REX_EXPORT_STUB(__imp__IoBuildAsynchronousFsdRequest);
+REX_EXPORT_STUB(__imp__IoBuildDeviceIoControlRequest);
+REX_EXPORT_STUB(__imp__IoBuildSynchronousFsdRequest);
+REX_EXPORT_STUB(__imp__IoCallDriver);
+REX_EXPORT_STUB(__imp__IoCheckShareAccess);
+REX_EXPORT_STUB(__imp__IoCompleteRequest);
+REX_EXPORT_STUB(__imp__IoCreateFile);
+REX_EXPORT_STUB(__imp__IoDeleteDevice);
+REX_EXPORT_STUB(__imp__IoDismountVolume);
+REX_EXPORT_STUB(__imp__IoFreeIrp);
+REX_EXPORT_STUB(__imp__IoInitializeIrp);
+REX_EXPORT_STUB(__imp__IoInvalidDeviceRequest);
+REX_EXPORT_STUB(__imp__IoQueueThreadIrp);
+REX_EXPORT_STUB(__imp__IoReleaseDeviceObjectLock);
+REX_EXPORT_STUB(__imp__IoRemoveShareAccess);
+REX_EXPORT_STUB(__imp__IoSetIoCompletion);
+REX_EXPORT_STUB(__imp__IoSetShareAccess);
+REX_EXPORT_STUB(__imp__IoStartNextPacket);
+REX_EXPORT_STUB(__imp__IoStartNextPacketByKey);
+REX_EXPORT_STUB(__imp__IoStartPacket);
+REX_EXPORT_STUB(__imp__IoSynchronousFsdRequest);
+REX_EXPORT_STUB(__imp__NtDeleteFile);
+REX_EXPORT_STUB(__imp__NtSetSystemTime);
+REX_EXPORT_STUB(__imp__NtWriteFileGather);
+REX_EXPORT_STUB(__imp__IoAcquireCancelSpinLock);
+REX_EXPORT_STUB(__imp__IoReleaseCancelSpinLock);
+REX_EXPORT_STUB(__imp__NtCancelIoFile);
+REX_EXPORT_STUB(__imp__NtCancelIoFileEx);
+REX_EXPORT_STUB(__imp__SvodCreateDevice);
 
-XBOXKRNL_EXPORT_STUB(__imp__SataCdRomRecordReset);
+REX_EXPORT_STUB(__imp__SataCdRomRecordReset);

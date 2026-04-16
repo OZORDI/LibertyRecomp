@@ -8,7 +8,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "builder_context.h"
+#include "builders/builder_context.h"
 #include "builders.h"
 
 #include <unordered_map>
@@ -82,6 +82,9 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_EXTSH, build_extsh},
       {PPC_INST_EXTSW, build_extsw},
       {PPC_INST_CLRLWI, build_clrlwi},
+      {PPC_INST_RLDCL, build_rldcl},
+      {PPC_INST_RLDCR, build_rldcr},
+      {PPC_INST_RLDIC, build_rldic},
       {PPC_INST_RLDICL, build_rldicl},
       {PPC_INST_RLDICR, build_rldicr},
       {PPC_INST_RLDIMI, build_rldimi},
@@ -139,6 +142,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_BDZLR, build_bdzlr},
       {PPC_INST_BDNZ, build_bdnz},
       {PPC_INST_BDNZF, build_bdnzf},
+      {PPC_INST_BDNZLR, build_bdnzlr},
       {PPC_INST_BDNZT, build_bdnzt},
       {PPC_INST_BEQ, build_beq},
       {PPC_INST_BEQLR, build_beqlr},
@@ -167,6 +171,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_FCFID, build_fcfid},
       {PPC_INST_FCTID, build_fctid},
       {PPC_INST_FCTIDZ, build_fctidz},
+      {PPC_INST_FCTIW, build_fctiw},
       {PPC_INST_FCTIWZ, build_fctiwz},
       {PPC_INST_FRSP, build_frsp},
       {PPC_INST_FCMPU, build_fcmpu},
@@ -208,6 +213,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_LBZUX, build_lbzux},
       {PPC_INST_LHA, build_lha},
       {PPC_INST_LHAU, build_lhau},
+      {PPC_INST_LHAUX, build_lhaux},
       {PPC_INST_LHAX, build_lhax},
       {PPC_INST_LHBRX, build_lhbrx},
       {PPC_INST_LHZ, build_lhz},
@@ -215,6 +221,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_LHZUX, build_lhzux},
       {PPC_INST_LHZX, build_lhzx},
       {PPC_INST_LWA, build_lwa},
+      {PPC_INST_LWAUX, build_lwaux},
       {PPC_INST_LWAX, build_lwax},
       {PPC_INST_LWZ, build_lwz},
       {PPC_INST_LWZU, build_lwzu},
@@ -253,6 +260,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_STWUX, build_stwux},
       {PPC_INST_STWX, build_stwx},
       {PPC_INST_STWBRX, build_stwbrx},
+      {PPC_INST_STMW, build_stmw},
       {PPC_INST_STWCX, build_stwcx},
       {PPC_INST_STDCX, build_stdcx},
       {PPC_INST_STD, build_std},
@@ -261,6 +269,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_STDUX, build_stdux},
       {PPC_INST_STFD, build_stfd},
       {PPC_INST_STFDU, build_stfdu},
+      {PPC_INST_STFDUX, build_stfdux},
       {PPC_INST_STFDX, build_stfdx},
       {PPC_INST_STFIWX, build_stfiwx},
       {PPC_INST_STFS, build_stfs},
@@ -273,6 +282,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       //=====================================================================
       {PPC_INST_LVX, build_lvx},
       {PPC_INST_LVX128, build_lvx},
+      {PPC_INST_LVXL, build_lvx},
       {PPC_INST_LVXL128, build_lvx},
       {PPC_INST_LVLX, build_lvlx},
       {PPC_INST_LVLX128, build_lvlx},
@@ -280,14 +290,15 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_LVRX128, build_lvrx},
       {PPC_INST_LVSL, build_lvsl},
       {PPC_INST_LVSR, build_lvsr},
-      {PPC_INST_LVEBX, build_lvx},  // Same as LVX for our purposes
-      {PPC_INST_LVEHX, build_lvx},  // Same as LVX for our purposes
-      {PPC_INST_LVEWX, build_lvx},  // Same as LVX for our purposes
+      {PPC_INST_LVEBX, build_lvx},
+      {PPC_INST_LVEHX, build_lvx},
+      {PPC_INST_LVEWX, build_lvx},
       {PPC_INST_LVEWX128, build_lvx},
 
       //=====================================================================
       // Memory - Vector Stores
       //=====================================================================
+      {PPC_INST_STVEBX, build_stvebx},
       {PPC_INST_STVEHX, build_stvehx},
       {PPC_INST_STVEWX, build_stvewx},
       {PPC_INST_STVEWX128, build_stvewx},
@@ -298,6 +309,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_STVRX128, build_stvrx},
       {PPC_INST_STVX, build_stvx},
       {PPC_INST_STVX128, build_stvx},
+      {PPC_INST_STVXL, build_stvx},
 
       //=====================================================================
       // System
@@ -375,13 +387,18 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_DCBST, build_dcbst},
       {PPC_INST_MR, build_mr},
       {PPC_INST_MCRF, build_mcrf},
+      {PPC_INST_MFXER, build_mfxer},
+      {PPC_INST_MFCTR, build_mfctr},
       {PPC_INST_MFCR, build_mfcr},
       {PPC_INST_MFOCRF, build_mfocrf},
       {PPC_INST_MFLR, build_mflr},
       {PPC_INST_MFMSR, build_mfmsr},
       {PPC_INST_MFFS, build_mffs},
       {PPC_INST_MFTB, build_mftb},
+      {PPC_INST_MFTBU, build_mftbu},
       {PPC_INST_MTCR, build_mtcr},
+      {PPC_INST_MTCRF, build_mtcrf},
+      {PPC_INST_MTOCRF, build_mtcrf},
       {PPC_INST_MTCTR, build_mtctr},
       {PPC_INST_MTLR, build_mtlr},
       {PPC_INST_MTMSRD, build_mtmsrd},
@@ -464,6 +481,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_VMINUH, build_vminuh},
       {PPC_INST_VMAXUB, build_vmaxub},
       {PPC_INST_VMINUB, build_vminub},
+      {PPC_INST_VMINUW, build_vminuw},
 
       //=====================================================================
       // Vector - Average
@@ -508,6 +526,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
       {PPC_INST_VCMPGTUB, build_vcmpgtub},
       {PPC_INST_VCMPGTUH, build_vcmpgtuh},
       {PPC_INST_VCMPGTUW, build_vcmpgtuw},
+      {PPC_INST_VCMPGTSB, build_vcmpgtsb},
       {PPC_INST_VCMPGTSH, build_vcmpgtsh},
       {PPC_INST_VCMPGTSW, build_vcmpgtsw},
 
@@ -620,6 +639,15 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
 }
 
 bool DispatchInstruction(int id, BuilderContext& ctx) {
+  // VUPKHSB128/VUPKLSB128 misidentification fixup (moved from recompiler.cpp).
+  // Only fires when operands[2]==0x60; table entries for *128 variants
+  // still serve the non-0x60 case.
+  if (id == PPC_INST_VUPKHSB128 && ctx.insn.operands[2] == 0x60) {
+    id = PPC_INST_VUPKHSH128;
+  } else if (id == PPC_INST_VUPKLSB128 && ctx.insn.operands[2] == 0x60) {
+    id = PPC_INST_VUPKLSH128;
+  }
+
   const auto& table = GetDispatchTable();
   auto it = table.find(id);
   if (it != table.end()) {
@@ -630,7 +658,7 @@ bool DispatchInstruction(int id, BuilderContext& ctx) {
   // and fail at runtime rather than skipping the entire function
   REXCODEGEN_WARN("Unimplemented: {} at 0x{:08X}", ctx.insn.opcode->name, ctx.base);
   ctx.println("\t// UNIMPLEMENTED: {}", ctx.insn.opcode->name);
-  ctx.println("\tPPC_UNIMPLEMENTED(0x{:X}, \"{}\");", ctx.base, ctx.insn.opcode->name);
+  ctx.println("\tREX_UNIMPLEMENTED(0x{:X}, \"{}\");", ctx.base, ctx.insn.opcode->name);
   return true;
 }
 

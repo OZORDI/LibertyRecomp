@@ -26,8 +26,9 @@ class VulkanGraphicsSystem : public GraphicsSystem {
 
   std::string name() const override;
 
-  X_STATUS Setup(runtime::Processor* processor, system::KernelState* kernel_state,
-                 ui::WindowedAppContext* app_context, bool with_presentation) override;
+  X_STATUS Setup(runtime::FunctionDispatcher* function_dispatcher,
+                 system::KernelState* kernel_state, ui::WindowedAppContext* app_context,
+                 bool with_presentation) override;
 
  private:
   std::unique_ptr<CommandProcessor> CreateCommandProcessor() override;

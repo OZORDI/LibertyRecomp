@@ -21,9 +21,9 @@
 #include <rex/system/mmio_handler.h>
 #include <rex/types.h>
 
-namespace rex::runtime {
+using namespace rex::arch;
 
-using namespace rex::arch;  // For ARM64 instruction decoding constants
+namespace rex::runtime {
 
 MMIOHandler* MMIOHandler::global_handler_ = nullptr;
 
@@ -68,8 +68,11 @@ MMIOHandler::MMIOHandler(uint8_t* virtual_membase, uint8_t* physical_membase, ui
 MMIOHandler::~MMIOHandler() {
   arch::ExceptionHandler::Uninstall(ExceptionCallbackThunk, this);
 
-  assert_true(global_handler_ == this);
-  global_handler_ = nullptr;
+  if (global_handler_ == this) {
+    global_handler_ = nullptr;
+  } else {
+    REXLOG_ERROR("~MMIOHandler: global_handler_ does not match this instance");
+  }
 }
 
 bool MMIOHandler::RegisterRange(uint32_t virtual_address, uint32_t mask, uint32_t size,
@@ -355,6 +358,26 @@ bool MMIOHandler::TryDecodeLoadStore(const uint8_t* p, DecodedLoadStore& decoded
 #error TryDecodeLoadStore not implemented for the target CPU architecture.
   return false;
 #endif  // REX_ARCH
+}
+
+bool MMIOHandler::HandleFault(uintptr_t fault_va, uintptr_t fault_pc, bool is_write,
+                              arch::HostThreadContext* thread_context,
+                              uintptr_t* resume_pc_out) {
+  if (!global_handler_) {
+    return false;
+  }
+  arch::Exception ex;
+  ex.InitializeAccessViolation(
+      thread_context, uint64_t(fault_va),
+      is_write ? arch::Exception::AccessViolationOperation::kWrite
+               : arch::Exception::AccessViolationOperation::kRead);
+  // Seed PC so ExceptionCallback can decode the faulting instruction.
+  ex.set_resume_pc(fault_pc);
+  bool handled = global_handler_->ExceptionCallback(&ex);
+  if (handled && resume_pc_out) {
+    *resume_pc_out = static_cast<uintptr_t>(ex.pc());
+  }
+  return handled;
 }
 
 bool MMIOHandler::ExceptionCallbackThunk(arch::Exception* ex, void* data) {

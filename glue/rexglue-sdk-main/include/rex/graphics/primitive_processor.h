@@ -31,7 +31,6 @@
 #include <rex/math.h>
 #include <rex/memory.h>
 #include <rex/platform.h>
-#include <rex/thread/mutex.h>
 
 #if REX_ARCH_AMD64
 // 128-bit SSSE3-level (SSE2+ for integer comparison, SSSE3 for pshufb) or AVX
@@ -134,6 +133,7 @@ class PrimitiveProcessor {
     xenos::TessellationMode tessellation_mode;
     // TODO(Triang3l): If important, split into the index count and the actual
     // index buffer size, using zeros for out-of-bounds indices.
+    uint32_t guest_draw_vertex_count;
     uint32_t host_draw_vertex_count;
     uint32_t line_loop_closing_index;
     ProcessedIndexBufferType index_buffer_type;
@@ -666,12 +666,17 @@ class PrimitiveProcessor {
       uint32_t is_reset_enabled : 1;  // 53
       // kNone if not changing the type (like only processing the reset index).
       xenos::PrimitiveType conversion_guest_primitive_type : 6;  // 59
+      // If set, entry is for forced 32-bit guest DMA to host-endian 24-bit
+      // index conversion used by non-kVertex host vertex shader types on
+      // backends not supporting full 32-bit index fetch in this path.
+      uint32_t non_vertex_32bit_dma_to_24bit : 1;  // 60
     };
 
     CacheKey() : key(0) { static_assert_size(*this, sizeof(key)); }
     CacheKey(uint32_t base, uint32_t count, xenos::IndexFormat format, xenos::Endian endian,
              bool is_reset_enabled,
-             xenos::PrimitiveType conversion_guest_primitive_type = xenos::PrimitiveType::kNone) {
+             xenos::PrimitiveType conversion_guest_primitive_type = xenos::PrimitiveType::kNone,
+             bool non_vertex_32bit_dma_to_24bit = false) {
       // Clear unused bits, then set each field explicitly, not via the
       // initializer list (which causes `uint64_t key = 0;` to be ignored, and
       // also can't contain initializers for aliasing union members).
@@ -682,6 +687,7 @@ class PrimitiveProcessor {
       this->endian = endian;
       this->is_reset_enabled = is_reset_enabled;
       this->conversion_guest_primitive_type = conversion_guest_primitive_type;
+      this->non_vertex_32bit_dma_to_24bit = non_vertex_32bit_dma_to_24bit;
     }
 
     struct Hasher {
@@ -784,7 +790,7 @@ class PrimitiveProcessor {
 
   void* memory_invalidation_callback_handle_ = nullptr;
 
-  rex::thread::global_critical_region global_critical_region_;
+  std::mutex cache_mutex_;
   // Modified by both the processor and the invalidation callback.
   std::unordered_map<CacheKey, size_t, CacheKey::Hasher> cache_map_;
   // The conversion is performed while the lock is released since it may take a
@@ -807,7 +813,7 @@ class PrimitiveProcessor {
   // Must be called in a global critical region.
   void UpdateCacheBucketsNonEmptyL2(
       uint32_t bucket_index_div_64,
-      [[maybe_unused]] const std::unique_lock<std::recursive_mutex>& global_lock) {
+      [[maybe_unused]] const std::lock_guard<std::mutex>& cache_lock) {
     uint64_t& cache_buckets_non_empty_l2_ref =
         cache_buckets_non_empty_l2_[bucket_index_div_64 >> 6];
     uint64_t cache_buckets_non_empty_l2_bit = uint64_t(1) << (bucket_index_div_64 & 63);

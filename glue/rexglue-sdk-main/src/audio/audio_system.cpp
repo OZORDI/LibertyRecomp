@@ -13,9 +13,7 @@
 #include <rex/audio/audio_driver.h>
 #include <rex/audio/audio_system.h>
 #include <rex/audio/flags.h>
-#ifndef __APPLE__
 #include <rex/audio/xma/decoder.h>
-#endif
 #include <rex/dbg.h>
 #include <rex/logging.h>
 #include <rex/math.h>
@@ -26,7 +24,9 @@
 #include <rex/thread.h>
 #include <rex/cvar.h>
 
-REXCVAR_DEFINE_INT32(audio_maxqframes, 64, "Audio", "Adjust audio maximum queued frames");
+REXCVAR_DEFINE_INT32(
+    audio_maxqframes, 8, "Audio",
+    "Max buffered audio frames (range 4-64). Lower reduces latency but may cause stuttering.");
 
 // As with normal Microsoft, there are like twelve different ways to access
 // the audio APIs. Early games use XMA*() methods almost exclusively to touch
@@ -42,12 +42,18 @@ REXCVAR_DEFINE_INT32(audio_maxqframes, 64, "Audio", "Adjust audio maximum queued
 
 namespace rex::audio {
 
-AudioSystem::AudioSystem(runtime::Processor* processor)
-    : memory_(processor->memory()), processor_(processor), worker_running_(false) {
+AudioSystem::AudioSystem(runtime::FunctionDispatcher* function_dispatcher)
+    : memory_(function_dispatcher->memory()),
+      function_dispatcher_(function_dispatcher),
+      worker_running_(false) {
   std::memset(clients_, 0, sizeof(clients_));
 
+  queued_frames_ = std::min(
+      static_cast<uint32_t>(kMaximumQueuedFrames),
+      std::max(static_cast<uint32_t>(REXCVAR_GET(audio_maxqframes)), static_cast<uint32_t>(4)));
+
   for (size_t i = 0; i < kMaximumClientCount; ++i) {
-    client_semaphores_[i] = rex::thread::Semaphore::Create(0, REXCVAR_GET(audio_maxqframes));
+    client_semaphores_[i] = rex::thread::Semaphore::Create(0, queued_frames_);
     assert_not_null(client_semaphores_[i]);
     wait_handles_[i] = client_semaphores_[i].get();
   }
@@ -55,29 +61,23 @@ AudioSystem::AudioSystem(runtime::Processor* processor)
   assert_not_null(shutdown_event_);
   wait_handles_[kMaximumClientCount] = shutdown_event_.get();
 
-#ifndef __APPLE__
-  xma_decoder_ = std::make_unique<rex::audio::XmaDecoder>(processor_);
-#endif
+  xma_decoder_ = std::make_unique<rex::audio::XmaDecoder>(function_dispatcher_);
 
   resume_event_ = rex::thread::Event::CreateAutoResetEvent(false);
   assert_not_null(resume_event_);
 }
 
 AudioSystem::~AudioSystem() {
-#ifndef __APPLE__
   if (xma_decoder_) {
     xma_decoder_->Shutdown();
   }
-#endif
 }
 
 X_STATUS AudioSystem::Setup(system::KernelState* kernel_state) {
-#ifndef __APPLE__
   X_STATUS result = xma_decoder_->Setup(kernel_state);
   if (result) {
     return result;
   }
-#endif
 
   worker_running_ = true;
   worker_thread_ = system::object_ref<system::XHostThread>(
@@ -97,6 +97,7 @@ void AudioSystem::WorkerThreadMain() {
   Initialize();
 
   // Main run loop.
+  uint32_t diag_pump_count = 0;
   while (worker_running_) {
     // These handles signify the number of submitted samples. Once we reach
     // 64 samples, we wait until our audio backend releases a semaphore
@@ -104,8 +105,14 @@ void AudioSystem::WorkerThreadMain() {
     auto result = rex::thread::WaitAny(wait_handles_, rex::countof(wait_handles_), true,
                                        std::chrono::milliseconds(500));
     if (result.first == rex::thread::WaitResult::kFailed) {
-      // TODO: Assert?
+      REXAPU_WARN("AudioWorker: WaitAny failed");
       continue;
+    }
+
+    if (result.first == rex::thread::WaitResult::kTimeout) {
+      if (diag_pump_count < 5) {
+        REXAPU_NOISY_DEBUG("AudioWorker: WaitAny timed out (no semaphore signals)");
+      }
     }
 
     if (result.first == thread::WaitResult::kSuccess && result.second == kMaximumClientCount) {
@@ -129,10 +136,20 @@ void AudioSystem::WorkerThreadMain() {
       global_lock.unlock();
 
       if (client_callback) {
+        if (diag_pump_count < 10) {
+          REXAPU_DEBUG("AudioWorker: dispatching callback {:08X} with arg {:08X} for client {}",
+                       client_callback, client_callback_arg, index);
+        }
         SCOPE_profile_cpu_i("apu", "rex::audio::AudioSystem->client_callback");
         uint64_t args[] = {client_callback_arg};
-        processor_->Execute(worker_thread_->thread_state(), client_callback, args,
-                            rex::countof(args));
+        function_dispatcher_->Execute(worker_thread_->thread_state(), client_callback, args,
+                                      rex::countof(args));
+        if (diag_pump_count < 10) {
+          REXAPU_DEBUG("AudioWorker: callback returned for client {}", index);
+        }
+        diag_pump_count++;
+      } else {
+        REXAPU_DEBUG("AudioWorker: semaphore signaled for client {} but callback is 0", index);
       }
 
       pumped = true;
@@ -171,11 +188,9 @@ void AudioSystem::Shutdown() {
   }
 
   // Shut down XMA decoder first - its worker can stall in FFmpeg
-#ifndef __APPLE__
   if (xma_decoder_) {
     xma_decoder_->Shutdown();
   }
-#endif
 
   worker_running_ = false;
   shutdown_event_->Set();
@@ -201,13 +216,17 @@ void AudioSystem::Shutdown() {
 }
 
 X_STATUS AudioSystem::RegisterClient(uint32_t callback, uint32_t callback_arg, size_t* out_index) {
+  REXAPU_DEBUG("AudioSystem::RegisterClient: callback={:08X} callback_arg={:08X}", callback,
+               callback_arg);
   auto global_lock = global_critical_region_.Acquire();
 
   auto index = FindFreeClient();
   assert_true(index >= 0);
+  REXAPU_DEBUG("AudioSystem::RegisterClient: using client index={} queued_frames={}", index,
+               queued_frames_);
 
   auto client_semaphore = client_semaphores_[index].get();
-  auto ret = client_semaphore->Release(REXCVAR_GET(audio_maxqframes), nullptr);
+  auto ret = client_semaphore->Release(queued_frames_, nullptr);
   assert_true(ret);
 
   AudioDriver* driver;
@@ -231,6 +250,13 @@ X_STATUS AudioSystem::RegisterClient(uint32_t callback, uint32_t callback_arg, s
 
 void AudioSystem::SubmitFrame(size_t index, uint32_t samples_ptr) {
   SCOPE_profile_cpu_f("apu");
+
+  static uint32_t submit_count = 0;
+  if (submit_count < 10) {
+    REXAPU_DEBUG("AudioSystem::SubmitFrame called: index={} samples_ptr={:08X}", index,
+                 samples_ptr);
+    submit_count++;
+  }
 
   auto global_lock = global_critical_region_.Acquire();
   assert_true(index < kMaximumClientCount);
@@ -309,7 +335,7 @@ bool AudioSystem::Restore(stream::ByteStream* stream) {
     client.in_use = true;
 
     auto client_semaphore = client_semaphores_[id].get();
-    auto ret = client_semaphore->Release(REXCVAR_GET(audio_maxqframes), nullptr);
+    auto ret = client_semaphore->Release(queued_frames_, nullptr);
     assert_true(ret);
 
     AudioDriver* driver = nullptr;
@@ -339,9 +365,7 @@ void AudioSystem::Pause() {
   shutdown_event_->Set();
   pause_fence_.Wait();
 
-#ifndef __APPLE__
   xma_decoder_->Pause();
-#endif
 }
 
 void AudioSystem::Resume() {
@@ -352,9 +376,7 @@ void AudioSystem::Resume() {
 
   resume_event_->Set();
 
-#ifndef __APPLE__
   xma_decoder_->Resume();
-#endif
 }
 
 }  // namespace rex::audio

@@ -15,7 +15,7 @@
 
 // Forward declarations
 namespace rex::runtime {
-class Processor;
+class FunctionDispatcher;
 }
 namespace rex::ui {
 class WindowedAppContext;
@@ -29,8 +29,9 @@ namespace rex::system {
 class IGraphicsSystem {
  public:
   virtual ~IGraphicsSystem() = default;
-  virtual X_STATUS Setup(runtime::Processor* processor, KernelState* kernel_state,
-                         ui::WindowedAppContext* app_context, bool with_presentation) = 0;
+  virtual X_STATUS Setup(runtime::FunctionDispatcher* function_dispatcher,
+                         KernelState* kernel_state, ui::WindowedAppContext* app_context,
+                         bool with_presentation) = 0;
   virtual void Shutdown() = 0;
 };
 

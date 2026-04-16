@@ -28,7 +28,7 @@
 
 REXCVAR_DEFINE_BOOL(half_pixel_offset, true, "GPU", "Enable half pixel offset");
 
-REXCVAR_DEFINE_BOOL(resolve_resolution_scale_fill_half_pixel_offset, false, "GPU",
+REXCVAR_DEFINE_BOOL(resolve_resolution_scale_fill_half_pixel_offset, true, "GPU",
                     "Fill half pixel offset during resolution scale resolve");
 
 // Very prominent in 545407F2.
@@ -117,7 +117,8 @@ void GetPreferredFacePolygonOffset(const RegisterFile& regs, bool primitive_poly
   offset_out = offset;
 }
 
-bool IsPixelShaderNeededWithRasterization(const Shader& shader, const RegisterFile& regs) {
+bool IsPixelShaderNeededWithRasterization(const Shader& shader, const RegisterFile& regs,
+                                          bool include_memory_export) {
   assert_true(shader.type() == xenos::ShaderType::kPixel);
   assert_true(shader.is_ucode_analyzed());
 
@@ -135,7 +136,8 @@ bool IsPixelShaderNeededWithRasterization(const Shader& shader, const RegisterFi
   // consider it as always mattering.
   //
   // Memory export is an obvious intentional side effect.
-  if (shader.kills_pixels() || shader.writes_depth() || shader.memexport_eM_written() ||
+  if (shader.kills_pixels() || shader.writes_depth() ||
+      (include_memory_export && shader.memexport_eM_written()) ||
       (shader.writes_color_target(0) &&
        DoesCoverageDependOnAlpha(regs.Get<reg::RB_COLORCONTROL>()))) {
     return true;

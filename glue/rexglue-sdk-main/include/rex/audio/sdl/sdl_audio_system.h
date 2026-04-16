@@ -17,12 +17,12 @@ namespace rex::audio::sdl {
 
 class SDLAudioSystem : public AudioSystem {
  public:
-  explicit SDLAudioSystem(runtime::Processor* processor);
+  explicit SDLAudioSystem(runtime::FunctionDispatcher* function_dispatcher);
   ~SDLAudioSystem() override;
 
   static bool IsAvailable() { return true; }
 
-  static std::unique_ptr<AudioSystem> Create(runtime::Processor* processor);
+  static std::unique_ptr<AudioSystem> Create(runtime::FunctionDispatcher* function_dispatcher);
 
   X_STATUS CreateDriver(size_t index, rex::thread::Semaphore* semaphore,
                         AudioDriver** out_driver) override;

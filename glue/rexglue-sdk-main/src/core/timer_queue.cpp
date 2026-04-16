@@ -10,9 +10,7 @@
  */
 
 #include <algorithm>
-#include <atomic>
 #include <forward_list>
-#include <thread>
 
 #include <disruptorplus/multi_threaded_claim_strategy.hpp>
 #include <disruptorplus/ring_buffer.hpp>
@@ -39,28 +37,25 @@ class TimerQueue {
       : buffer_(kWaitCount),
         wait_strategy_(),
         claim_strategy_(kWaitCount, wait_strategy_),
-        consumed_(wait_strategy_),
-        stop_requested_(false) {
+        consumed_(wait_strategy_) {
     claim_strategy_.add_claim_barrier(consumed_);
     dispatch_thread_ =
-        std::thread([this]() { TimerThreadMain(); });
+        std::jthread([this](std::stop_token stop_token) { TimerThreadMain(stop_token); });
   }
 
   ~TimerQueue() {
-    stop_requested_.store(true, std::memory_order_release);
+    dispatch_thread_.request_stop();
 
-    // Kick dispatch thread to check stop flag
+    // Kick dispatch thread to check stop token
     auto wait_item = std::make_shared<WaitItem>(nullptr, nullptr, this, clock::time_point::min(),
                                                 clock::duration::zero());
     wait_item->Disarm();
     QueueTimer(std::move(wait_item));
 
-    if (dispatch_thread_.joinable()) {
-      dispatch_thread_.join();
-    }
+    // std::jthread auto-joins on destruction
   }
 
-  void TimerThreadMain() {
+  void TimerThreadMain(std::stop_token stop_token) {
     dp::sequence_t next_sequence = 0;
     const auto comp = [](const std::shared_ptr<WaitItem>& left,
                          const std::shared_ptr<WaitItem>& right) {
@@ -69,7 +64,7 @@ class TimerQueue {
 
     set_current_thread_name("rex::thread::TimerQueue");
 
-    while (!stop_requested_.load(std::memory_order_acquire)) {
+    while (!stop_token.stop_requested()) {
       {
         // Consume new wait items and add them to sorted wait queue
         dp::sequence_t available = claim_strategy_.wait_until_published(
@@ -141,7 +136,7 @@ class TimerQueue {
     return wait_item_weak;
   }
 
-  std::thread::id dispatch_thread_id() const { return dispatch_thread_.get_id(); }
+  std::jthread::id dispatch_thread_id() const { return dispatch_thread_.get_id(); }
 
  private:
   // This ring buffer will be used to introduce timers queued by the public API
@@ -154,8 +149,7 @@ class TimerQueue {
   // This is a _sorted_ (ascending due_) list of active timers managed by a
   // dedicated thread
   std::forward_list<std::shared_ptr<WaitItem>> wait_queue_;
-  std::thread dispatch_thread_;
-  std::atomic<bool> stop_requested_;
+  std::jthread dispatch_thread_;
 };
 
 rex::thread::TimerQueue timer_queue_;
@@ -193,13 +187,13 @@ void TimerQueueWaitItem::Disarm() {
   }
 }
 
-std::weak_ptr<WaitItem> QueueTimerOnce(std::move_only_function<void(void*)> callback,
+std::weak_ptr<WaitItem> QueueTimerOnce(rex::move_only_function<void(void*)> callback,
                                        void* userdata, WaitItem::clock::time_point due) {
   return timer_queue_.QueueTimer(std::make_shared<WaitItem>(
       std::move(callback), userdata, &timer_queue_, due, WaitItem::clock::duration::zero()));
 }
 
-std::weak_ptr<WaitItem> QueueTimerRecurring(std::move_only_function<void(void*)> callback,
+std::weak_ptr<WaitItem> QueueTimerRecurring(rex::move_only_function<void(void*)> callback,
                                             void* userdata, WaitItem::clock::time_point due,
                                             WaitItem::clock::duration interval) {
   return timer_queue_.QueueTimer(

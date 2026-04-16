@@ -23,39 +23,12 @@
 #include <rex/assert.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
-#include <rex/platform.h>
 #include <rex/string.h>
 
 #include <dirent.h>
-
-// <ftw.h> (nftw) and <pwd.h> (getpwuid_r) are not available in Switch newlib.
-// PS4's FreeBSD libc has them, but we don't use them there either since
-// /proc doesn't exist and there is no $HOME environment variable.
-#if !REX_PLATFORM_SWITCH && !REX_PLATFORM_PS4
-#  include <ftw.h>
-#  include <libgen.h>
-#  include <pwd.h>
-#endif
-
-// Platform-specific executable resolution
-#if REX_PLATFORM_PS4
-// PS4 homebrew (OpenOrbis) — application always unpacked at /app0/
-// No /proc filesystem exists on FreeBSD-derived PS4 kernel.
-#elif REX_PLATFORM_SWITCH
-// Switch (libnx) — NRO loaded from SD; envGetNextLoadPath() gives NRO path.
-#  include <switch.h>
-#elif defined(__APPLE__)
-// macOS uses 64-bit off_t natively — no *64 variants needed.
-#  include <mach-o/dyld.h>      // _NSGetExecutablePath
-#endif
-
-#if defined(__APPLE__) || REX_PLATFORM_PS4 || REX_PLATFORM_SWITCH
-#  define fseeko64    fseeko
-#  define ftello64    ftello
-#  define ftruncate64 ftruncate
-typedef off_t off64_t;
-#endif
-
+#include <ftw.h>
+#include <libgen.h>
+#include <pwd.h>
 
 namespace rex {
 
@@ -78,29 +51,10 @@ std::filesystem::path to_path(const std::u16string_view source) {
 namespace filesystem {
 
 std::filesystem::path GetExecutablePath() {
-#if REX_PLATFORM_PS4
-  // PS4: the application package is always extracted to /app0/ by the kernel.
-  // There is no /proc filesystem on PS4's FreeBSD-derived OS.
-  return std::filesystem::path("/app0/eboot.bin");
-#elif REX_PLATFORM_SWITCH
-  // Switch: the NRO is loaded from the SD card; envGetNextLoadPath() gives the
-  // loader-assigned path (e.g. "sdmc:/switch/LibertyRecomp/LibertyRecomp.nro").
-  // Fall back to romfs:/ root if the loader did not set a path.
-  const char* nro_path = envGetNextLoadPath();
-  if (nro_path && nro_path[0] != '\0')
-    return std::filesystem::path(nro_path);
-  return std::filesystem::path("romfs:/");
-#elif defined(__APPLE__)
-  char buff[FILENAME_MAX] = "";
-  uint32_t buffsize = FILENAME_MAX;
-  _NSGetExecutablePath(buff, &buffsize);
-  return std::filesystem::canonical(buff);
-#else
-  // Linux: read the /proc/self/exe symlink.
   char buff[FILENAME_MAX] = "";
   readlink("/proc/self/exe", buff, FILENAME_MAX);
-  return std::string(buff);
-#endif
+  std::string s(buff);
+  return s;
 }
 
 std::filesystem::path GetExecutableFolder() {
@@ -108,35 +62,26 @@ std::filesystem::path GetExecutableFolder() {
 }
 
 std::filesystem::path GetUserFolder() {
-#if REX_PLATFORM_PS4
-  // PS4: save data is mounted at /savedata0/ by os::savedata::MountSaveData()
-  // before this is called. Return that mount point as the user data root.
-  // If it hasn't been mounted yet we return /app0/ as a safe read-only fallback
-  // so the path is always valid; SetupVfs will refuse to write to a read-only device.
-  return std::filesystem::path("/savedata0");
-#elif REX_PLATFORM_SWITCH
-  // Switch: account save data is mounted as "save:/" by switch_main's __appInit
-  // via fsdevMountSaveData(). For config/cache that doesn't need the save-data
-  // journal (screenshots, settings) we use the SD card.
-  // SetupVfs mounts save:/ as the writable user-data VFS device.
-  return std::filesystem::path("save:/");
-#else
-  // Desktop: honour XDG_DATA_HOME, then $HOME/.local/share, then passwd entry.
+  // get preferred data home
   char* home = std::getenv("XDG_DATA_HOME");
   if (home) {
     return std::string(home);
   }
+
+  // if XDG_DATA_HOME not set, fallback to HOME directory
   home = std::getenv("HOME");
-  if (home == nullptr) {
+
+  // if HOME not set, fall back to this
+  if (home == NULL) {
     struct passwd pw1;
     struct passwd* pw;
-    char buf[4096];
+    char buf[4096];  // could potentionally lower this
     getpwuid_r(getuid(), &pw1, buf, sizeof(buf), &pw);
-    assert(&pw1 == pw);
+    assert(&pw1 == pw);  // sanity check
     home = pw->pw_dir;
   }
+
   return std::filesystem::path(home) / ".local" / "share";
-#endif
 }
 
 FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
@@ -144,11 +89,11 @@ FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
 }
 
 bool Seek(FILE* file, int64_t offset, int origin) {
-  return fseeko64(file, off64_t(offset), origin) == 0;
+  return fseeko(file, static_cast<off_t>(offset), origin) == 0;
 }
 
 int64_t Tell(FILE* file) {
-  return int64_t(ftello64(file));
+  return static_cast<int64_t>(ftello(file));
 }
 
 bool TruncateStdioFile(FILE* file, uint64_t length) {
@@ -159,7 +104,7 @@ bool TruncateStdioFile(FILE* file, uint64_t length) {
   if (position < 0) {
     return false;
   }
-  if (ftruncate64(fileno(file), off64_t(length))) {
+  if (ftruncate(fileno(file), static_cast<off_t>(length))) {
     return false;
   }
   if (uint64_t(position) > length) {
@@ -170,15 +115,11 @@ bool TruncateStdioFile(FILE* file, uint64_t length) {
   return true;
 }
 
-// nftw-based recursive removal: only available on platforms that have <ftw.h>.
-// PS4 and Switch use std::filesystem::remove_all() as the portable fallback.
-#if !REX_PLATFORM_SWITCH && !REX_PLATFORM_PS4
 static int removeCallback(const char* fpath, const struct stat* sb, int typeflag,
                           struct FTW* ftwbuf) {
   int rv = remove(fpath);
   return rv;
 }
-#endif
 
 static uint64_t convertUnixtimeToWinFiletime(time_t unixtime) {
   // Linux uses number of seconds since 1/1/1970, and Windows uses
@@ -300,7 +241,7 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
     info.access_timestamp = convertUnixtimeToWinFiletime(st.st_atime);
     info.write_timestamp = convertUnixtimeToWinFiletime(st.st_mtime);
     info.path = path;
-    if (S_ISDIR(st.st_mode)) {
+    if (ent->d_type == DT_DIR) {
       info.type = FileInfo::Type::kDirectory;
       info.total_size = 0;
     } else {

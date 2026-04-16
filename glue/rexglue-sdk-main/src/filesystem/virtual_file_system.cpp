@@ -13,7 +13,12 @@
 #include <rex/logging.h>
 #include <rex/string.h>
 
-#include "devices/host_path_entry.h"
+#include <rex/filesystem/devices/host_path_entry.h>
+
+REXCVAR_DEFINE_BOOL(allow_game_relative_writes, false, "Filesystem",
+                    "Not useful to non-developers. Allows code to write to paths "
+                    "relative to game://. Used for "
+                    "generating test data to compare with original hardware.");
 
 namespace rex::filesystem {
 
@@ -112,7 +117,7 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
 
   // Find the device.
   auto it = std::find_if(devices_.cbegin(), devices_.cend(), [&](const auto& d) {
-    return rex::string::utf8_starts_with(normalized_path, d->mount_path());
+    return rex::string::utf8_starts_with_case(normalized_path, d->mount_path());
   });
   if (it == devices_.cend()) {
     REXFS_WARN("VFS: '{}' -> [no device]", path);
@@ -212,9 +217,17 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
 
     auto file_name = rex::string::utf8_find_name_from_guest_path(path);
     entry = parent_entry->GetChild(file_name);
+  } else {
+    entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
+  }
+
+  if (entry) {
+    if (entry->attributes() & kFileAttributeDirectory && is_non_directory) {
+      return X_STATUS_FILE_IS_A_DIRECTORY;
+    }
 
     // If the cached entry does not exist on host anymore, invalidate it.
-    if (entry && parent_entry) {
+    if (parent_entry) {
       const auto* host_path_entry = dynamic_cast<const HostPathEntry*>(parent_entry);
       if (host_path_entry) {
         const auto file_path = host_path_entry->host_path() / rex::to_path(entry->name());
@@ -223,14 +236,6 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
           entry = nullptr;
         }
       }
-    }
-  } else {
-    entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
-  }
-
-  if (entry) {
-    if (entry->attributes() & kFileAttributeDirectory && is_non_directory) {
-      return X_STATUS_FILE_IS_A_DIRECTORY;
     }
   }
 

@@ -3,9 +3,7 @@
 #==========================================================
 set_target_properties(rexcore PROPERTIES EXPORT_NAME core)
 set_target_properties(rexfilesystem PROPERTIES EXPORT_NAME filesystem)
-if(TARGET rexui)
-    set_target_properties(rexui PROPERTIES EXPORT_NAME ui)
-endif()
+set_target_properties(rexui PROPERTIES EXPORT_NAME ui)
 set_target_properties(rexinput PROPERTIES EXPORT_NAME input)
 set_target_properties(rexaudio PROPERTIES EXPORT_NAME audio)
 set_target_properties(rexgraphics PROPERTIES EXPORT_NAME graphics)
@@ -20,13 +18,11 @@ set(REXGLUE_INSTALL_TARGETS
     rexaudio rexgraphics rexsystem rexkernel rexcodegen
     # Vendored thirdparty libraries (required by SDK)
     disruptorplus renderdoc simde tomlplusplus  # INTERFACE (header-only)
-    aes128 mspack disasm xxhash imgui  # STATIC libraries
+    aes128 mspack o1heap disasm xxhash imgui  # STATIC libraries
+    libavcodec libavutil           # FFmpeg (vendored build)
     # CLI tool
     rexglue
 )
-if(NOT APPLE)
-    list(APPEND REXGLUE_INSTALL_TARGETS libavcodec libavutil)  # FFmpeg (vendored build)
-endif()
 
 if(REXGLUE_USE_VULKAN)
     list(APPEND REXGLUE_INSTALL_TARGETS
@@ -39,25 +35,57 @@ if(REXGLUE_USE_D3D12)
     list(APPEND REXGLUE_INSTALL_TARGETS dxc-headers)
 endif()
 
-# Filter out any targets that don't exist at configure time
-# (e.g. SPIRV-Tools-static when only the merged target is built)
-set(_FILTERED_TARGETS)
-foreach(_t ${REXGLUE_INSTALL_TARGETS})
-    if(TARGET ${_t})
-        list(APPEND _FILTERED_TARGETS ${_t})
-    endif()
-endforeach()
+if(REXGLUE_ENABLE_TRACY)
+    list(APPEND REXGLUE_INSTALL_TARGETS TracyClient)
+endif()
 
-install(TARGETS ${_FILTERED_TARGETS}
+set(REXGLUE_INSTALL_FIDELITYFX_TARGETS)
+if(TARGET amd_fidelityfx_vk)
+    list(APPEND REXGLUE_INSTALL_FIDELITYFX_TARGETS amd_fidelityfx_vk)
+endif()
+
+if(TARGET amd_fidelityfx_dx12)
+    list(APPEND REXGLUE_INSTALL_FIDELITYFX_TARGETS amd_fidelityfx_dx12)
+endif()
+
+install(TARGETS ${REXGLUE_INSTALL_TARGETS}
     EXPORT rexglueTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# MoltenVK's upstream CMake target graph is not export-safe in this vendored
+# layout, so install the runtime separately on Apple platforms.
+# Skip for console platforms (PS4/Switch) — they use their own GNM/NVN backends.
+if(APPLE AND REXGLUE_USE_VULKAN
+   AND NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
+            OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+    include(${CMAKE_SOURCE_DIR}/cmake/rexglue_moltenvk.cmake)
+    rexglue_find_moltenvk_library(REXGLUE_MOLTENVK_LIBRARY REQUIRED)
+    install(FILES "${REXGLUE_MOLTENVK_LIBRARY}"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
+
+if(REXGLUE_INSTALL_FIDELITYFX_TARGETS)
+    install(TARGETS ${REXGLUE_INSTALL_FIDELITYFX_TARGETS}
+        EXPORT rexglueTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
 # Install public headers
 install(DIRECTORY include/rex
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Install generated version header
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/include/rex/version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rex
 )
 
 # Install vendored header-only library headers
@@ -81,6 +109,10 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 install(FILES
+    thirdparty/o1heap/o1heap/o1heap.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(FILES
     thirdparty/imgui/imgui.h
     thirdparty/imgui/imconfig.h
     thirdparty/imgui/imgui_internal.h
@@ -99,13 +131,19 @@ if(REXGLUE_USE_VULKAN)
     )
 endif()
 
-# Install platform entry point sources and ReXApp for SDK consumers
-install(FILES
-    src/ui/windowed_app_main_win.cpp
-    src/ui/windowed_app_main_posix.cpp
-    src/ui/rex_app.cpp
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
-)
+# Install platform entry point sources and ReXApp for SDK consumers.
+# Desktop-only: console platforms (PS4/Switch) ship their own entry points
+# via their native toolchains and don't consume the windowed_app_main_* sources.
+if(NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
+        OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+    install(FILES
+        src/ui/windowed_app_main_win.cpp
+        src/ui/windowed_app_main_macos.cpp
+        src/ui/windowed_app_main_posix.cpp
+        src/ui/rex_app.cpp
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
+    )
+endif()
 
 # Install DXC API headers (vendored, for D3D12 backend)
 if(REXGLUE_USE_D3D12)
@@ -140,6 +178,16 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rexglue
 )
 
+# MoltenVK helper is only needed on desktop macOS; consoles (PS4/Switch) don't
+# use Vulkan so the helper script is irrelevant there.
+if(APPLE AND NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
+                  OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/cmake/rexglue_moltenvk.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rexglue
+    )
+endif()
+
 # Export targets with rex:: namespace
 install(EXPORT rexglueTargets
     FILE rexglueTargets.cmake
@@ -148,7 +196,13 @@ install(EXPORT rexglueTargets
 )
 
 # Register in the CMake User Package Registry after install.
+# This makes find_package(rexglue) work with no REXSDK env var or CMAKE_PREFIX_PATH.
+# Multiple SxS installs coexist. Each prefix gets a unique hash entry.
+#
+# Windows: HKCU\Software\Kitware\CMake\Packages\rexglue  (REG_SZ, value name = MD5 hash)
+# Unix:    ~/.cmake/packages/rexglue/<hash>               (file containing prefix path)
 install(CODE [[
+    # Normalize path casing on Windows before hashing to avoid duplicate entries
     if(CMAKE_HOST_WIN32)
         string(TOLOWER "${CMAKE_INSTALL_PREFIX}" _reg_key)
     else()
@@ -157,6 +211,7 @@ install(CODE [[
     string(MD5 _hash "${_reg_key}")
 
     if(CMAKE_HOST_WIN32)
+        # Windows CMake User Package Registry lives in HKCU (not the filesystem)
         set(_reg_root "HKCU\\Software\\Kitware\\CMake\\Packages\\rexglue")
         execute_process(
             COMMAND reg add "${_reg_root}" /v "${_hash}" /t REG_SZ /d "${CMAKE_INSTALL_PREFIX}" /f

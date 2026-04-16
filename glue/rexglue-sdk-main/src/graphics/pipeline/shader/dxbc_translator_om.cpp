@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include <rex/assert.h>
+#include <rex/graphics/flags.h>
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/graphics/pipeline/shader/dxbc_translator.h>
 #include <rex/graphics/pipeline/texture/cache.h>
@@ -2645,11 +2646,14 @@ void DxbcShaderTranslator::CompletePixelShader() {
     // X - mask, then masked result (SGPR for loading, VGPR for masking).
     // Y - operation result (SGPR for mask operations, VGPR for alpha
     //     operations).
+    // Z - fuzzy diff (alpha - reference), used when fuzzy epsilon is enabled.
     uint32_t alpha_test_temp = PushSystemTemp();
     dxbc::Dest alpha_test_mask_dest(dxbc::Dest::R(alpha_test_temp, 0b0001));
     dxbc::Src alpha_test_mask_src(dxbc::Src::R(alpha_test_temp, dxbc::Src::kXXXX));
     dxbc::Dest alpha_test_op_dest(dxbc::Dest::R(alpha_test_temp, 0b0010));
     dxbc::Src alpha_test_op_src(dxbc::Src::R(alpha_test_temp, dxbc::Src::kYYYY));
+    dxbc::Dest alpha_test_fuzzy_diff_dest(dxbc::Dest::R(alpha_test_temp, 0b0100));
+    dxbc::Src alpha_test_fuzzy_diff_src(dxbc::Src::R(alpha_test_temp, dxbc::Src::kZZZZ));
     // Extract the comparison mask to check if the test needs to be done at all.
     // Don't care about flow control being somewhat dynamic - early Z is forced
     // using a special version of the shader anyway.
@@ -2670,26 +2674,56 @@ void DxbcShaderTranslator::CompletePixelShader() {
       dxbc::Src alpha_test_reference_src(
           LoadSystemConstant(SystemConstants::Index::kAlphaTestReference,
                              offsetof(SystemConstants, alpha_test_reference), dxbc::Src::kXXXX));
+      // Epsilon for fuzzy alpha checks (prevents flickering on NVIDIA GPUs).
+      dxbc::Src fuzzy_epsilon = dxbc::Src::LF(1e-3f);
       // Handle "not equal" specially (specifically as "not equal" so it's true
       // for NaN, not "less or greater" which is false for NaN).
       a_.OpIEq(alpha_test_op_dest, alpha_test_mask_src,
                dxbc::Src::LU(uint32_t(xenos::CompareFunction::kNotEqual)));
       a_.OpIf(true, alpha_test_op_src);
-      { a_.OpNE(alpha_test_mask_dest, alpha_src, alpha_test_reference_src); }
+      {
+        if (REXCVAR_GET(use_fuzzy_alpha_epsilon)) {
+          a_.OpAdd(alpha_test_fuzzy_diff_dest, alpha_src, -alpha_test_reference_src);
+          // Check if distance to desired value is less than epsilon (false for
+          // NaN) and write the negated result.
+          a_.OpLT(alpha_test_mask_dest, alpha_test_fuzzy_diff_src.Abs(), fuzzy_epsilon);
+          a_.OpNot(alpha_test_mask_dest, alpha_test_mask_src);
+        } else {
+          a_.OpNE(alpha_test_mask_dest, alpha_src, alpha_test_reference_src);
+        }
+      }
       a_.OpElse();
       {
-        // Less than.
-        a_.OpLT(alpha_test_op_dest, alpha_src, alpha_test_reference_src);
-        a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 0)));
-        a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
-        // Equals to.
-        a_.OpEq(alpha_test_op_dest, alpha_src, alpha_test_reference_src);
-        a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 1)));
-        a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
-        // Greater than.
-        a_.OpLT(alpha_test_op_dest, alpha_test_reference_src, alpha_src);
-        a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 2)));
-        a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+        if (REXCVAR_GET(use_fuzzy_alpha_epsilon)) {
+          // Less than.
+          a_.OpAdd(alpha_test_fuzzy_diff_dest, alpha_src, -fuzzy_epsilon);
+          a_.OpLT(alpha_test_op_dest, alpha_test_fuzzy_diff_src, alpha_test_reference_src);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 0)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+          // "Equals" to.
+          a_.OpAdd(alpha_test_fuzzy_diff_dest, alpha_src, -alpha_test_reference_src);
+          a_.OpLT(alpha_test_op_dest, alpha_test_fuzzy_diff_src.Abs(), fuzzy_epsilon);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 1)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+          // Greater than.
+          a_.OpAdd(alpha_test_fuzzy_diff_dest, alpha_src, fuzzy_epsilon);
+          a_.OpLT(alpha_test_op_dest, alpha_test_reference_src, alpha_test_fuzzy_diff_src);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 2)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+        } else {
+          // Less than.
+          a_.OpLT(alpha_test_op_dest, alpha_src, alpha_test_reference_src);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 0)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+          // Equals to.
+          a_.OpEq(alpha_test_op_dest, alpha_src, alpha_test_reference_src);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 1)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+          // Greater than.
+          a_.OpLT(alpha_test_op_dest, alpha_test_reference_src, alpha_src);
+          a_.OpOr(alpha_test_op_dest, alpha_test_op_src, dxbc::Src::LU(~uint32_t(1 << 2)));
+          a_.OpAnd(alpha_test_mask_dest, alpha_test_mask_src, alpha_test_op_src);
+        }
       }
       // Close the "not equal" check.
       a_.OpEndIf();

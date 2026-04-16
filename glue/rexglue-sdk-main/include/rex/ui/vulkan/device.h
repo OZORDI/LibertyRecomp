@@ -115,6 +115,14 @@ class VulkanDevice {
 
     bool samplerMirrorClampToEdge = false;
 
+    // VK_KHR_uniform_buffer_standard_layout (#253, promoted to 1.2)
+
+    bool uniformBufferStandardLayout = false;
+
+    // VK_EXT_scalar_block_layout (#222, promoted to 1.2)
+
+    bool scalarBlockLayout = false;
+
     // VK_KHR_portability_subset (#164)
 
     bool constantAlphaColorBlendFactors = false;
@@ -123,7 +131,6 @@ class VulkanDevice {
     bool pointPolygons = false;
     bool separateStencilMaskRef = false;
     bool shaderSampleRateInterpolationFunctions = false;
-    bool triangleFans = false;
 
     // VK_KHR_driver_properties (#197, promoted to 1.2)
 
@@ -144,9 +151,23 @@ class VulkanDevice {
 
     bool shaderDemoteToHelperInvocation = false;
 
+    // VK_KHR_dynamic_rendering (#55, promoted to 1.3)
+
+    bool dynamicRendering = false;
+
     // VK_EXT_non_seamless_cube_map (#423)
 
     bool nonSeamlessCubeMap = false;
+
+    // VK_EXT_custom_border_color
+
+    bool customBorderColors = false;
+    bool customBorderColorWithoutFormat = false;
+    uint32_t maxCustomBorderColorSamplers = 0;
+
+    // VK_EXT_robustness2
+
+    bool nullDescriptor = false;
   };
 
   // Properties of the core API and enabled extensions, and enabled features.
@@ -171,7 +192,13 @@ class VulkanDevice {
     bool ext_1_2_KHR_spirv_1_4 = false;                 // #237
     bool ext_EXT_memory_budget = false;                 // #238
     // Has optional features not implied by this being true.
+    bool ext_EXT_custom_border_color = false;
+    // Has optional features not implied by this being true.
+    bool ext_EXT_robustness2 = false;
+    // Has optional features not implied by this being true.
     bool ext_1_3_KHR_maintenance4 = false;  // #414
+    // Has optional features not implied by this being true.
+    bool ext_1_3_KHR_dynamic_rendering = false;  // #55
   };
 
   const Extensions& extensions() const { return extensions_; }
@@ -191,6 +218,8 @@ class VulkanDevice {
 #include <rex/ui/vulkan/functions/device_1_1_khr_bind_memory2.inc>
     // VK_KHR_maintenance4 (#414, promoted to 1.3)
 #include <rex/ui/vulkan/functions/device_1_3_khr_maintenance4.inc>
+    // VK_KHR_dynamic_rendering (#55, promoted to 1.3)
+#include <rex/ui/vulkan/functions/device_1_3_khr_dynamic_rendering.inc>
 #undef XE_UI_VULKAN_FUNCTION_PROMOTED
 #undef XE_UI_VULKAN_FUNCTION
   };

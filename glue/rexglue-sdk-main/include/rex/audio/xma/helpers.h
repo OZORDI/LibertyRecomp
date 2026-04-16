@@ -17,30 +17,30 @@
 
 namespace rex::audio::xma {
 
-static const uint32_t kMaxFrameLength = 0x7FFF;
+static constexpr uint32_t kMaxFrameLength = 0x7FFF;
 
-// Get number of frames that /begin/ in this packet.
-inline uint32_t GetPacketFrameCount(uint8_t* packet) {
-  return (uint8_t)(packet[0] >> 2);
+// Get number of frames that /begin/ in this packet. Valid only for XMA2 packets.
+inline uint8_t GetPacketFrameCount(const uint8_t* packet) {
+  return packet[0] >> 2;
 }
 
 // Get the first frame offset in bits
-inline uint32_t GetPacketFrameOffset(uint8_t* packet) {
-  uint32_t val = (uint16_t)(((packet[0] & 0x3) << 13) | (packet[1] << 5) | (packet[2] >> 3));
-  // if (val > kBitsPerPacket - kBitsPerHeader) {
-  //   // There is no data in this packet
-  //   return -1;
-  // } else {
+inline uint32_t GetPacketFrameOffset(const uint8_t* packet) {
+  uint32_t val =
+      static_cast<uint16_t>(((packet[0] & 0x3) << 13) | (packet[1] << 5) | (packet[2] >> 3));
   return val + 32;
-  // }
 }
 
-inline uint32_t GetPacketMetadata(uint8_t* packet) {
-  return (uint8_t)(packet[2] & 0x7);
+inline uint8_t GetPacketMetadata(const uint8_t* packet) {
+  return packet[2] & 0x7;
 }
 
-inline uint32_t GetPacketSkipCount(uint8_t* packet) {
-  return (uint8_t)(packet[3]);
+inline bool IsPacketXma2Type(const uint8_t* packet) {
+  return GetPacketMetadata(packet) == 1;
+}
+
+inline uint8_t GetPacketSkipCount(const uint8_t* packet) {
+  return packet[3];
 }
 
 }  // namespace rex::audio::xma

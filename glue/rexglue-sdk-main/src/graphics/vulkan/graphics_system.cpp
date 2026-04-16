@@ -24,11 +24,11 @@ std::string VulkanGraphicsSystem::name() const {
   return "Vulkan";
 }
 
-X_STATUS VulkanGraphicsSystem::Setup(runtime::Processor* processor,
+X_STATUS VulkanGraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispatcher,
                                      system::KernelState* kernel_state,
                                      ui::WindowedAppContext* app_context, bool with_presentation) {
   provider_ = rex::ui::vulkan::VulkanProvider::Create(true, with_presentation);
-  return GraphicsSystem::Setup(processor, kernel_state, app_context, with_presentation);
+  return GraphicsSystem::Setup(function_dispatcher, kernel_state, app_context, with_presentation);
 }
 
 std::unique_ptr<CommandProcessor> VulkanGraphicsSystem::CreateCommandProcessor() {

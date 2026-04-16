@@ -12,10 +12,15 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <rex/assert.h>
+#include <rex/cvar.h>
 #include <rex/filesystem.h>
+#include <rex/graphics/flags.h>
+#include <rex/graphics/video_mode_util.h>
 #include <rex/logging.h>
+#include <rex/ui/flags.h>
 #include <rex/ui/surface_win.h>
 #include <rex/ui/window_win.h>
 
@@ -31,12 +36,72 @@
 #include <shellapi.h>
 #include <tpcshrd.h>
 
+namespace {
+
+uint32_t ResolveWindowWidth(uint32_t requested_width) {
+  if (REXCVAR_GET(window_width) > 0) {
+    return uint32_t(REXCVAR_GET(window_width));
+  }
+  if (!rex::cvar::HasNonDefaultValue("window_width")) {
+    if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
+      return uint32_t(std::clamp(REXCVAR_GET(video_mode_width), 1, 8192));
+    }
+    int32_t preset_width = 0;
+    int32_t preset_height = 0;
+    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+                                                                       preset_height)) {
+      return uint32_t(std::clamp(preset_width, 1, 8192));
+    }
+  }
+  return requested_width;
+}
+
+uint32_t ResolveWindowHeight(uint32_t requested_height) {
+  if (REXCVAR_GET(window_height) > 0) {
+    return uint32_t(REXCVAR_GET(window_height));
+  }
+  if (!rex::cvar::HasNonDefaultValue("window_height")) {
+    if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
+      return uint32_t(std::clamp(REXCVAR_GET(video_mode_height), 1, 8192));
+    }
+    int32_t preset_width = 0;
+    int32_t preset_height = 0;
+    if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+                                                                       preset_height)) {
+      return uint32_t(std::clamp(preset_height, 1, 8192));
+    }
+  }
+  return requested_height;
+}
+
+BOOL CALLBACK EnumMonitorsCallback(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+  auto* monitors = reinterpret_cast<std::vector<HMONITOR>*>(data);
+  monitors->push_back(monitor);
+  return TRUE;
+}
+
+HMONITOR GetMonitorByIndex(int32_t index) {
+  if (index <= 0) {
+    return nullptr;
+  }
+  std::vector<HMONITOR> monitors;
+  EnumDisplayMonitors(nullptr, nullptr, EnumMonitorsCallback, reinterpret_cast<LPARAM>(&monitors));
+  if (index <= static_cast<int32_t>(monitors.size())) {
+    return monitors[index - 1];
+  }
+  return nullptr;
+}
+
+}  // namespace
+
 namespace rex {
 namespace ui {
 
 std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
                                        const std::string_view title, uint32_t desired_logical_width,
                                        uint32_t desired_logical_height) {
+  desired_logical_width = ResolveWindowWidth(desired_logical_width);
+  desired_logical_height = ResolveWindowHeight(desired_logical_height);
   return std::make_unique<Win32Window>(app_context, title, desired_logical_width,
                                        desired_logical_height);
 }
@@ -131,10 +196,10 @@ bool Win32Window::OpenImpl() {
   // Create the window. Though WM_NCCREATE will assign to `hwnd_` too, still do
   // the assignment here to handle the case of a failure after WM_NCCREATE, for
   // instance.
+  auto wide_title = rex::string::to_utf16(GetTitle());
   hwnd_ = CreateWindowExW(
-      window_ex_style, L"RexWindowClass",
-      reinterpret_cast<LPCWSTR>(rex::string::to_utf16(GetTitle()).c_str()), window_style,
-      CW_USEDEFAULT, CW_USEDEFAULT, window_size_rect.right - window_size_rect.left,
+      window_ex_style, L"RexWindowClass", reinterpret_cast<LPCWSTR>(wide_title.c_str()),
+      window_style, CW_USEDEFAULT, CW_USEDEFAULT, window_size_rect.right - window_size_rect.left,
       window_size_rect.bottom - window_size_rect.top, nullptr, nullptr, hinstance, this);
   if (!hwnd_) {
     REXLOG_ERROR("CreateWindowExW failed");
@@ -215,6 +280,25 @@ bool Win32Window::OpenImpl() {
   if (icon_) {
     SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon_));
     SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_));
+  }
+
+  // Move the window to the requested monitor before entering fullscreen so
+  // that MonitorFromWindow picks the correct display.
+  if (int32_t monitor_index = REXCVAR_GET(monitor); monitor_index > 0) {
+    HMONITOR target = GetMonitorByIndex(monitor_index);
+    if (target) {
+      MONITORINFO mi;
+      mi.cbSize = sizeof(mi);
+      if (GetMonitorInfo(target, &mi)) {
+        RECT wr;
+        GetWindowRect(hwnd_, &wr);
+        int w = wr.right - wr.left;
+        int h = wr.bottom - wr.top;
+        int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - w) / 2;
+        int y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - h) / 2;
+        SetWindowPos(hwnd_, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+      }
+    }
   }
 
   if (IsFullscreen()) {
@@ -412,7 +496,8 @@ void Win32Window::ApplyNewFullscreen() {
 }
 
 void Win32Window::ApplyNewTitle() {
-  SetWindowTextW(hwnd_, reinterpret_cast<LPCWSTR>(rex::string::to_utf16(GetTitle()).c_str()));
+  auto wide_title = rex::string::to_utf16(GetTitle());
+  SetWindowTextW(hwnd_, reinterpret_cast<LPCWSTR>(wide_title.c_str()));
 }
 
 void Win32Window::LoadAndApplyIcon(const void* buffer, size_t size,
@@ -949,7 +1034,7 @@ LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     // destruction_receiver.IsWindowDestroyed() afterwards.
     return HandleMouse(message, wParam, lParam, destruction_receiver)
                ? 0
-               : DefWindowProc(hWnd, message, wParam, lParam);
+               : DefWindowProcW(hWnd, message, wParam, lParam);
   }
   if (message >= WM_KEYFIRST && message <= WM_KEYLAST) {
     WindowDestructionReceiver destruction_receiver(this);
@@ -957,7 +1042,7 @@ LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     // destruction_receiver.IsWindowDestroyed() afterwards.
     return HandleKeyboard(message, wParam, lParam, destruction_receiver)
                ? 0
-               : DefWindowProc(hWnd, message, wParam, lParam);
+               : DefWindowProcW(hWnd, message, wParam, lParam);
   }
 
   switch (message) {
@@ -1190,7 +1275,7 @@ LRESULT Win32Window::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
   // have been closed or destroyed by a handler, making hwnd_ null even though
   // DefWindowProc still needs to be called to propagate the closing-related
   // messages needed by Windows, or inaccessible (due to use-after-free) at all.
-  return DefWindowProc(hWnd, message, wParam, lParam);
+  return DefWindowProcW(hWnd, message, wParam, lParam);
 }
 
 LRESULT CALLBACK Win32Window::WndProcThunk(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -1230,7 +1315,7 @@ LRESULT CALLBACK Win32Window::WndProcThunk(HWND hWnd, UINT message, WPARAM wPara
       }
     }
   }
-  return DefWindowProc(hWnd, message, wParam, lParam);
+  return DefWindowProcW(hWnd, message, wParam, lParam);
 }
 
 std::unique_ptr<ui::MenuItem> MenuItem::Create(Type type, const std::string& text,
@@ -1284,10 +1369,11 @@ void Win32MenuItem::OnChildAdded(MenuItem* generic_child_item) {
     case MenuItem::Type::kNormal:
       // Nothing special.
       break;
-    case MenuItem::Type::kPopup:
+    case MenuItem::Type::kPopup: {
+      auto wide_text = rex::string::to_utf16(child_item->text());
       AppendMenuW(handle_, MF_POPUP, reinterpret_cast<UINT_PTR>(child_item->handle()),
-                  reinterpret_cast<LPCWSTR>(rex::string::to_utf16(child_item->text()).c_str()));
-      break;
+                  reinterpret_cast<LPCWSTR>(wide_text.c_str()));
+    } break;
     case MenuItem::Type::kSeparator:
       AppendMenuW(handle_, MF_SEPARATOR, UINT_PTR(child_item->handle_), 0);
       break;
@@ -1296,8 +1382,9 @@ void Win32MenuItem::OnChildAdded(MenuItem* generic_child_item) {
       if (!child_item->hotkey().empty()) {
         full_name += "\t" + child_item->hotkey();
       }
+      auto wide_name = rex::string::to_utf16(full_name);
       AppendMenuW(handle_, MF_STRING, UINT_PTR(child_item->handle_),
-                  reinterpret_cast<LPCWSTR>(rex::string::to_utf16(full_name).c_str()));
+                  reinterpret_cast<LPCWSTR>(wide_name.c_str()));
       break;
   }
 }

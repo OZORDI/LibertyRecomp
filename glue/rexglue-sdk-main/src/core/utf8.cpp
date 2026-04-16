@@ -557,7 +557,7 @@ std::string utf8_find_name_from_path(const std::string_view path, char32_t separ
   if (path.empty()) {
     return std::string();
   }
-  try {
+
   auto [begin, end] = make_citer(path);
 
   auto it = end;
@@ -591,9 +591,6 @@ std::string utf8_find_name_from_path(const std::string_view path, char32_t separ
   auto offset = byte_length(begin, it);
   auto length = byte_length(it, end);
   return std::string(path.substr(offset, length));
-  } catch (...) {
-    return std::string();
-  }
 }
 
 std::string utf8_find_base_name_from_path(const std::string_view path, char32_t separator) {
@@ -627,7 +624,7 @@ std::string utf8_find_base_path(const std::string_view path, char32_t separator)
   if (path.empty()) {
     return std::string();
   }
-  try {
+
   auto [begin, end] = make_citer(path);
 
   auto it = end;
@@ -671,9 +668,6 @@ std::string utf8_find_base_path(const std::string_view path, char32_t separator)
 
   auto length = byte_length(begin, std::next(it));
   return std::string(path.substr(0, length));
-  } catch (...) {
-    return std::string();
-  }
 }
 
 std::string utf8_canonicalize_path(const std::string_view path, char32_t separator) {

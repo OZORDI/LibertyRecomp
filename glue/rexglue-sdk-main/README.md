@@ -43,8 +43,8 @@ This project is not intended to promote piracy nor unauthorized use of copyright
 # Credits
 
 ## ReXGlue
-- [Tom (crack)](https://github.com/tomcl7) - Lead developer and project founder. Creator of the recompiler and core architecture of ReXGlue.
-- [Loreaxe](https://github.com/Loreaxe) - Testing on various hardware and helping found the project.
+- [Tom (crack)](https://github.com/tomcl7) - Lead developer and project founder
+- [Loreaxe](https://github.com/Loreaxe) - Core contributor of the Linux/POSIX, ARM, and Vulkan feature sets.
 - [Soren/Roxxsen](https://github.com/Roxxsen) - Lead project manager and git maintainer.
 - [Toby](https://github.com/TbyDtch) - Graphic designer.
 

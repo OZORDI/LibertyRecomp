@@ -60,7 +60,7 @@ class XexModule : public Module {
     kFormatXex2,
   };
 
-  XexModule(Processor* processor, system::KernelState* kernel_state);
+  XexModule(FunctionDispatcher* function_dispatcher, system::KernelState* kernel_state);
   virtual ~XexModule();
 
   bool loaded() const { return loaded_; }
@@ -185,9 +185,6 @@ class XexModule : public Module {
             (XEX_MODULE_MODULE_PATCH | XEX_MODULE_PATCH_DELTA | XEX_MODULE_PATCH_FULL));
   }
 
- protected:
-  std::unique_ptr<Function> CreateFunction(uint32_t address) override;
-
  private:
   void ReadSecurityInfo();
 
@@ -199,7 +196,6 @@ class XexModule : public Module {
   int ReadPEHeaders();
 
   bool SetupLibraryImports(const std::string_view name, const xex2_import_library* library);
-  bool FindSaveRest();
 
   void PopulateBinaryData();
 

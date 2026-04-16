@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "rex/system/processor.h"
+#include "rex/system/function_dispatcher.h"
 
 #include <atomic>
 #include <cstdint>
@@ -53,12 +53,13 @@ class GraphicsSystem : public system::IGraphicsSystem {
   virtual std::string name() const = 0;
 
   memory::Memory* memory() const { return memory_; }
-  runtime::Processor* processor() const { return processor_; }
+  runtime::FunctionDispatcher* function_dispatcher() const { return function_dispatcher_; }
   system::KernelState* kernel_state() const { return kernel_state_; }
   ::rex::ui::GraphicsProvider* provider() const { return provider_.get(); }
   ::rex::ui::Presenter* presenter() const { return presenter_.get(); }
 
-  virtual X_STATUS Setup(runtime::Processor* processor, system::KernelState* kernel_state,
+  virtual X_STATUS Setup(runtime::FunctionDispatcher* function_dispatcher,
+                         system::KernelState* kernel_state,
                          ::rex::ui::WindowedAppContext* app_context, bool with_presentation);
   virtual void Shutdown();
 
@@ -76,6 +77,7 @@ class GraphicsSystem : public system::IGraphicsSystem {
   void DispatchInterruptCallback(uint32_t source, uint32_t cpu);
 
   virtual void ClearCaches();
+  virtual void InvalidateGpuMemory();
 
   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
                                bool blocking);
@@ -106,7 +108,7 @@ class GraphicsSystem : public system::IGraphicsSystem {
   void MarkVblank();
 
   memory::Memory* memory_ = nullptr;
-  runtime::Processor* processor_ = nullptr;
+  runtime::FunctionDispatcher* function_dispatcher_ = nullptr;
   system::KernelState* kernel_state_ = nullptr;
   ::rex::ui::WindowedAppContext* app_context_ = nullptr;
   std::unique_ptr<::rex::ui::GraphicsProvider> provider_;

@@ -27,9 +27,6 @@ class ConsoleDialog : public ImGuiDialog {
   ConsoleDialog(ImGuiDrawer* imgui_drawer, std::shared_ptr<rex::LogCaptureSink> sink);
   ~ConsoleDialog();
 
-  void ToggleVisible();
-  bool IsVisible() const { return visible_; }
-
  protected:
   void OnDraw(ImGuiIO& io) override;
 
@@ -38,13 +35,13 @@ class ConsoleDialog : public ImGuiDialog {
   void RefreshCategories();
   static int InputTextCallback(ImGuiInputTextCallbackData* data);
 
-  bool visible_ = false;
-  bool focus_input_next_frame_ = false;
+  bool focus_input_next_frame_ = true;
   bool scroll_to_bottom_ = true;
   uint64_t last_generation_ = 0;
 
   std::shared_ptr<rex::LogCaptureSink> sink_;
-  std::vector<rex::LogEntry> entries_;  // refreshed each frame when generation changes
+  std::vector<rex::LogEntry> entries_;        // refreshed each frame when generation changes
+  std::vector<rex::LogEntry> local_entries_;  // console-only output (command feedback)
 
   // Filters
   int min_level_ = 0;  // index into spdlog level enum; 0 = trace

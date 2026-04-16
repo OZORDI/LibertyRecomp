@@ -225,6 +225,37 @@ bool build_rldicr(BuilderContext& ctx) {
   return true;
 }
 
+bool build_rldic(BuilderContext& ctx) {
+  uint32_t sh = ctx.insn.operands[2];
+  uint64_t mask = compute_mask(ctx.insn.operands[3], 63 - sh);
+  if (sh)
+    ctx.println("\t{}.u64 = __builtin_rotateleft64({}.u64, {}) & 0x{:X};",
+                ctx.r(ctx.insn.operands[0]), ctx.r(ctx.insn.operands[1]), sh, mask);
+  else
+    ctx.println("\t{}.u64 = {}.u64 & 0x{:X};", ctx.r(ctx.insn.operands[0]),
+                ctx.r(ctx.insn.operands[1]), mask);
+  emitRecordFormCompare(ctx);
+  return true;
+}
+
+bool build_rldcl(BuilderContext& ctx) {
+  uint64_t mask = compute_mask(ctx.insn.operands[3], 63);
+  ctx.println("\t{}.u64 = __builtin_rotateleft64({}.u64, {}.u8 & 0x3F) & 0x{:X};",
+              ctx.r(ctx.insn.operands[0]), ctx.r(ctx.insn.operands[1]), ctx.r(ctx.insn.operands[2]),
+              mask);
+  emitRecordFormCompare(ctx);
+  return true;
+}
+
+bool build_rldcr(BuilderContext& ctx) {
+  uint64_t mask = compute_mask(0, ctx.insn.operands[3]);
+  ctx.println("\t{}.u64 = __builtin_rotateleft64({}.u64, {}.u8 & 0x3F) & 0x{:X};",
+              ctx.r(ctx.insn.operands[0]), ctx.r(ctx.insn.operands[1]), ctx.r(ctx.insn.operands[2]),
+              mask);
+  emitRecordFormCompare(ctx);
+  return true;
+}
+
 bool build_rldimi(BuilderContext& ctx) {
   const uint64_t mask = compute_mask(ctx.insn.operands[3], ~ctx.insn.operands[2]);
   ctx.println("\t{}.u64 = (__builtin_rotateleft64({}.u64, {}) & 0x{:X}) | ({}.u64 & 0x{:X});",
@@ -247,9 +278,11 @@ bool build_rotldi(BuilderContext& ctx) {
 
 bool build_rlwimi(BuilderContext& ctx) {
   const uint64_t mask = compute_mask(ctx.insn.operands[3] + 32, ctx.insn.operands[4] + 32);
-  ctx.println("\t{}.u64 = (__builtin_rotateleft32({}.u32, {}) & 0x{:X}) | ({}.u64 & 0x{:X});",
-              ctx.r(ctx.insn.operands[0]), ctx.r(ctx.insn.operands[1]), ctx.insn.operands[2], mask,
-              ctx.r(ctx.insn.operands[0]), ~mask);
+  ctx.println(
+      "\t{}.u64 = (__builtin_rotateleft64({}.u32 | ({}.u64 << 32), {}) & 0x{:X}) | ({}.u64 & "
+      "0x{:X});",
+      ctx.r(ctx.insn.operands[0]), ctx.r(ctx.insn.operands[1]), ctx.r(ctx.insn.operands[1]),
+      ctx.insn.operands[2], mask, ctx.r(ctx.insn.operands[0]), ~mask);
   emitRecordFormCompare(ctx);
   return true;
 }

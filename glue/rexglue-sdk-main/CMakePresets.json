@@ -53,26 +53,56 @@
             }
         },
         {
-            "name": "macos-base",
+            "name": "mac-base",
             "hidden": true,
             "generator": "Ninja Multi-Config",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm@21/bin/clang",
-                "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm@21/bin/clang++",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_C_FLAGS": "-march=x86-64-v3",
+                "CMAKE_CXX_FLAGS": "-march=x86-64-v3",
                 "CMAKE_CXX_STANDARD": "23",
                 "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo",
                 "CMAKE_CROSS_CONFIGS": "all",
                 "CMAKE_DEFAULT_BUILD_TYPE": "Debug",
                 "CMAKE_DEFAULT_CONFIGS": "all",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_EXE_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm@21/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++",
-                "CMAKE_SHARED_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm@21/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++"
+                "CMAKE_OSX_ARCHITECTURES": "x86_64",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
             },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Darwin"
+            }
+        },
+        {
+            "name": "windows-arm64-base",
+            "hidden": true,
+            "inherits": "windows-base",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-march=armv8-a",
+                "CMAKE_CXX_FLAGS": "-march=armv8-a"
+            }
+        },
+        {
+            "name": "linux-arm64-base",
+            "hidden": true,
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-march=armv8-a",
+                "CMAKE_CXX_FLAGS": "-march=armv8-a"
+            }
+        },
+        {
+            "name": "mac-arm64-base",
+            "hidden": true,
+            "inherits": "mac-base",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-march=armv8-a",
+                "CMAKE_CXX_FLAGS": "-march=armv8-a",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_APPLE_SILICON_PROCESSOR": "arm64"
             }
         },
         {
@@ -82,16 +112,34 @@
             "inherits": "windows-base"
         },
         {
+            "name": "win-arm64",
+            "displayName": "Windows ARM64",
+            "description": "Multi-config build for Windows ARM64 using Clang",
+            "inherits": "windows-arm64-base"
+        },
+        {
             "name": "linux-amd64",
             "displayName": "Linux AMD64",
-            "description": "Multi-config build for Linux AMD64 using Clang 20",
+            "description": "Multi-config build for Linux AMD64 using Clang",
             "inherits": "linux-base"
         },
         {
-            "name": "macos-arm64",
+            "name": "linux-arm64",
+            "displayName": "Linux ARM64",
+            "description": "Multi-config build for Linux ARM64 using Clang",
+            "inherits": "linux-arm64-base"
+        },
+        {
+            "name": "mac-amd64",
+            "displayName": "macOS AMD64",
+            "description": "Multi-config build for macOS AMD64 using Homebrew LLVM",
+            "inherits": "mac-base"
+        },
+        {
+            "name": "mac-arm64",
             "displayName": "macOS ARM64",
-            "description": "Multi-config build for macOS ARM64 using LLVM 21",
-            "inherits": "macos-base"
+            "description": "Multi-config build for macOS ARM64 using Homebrew LLVM",
+            "inherits": "mac-arm64-base"
         }
     ],
     "buildPresets": [
@@ -111,6 +159,21 @@
             "configuration": "RelWithDebInfo"
         },
         {
+            "name": "win-arm64-debug",
+            "configurePreset": "win-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "win-arm64-release",
+            "configurePreset": "win-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "win-arm64-relwithdebinfo",
+            "configurePreset": "win-arm64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
             "name": "linux-amd64-debug",
             "configurePreset": "linux-amd64",
             "configuration": "Debug"
@@ -126,18 +189,48 @@
             "configuration": "RelWithDebInfo"
         },
         {
-            "name": "macos-arm64-debug",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64",
             "configuration": "Debug"
         },
         {
-            "name": "macos-arm64-release",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64",
             "configuration": "Release"
         },
         {
-            "name": "macos-arm64-relwithdebinfo",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-relwithdebinfo",
+            "configurePreset": "linux-arm64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "mac-amd64-debug",
+            "configurePreset": "mac-amd64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-amd64-release",
+            "configurePreset": "mac-amd64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-amd64-relwithdebinfo",
+            "configurePreset": "mac-amd64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "mac-arm64-debug",
+            "configurePreset": "mac-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-arm64-release",
+            "configurePreset": "mac-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-arm64-relwithdebinfo",
+            "configurePreset": "mac-arm64",
             "configuration": "RelWithDebInfo"
         }
     ],
@@ -158,6 +251,21 @@
             "configuration": "RelWithDebInfo"
         },
         {
+            "name": "win-arm64-debug",
+            "configurePreset": "win-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "win-arm64-release",
+            "configurePreset": "win-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "win-arm64-relwithdebinfo",
+            "configurePreset": "win-arm64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
             "name": "linux-amd64-debug",
             "configurePreset": "linux-amd64",
             "configuration": "Debug"
@@ -173,18 +281,48 @@
             "configuration": "RelWithDebInfo"
         },
         {
-            "name": "macos-arm64-debug",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64",
             "configuration": "Debug"
         },
         {
-            "name": "macos-arm64-release",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64",
             "configuration": "Release"
         },
         {
-            "name": "macos-arm64-relwithdebinfo",
-            "configurePreset": "macos-arm64",
+            "name": "linux-arm64-relwithdebinfo",
+            "configurePreset": "linux-arm64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "mac-amd64-debug",
+            "configurePreset": "mac-amd64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-amd64-release",
+            "configurePreset": "mac-amd64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-amd64-relwithdebinfo",
+            "configurePreset": "mac-amd64",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "mac-arm64-debug",
+            "configurePreset": "mac-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-arm64-release",
+            "configurePreset": "mac-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-arm64-relwithdebinfo",
+            "configurePreset": "mac-arm64",
             "configuration": "RelWithDebInfo"
         }
     ]

@@ -39,15 +39,14 @@
 #elif defined(__ANDROID__)
 #define REX_PLATFORM_ANDROID 1
 #define REX_PLATFORM_LINUX 1
-#elif defined(__ORBIS__) || defined(__SCE__)
-// PS4 / OpenOrbis: clang targeting x86_64-scei-ps4 defines __ORBIS__
-#define REX_PLATFORM_PS4 1
-#elif defined(__SWITCH__)
-// Nintendo Switch / libnx (devkitA64): toolchain defines __SWITCH__
-#define REX_PLATFORM_SWITCH 1
 #elif defined(__gnu_linux__)
 #define REX_PLATFORM_GNU_LINUX 1
 #define REX_PLATFORM_LINUX 1
+#elif defined(__ORBIS__) || defined(LIBERTY_RECOMP_PS4)
+#define REX_PLATFORM_PS4 1
+#elif defined(__SWITCH__) || defined(LIBERTY_RECOMP_NX)
+#define REX_PLATFORM_NX 1
+#define REX_PLATFORM_SWITCH 1  // alias for compat
 #else
 #error Unsupported target OS.
 #endif
@@ -66,18 +65,34 @@
 #ifndef REX_PLATFORM_ANDROID
 #define REX_PLATFORM_ANDROID 0
 #endif
-#ifndef REX_PLATFORM_PS4
-#define REX_PLATFORM_PS4 0
-#endif
-#ifndef REX_PLATFORM_SWITCH
-#define REX_PLATFORM_SWITCH 0
-#endif
 #ifndef REX_PLATFORM_GNU_LINUX
 #define REX_PLATFORM_GNU_LINUX 0
 #endif
 #ifndef REX_PLATFORM_LINUX
 #define REX_PLATFORM_LINUX 0
 #endif
+#ifndef REX_PLATFORM_PS4
+#define REX_PLATFORM_PS4 0
+#endif
+#ifndef REX_PLATFORM_NX
+#define REX_PLATFORM_NX 0
+#endif
+#ifndef REX_PLATFORM_SWITCH
+#define REX_PLATFORM_SWITCH 0
+#endif
+
+// Convenience aggregates.
+#define REX_PLATFORM_POSIX (REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_IOS || REX_PLATFORM_PS4 || REX_PLATFORM_NX)
+#define REX_PLATFORM_CONSOLE (REX_PLATFORM_PS4 || REX_PLATFORM_NX)
+
+// Legacy REX_OS_* aliases (for older code that predates the REX_PLATFORM_* rename).
+#define REX_OS_WINDOWS  REX_PLATFORM_WIN32
+#define REX_OS_MACOS    REX_PLATFORM_MAC
+#define REX_OS_LINUX    REX_PLATFORM_LINUX
+#define REX_OS_IOS      REX_PLATFORM_IOS
+#define REX_OS_ANDROID  REX_PLATFORM_ANDROID
+#define REX_OS_PS4      REX_PLATFORM_PS4
+#define REX_OS_SWITCH   REX_PLATFORM_NX
 
 #if defined(__clang__)
 #define REX_COMPILER_CLANG 1
@@ -103,6 +118,13 @@
 #define REX_ARCH_PPC 1
 #endif
 
+// Arch aliases (common naming).
+#if defined(REX_ARCH_AMD64)
+#define REX_ARCH_X64 REX_ARCH_AMD64
+#else
+#define REX_ARCH_X64 0
+#endif
+
 #if REX_PLATFORM_WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX  // Don't want windows.h including min/max macros.
@@ -117,6 +139,31 @@
 #if REX_PLATFORM_MAC
 #include <libkern/OSByteOrder.h>
 #endif  // REX_PLATFORM_MAC
+
+#include <bit>
+#include <cstdint>
+
+//=============================================================================
+// Compiler Polyfills
+//=============================================================================
+
+#if defined(__clang__)
+// Clang has builtin rotate functions and debugtrap
+#elif defined(__GNUC__)
+#ifndef __builtin_rotateleft32
+#define __builtin_rotateleft32(x, n) std::rotl(static_cast<uint32_t>(x), static_cast<int>(n))
+#endif
+#ifndef __builtin_rotateleft64
+#define __builtin_rotateleft64(x, n) std::rotl(static_cast<uint64_t>(x), static_cast<int>(n))
+#endif
+#ifndef __builtin_debugtrap
+#if defined(__x86_64__) || defined(__i386__)
+#define __builtin_debugtrap() __asm__ __volatile__("int3")
+#else
+#define __builtin_debugtrap() __builtin_trap()
+#endif
+#endif
+#endif
 
 #if REX_COMPILER_MSVC
 #define _REXPACKEDSCOPE(body) __pragma(pack(push, 1)) body __pragma(pack(pop));
@@ -137,16 +184,6 @@
 #else
 #define REX_HAS_BUILTIN_STRLEN 0
 #define REX_LACKS_FLOAT_FROM_CHARS 0
-#endif
-
-// Convenience: true on any POSIX-like platform.
-// macOS/iOS are full POSIX. Linux/Android are full POSIX.
-// PS4 (OpenOrbis/FreeBSD-derived) and Switch (libnx/newlib) provide enough
-// POSIX surface area to share the posix source files.
-#if REX_PLATFORM_MAC || REX_PLATFORM_IOS || REX_PLATFORM_LINUX || REX_PLATFORM_PS4 || REX_PLATFORM_SWITCH
-#define REX_PLATFORM_POSIX 1
-#else
-#define REX_PLATFORM_POSIX 0
 #endif
 
 namespace rex {

@@ -9,7 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "../builder_context.h"
+#include "builder_context.h"
 #include "helpers.h"
 
 #include <cmath>
@@ -128,29 +128,45 @@ bool build_vminfp(BuilderContext& ctx) {
 bool build_vrefp(BuilderContext& ctx) {
   // TODO: see if we can use rcp safely
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_div_ps(simde_mm_set1_ps(1), "
-      "simde_mm_load_ps({}.f32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr("simde_mm_div_ps(simde_mm_set1_ps(1), simde_mm_load_ps({vA}.f32))");
   return true;
 }
 
 bool build_vrsqrtefp(BuilderContext& ctx) {
   // TODO: see if we can use rsqrt safely
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_div_ps(simde_mm_set1_ps(1), "
-      "simde_mm_sqrt_ps(simde_mm_load_ps({}.f32))));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr(
+      "simde_mm_div_ps(simde_mm_set1_ps(1), simde_mm_sqrt_ps(simde_mm_load_ps({vA}.f32)))");
   return true;
 }
 
 bool build_vexptefp(BuilderContext& ctx) {
-  // TODO: vectorize
+  // SIMD exp2 estimate (~12-bit precision, matching PPC vexptefp spec)
+  // Algorithm: exp2(x) = 2^n * poly(f), where n = floor(x), f = x - n
+  auto vD = ctx.v(ctx.insn.operands[0]);
+  auto vA = ctx.v(ctx.insn.operands[1]);
   ctx.emit_set_flush_mode(true);
-  for (size_t i = 0; i < 4; i++)
-    ctx.println("\t{}.f32[{}] = exp2f({}.f32[{}]);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i);
+  ctx.println("\t{{");
+  ctx.println("\t\tsimde__m128 x = simde_mm_load_ps({}.f32);", vA);
+  ctx.println(
+      "\t\tsimde__m128 n = simde_mm_round_ps(x, "
+      "SIMDE_MM_FROUND_TO_NEG_INF | SIMDE_MM_FROUND_NO_EXC);");
+  ctx.println("\t\tsimde__m128 f = simde_mm_sub_ps(x, n);");
+  // 4th-order minimax polynomial for 2^f, f in [0,1), ~12-bit accuracy
+  ctx.println("\t\tsimde__m128 p = simde_mm_set1_ps(1.8775767e-3f);");
+  ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(8.9893397e-3f));");
+  ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(5.5826318e-2f));");
+  ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(2.4015361e-1f));");
+  ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(6.9315308e-1f));");
+  ctx.println("\t\tp = simde_mm_add_ps(simde_mm_mul_ps(p, f), simde_mm_set1_ps(1.0f));");
+  // Construct 2^n by adding n to the IEEE 754 exponent bias and shifting into place
+  ctx.println("\t\tsimde__m128i exp_bits = simde_mm_slli_epi32(");
+  ctx.println("\t\t\tsimde_mm_add_epi32(simde_mm_cvttps_epi32(n), simde_mm_set1_epi32(127)), 23);");
+  ctx.println(
+      "\t\tsimde_mm_store_ps({}.f32, "
+      "simde_mm_mul_ps(p, simde_mm_castsi128_ps(exp_bits)));",
+      vD);
+  ctx.println("\t}}");
   return true;
 }
 
@@ -194,37 +210,33 @@ bool build_vmsum4fp128(BuilderContext& ctx) {
 
 bool build_vrfim(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_round_ps(simde_mm_load_ps({}.f32), "
-      "SIMDE_MM_FROUND_TO_NEG_INF | SIMDE_MM_FROUND_NO_EXC));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr(
+      "simde_mm_round_ps(simde_mm_load_ps({vA}.f32), "
+      "SIMDE_MM_FROUND_TO_NEG_INF | SIMDE_MM_FROUND_NO_EXC)");
   return true;
 }
 
 bool build_vrfin(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_round_ps(simde_mm_load_ps({}.f32), "
-      "SIMDE_MM_FROUND_TO_NEAREST_INT | SIMDE_MM_FROUND_NO_EXC));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr(
+      "simde_mm_round_ps(simde_mm_load_ps({vA}.f32), "
+      "SIMDE_MM_FROUND_TO_NEAREST_INT | SIMDE_MM_FROUND_NO_EXC)");
   return true;
 }
 
 bool build_vrfip(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_round_ps(simde_mm_load_ps({}.f32), "
-      "SIMDE_MM_FROUND_TO_POS_INF | SIMDE_MM_FROUND_NO_EXC));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr(
+      "simde_mm_round_ps(simde_mm_load_ps({vA}.f32), "
+      "SIMDE_MM_FROUND_TO_POS_INF | SIMDE_MM_FROUND_NO_EXC)");
   return true;
 }
 
 bool build_vrfiz(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_round_ps(simde_mm_load_ps({}.f32), "
-      "SIMDE_MM_FROUND_TO_ZERO | SIMDE_MM_FROUND_NO_EXC));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_fp_unary_expr(
+      "simde_mm_round_ps(simde_mm_load_ps({vA}.f32), "
+      "SIMDE_MM_FROUND_TO_ZERO | SIMDE_MM_FROUND_NO_EXC)");
   return true;
 }
 
@@ -295,7 +307,7 @@ bool build_vadduwm(BuilderContext& ctx) {
 bool build_vadduws(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u32, "
-      "rex::simde_mm_adds_epu32(simde_mm_load_si128((simde__m128i*){}.u32), "
+      "rex::ppc::simde_mm_adds_epu32(simde_mm_load_si128((simde__m128i*){}.u32), "
       "simde_mm_load_si128((simde__m128i*){}.u32)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -393,6 +405,11 @@ bool build_vminuh(BuilderContext& ctx) {
   return true;
 }
 
+bool build_vminuw(BuilderContext& ctx) {
+  ctx.emit_vec_int_binary("min_epu32", "u32");
+  return true;
+}
+
 bool build_vsubsbs(BuilderContext& ctx) {
   ctx.emit_vec_int_binary("subs_epi8", "s8");
   return true;
@@ -420,7 +437,7 @@ bool build_vsubshs(BuilderContext& ctx) {
 bool build_vavgsb(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_avg_epi8(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_avg_epi8(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -429,7 +446,7 @@ bool build_vavgsb(BuilderContext& ctx) {
 bool build_vavgsh(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u16, "
-      "rex::simde_mm_avg_epi16(simde_mm_load_si128((simde__m128i*){}.u16), "
+      "rex::ppc::simde_mm_avg_epi16(simde_mm_load_si128((simde__m128i*){}.u16), "
       "simde_mm_load_si128((simde__m128i*){}.u16)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -438,7 +455,7 @@ bool build_vavgsh(BuilderContext& ctx) {
 bool build_vavgsw(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.s32, "
-      "rex::simde_mm_avg_epi32("
+      "rex::ppc::simde_mm_avg_epi32("
       "simde_mm_load_si128((simde__m128i*){}.s32), "
       "simde_mm_load_si128((simde__m128i*){}.s32)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
@@ -549,7 +566,7 @@ bool build_vcmpbfp(BuilderContext& ctx) {
       "\tsimde_mm_store_ps({}.f32, simde_mm_and_ps(simde_mm_cmpgt_ps(simde_mm_load_ps({}.f32), "
       "simde_mm_load_ps({}.f32)), simde_mm_castsi128_ps(simde_mm_set1_epi32(int(0x80000000)))));",
       ctx.v_temp(), vA, vB);
-  // neg_vB stored in vD temporarily, then compute lt_neg_mask = (vA < neg_vB) & 0x40000000
+  // lt_neg_mask = (vA < -vB) & 0x40000000
   ctx.println(
       "\tsimde_mm_store_ps({}.f32, simde_mm_and_ps(simde_mm_cmplt_ps(simde_mm_load_ps({}.f32), "
       "simde_mm_xor_ps(simde_mm_load_ps({}.f32), "
@@ -562,17 +579,21 @@ bool build_vcmpbfp(BuilderContext& ctx) {
       "simde_mm_load_ps({}.f32)));",
       vD, ctx.v_temp(), vD);
 
+  // CR6 from vD: movemask_ps only checks bit 31, but lower-bound violations only
+  // set bit 30. Shift left by 1 to move bit 30 into bit 31, then OR with original
+  // so movemask detects both upper and lower bound violations.
   if (isRecordForm(ctx.insn))
-    ctx.println("\t{}.setFromMask(simde_mm_load_ps({}.f32), 0xF);", ctx.cr(6), vD);
+    ctx.println(
+        "\t{}.setFromMask(simde_mm_castsi128_ps(simde_mm_or_si128("
+        "simde_mm_load_si128((simde__m128i*){}.f32), "
+        "simde_mm_slli_epi32(simde_mm_load_si128((simde__m128i*){}.f32), 1))), 0xF);",
+        ctx.cr(6), vD, vD);
   return true;
 }
 
 bool build_vcmpeqfp(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_cmpeq_ps(simde_mm_load_ps({}.f32), "
-      "simde_mm_load_ps({}.f32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+  ctx.emit_vec_fp_binary("cmpeq");
   if (isRecordForm(ctx.insn))
     ctx.println("\t{}.setFromMask(simde_mm_load_ps({}.f32), 0xF);", ctx.cr(6),
                 ctx.v(ctx.insn.operands[0]));
@@ -580,11 +601,7 @@ bool build_vcmpeqfp(BuilderContext& ctx) {
 }
 
 bool build_vcmpequb(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "simde_mm_cmpeq_epi8(simde_mm_load_si128((simde__m128i*){}.u8), "
-      "simde_mm_load_si128((simde__m128i*){}.u8)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+  ctx.emit_vec_int_binary("cmpeq_epi8", "u8");
   if (isRecordForm(ctx.insn))
     ctx.println("\t{}.setFromMask(simde_mm_load_si128((simde__m128i*){}.u8), 0xFFFF);", ctx.cr(6),
                 ctx.v(ctx.insn.operands[0]));
@@ -617,10 +634,7 @@ bool build_vcmpequw(BuilderContext& ctx) {
 
 bool build_vcmpgefp(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_cmpge_ps(simde_mm_load_ps({}.f32), "
-      "simde_mm_load_ps({}.f32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+  ctx.emit_vec_fp_binary("cmpge");
   if (isRecordForm(ctx.insn))
     ctx.println("\t{}.setFromMask(simde_mm_load_ps({}.f32), 0xF);", ctx.cr(6),
                 ctx.v(ctx.insn.operands[0]));
@@ -629,10 +643,7 @@ bool build_vcmpgefp(BuilderContext& ctx) {
 
 bool build_vcmpgtfp(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.println(
-      "\tsimde_mm_store_ps({}.f32, simde_mm_cmpgt_ps(simde_mm_load_ps({}.f32), "
-      "simde_mm_load_ps({}.f32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+  ctx.emit_vec_fp_binary("cmpgt");
   if (isRecordForm(ctx.insn))
     ctx.println("\t{}.setFromMask(simde_mm_load_ps({}.f32), 0xF);", ctx.cr(6),
                 ctx.v(ctx.insn.operands[0]));
@@ -642,7 +653,7 @@ bool build_vcmpgtfp(BuilderContext& ctx) {
 bool build_vcmpgtub(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_cmpgt_epu8(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_cmpgt_epu8(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   if (isRecordForm(ctx.insn))
@@ -654,7 +665,7 @@ bool build_vcmpgtub(BuilderContext& ctx) {
 bool build_vcmpgtuh(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_cmpgt_epu16(simde_mm_load_si128((simde__m128i*){}.u16), "
+      "rex::ppc::simde_mm_cmpgt_epu16(simde_mm_load_si128((simde__m128i*){}.u16), "
       "simde_mm_load_si128((simde__m128i*){}.u16)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   if (isRecordForm(ctx.insn))
@@ -679,6 +690,14 @@ bool build_vcmpgtuw(BuilderContext& ctx) {
   return true;
 }
 
+bool build_vcmpgtsb(BuilderContext& ctx) {
+  ctx.emit_vec_int_binary("cmpgt_epi8", "u8");
+  if (isRecordForm(ctx.insn))
+    ctx.println("\t{}.setFromMask(simde_mm_load_si128((simde__m128i*){}.u8), 0xFFFF);", ctx.cr(6),
+                ctx.v(ctx.insn.operands[0]));
+  return true;
+}
+
 bool build_vcmpgtsh(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
@@ -692,11 +711,7 @@ bool build_vcmpgtsh(BuilderContext& ctx) {
 }
 
 bool build_vcmpgtsw(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u32, "
-      "simde_mm_cmpgt_epi32(simde_mm_load_si128((simde__m128i*){}.u32), "
-      "simde_mm_load_si128((simde__m128i*){}.u32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+  ctx.emit_vec_int_binary("cmpgt_epi32", "u32");
   if (isRecordForm(ctx.insn))
     ctx.println(
         "\t{}.setFromMask(simde_mm_castsi128_ps(simde_mm_load_si128((simde__m128i*){}.u32)), 0xF);",
@@ -710,7 +725,7 @@ bool build_vcmpgtsw(BuilderContext& ctx) {
 
 bool build_vctsxs(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(true);
-  ctx.print("\tsimde_mm_store_si128((simde__m128i*){}.s32, rex::simde_mm_vctsxs(",
+  ctx.print("\tsimde_mm_store_si128((simde__m128i*){}.s32, rex::ppc::simde_mm_vctsxs(",
             ctx.v(ctx.insn.operands[0]));
   if (ctx.insn.operands[2] != 0)
     ctx.println("simde_mm_mul_ps(simde_mm_load_ps({}.f32), simde_mm_set1_ps({}))));",
@@ -742,11 +757,12 @@ bool build_vcfux(BuilderContext& ctx) {
   if (ctx.insn.operands[2] != 0) {
     const float value = std::ldexp(1.0f, -static_cast<int32_t>(ctx.insn.operands[2]));
     ctx.println(
-        "simde_mm_mul_ps(rex::simde_mm_cvtepu32_ps_(simde_mm_load_si128((simde__m128i*){}.u32)), "
+        "simde_mm_mul_ps(rex::ppc::simde_mm_cvtepu32_ps_(simde_mm_load_si128((simde__m128i*){}.u32)"
+        "), "
         "simde_mm_castsi128_ps(simde_mm_set1_epi32(int(0x{:X})))));",
         ctx.v(ctx.insn.operands[1]), *reinterpret_cast<const uint32_t*>(&value));
   } else {
-    ctx.println("rex::simde_mm_cvtepu32_ps_(simde_mm_load_si128((simde__m128i*){}.u32)));",
+    ctx.println("rex::ppc::simde_mm_cvtepu32_ps_(simde_mm_load_si128((simde__m128i*){}.u32)));",
                 ctx.v(ctx.insn.operands[1]));
   }
   return true;
@@ -755,7 +771,7 @@ bool build_vcfux(BuilderContext& ctx) {
 bool build_vctuxs(BuilderContext& ctx) {
   // Vector Convert To Unsigned Fixed-Point Word Saturate
   ctx.emit_set_flush_mode(true);
-  ctx.print("\tsimde_mm_store_si128((simde__m128i*){}.u32, rex::simde_mm_vctuxs(",
+  ctx.print("\tsimde_mm_store_si128((simde__m128i*){}.u32, rex::ppc::simde_mm_vctuxs(",
             ctx.v(ctx.insn.operands[0]));
   if (ctx.insn.operands[2] != 0)
     ctx.println("simde_mm_mul_ps(simde_mm_load_ps({}.f32), simde_mm_set1_ps({}))));",
@@ -770,56 +786,32 @@ bool build_vctuxs(BuilderContext& ctx) {
 //=============================================================================
 
 bool build_vmrghb(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "simde_mm_unpackhi_epi8(simde_mm_load_si128((simde__m128i*){}.u8), "
-      "simde_mm_load_si128((simde__m128i*){}.u8)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpackhi_epi8", "u8");
   return true;
 }
 
 bool build_vmrghh(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u16, "
-      "simde_mm_unpackhi_epi16(simde_mm_load_si128((simde__m128i*){}.u16), "
-      "simde_mm_load_si128((simde__m128i*){}.u16)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpackhi_epi16", "u16");
   return true;
 }
 
 bool build_vmrghw(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u32, "
-      "simde_mm_unpackhi_epi32(simde_mm_load_si128((simde__m128i*){}.u32), "
-      "simde_mm_load_si128((simde__m128i*){}.u32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpackhi_epi32", "u32");
   return true;
 }
 
 bool build_vmrglb(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "simde_mm_unpacklo_epi8(simde_mm_load_si128((simde__m128i*){}.u8), "
-      "simde_mm_load_si128((simde__m128i*){}.u8)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpacklo_epi8", "u8");
   return true;
 }
 
 bool build_vmrglh(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u16, "
-      "simde_mm_unpacklo_epi16(simde_mm_load_si128((simde__m128i*){}.u16), "
-      "simde_mm_load_si128((simde__m128i*){}.u16)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpacklo_epi16", "u16");
   return true;
 }
 
 bool build_vmrglw(BuilderContext& ctx) {
-  ctx.println(
-      "\tsimde_mm_store_si128((simde__m128i*){}.u32, "
-      "simde_mm_unpacklo_epi32(simde_mm_load_si128((simde__m128i*){}.u32), "
-      "simde_mm_load_si128((simde__m128i*){}.u32)));",
-      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]), ctx.v(ctx.insn.operands[1]));
+  ctx.emit_vec_int_binary_swapped("unpacklo_epi32", "u32");
   return true;
 }
 
@@ -830,7 +822,7 @@ bool build_vmrglw(BuilderContext& ctx) {
 bool build_vperm(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_perm_epi8_(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_perm_epi8_(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]),
       ctx.v(ctx.insn.operands[3]));
@@ -867,10 +859,7 @@ bool build_vrlimi128(BuilderContext& ctx) {
 //=============================================================================
 
 bool build_vslb(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 16; i++)
-    ctx.println("\t{}.u8[{}] = {}.u8[{}] << ({}.u8[{}] & 0x7);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i, ctx.v(ctx.insn.operands[2]), i);
+  ctx.emit_vec_var_shift("sllv", "epi8", 0x7);
   return true;
 }
 
@@ -885,18 +874,12 @@ bool build_vsldoi(BuilderContext& ctx) {
 }
 
 bool build_vslh(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 8; i++)
-    ctx.println("\t{}.u16[{}] = {}.u16[{}] << ({}.u16[{}] & 0xF);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i, ctx.v(ctx.insn.operands[2]), i);
+  ctx.emit_vec_var_shift("sllv", "epi16", 0xF);
   return true;
 }
 
 bool build_vsrh(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 8; i++)
-    ctx.println("\t{}.u16[{}] = {}.u16[{}] >> ({}.u16[{}] & 0xF);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i, ctx.v(ctx.insn.operands[2]), i);
+  ctx.emit_vec_var_shift("srlv", "epi16", 0xF);
   return true;
 }
 
@@ -917,21 +900,24 @@ bool build_vsrab(BuilderContext& ctx) {
 }
 
 bool build_vsrah(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 8; i++)
-    ctx.println("\t{}.s16[{}] = {}.s16[{}] >> ({}.u16[{}] & 0xF);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i, ctx.v(ctx.insn.operands[2]), i);
+  ctx.emit_vec_var_shift("srav", "epi16", 0xF);
   return true;
 }
 
 bool build_vrlh(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 8; i++) {
-    ctx.println("\t{{ uint16_t sh = {}.u16[{}] & 0xF;", ctx.v(ctx.insn.operands[2]), i);
-    ctx.println("\t{}.u16[{}] = ({}.u16[{}] << sh) | (sh ? ({}.u16[{}] >> (16 - sh)) : 0); }}",
-                ctx.v(ctx.insn.operands[0]), i, ctx.v(ctx.insn.operands[1]), i,
-                ctx.v(ctx.insn.operands[1]), i);
-  }
+  auto vD = ctx.v(ctx.insn.operands[0]);
+  auto vA = ctx.v(ctx.insn.operands[1]);
+  auto vB = ctx.v(ctx.insn.operands[2]);
+  ctx.println("\t{{");
+  ctx.println("\t\tsimde__m128i a = simde_mm_load_si128((simde__m128i*){}.u8);", vA);
+  ctx.println("\t\tsimde__m128i sh = simde_mm_and_si128(");
+  ctx.println("\t\t\tsimde_mm_load_si128((simde__m128i*){}.u8), simde_mm_set1_epi16(0xF));", vB);
+  ctx.println("\t\tsimde__m128i rsh = simde_mm_sub_epi16(simde_mm_set1_epi16(16), sh);");
+  ctx.println("\t\tsimde__m128i result = simde_mm_or_si128(");
+  ctx.println("\t\t\trex::ppc::simde_mm_sllv_epi16(a, sh),");
+  ctx.println("\t\t\trex::ppc::simde_mm_srlv_epi16(a, rsh));");
+  ctx.println("\t\tsimde_mm_store_si128((simde__m128i*){}.u8, result);", vD);
+  ctx.println("\t}}");
   return true;
 }
 
@@ -939,7 +925,7 @@ bool build_vrlw(BuilderContext& ctx) {
   // TODO(tomc): vectorize
   for (size_t i = 0; i < 4; i++) {
     ctx.println("\t{{ uint32_t sh = {}.u32[{}] & 0x1F;", ctx.v(ctx.insn.operands[2]), i);
-    ctx.println("\t{}.u32[{}] = ({}.u32[{}] << sh) | ({}.u32[{}] >> (32 - sh)); }}",
+    ctx.println("\t{}.u32[{}] = ({}.u32[{}] << sh) | (sh ? ({}.u32[{}] >> (32 - sh)) : 0); }}",
                 ctx.v(ctx.insn.operands[0]), i, ctx.v(ctx.insn.operands[1]), i,
                 ctx.v(ctx.insn.operands[1]), i);
   }
@@ -950,7 +936,7 @@ bool build_vsl(BuilderContext& ctx) {
   // Vector Shift Left (128-bit) - shift entire vector left by bits specified in low 3 bits of vB
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_vsl(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_vsl(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -960,7 +946,7 @@ bool build_vslo(BuilderContext& ctx) {
   // Vector Shift Left by Octet - shift entire vector left by bytes specified in bits 121:124 of vB
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_vslo(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_vslo(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -971,24 +957,32 @@ bool build_vsro(BuilderContext& ctx) {
   // vB
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_vsro(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_vsro(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
 }
 
 bool build_vslw(BuilderContext& ctx) {
-  // TODO(tomc): vectorize
-  for (size_t i = 0; i < 4; i++)
-    ctx.println("\t{}.u32[{}] = {}.u32[{}] << ({}.u8[{}] & 0x1F);", ctx.v(ctx.insn.operands[0]), i,
-                ctx.v(ctx.insn.operands[1]), i, ctx.v(ctx.insn.operands[2]), i * 4);
+  auto vD = ctx.v(ctx.insn.operands[0]);
+  auto vA = ctx.v(ctx.insn.operands[1]);
+  auto vB = ctx.v(ctx.insn.operands[2]);
+  ctx.println("\t{{");
+  ctx.println("\t\tsimde__m128i a = simde_mm_load_si128((simde__m128i*){}.u8);", vA);
+  ctx.println("\t\tsimde__m128i b = simde_mm_load_si128((simde__m128i*){}.u8);", vB);
+  ctx.println("\t\tsimde__m128i shift = simde_mm_and_si128(b, simde_mm_set1_epi32(0x1F));");
+  ctx.println(
+      "\t\tsimde_mm_store_si128((simde__m128i*){}.u8, "
+      "simde_mm_sllv_epi32(a, shift));",
+      vD);
+  ctx.println("\t}}");
   return true;
 }
 
 bool build_vsr(BuilderContext& ctx) {
   ctx.println(
       "\tsimde_mm_store_si128((simde__m128i*){}.u8, "
-      "rex::simde_mm_vsr(simde_mm_load_si128((simde__m128i*){}.u8), "
+      "rex::ppc::simde_mm_vsr(simde_mm_load_si128((simde__m128i*){}.u8), "
       "simde_mm_load_si128((simde__m128i*){}.u8)));",
       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
   return true;
@@ -1038,14 +1032,18 @@ bool build_vsplth(BuilderContext& ctx) {
 }
 
 bool build_vspltisb(BuilderContext& ctx) {
+  // Sign-extend 5-bit immediate to 8-bit
+  int8_t imm5 = static_cast<int8_t>(ctx.insn.operands[1] << 3) >> 3;
   ctx.println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_set1_epi8(char(0x{:X})));",
-              ctx.v(ctx.insn.operands[0]), ctx.insn.operands[1]);
+              ctx.v(ctx.insn.operands[0]), static_cast<uint8_t>(imm5));
   return true;
 }
 
 bool build_vspltisw(BuilderContext& ctx) {
+  // Sign-extend 5-bit immediate to 32-bit
+  int8_t imm5 = static_cast<int8_t>(ctx.insn.operands[1] << 3) >> 3;
   ctx.println("\tsimde_mm_store_si128((simde__m128i*){}.u32, simde_mm_set1_epi32(int(0x{:X})));",
-              ctx.v(ctx.insn.operands[0]), ctx.insn.operands[1]);
+              ctx.v(ctx.insn.operands[0]), static_cast<uint32_t>(static_cast<int32_t>(imm5)));
   return true;
 }
 

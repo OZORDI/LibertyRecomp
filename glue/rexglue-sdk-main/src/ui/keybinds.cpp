@@ -12,8 +12,8 @@
 #include <rex/cvar.h>
 #include <mutex>
 #include <string>
+#include <deque>
 #include <unordered_map>
-#include <vector>
 
 namespace rex::ui {
 
@@ -137,11 +137,24 @@ static const std::unordered_map<std::string, VirtualKey> kKeyNames = {
     {"CapsLock", VirtualKey::kCapital},
     {"NumLock", VirtualKey::kNumLock},
     {"ScrollLock", VirtualKey::kScroll},
+    // Mouse buttons
+    {"LMB", VirtualKey::kLButton},
+    {"RMB", VirtualKey::kRButton},
+    {"MMB", VirtualKey::kMButton},
 };
 
 VirtualKey ParseVirtualKey(std::string_view name) {
   auto it = kKeyNames.find(std::string(name));
   return (it != kKeyNames.end()) ? it->second : VirtualKey::kNone;
+}
+
+std::string VirtualKeyToString(VirtualKey vk) {
+  for (const auto& [name, key] : kKeyNames) {
+    if (key == vk) {
+      return name;
+    }
+  }
+  return {};
 }
 
 /* ---- Bind registry ---- */
@@ -153,7 +166,7 @@ struct BindEntry {
 };
 
 static std::mutex g_binds_mutex;
-static std::vector<BindEntry> g_binds;
+static std::deque<BindEntry> g_binds;
 
 void RegisterBind(std::string_view name, std::string_view default_key, std::string_view description,
                   std::function<void()> callback) {
@@ -173,7 +186,7 @@ void RegisterBind(std::string_view name, std::string_view default_key, std::stri
   rex::cvar::RegisterFlag({
       .name = std::string(name),
       .type = rex::cvar::FlagType::String,
-      .category = "Keybinds",
+      .category = "Input/Keybinds/System",
       .description = std::string(description),
       .setter = [key_ptr](std::string_view v) -> bool {
         *key_ptr = std::string(v);

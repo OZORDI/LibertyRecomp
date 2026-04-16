@@ -13,8 +13,10 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <rex/logging.h>
 
 namespace rexglue::cli {
@@ -80,6 +82,12 @@ inline AppNameParts parse_app_name(const std::string& input) {
     }
   }
   return parts;
+}
+
+inline nlohmann::json names_to_json(const AppNameParts& names) {
+  return {{"snake_case", names.snake_case},
+          {"pascal_case", names.pascal_case},
+          {"upper_case", names.upper_case}};
 }
 
 inline bool write_file(const std::filesystem::path& path, const std::string& content) {

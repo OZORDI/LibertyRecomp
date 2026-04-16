@@ -24,15 +24,6 @@
 #include <rex/math.h>
 #include <rex/memory/utils.h>
 #include <rex/platform.h>
-
-#ifdef __APPLE__
-// macOS uses 64-bit file offsets natively; no *64 API variants needed.
-#  define ftruncate64 ftruncate
-#  define mmap64      mmap
-#  define fstat64     fstat
-typedef off_t off64_t;
-#endif  // __APPLE__
-
 #include <rex/string.h>
 
 #if REX_PLATFORM_ANDROID
@@ -210,69 +201,15 @@ static PageAccess PermsToPageAccess(const char perms[5]) {
 }  // namespace
 #endif  // REX_PLATFORM_LINUX
 
-#ifdef __APPLE__
-#include <mach/mach.h>
-// Returns true if [base, base+length) is already mapped in this process
-static bool IsMacOSRangeAlreadyMapped(void* base_address, size_t length) {
-  if (!base_address || length == 0) return false;
-  const vm_address_t addr = reinterpret_cast<vm_address_t>(base_address);
-  const vm_address_t end  = addr + length;
-  vm_address_t cur = addr;
-  while (cur < end) {
-    vm_size_t region_size = 0;
-    struct vm_region_basic_info_64 info;
-    mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
-    memory_object_name_t object_name;
-    kern_return_t kr = vm_region_64(mach_task_self(), &cur, &region_size,
-                                    VM_REGION_BASIC_INFO_64,
-                                    reinterpret_cast<vm_region_info_t>(&info),
-                                    &info_count, &object_name);
-    if (kr != KERN_SUCCESS) return false;  // gap — not mapped
-    if (cur > addr) return false;           // gap before region
-    cur += region_size;
-  }
-  return true;
-}
-#endif  // __APPLE__
-
 void* AllocFixed(void* base_address, size_t length, AllocationType allocation_type,
                  PageAccess access) {
   // Emulates Windows VirtualAlloc behavior:
   // - Reserve: create PROT_NONE mapping to hold address space
-  // - Commit on existing reservation: mprotect to enable access
+  // - Commit on existing reservation: mprotect to enable access (EEXIST path)
   // - New allocation: mmap with MAP_FIXED_NOREPLACE (never silently replace)
   const uint32_t prot_requested = ToPosixProtectFlags(access);
 
-  // ─── macOS path ────────────────────────────────────────────────────────────
-  // On macOS, MAP_FIXED_NOREPLACE is not available. When committing into the
-  // pre-mapped shared-memory region (set up by MapViews via shm_open/MAP_FIXED)
-  // we must use mprotect rather than a new anonymous mmap.
-#ifdef __APPLE__
-  if (base_address &&
-      (allocation_type == AllocationType::kCommit ||
-       allocation_type == AllocationType::kReserveCommit)) {
-    // Try mprotect first — succeeds if the range is already file-mapped
-    if (IsMacOSRangeAlreadyMapped(base_address, length)) {
-      if (mprotect(base_address, length, static_cast<int>(prot_requested)) == 0) {
-        return base_address;
-      }
-    }
-  }
-  if (allocation_type == AllocationType::kReserve && base_address) {
-    // Reserve: map PROT_NONE over any existing mapping (MAP_FIXED replaces)
-    void* result = mmap(base_address, length, PROT_NONE,
-                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-    return (result != MAP_FAILED) ? result : nullptr;
-  }
-  // Fallback: non-fixed allocation (macOS only, should rarely hit this)
-  {
-    void* r = mmap(nullptr, length, static_cast<int>(prot_requested),
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return (r != MAP_FAILED) ? r : nullptr;
-  }
-#endif  // __APPLE__
-
-  // ─── Linux path ────────────────────────────────────────────────────────────
+  // Determine initial protection based on allocation type
   int prot_initial = 0;
   switch (allocation_type) {
     case AllocationType::kReserve:
@@ -285,6 +222,7 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
       break;
   }
 
+  // Build flags - always use MAP_FIXED_NOREPLACE for fixed addresses
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
 #if defined(MAP_FIXED_NOREPLACE)
   if (base_address) {
@@ -301,9 +239,12 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     return result;
   }
 #if defined(MAP_FIXED_NOREPLACE) && REX_PLATFORM_LINUX
+  // Handle EEXIST: address already has a mapping (e.g., from prior Reserve)
+  // This is the "commit on existing reservation" path
   if (errno == EEXIST && base_address &&
       (allocation_type == AllocationType::kCommit ||
        allocation_type == AllocationType::kReserveCommit)) {
+    // Verify the entire range is mapped before using mprotect
     if (IsRangeFullyMapped(base_address, length)) {
       if (mprotect(base_address, length, static_cast<int>(prot_requested)) == 0) {
         return base_address;
@@ -427,24 +368,16 @@ FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, siz
   }
   oflag |= O_CREAT;
   auto full_path = MakeShmName(path);
-#if REX_PLATFORM_SWITCH
-  // libnx (newlib) has no shm_open; fall back to a plain anonymous fd via memfd_create
-  // if available, otherwise return invalid so callers use anonymous mmap instead.
-  (void)full_path;
-  (void)oflag;
-  return kFileMappingHandleInvalid;
-#else
   int ret = shm_open(full_path.c_str(), oflag, 0777);
   if (ret < 0) {
     return kFileMappingHandleInvalid;
   }
-  if (ftruncate64(ret, static_cast<off_t>(length)) != 0) {
+  if (ftruncate(ret, static_cast<off_t>(length)) != 0) {
     close(ret);
     shm_unlink(full_path.c_str());
     return kFileMappingHandleInvalid;
   }
   return static_cast<FileMappingHandle>(ret);
-#endif  // REX_PLATFORM_SWITCH
 #endif
 }
 
@@ -470,41 +403,12 @@ void* MapFileView(FileMappingHandle handle, void* base_address, size_t length, P
   // The emulator reserves address space first, then maps file views into it.
   // MAP_FIXED_NOREPLACE would fail with EEXIST in this case.
   if (base_address) {
-#ifdef __APPLE__
-    // On macOS, MAP_FIXED silently replaces *any* existing mapping, including
-    // the binary's own code pages.  The scan loop in Memory::Initialize()
-    // probes 1<<32, 1<<33, ... looking for a completely free window.  The
-    // binary is loaded near 0x100000000 but offset by an ASLR slide, so the
-    // start of that 1GB window appears unmapped even though the binary sits
-    // inside it.  Use vm_region_64 to detect ANY overlap with the requested
-    // range and bail out so the loop can try the next candidate.
-    {
-      vm_address_t check_addr = reinterpret_cast<vm_address_t>(base_address);
-      vm_size_t    region_sz  = 0;
-      struct vm_region_basic_info_64 vr_info;
-      mach_msg_type_number_t         vr_cnt = VM_REGION_BASIC_INFO_COUNT_64;
-      memory_object_name_t           vr_obj;
-      kern_return_t kr = vm_region_64(mach_task_self(), &check_addr, &region_sz,
-                                      VM_REGION_BASIC_INFO_64,
-                                      reinterpret_cast<vm_region_info_t>(&vr_info),
-                                      &vr_cnt, &vr_obj);
-      if (kr == KERN_SUCCESS) {
-        // A mapping was found at or after base_address.  If it starts before
-        // the end of our requested range it overlaps → refuse to MAP_FIXED.
-        vm_address_t range_end =
-            reinterpret_cast<vm_address_t>(base_address) + length;
-        if (check_addr < range_end) {
-          return nullptr;
-        }
-      }
-    }
-#endif
     flags |= MAP_FIXED;
   }
 
   uint32_t prot = ToPosixProtectFlags(access);
-  void* result = mmap64(base_address, length, prot, flags, static_cast<int>(handle),
-                        static_cast<off_t>(file_offset));
+  void* result = mmap(base_address, length, prot, flags, static_cast<int>(handle),
+                      static_cast<off_t>(file_offset));
   if (result == MAP_FAILED) {
     return nullptr;
   }

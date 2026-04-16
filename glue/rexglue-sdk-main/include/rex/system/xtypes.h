@@ -56,6 +56,7 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_OBJECT_NAME_COLLISION ((X_STATUS)0xC0000035L)
 #define X_STATUS_INVALID_PAGE_PROTECTION ((X_STATUS)0xC0000045L)
 #define X_STATUS_MUTANT_NOT_OWNED ((X_STATUS)0xC0000046L)
+#define X_STATUS_THREAD_IS_TERMINATING ((X_STATUS)0xC000004BL)
 #define X_STATUS_PROCEDURE_NOT_FOUND ((X_STATUS)0xC000007AL)
 #define X_STATUS_INSUFFICIENT_RESOURCES ((X_STATUS)0xC000009AL)
 #define X_STATUS_MEMORY_NOT_ALLOCATED ((X_STATUS)0xC00000A0L)
@@ -66,6 +67,7 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_INVALID_PARAMETER_3 ((X_STATUS)0xC00000F1L)
 #define X_STATUS_DLL_NOT_FOUND ((X_STATUS)0xC0000135L)
 #define X_STATUS_ENTRYPOINT_NOT_FOUND ((X_STATUS)0xC0000139L)
+#define X_STATUS_SEMAPHORE_LIMIT_EXCEEDED ((X_STATUS)0xC000012BL)
 #define X_STATUS_MAPPED_ALIGNMENT ((X_STATUS)0xC0000220L)
 #define X_STATUS_NOT_FOUND ((X_STATUS)0xC0000225L)
 #define X_STATUS_DRIVER_ORDINAL_NOT_FOUND ((X_STATUS)0xC0000262L)
@@ -169,5 +171,23 @@ struct X_SLIST_HEADER {
   be<uint16_t> sequence;     // 0x6
 };
 static_assert_size(X_SLIST_HEADER, 8);
+
+struct X_KSPINLOCK {
+  be<uint32_t> prcb_of_owner;
+};
+static_assert_size(X_KSPINLOCK, 4);
+
+// Typed guest pointer - holds a guest address but provides type documentation.
+// Implicitly converts to/from uint32_t via the be<uint32_t> member.
+template <typename T>
+struct TypedGuestPointer {
+  be<uint32_t> value;
+
+  operator uint32_t() const { return value; }
+  TypedGuestPointer& operator=(uint32_t v) {
+    value = v;
+    return *this;
+  }
+};
 
 }  // namespace rex

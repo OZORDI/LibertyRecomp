@@ -781,7 +781,8 @@ void DxbcShaderTranslator::ProcessTextureFetchInstruction(
     if (!instr.attributes.unnormalized_coordinates) {
       switch (instr.dimension) {
         case xenos::FetchOpDimension::k1D:
-          size_needed_components |= used_result_nonzero_components & 0b0001;
+          // Always need size for 1D textures to support wide 1D textures.
+          size_needed_components |= 0b0001;
           break;
         case xenos::FetchOpDimension::k2D:
         case xenos::FetchOpDimension::kCube:

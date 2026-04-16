@@ -13,11 +13,14 @@
 #include <cinttypes>
 #include <cmath>
 #include <cstring>
+#include <string_view>
 
 #include <fmt/format.h>
 
 #include <rex/cvar.h>
 #include <rex/dbg.h>
+#include <rex/perf/counter.h>
+#include <rex/chrono/clock.h>
 #include <rex/graphics/command_processor.h>
 #include <rex/graphics/flags.h>
 #include <rex/graphics/graphics_system.h>
@@ -34,13 +37,69 @@
 
 REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
 
+REXCVAR_DEFINE_BOOL(clear_memory_page_state, true, "GPU",
+                    "Refresh page-valid state from GPU-written memory at frame end. "
+                    "Disable for minor CPU overhead reduction, but may break memory coherency.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(occlusion_query_enable, true, "GPU", "Enable host occlusion query handling")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_STRING(readback_resolve, "none", "GPU",
+                      "Controls CPU readback of render-to-texture resolve results.\n"
+                      " none: Disable readback (default)\n"
+                      " fast: Read previous frame (delayed, copy every frame)\n"
+                      " some: Read previous frame (delayed, copy on cache miss)\n"
+                      " full: Immediate sync readback (accurate but stalls)")
+    .allowed({"none", "fast", "some", "full"})
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(readback_resolve_half_pixel_offset, false, "GPU",
+                    "When draw resolution scaling is active, sample from the center of each "
+                    "scaled block during resolve readback downscale")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(readback_memexport, true, "GPU",
+                    "Enable CPU readback of shader memexport writes for guest memory "
+                    "coherency (can reduce correctness issues, but may add GPU/CPU sync cost)")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(readback_memexport_fast, true, "GPU",
+                    "Use fast double-buffered memexport readback when possible, with "
+                    "automatic fallback to full synchronous readback")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
 REXCVAR_DEFINE_INT32(query_occlusion_fake_sample_count, 1000, "GPU",
                      "Fake sample count for occlusion queries")
-    .range(1, 100000);
+    .range(1, 100000)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(async_shader_compilation, true, "GPU",
+                    "Compile shaders and create pipelines asynchronously in background "
+                    "threads. This reduces stutter but may cause brief visual artifacts while "
+                    "pipelines are being prepared.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 namespace rex::graphics {
 
 using namespace rex::graphics::xenos;
+
+namespace {
+
+ReadbackResolveMode ParseReadbackResolveMode(std::string_view value) {
+  if (value == "fast") {
+    return ReadbackResolveMode::kFast;
+  }
+  if (value == "some") {
+    return ReadbackResolveMode::kSome;
+  }
+  if (value == "full") {
+    return ReadbackResolveMode::kFull;
+  }
+  return ReadbackResolveMode::kDisabled;
+}
+
+}  // namespace
 
 CommandProcessor::CommandProcessor(GraphicsSystem* graphics_system,
                                    system::KernelState* kernel_state)
@@ -181,6 +240,28 @@ void CommandProcessor::CallInThread(std::function<void()> fn) {
 }
 
 void CommandProcessor::ClearCaches() {}
+
+void CommandProcessor::InvalidateGpuMemory() {}
+
+ReadbackResolveMode CommandProcessor::GetReadbackResolveMode(
+    bool legacy_readback_resolve_enabled) const {
+  ReadbackResolveMode shared_mode = ParseReadbackResolveMode(REXCVAR_GET(readback_resolve));
+  bool shared_mode_overrides_legacy = shared_mode != ReadbackResolveMode::kDisabled ||
+                                      rex::cvar::HasNonDefaultValue("readback_resolve");
+  if (shared_mode_overrides_legacy) {
+    return shared_mode;
+  }
+  return legacy_readback_resolve_enabled ? ReadbackResolveMode::kFast
+                                         : ReadbackResolveMode::kDisabled;
+}
+
+bool CommandProcessor::IsReadbackMemexportEnabled(bool legacy_backend_flag) const {
+  if (legacy_readback_memexport_cvar_name_ &&
+      rex::cvar::HasNonDefaultValue(legacy_readback_memexport_cvar_name_)) {
+    return legacy_backend_flag;
+  }
+  return REXCVAR_GET(readback_memexport);
+}
 
 void CommandProcessor::SetDesiredSwapPostEffect(SwapPostEffect swap_post_effect) {
   if (swap_post_effect_desired_ == swap_post_effect) {
@@ -325,17 +406,31 @@ void CommandProcessor::UpdateWritePointer(uint32_t value) {
   write_ptr_index_event_->Set();
 }
 
+uint32_t CommandProcessor::ReadRegisterValue(uint32_t index) const {
+  if (index < RegisterFile::kRegisterCount) {
+    return register_file_->values[index];
+  }
+  auto it = extended_register_values_.find(index);
+  return it != extended_register_values_.end() ? it->second : 0;
+}
+
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   RegisterFile& regs = *register_file_;
   if (index >= RegisterFile::kRegisterCount) {
-    REXGPU_WARN("CommandProcessor::WriteRegister index out of bounds: {}", index);
+    auto [it, inserted] = extended_register_values_.insert_or_assign(index, value);
+    (void)it;
+    if (inserted) {
+      REXGPU_WARN(
+          "CommandProcessor::WriteRegister index out of bounds: {} (stored as extended register)",
+          index);
+    }
     return;
   }
 
   // Volatile for the WAIT_REG_MEM loop.
   const_cast<volatile uint32_t&>(regs.values[index]) = value;
   if (!regs.GetRegisterInfo(index)) {
-    REXGPU_WARN("GPU: Write to unknown register ({:04X} = {:08X})", index, value);
+    REXGPU_DEBUG("GPU: Write to unknown register ({:04X} = {:08X})", index, value);
   }
 
   // Scratch register writeback.
@@ -468,6 +563,83 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
       } break;
     }
   }
+}
+
+void CommandProcessor::WriteRegistersFromMem(uint32_t start_index, uint32_t* base,
+                                             uint32_t num_registers) {
+  for (uint32_t i = 0; i < num_registers; ++i) {
+    uint32_t data = memory::load_and_swap<uint32_t>(base + i);
+    WriteRegister(start_index + i, data);
+  }
+}
+
+void CommandProcessor::WriteRegisterRangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                                  uint32_t num_registers) {
+  if (!num_registers) {
+    return;
+  }
+  memory::RingBuffer::ReadRange range = ring->BeginRead(size_t(num_registers) * sizeof(uint32_t));
+  if (range.first_length != 0) {
+    uint32_t first_count = uint32_t(range.first_length / sizeof(uint32_t));
+    WriteRegistersFromMem(base, reinterpret_cast<uint32_t*>(const_cast<uint8_t*>(range.first)),
+                          first_count);
+    base += first_count;
+  }
+  if (range.second_length != 0) {
+    WriteRegistersFromMem(base, reinterpret_cast<uint32_t*>(const_cast<uint8_t*>(range.second)),
+                          uint32_t(range.second_length / sizeof(uint32_t)));
+  }
+  ring->EndRead(range);
+}
+
+void CommandProcessor::WriteALURangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                             uint32_t num_registers) {
+  WriteRegisterRangeFromRing(ring, base + 0x4000, num_registers);
+}
+
+void CommandProcessor::WriteFetchRangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                               uint32_t num_registers) {
+  WriteRegisterRangeFromRing(ring, base + 0x4800, num_registers);
+}
+
+void CommandProcessor::WriteBoolRangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                              uint32_t num_registers) {
+  WriteRegisterRangeFromRing(ring, base + 0x4900, num_registers);
+}
+
+void CommandProcessor::WriteLoopRangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                              uint32_t num_registers) {
+  WriteRegisterRangeFromRing(ring, base + 0x4908, num_registers);
+}
+
+void CommandProcessor::WriteREGISTERSRangeFromRing(memory::RingBuffer* ring, uint32_t base,
+                                                   uint32_t num_registers) {
+  WriteRegisterRangeFromRing(ring, base + 0x2000, num_registers);
+}
+
+void CommandProcessor::WriteALURangeFromMem(uint32_t start_index, uint32_t* base,
+                                            uint32_t num_registers) {
+  WriteRegistersFromMem(start_index + 0x4000, base, num_registers);
+}
+
+void CommandProcessor::WriteFetchRangeFromMem(uint32_t start_index, uint32_t* base,
+                                              uint32_t num_registers) {
+  WriteRegistersFromMem(start_index + 0x4800, base, num_registers);
+}
+
+void CommandProcessor::WriteBoolRangeFromMem(uint32_t start_index, uint32_t* base,
+                                             uint32_t num_registers) {
+  WriteRegistersFromMem(start_index + 0x4900, base, num_registers);
+}
+
+void CommandProcessor::WriteLoopRangeFromMem(uint32_t start_index, uint32_t* base,
+                                             uint32_t num_registers) {
+  WriteRegistersFromMem(start_index + 0x4908, base, num_registers);
+}
+
+void CommandProcessor::WriteREGISTERSRangeFromMem(uint32_t start_index, uint32_t* base,
+                                                  uint32_t num_registers) {
+  WriteRegistersFromMem(start_index + 0x2000, base, num_registers);
 }
 
 void CommandProcessor::MakeCoherent() {
@@ -896,7 +1068,20 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
                                                   uint32_t count) {
   SCOPE_profile_cpu_f("gpu");
 
-  rex::debug::Profiler::Flip();
+#ifdef REXGLUE_ENABLE_PERF_COUNTERS
+  {
+    static uint64_t last_frame_tick = 0;
+    uint64_t now = rex::chrono::Clock::QueryHostTickCount();
+    if (last_frame_tick) {
+      uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();
+      int64_t dt_us = static_cast<int64_t>((now - last_frame_tick) * 1000000 / freq);
+      PROFILE_FRAME_TIME_US(dt_us);
+      PROFILE_FPS(freq / (now - last_frame_tick));
+    }
+    last_frame_tick = now;
+  }
+#endif
+  rex::perf::Profiler::Flip();
 
   // Xenia-specific VdSwap hook.
   // VdSwap will post this to tell us we need to swap the screen/fire an
@@ -942,22 +1127,19 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
 
   bool is_memory = (wait_info & 0x10) != 0;
 
-  assert_true(is_memory || poll_reg_addr < RegisterFile::kRegisterCount);
-  const volatile uint32_t& value_ref =
-      is_memory
-          ? *reinterpret_cast<uint32_t*>(memory_->TranslatePhysical(poll_reg_addr & ~uint32_t(0x3)))
-          : register_file_->values[poll_reg_addr];
-
   bool matched = false;
   do {
-    uint32_t value = value_ref;
+    uint32_t value = 0;
     if (is_memory) {
+      value =
+          *reinterpret_cast<uint32_t*>(memory_->TranslatePhysical(poll_reg_addr & ~uint32_t(0x3)));
       trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)), sizeof(uint32_t));
       value = xenos::GpuSwap(value, static_cast<xenos::Endian>(poll_reg_addr & 0x3));
     } else {
+      value = ReadRegisterValue(poll_reg_addr);
       if (poll_reg_addr == XE_GPU_REG_COHER_STATUS_HOST) {
         MakeCoherent();
-        value = value_ref;
+        value = ReadRegisterValue(poll_reg_addr);
       }
     }
     switch (wait_info & 0x7) {
@@ -1046,10 +1228,7 @@ bool CommandProcessor::ExecutePacketType3_REG_TO_MEM(memory::RingBuffer* reader,
   uint32_t reg_addr = reader->ReadAndSwap<uint32_t>();
   uint32_t mem_addr = reader->ReadAndSwap<uint32_t>();
 
-  uint32_t reg_val;
-
-  assert_true(reg_addr < RegisterFile::kRegisterCount);
-  reg_val = register_file_->values[reg_addr];
+  uint32_t reg_val = ReadRegisterValue(reg_addr);
 
   auto endianness = static_cast<xenos::Endian>(mem_addr & 0x3);
   mem_addr &= ~0x3;
@@ -1096,8 +1275,7 @@ bool CommandProcessor::ExecutePacketType3_COND_WRITE(memory::RingBuffer* reader,
     value = GpuSwap(value, endianness);
   } else {
     // Register.
-    assert_true(poll_reg_addr < RegisterFile::kRegisterCount);
-    value = register_file_->values[poll_reg_addr];
+    value = ReadRegisterValue(poll_reg_addr);
   }
   bool matched = false;
   switch (wait_info & 0x7) {
@@ -1229,6 +1407,9 @@ bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* re
   if (fake_sample_count >= 0) {
     auto* pSampleCounts = memory_->TranslatePhysical<xe_gpu_depth_sample_counts*>(
         register_file_->values[XE_GPU_REG_RB_SAMPLE_COUNT_ADDR]);
+    if (!pSampleCounts) {
+      return true;
+    }
     // 0xFFFFFEED is written to this two locations by D3D only on D3DISSUE_END
     // and used to detect a finished query.
     bool is_end_via_z_pass =
@@ -1340,15 +1521,22 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
       // TODO(Triang3l || JoelLinn): Handle this properly in the render
       // backends.
 
-      draw_succeeded = IssueDraw(
-          vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
-          is_indexed ? &index_buffer_info : nullptr,
-          xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type));
+      bool major_mode_explicit =
+          xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
+      draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
+                                 is_indexed ? &index_buffer_info : nullptr, major_mode_explicit);
       if (!draw_succeeded) {
-        REXGPU_ERROR("{}({}, {}, {}): Failed in backend", opcode_name,
-                     static_cast<uint32_t>(vgt_draw_initiator.num_indices),
-                     uint32_t(vgt_draw_initiator.prim_type),
-                     uint32_t(vgt_draw_initiator.source_select));
+        auto vgt_output_path_cntl = register_file_->Get<reg::VGT_OUTPUT_PATH_CNTL>();
+        auto vgt_hos_cntl = register_file_->Get<reg::VGT_HOS_CNTL>();
+        auto rb_modecontrol = register_file_->Get<reg::RB_MODECONTROL>();
+        REXGPU_ERROR(
+            "{}({}, {}, {}): Failed in backend "
+            "(major_mode={}, explicit_major={}, path_select={}, tess_mode={}, edram_mode={})",
+            opcode_name, static_cast<uint32_t>(vgt_draw_initiator.num_indices),
+            uint32_t(vgt_draw_initiator.prim_type), uint32_t(vgt_draw_initiator.source_select),
+            uint32_t(vgt_draw_initiator.major_mode), uint32_t(major_mode_explicit),
+            uint32_t(vgt_output_path_cntl.path_select), uint32_t(vgt_hos_cntl.tess_mode),
+            uint32_t(rb_modecontrol.edram_mode));
       }
     }
   }
@@ -1393,30 +1581,27 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT(memory::RingBuffer* reade
   uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
   uint32_t index = offset_type & 0x7FF;
   uint32_t type = (offset_type >> 16) & 0xFF;
+  uint32_t count_registers = count - 1;
   switch (type) {
     case 0:  // ALU
-      index += 0x4000;
+      WriteALURangeFromRing(reader, index, count_registers);
       break;
     case 1:  // FETCH
-      index += 0x4800;
+      WriteFetchRangeFromRing(reader, index, count_registers);
       break;
     case 2:  // BOOL
-      index += 0x4900;
+      WriteBoolRangeFromRing(reader, index, count_registers);
       break;
     case 3:  // LOOP
-      index += 0x4908;
+      WriteLoopRangeFromRing(reader, index, count_registers);
       break;
     case 4:  // REGISTERS
-      index += 0x2000;
+      WriteREGISTERSRangeFromRing(reader, index, count_registers);
       break;
     default:
       assert_always();
       reader->AdvanceRead((count - 1) * sizeof(uint32_t));
       return true;
-  }
-  for (uint32_t n = 0; n < count - 1; n++, index++) {
-    uint32_t data = reader->ReadAndSwap<uint32_t>();
-    WriteRegister(index, data);
   }
   return true;
 }
@@ -1425,10 +1610,7 @@ bool CommandProcessor::ExecutePacketType3_SET_CONSTANT2(memory::RingBuffer* read
                                                         uint32_t count) {
   uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
   uint32_t index = offset_type & 0xFFFF;
-  for (uint32_t n = 0; n < count - 1; n++, index++) {
-    uint32_t data = reader->ReadAndSwap<uint32_t>();
-    WriteRegister(index, data);
-  }
+  WriteRegisterRangeFromRing(reader, index, count - 1);
   return true;
 }
 
@@ -1442,30 +1624,31 @@ bool CommandProcessor::ExecutePacketType3_LOAD_ALU_CONSTANT(memory::RingBuffer* 
   uint32_t size_dwords = reader->ReadAndSwap<uint32_t>();
   size_dwords &= 0xFFF;
   uint32_t type = (offset_type >> 16) & 0xFF;
+  uint32_t* xlat_address = memory_->TranslatePhysical<uint32_t*>(address);
   switch (type) {
     case 0:  // ALU
-      index += 0x4000;
+      trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
+      WriteALURangeFromMem(index, xlat_address, size_dwords);
       break;
     case 1:  // FETCH
-      index += 0x4800;
+      trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
+      WriteFetchRangeFromMem(index, xlat_address, size_dwords);
       break;
     case 2:  // BOOL
-      index += 0x4900;
+      trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
+      WriteBoolRangeFromMem(index, xlat_address, size_dwords);
       break;
     case 3:  // LOOP
-      index += 0x4908;
+      trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
+      WriteLoopRangeFromMem(index, xlat_address, size_dwords);
       break;
     case 4:  // REGISTERS
-      index += 0x2000;
+      trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
+      WriteREGISTERSRangeFromMem(index, xlat_address, size_dwords);
       break;
     default:
       assert_always();
       return true;
-  }
-  trace_writer_.WriteMemoryRead(CpuToGpu(address), size_dwords * 4);
-  for (uint32_t n = 0; n < size_dwords; n++, index++) {
-    uint32_t data = memory::load_and_swap<uint32_t>(memory_->TranslatePhysical(address + n * 4));
-    WriteRegister(index, data);
   }
   return true;
 }
@@ -1474,10 +1657,7 @@ bool CommandProcessor::ExecutePacketType3_SET_SHADER_CONSTANTS(memory::RingBuffe
                                                                uint32_t packet, uint32_t count) {
   uint32_t offset_type = reader->ReadAndSwap<uint32_t>();
   uint32_t index = offset_type & 0xFFFF;
-  for (uint32_t n = 0; n < count - 1; n++, index++) {
-    uint32_t data = reader->ReadAndSwap<uint32_t>();
-    WriteRegister(index, data);
-  }
+  WriteRegisterRangeFromRing(reader, index, count - 1);
   return true;
 }
 

@@ -39,9 +39,17 @@ message(STATUS "Target platform: ${LIBERTY_RECOMP_TARGET_PLATFORM}")
 # ─── Build-time Asset Path ──────────────────────────────────────────────────
 # For non-desktop platforms that cannot use a file-picker installer, all game
 # assets must be available at configure time and bundled into the package.
+#
+# Priority: $GTA4_GAME_PATH env var (if set) overrides everything,
+#           then -DLIBERTY_RECOMP_EMBEDDED_GAME_PATH=... (CMake cache),
+#           then tools/local_game_payload/ (default).
 set(LIBERTY_RECOMP_EMBEDDED_GAME_PATH
     "${CMAKE_SOURCE_DIR}/tools/local_game_payload"
     CACHE PATH "Path to the staged GTA IV Xbox 360 game files for embedded builds")
+if(DEFINED ENV{GAME_PATH})
+    set(LIBERTY_RECOMP_EMBEDDED_GAME_PATH "$ENV{GAME_PATH}")
+    message(STATUS "GAME_PATH env var set — using: ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
+endif()
 
 if(NOT LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
     message(STATUS "Embedded game path: ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
@@ -50,8 +58,9 @@ if(NOT LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
         message(FATAL_ERROR
             "LIBERTY_RECOMP_EMBEDDED_GAME_PATH does not exist:\n"
             "  ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}\n"
-            "Populate tools/local_game_payload/ with the required game files or set "
-            "LIBERTY_RECOMP_EMBEDDED_GAME_PATH to the correct path.\n"
+            "Set the GAME_PATH environment variable to your extracted game directory,\n"
+            "or populate tools/local_game_payload/, or pass "
+            "-DLIBERTY_RECOMP_EMBEDDED_GAME_PATH=... to CMake.\n"
             "See tools/local_game_payload/README.md for the required layout.")
     endif()
 
@@ -93,7 +102,7 @@ endif()
 
 
 
-if (APPLE)
+if (APPLE AND NOT LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
     enable_language(OBJC OBJCXX)
 endif()
 
@@ -120,7 +129,38 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 add_subdirectory(${LIBERTY_RECOMP_THIRDPARTY_ROOT})
-add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT})
+# xbox_support: XEX/XDBF/big-endian helpers used by both desktop and console
+# builds (previously sourced from the now-removed XenonRecomp tool).
+set(THIRDPARTY_ROOT ${CMAKE_SOURCE_DIR}/third_party)
+if (NOT TARGET disasm)
+    add_subdirectory(${THIRDPARTY_ROOT}/disasm ${CMAKE_BINARY_DIR}/_xbox_disasm)
+endif()
+if (NOT TARGET xbox_support)
+    add_subdirectory(${THIRDPARTY_ROOT}/xbox_support ${CMAKE_BINARY_DIR}/_xbox_support)
+endif()
+
+# Dev tools (u8extract, x_decompress, etc.) are host-only — skip for console cross-compiles
+if(NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
+    add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT})
+else()
+    # Console builds still need liberty_debugger (static lib linked into LibertyRecomp)
+    add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/liberty_debugger)
+    # xbox_support + disasm already added above (desktop + console shared path).
+    # Console builds also need zstd, xxHash — normally provided through XenosRecomp thirdparty chain
+    # (fmt is provided by glue/rexglue-sdk thirdparty for console builds)
+    set(XENOS_THIRDPARTY_ROOT ${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp/thirdparty)
+    set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
+    set(ZSTD_DISABLE_ASM ON CACHE BOOL "" FORCE)
+    if (NOT TARGET libzstd_static)
+        add_subdirectory(${XENOS_THIRDPARTY_ROOT}/zstd/build/cmake ${CMAKE_BINARY_DIR}/_zstd)
+    endif()
+    if (NOT TARGET xxHash::xxhash)
+        set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
+        add_subdirectory(${XENOS_THIRDPARTY_ROOT}/xxHash/cmake_unofficial ${CMAKE_BINARY_DIR}/_xxhash)
+    endif()
+endif()
 
 # RexGlue SDK integration (core/filesystem/runtime/kernel only)
 option(USE_REXGLUE_RUNTIME "Use RexGlue SDK for runtime infrastructure" ON)

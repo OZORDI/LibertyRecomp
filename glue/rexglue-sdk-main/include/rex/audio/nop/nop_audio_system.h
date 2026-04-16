@@ -17,12 +17,12 @@ namespace rex::audio::nop {
 
 class NopAudioSystem : public AudioSystem {
  public:
-  explicit NopAudioSystem(runtime::Processor* processor);
+  explicit NopAudioSystem(runtime::FunctionDispatcher* function_dispatcher);
   ~NopAudioSystem() override;
 
   static bool IsAvailable() { return true; }
 
-  static std::unique_ptr<AudioSystem> Create(runtime::Processor* processor);
+  static std::unique_ptr<AudioSystem> Create(runtime::FunctionDispatcher* function_dispatcher);
 
   X_STATUS CreateDriver(size_t index, rex::thread::Semaphore* semaphore,
                         AudioDriver** out_driver) override;

@@ -13,7 +13,9 @@
 #ifdef _WIN32
 #include <conio.h>
 #else
+#if !defined(__SWITCH__)
 #include <termios.h>
+#endif
 #include <unistd.h>
 #endif
 

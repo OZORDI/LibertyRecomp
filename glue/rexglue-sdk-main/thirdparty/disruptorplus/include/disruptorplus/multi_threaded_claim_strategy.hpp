@@ -6,7 +6,6 @@
 #include "sequence_barrier_group.hpp"
 #include "sequence_range.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <memory>

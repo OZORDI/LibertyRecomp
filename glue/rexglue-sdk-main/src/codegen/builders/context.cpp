@@ -9,34 +9,33 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "../builder_context.h"
+#include "builder_context.h"
 #include "helpers.h"
 
 #include <algorithm>
 
-#include <rex/codegen/recompiler.h>
+#include <rex/codegen/binary_view.h>
 #include <rex/logging.h>
 
 #include "../codegen_logging.h"
-#include <rex/runtime.h>
 #include <rex/system/export_resolver.h>
 
 namespace rex::codegen {
+
+/// eieio instruction encoding (big-endian). Used for MMIO detection:
+/// if the next instruction after a load/store is eieio, the access is MMIO.
+static constexpr uint32_t kEieioEncoding = 0xAC06007C;
 
 //=============================================================================
 // Convenience Accessors
 //=============================================================================
 
 const RecompilerConfig& BuilderContext::config() const {
-  return recompiler.ctx_->Config();
+  return emitCtx.config;
 }
 
 const FunctionGraph& BuilderContext::graph() const {
-  return recompiler.ctx_->graph;
-}
-
-std::string& BuilderContext::out() {
-  return recompiler.out;
+  return emitCtx.graph;
 }
 
 //=============================================================================
@@ -139,13 +138,13 @@ const char* BuilderContext::ea() {
 //=============================================================================
 
 bool BuilderContext::mmio_check_d_form() {
-  if (base + 4 < fn.end() && *(data + 1) == Recompiler::c_eieio)
+  if (base + 4 < fn.end() && *(data + 1) == kEieioEncoding)
     return true;
   return locals.is_mmio_base(insn.operands[2]);
 }
 
 bool BuilderContext::mmio_check_x_form() {
-  if (base + 4 < fn.end() && *(data + 1) == Recompiler::c_eieio)
+  if (base + 4 < fn.end() && *(data + 1) == kEieioEncoding)
     return true;
   return locals.is_mmio_base(insn.operands[1]) || locals.is_mmio_base(insn.operands[2]);
 }
@@ -173,7 +172,7 @@ void BuilderContext::emit_function_call(uint32_t address) {
 
   if (address == cfg.longJmpAddress) {
     // Use custom ppc_longjmp that uses guest address as key (not for storage)
-    println("\t::rex::ppc_longjmp({}.u32, {}.s32);", r(3), r(4));
+    println("\tppc_longjmp({}.u32, {}.s32);", r(3), r(4));
     return;
   }
 
@@ -211,19 +210,17 @@ void BuilderContext::emit_function_call(uint32_t address) {
 
       // Try to resolve ordinal to actual function name
       auto at_pos = importTarget.name.find('@');
-      if (at_pos != std::string::npos && recompiler.runtime) {
+      if (at_pos != std::string::npos && emitCtx.resolver) {
         auto lib_name = importTarget.name.substr(0, at_pos);
         auto ordinal_str = importTarget.name.substr(at_pos + 1);
         uint16_t ordinal = static_cast<uint16_t>(std::stoul(ordinal_str));
 
-        if (auto* resolver = recompiler.runtime->export_resolver()) {
-          auto* exp = resolver->GetExportByOrdinal(lib_name + ".xex", ordinal);
-          if (!exp)
-            exp = resolver->GetExportByOrdinal(lib_name, ordinal);
+        auto* exp = emitCtx.resolver->GetExportByOrdinal(lib_name + ".xex", ordinal);
+        if (!exp)
+          exp = emitCtx.resolver->GetExportByOrdinal(lib_name, ordinal);
 
-          if (exp) {
-            func_name = "__imp__" + std::string(exp->name);
-          }
+        if (exp) {
+          func_name = "__imp__" + std::string(exp->name);
         }
       }
 
@@ -331,36 +328,66 @@ void BuilderContext::emit_mid_asm_hook() {
   if (returnsBool)
     print("if (");
 
-  print("{}(ctx, base", midAsmHook->second.name);
-  for (const auto& reg : midAsmHook->second.registers) {
-    print(", {}", reg);
+  // Build call -- no ctx/base prefix, just register arguments resolved through accessors
+  print("{}(", midAsmHook->second.name);
+  for (auto& reg : midAsmHook->second.registers) {
+    if (out.back() != '(')
+      out += ", ";
+
+    switch (reg[0]) {
+      case 'c':
+        if (reg == "ctr")
+          out += ctr();
+        else
+          out += cr(std::atoi(reg.c_str() + 2));
+        break;
+      case 'x':
+        out += xer();
+        break;
+      case 'r':
+        if (reg == "reserved")
+          out += reserved();
+        else
+          out += r(std::atoi(reg.c_str() + 1));
+        break;
+      case 'f':
+        if (reg == "fpscr")
+          out += "ctx.fpscr";
+        else
+          out += f(std::atoi(reg.c_str() + 1));
+        break;
+      case 'v':
+        out += v(std::atoi(reg.c_str() + 1));
+        break;
+    }
   }
-  print(")");
 
-  if (returnsBool)
-    print(") ");
+  if (returnsBool) {
+    println(")) {{");
 
-  if (midAsmHook->second.returnOnTrue || midAsmHook->second.returnOnFalse) {
+    if (midAsmHook->second.returnOnTrue)
+      println("\t\treturn;");
+    else if (midAsmHook->second.jumpAddressOnTrue != 0)
+      println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnTrue);
+
+    println("\t}}");
+
+    println("\telse {{");
+
     if (midAsmHook->second.returnOnFalse)
-      print("{{ ");
-    println("return;");
-    if (midAsmHook->second.returnOnFalse)
-      println("\t}}");
-  } else if (midAsmHook->second.jumpAddress != 0) {
-    println("goto loc_{:X};", midAsmHook->second.jumpAddress);
-  } else if (midAsmHook->second.jumpAddressOnTrue != 0) {
-    println("goto loc_{:X};", midAsmHook->second.jumpAddressOnTrue);
-  } else if (midAsmHook->second.jumpAddressOnFalse != 0) {
-    println("{{ goto loc_{:X}; }}", midAsmHook->second.jumpAddressOnFalse);
-  } else if (midAsmHook->second.ret) {
-    println("return;");
+      println("\t\treturn;");
+    else if (midAsmHook->second.jumpAddressOnFalse != 0)
+      println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnFalse);
+
+    println("\t}}");
   } else {
-    println(";");
-  }
-}
+    println(");");
 
-void BuilderContext::reset_switch_table() {
-  switchTable = recompiler.ctx_->Config().switchTables.end();
+    if (midAsmHook->second.ret)
+      println("\treturn;");
+    else if (midAsmHook->second.jumpAddress != 0)
+      println("\tgoto loc_{:X};", midAsmHook->second.jumpAddress);
+  }
 }
 
 //=============================================================================
@@ -408,6 +435,24 @@ void BuilderContext::emit_vec_int_binary_swapped(const char* simd_op, const char
       v(insn.operands[1]), element_type);
 }
 
+void BuilderContext::emit_vec_var_shift(const char* shift_dir, const char* element_type,
+                                        uint32_t mask_value) {
+  auto vD = v(insn.operands[0]);
+  auto vA = v(insn.operands[1]);
+  auto vB = v(insn.operands[2]);
+  println("\t{{");
+  println("\t\tsimde__m128i a = simde_mm_load_si128((simde__m128i*){}.u8);", vA);
+  println("\t\tsimde__m128i b = simde_mm_load_si128((simde__m128i*){}.u8);", vB);
+  println("\t\tsimde__m128i shift = simde_mm_and_si128(b, simde_mm_set1_{}(0x{:X}));", element_type,
+          mask_value);
+  println(
+      "\t\tsimde_mm_store_si128((simde__m128i*){}.u8, "
+      "rex::ppc::simde_mm_{}_{}"
+      "(a, shift));",
+      vD, shift_dir, element_type);
+  println("\t}}");
+}
+
 //=============================================================================
 // Memory (Load/Store) Code Generation Helpers
 //=============================================================================
@@ -415,13 +460,13 @@ void BuilderContext::emit_vec_int_binary_swapped(const char* simd_op, const char
 void BuilderContext::emit_load_d_form(const char* load_macro, const char* dest_type,
                                       bool check_mmio) {
   // D-form: rD = LOAD(rA + D) where operands[0]=rD, operands[1]=D, operands[2]=rA
-  // load_macro should be like "PPC_LOAD_U8" - we replace PPC_LOAD with PPC_MM_LOAD for MMIO
+  // load_macro should be like "REX_LOAD_U8" - we replace REX_LOAD with REX_MM_LOAD for MMIO
   const char* macro = load_macro;
   static char mm_macro[64];
   if (check_mmio && mmio_check_d_form()) {
-    // Replace "PPC_LOAD_" with "PPC_MM_LOAD_"
-    if (strncmp(load_macro, "PPC_LOAD_", 9) == 0) {
-      snprintf(mm_macro, sizeof(mm_macro), "PPC_MM_LOAD_%s", load_macro + 9);
+    // Replace "REX_LOAD_" with "REX_MM_LOAD_"
+    if (strncmp(load_macro, "REX_LOAD_", 9) == 0) {
+      snprintf(mm_macro, sizeof(mm_macro), "REX_MM_LOAD_%s", load_macro + 9);
       macro = mm_macro;
     }
   }
@@ -435,13 +480,13 @@ void BuilderContext::emit_load_d_form(const char* load_macro, const char* dest_t
 void BuilderContext::emit_load_x_form(const char* load_macro, const char* dest_type,
                                       bool check_mmio) {
   // X-form: rD = LOAD(rA + rB) where operands[0]=rD, operands[1]=rA, operands[2]=rB
-  // load_macro should be like "PPC_LOAD_U8" - we replace PPC_LOAD with PPC_MM_LOAD for MMIO
+  // load_macro should be like "REX_LOAD_U8" - we replace REX_LOAD with REX_MM_LOAD for MMIO
   const char* macro = load_macro;
   static char mm_macro[64];
   if (check_mmio && mmio_check_x_form()) {
-    // Replace "PPC_LOAD_" with "PPC_MM_LOAD_"
-    if (strncmp(load_macro, "PPC_LOAD_", 9) == 0) {
-      snprintf(mm_macro, sizeof(mm_macro), "PPC_MM_LOAD_%s", load_macro + 9);
+    // Replace "REX_LOAD_" with "REX_MM_LOAD_"
+    if (strncmp(load_macro, "REX_LOAD_", 9) == 0) {
+      snprintf(mm_macro, sizeof(mm_macro), "REX_MM_LOAD_%s", load_macro + 9);
       macro = mm_macro;
     }
   }
@@ -455,13 +500,13 @@ void BuilderContext::emit_load_x_form(const char* load_macro, const char* dest_t
 void BuilderContext::emit_store_d_form(const char* store_macro, const char* src_type,
                                        bool check_mmio) {
   // D-form: STORE(rA + D, rS) where operands[0]=rS, operands[1]=D, operands[2]=rA
-  // store_macro should be like "PPC_STORE_U8" - we replace PPC_STORE with PPC_MM_STORE for MMIO
+  // store_macro should be like "REX_STORE_U8" - we replace REX_STORE with REX_MM_STORE for MMIO
   const char* macro = store_macro;
   static char mm_macro[64];
   if (check_mmio && mmio_check_d_form()) {
-    // Replace "PPC_STORE_" with "PPC_MM_STORE_"
-    if (strncmp(store_macro, "PPC_STORE_", 10) == 0) {
-      snprintf(mm_macro, sizeof(mm_macro), "PPC_MM_STORE_%s", store_macro + 10);
+    // Replace "REX_STORE_" with "REX_MM_STORE_"
+    if (strncmp(store_macro, "REX_STORE_", 10) == 0) {
+      snprintf(mm_macro, sizeof(mm_macro), "REX_MM_STORE_%s", store_macro + 10);
       macro = mm_macro;
     }
   }
@@ -475,13 +520,13 @@ void BuilderContext::emit_store_d_form(const char* store_macro, const char* src_
 void BuilderContext::emit_store_x_form(const char* store_macro, const char* src_type,
                                        bool check_mmio) {
   // X-form: STORE(rA + rB, rS) where operands[0]=rS, operands[1]=rA, operands[2]=rB
-  // store_macro should be like "PPC_STORE_U8" - we replace PPC_STORE with PPC_MM_STORE for MMIO
+  // store_macro should be like "REX_STORE_U8" - we replace REX_STORE with REX_MM_STORE for MMIO
   const char* macro = store_macro;
   static char mm_macro[64];
   if (check_mmio && mmio_check_x_form()) {  // Use X-form specific check (operands[1] is base)
-    // Replace "PPC_STORE_" with "PPC_MM_STORE_"
-    if (strncmp(store_macro, "PPC_STORE_", 10) == 0) {
-      snprintf(mm_macro, sizeof(mm_macro), "PPC_MM_STORE_%s", store_macro + 10);
+    // Replace "REX_STORE_" with "REX_MM_STORE_"
+    if (strncmp(store_macro, "REX_STORE_", 10) == 0) {
+      snprintf(mm_macro, sizeof(mm_macro), "REX_MM_STORE_%s", store_macro + 10);
       macro = mm_macro;
     }
   }

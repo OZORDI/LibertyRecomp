@@ -13,7 +13,7 @@ add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/file_to_c)
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/fshasher)
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/u8extract)
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/x_decompress)
-add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp)
+# XenonRecomp removed — replaced by rexglue SDK (graine) static recompilation.
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp)
 add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/liberty_debugger)
 #add_subdirectory(${LIBERTY_RECOMP_TOOLS_ROOT}/nebula)

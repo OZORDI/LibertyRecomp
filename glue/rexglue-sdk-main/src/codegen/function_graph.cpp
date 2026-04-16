@@ -25,6 +25,7 @@
 #include <rex/codegen/function_scanner.h>
 #include <rex/logging.h>
 #include <rex/memory/utils.h>
+#include <rex/platform.h>
 
 #include "codegen_logging.h"
 
@@ -344,6 +345,17 @@ void emit_print(std::string& out, fmt::format_string<Args...> fmt, Args&&... arg
   fmt::vformat_to(std::back_inserter(out), fmt.get(), fmt::make_format_args(args...));
 }
 
+void emit_weak_function_forwarder(std::string& out, const std::string& name) {
+#if REX_PLATFORM_MAC
+  emit_println(out, "PPC_EXTERN_FUNC(__imp__{});", name);
+  emit_println(out, "PPC_WEAK_FUNC({}) {{", name);
+  emit_println(out, "\t__imp__{}(ctx, base);", name);
+  emit_println(out, "}}");
+#else
+  emit_println(out, "__attribute__((alias(\"__imp__{}\"))) PPC_WEAK_FUNC({});", name, name);
+#endif
+}
+
 }  // namespace
 
 std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
@@ -367,12 +379,7 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
     }
 
     emit_println(out, "// STUB: Function at 0x{:08X} has no discovered code blocks", base());
-#ifdef __APPLE__
-    emit_println(out, "PPC_FUNC_IMPL(__imp__{});", name);
-    emit_println(out, "PPC_WEAK_FUNC({}) {{ __imp__{}(ctx, base); }}", name, name);
-#else
-    emit_println(out, "__attribute__((alias(\"__imp__{}\"))) PPC_WEAK_FUNC({});", name, name);
-#endif
+    emit_weak_function_forwarder(out, name);
     emit_println(out, "PPC_FUNC_IMPL(__imp__{}) {{", name);
     emit_println(out, "\tPPC_FUNC_PROLOGUE();");
     emit_println(out, "}}\n");
@@ -485,12 +492,7 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
   }
 
   // Function signature with weak/alias pattern
-#ifdef __APPLE__
-  emit_println(out, "PPC_FUNC_IMPL(__imp__{});", name);
-  emit_println(out, "PPC_WEAK_FUNC({}) {{ __imp__{}(ctx, base); }}", name, name);
-#else
-  emit_println(out, "__attribute__((alias(\"__imp__{}\"))) PPC_WEAK_FUNC({});", name, name);
-#endif
+  emit_weak_function_forwarder(out, name);
   emit_println(out, "PPC_FUNC_IMPL(__imp__{}) {{", name);
   emit_println(out, "\tPPC_FUNC_PROLOGUE();");
 

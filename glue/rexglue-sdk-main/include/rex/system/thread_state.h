@@ -10,6 +10,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <cassert>
 #include <string>
 
 #include <rex/memory.h>
@@ -42,5 +43,27 @@ class ThreadState {
   alignas(64)::PPCContext context_storage_;
   ::PPCContext* context_ = &context_storage_;
 };
+
+// Thread-safe accessors for current thread's PPC context and kernel state.
+// Require ThreadState::Bind() to have been called on the current thread.
+inline PPCContext* current_ppc_context() {
+  auto* ts = ThreadState::Get();
+  assert(ts && "current_ppc_context() called without bound ThreadState");
+  return ts->context();
+}
+
+}  // namespace rex::runtime
+
+// Forward declaration in correct namespace
+namespace rex::system {
+class KernelState;
+KernelState* kernel_state();
+}  // namespace rex::system
+
+namespace rex::runtime {
+
+inline rex::system::KernelState* current_kernel_state() {
+  return rex::system::kernel_state();
+}
 
 }  // namespace rex::runtime

@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -37,9 +37,11 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-noble.list http://packages.lunarg.com/vulkan/lunarg-vulkan-noble.list
           sudo apt update
           sudo apt install -y cmake ninja-build build-essential git curl unzip autoconf python3.12-venv \
-          libgtk-3-dev libx11-xcb-dev
+          libgtk-3-dev libx11-xcb-dev wine vulkan-sdk
 
       - name: Configure (CMake preset)
         run: cmake --preset linux-amd64

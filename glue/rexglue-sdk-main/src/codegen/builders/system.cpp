@@ -9,7 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "../builder_context.h"
+#include "builder_context.h"
 #include "helpers.h"
 
 namespace rex::codegen {
@@ -153,7 +153,7 @@ bool build_dcbz(BuilderContext& ctx) {
   if (ctx.insn.operands[0] != 0)
     ctx.print("{}.u32 + ", ctx.r(ctx.insn.operands[0]));
   ctx.println("{}.u32) & ~31;", ctx.r(ctx.insn.operands[1]));
-  ctx.println("\tmemset((void*)PPC_RAW_ADDR({}), 0, 32);", ctx.ea());
+  ctx.println("\tmemset((void*)REX_RAW_ADDR({}), 0, 32);", ctx.ea());
   return true;
 }
 
@@ -163,7 +163,7 @@ bool build_dcbzl(BuilderContext& ctx) {
   if (ctx.insn.operands[0] != 0)
     ctx.print("{}.u32 + ", ctx.r(ctx.insn.operands[0]));
   ctx.println("{}.u32) & ~127;", ctx.r(ctx.insn.operands[1]));
-  ctx.println("\tmemset((void*)PPC_RAW_ADDR({}), 0, 128);", ctx.ea());
+  ctx.println("\tmemset((void*)REX_RAW_ADDR({}), 0, 128);", ctx.ea());
   return true;
 }
 
@@ -204,6 +204,17 @@ bool build_mcrf(BuilderContext& ctx) {
 // Move From Special Registers
 //=============================================================================
 
+bool build_mfxer(BuilderContext& ctx) {
+  ctx.println("\t{}.u64 = ({}.so << 31) | ({}.ov << 30) | ({}.ca << 29);",
+              ctx.r(ctx.insn.operands[0]), ctx.xer(), ctx.xer(), ctx.xer());
+  return true;
+}
+
+bool build_mfctr(BuilderContext& ctx) {
+  ctx.println("\t{}.u64 = {}.u64;", ctx.r(ctx.insn.operands[0]), ctx.ctr());
+  return true;
+}
+
 bool build_mfcr(BuilderContext& ctx) {
   for (size_t i = 0; i < 32; i++) {
     constexpr std::string_view fields[] = {"lt", "gt", "eq", "so"};
@@ -242,7 +253,7 @@ bool build_mfmsr(BuilderContext& ctx) {
     ctx.println("\tstd::atomic_thread_fence(std::memory_order_seq_cst);");
     // Check global lock and return appropriate value
     // Returns 0x8000 if unlocked (interrupts enabled), 0 if locked
-    ctx.println("\t{}.u64 = PPC_CHECK_GLOBAL_LOCK();", ctx.r(ctx.insn.operands[0]));
+    ctx.println("\t{}.u64 = REX_CHECK_GLOBAL_LOCK();", ctx.r(ctx.insn.operands[0]));
   }
   return true;
 }
@@ -254,8 +265,14 @@ bool build_mffs(BuilderContext& ctx) {
 
 bool build_mftb(BuilderContext& ctx) {
   // Xbox 360 timebase runs at 50 MHz (guest tick frequency)
-  // Using PPC_QUERY_TIMEBASE() macro provides properly scaled timing from the runtime
-  ctx.println("\t{}.u64 = PPC_QUERY_TIMEBASE();", ctx.r(ctx.insn.operands[0]));
+  // Using REX_QUERY_TIMEBASE() macro provides properly scaled timing from the runtime
+  ctx.println("\t{}.u64 = REX_QUERY_TIMEBASE();", ctx.r(ctx.insn.operands[0]));
+  return true;
+}
+
+bool build_mftbu(BuilderContext& ctx) {
+  // Upper 32 bits of timebase
+  ctx.println("\t{}.u64 = REX_QUERY_TIMEBASE() >> 32;", ctx.r(ctx.insn.operands[0]));
   return true;
 }
 
@@ -268,6 +285,21 @@ bool build_mtcr(BuilderContext& ctx) {
     constexpr std::string_view fields[] = {"lt", "gt", "eq", "so"};
     ctx.println("\t{}.{} = ({}.u32 & 0x{:X}) != 0;", ctx.cr(i / 4), fields[i % 4],
                 ctx.r(ctx.insn.operands[0]), 1u << (31 - i));
+  }
+  return true;
+}
+
+bool build_mtcrf(BuilderContext& ctx) {
+  uint32_t fxm = ctx.insn.operands[0];
+  constexpr std::string_view names[] = {"lt", "gt", "eq", "so"};
+  for (uint32_t field = 0; field < 8; field++) {
+    if (fxm & (0x80u >> field)) {
+      uint32_t base_bit = 28 - 4 * field;
+      for (int b = 0; b < 4; b++) {
+        ctx.println("\t{}.{} = ({}.u32 & 0x{:X}) != 0;", ctx.cr(field), names[b],
+                    ctx.r(ctx.insn.operands[1]), 1u << (base_bit + 3 - b));
+      }
+    }
   }
   return true;
 }
@@ -295,16 +327,28 @@ bool build_mtmsrd(BuilderContext& ctx) {
     // Other = leave lock (enable interrupts)
     uint32_t src_reg = ctx.insn.operands[0];
     if (src_reg == 13) {
-      ctx.println("\tPPC_ENTER_GLOBAL_LOCK();");
+      ctx.println("\tREX_ENTER_GLOBAL_LOCK();");
     } else {
-      ctx.println("\tPPC_LEAVE_GLOBAL_LOCK();");
+      ctx.println("\tREX_LEAVE_GLOBAL_LOCK();");
     }
   }
   return true;
 }
 
 bool build_mtfsf(BuilderContext& ctx) {
-  ctx.println("\tctx.fpscr.storeFromGuest({}.u32);", ctx.f(ctx.insn.operands[1]));
+  uint32_t fm = ctx.insn.operands[0];
+  uint32_t mask = 0;
+  for (int j = 0; j < 8; j++) {
+    if (fm & (1 << (7 - j)))
+      mask |= 0xF << (4 * j);
+  }
+  if (mask == 0xFFFFFFFF) {
+    ctx.println("\tctx.fpscr.storeFromGuest({}.u32);", ctx.f(ctx.insn.operands[1]));
+  } else {
+    ctx.println(
+        "\tctx.fpscr.storeFromGuest((ctx.fpscr.loadFromHost() & 0x{:08X}) | ({}.u32 & 0x{:08X}));",
+        ~mask, ctx.f(ctx.insn.operands[1]), mask);
+  }
   return true;
 }
 

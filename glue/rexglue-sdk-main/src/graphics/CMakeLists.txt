@@ -118,12 +118,10 @@ target_include_directories(rexgraphics PRIVATE
 target_link_libraries(rexgraphics PUBLIC
     rexcore
     rexsystem
+    rexui
     xxHash::xxhash
     snappy
 )
-if(TARGET rexui)
-    target_link_libraries(rexgraphics PUBLIC rexui)
-endif()
 
 if(REXGLUE_USE_VULKAN)
     target_link_libraries(rexgraphics PUBLIC
@@ -131,7 +129,17 @@ if(REXGLUE_USE_VULKAN)
         glslang::SPIRV
         GPUOpen::VulkanMemoryAllocator
     )
+    target_link_libraries(rexgraphics PRIVATE
+        glslang
+        MachineIndependent
+        GenericCodeGen
+        OSDependent
+        OGLCompiler
+    )
     target_compile_definitions(rexgraphics PUBLIC REX_HAS_VULKAN=1)
+    if(APPLE)
+        target_compile_definitions(rexgraphics PRIVATE VK_USE_PLATFORM_METAL_EXT)
+    endif()
 endif()
 
 if(REXGLUE_USE_D3D12)
@@ -142,4 +150,3 @@ if(REXGLUE_USE_D3D12)
     )
     target_compile_definitions(rexgraphics PUBLIC REX_HAS_D3D12=1)
 endif()
-

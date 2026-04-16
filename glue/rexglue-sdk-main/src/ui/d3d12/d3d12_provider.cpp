@@ -227,8 +227,21 @@ bool D3D12Provider::Initialize() {
       REXLOG_WARN("Failed to enable the Direct3D 12 debug layer");
       debug = false;
     }
-  }
 
+    // Enable DRED (Device Removed Extended Data) for diagnosing GPU crashes.
+    {
+      Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dred_settings;
+      if (SUCCEEDED(pfn_d3d12_get_debug_interface_(IID_PPV_ARGS(&dred_settings)))) {
+        dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        REXLOG_INFO("DRED (Device Removed Extended Data) enabled");
+      } else {
+        REXLOG_WARN(
+            "Failed to enable DRED - device removal diagnostics will be "
+            "limited");
+      }
+    }
+  }
   // Create the DXGI factory.
   IDXGIFactory2* dxgi_factory;
   if (FAILED(pfn_create_dxgi_factory2_(debug ? DXGI_CREATE_FACTORY_DEBUG : 0,

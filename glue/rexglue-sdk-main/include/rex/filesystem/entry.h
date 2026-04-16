@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -91,6 +92,13 @@ class Entry {
   uint64_t create_timestamp() const { return create_timestamp_; }
   uint64_t access_timestamp() const { return access_timestamp_; }
   uint64_t write_timestamp() const { return write_timestamp_; }
+  bool delete_on_close() const { return delete_on_close_; }
+
+  virtual bool SetAttributes([[maybe_unused]] uint64_t attributes) { return false; }
+  virtual bool SetCreateTimestamp([[maybe_unused]] uint64_t timestamp) { return false; }
+  virtual bool SetAccessTimestamp([[maybe_unused]] uint64_t timestamp) { return false; }
+  virtual bool SetWriteTimestamp([[maybe_unused]] uint64_t timestamp) { return false; }
+  void SetForDeletion(bool delete_on_close) { delete_on_close_ = delete_on_close; }
 
   bool is_read_only() const;
 
@@ -105,6 +113,7 @@ class Entry {
   bool Delete(Entry* entry);
   bool Delete();
   virtual bool Truncate() { return false; }
+  void Rename(const std::filesystem::path& file_path);
   void Touch();
 
   // If successful, out_file points to a new file. When finished, call
@@ -134,6 +143,9 @@ class Entry {
     (void)entry;
     return false;
   }
+  virtual void RenameEntryInternal(const std::vector<std::string_view>& path_parts) {
+    (void)path_parts;
+  }
 
   rex::thread::global_critical_region global_critical_region_;
   Device* device_;
@@ -148,6 +160,7 @@ class Entry {
   uint64_t access_timestamp_;
   uint64_t write_timestamp_;
   std::vector<std::unique_ptr<Entry>> children_;
+  bool delete_on_close_ = false;
 };
 
 }  // namespace rex::filesystem

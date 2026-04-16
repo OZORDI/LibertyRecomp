@@ -1,7 +1,7 @@
 #include <rex/platform.h>
 #include <rex/thread/atomic.h>
 
-static_assert(REX_PLATFORM_POSIX, "This file requires a POSIX-like platform (macOS, iOS, Linux, Android, PS4, Switch)");
+static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
 
 namespace rex::thread {
 
@@ -33,6 +33,10 @@ bool atomic_cas(int32_t old_value, int32_t new_value, volatile int32_t* value) {
 bool atomic_cas(int64_t old_value, int64_t new_value, volatile int64_t* value) {
   return __sync_bool_compare_and_swap(reinterpret_cast<volatile int64_t*>(value), old_value,
                                       new_value);
+}
+
+void atomic_store_release(int32_t new_value, volatile int32_t* value) {
+  __atomic_store_n(value, new_value, __ATOMIC_RELEASE);
 }
 
 }  // namespace rex::thread

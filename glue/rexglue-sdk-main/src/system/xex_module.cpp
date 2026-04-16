@@ -25,10 +25,9 @@
 #include <rex/runtime.h>
 #include <rex/system/export_resolver.h>
 #include <rex/system/flags.h>
-#include <rex/system/function.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/lzx.h>
-#include <rex/system/processor.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/system/xex_module.h>
 #include <rex/system/xmodule.h>
 #include <rex/types.h>
@@ -61,8 +60,8 @@ namespace rex::runtime {
 
 using rex::system::KernelState;
 
-XexModule::XexModule(Processor* processor, KernelState* kernel_state)
-    : Module(processor), kernel_state_(kernel_state) {}
+XexModule::XexModule(FunctionDispatcher* function_dispatcher, KernelState* kernel_state)
+    : Module(function_dispatcher), kernel_state_(kernel_state) {}
 
 XexModule::~XexModule() {}
 
@@ -1140,17 +1139,6 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
 
 bool XexModule::ContainsAddress(uint32_t address) {
   return address >= low_address_ && address < high_address_;
-}
-
-std::unique_ptr<Function> XexModule::CreateFunction(uint32_t address) {
-  // NOTE(tomc): this used to be a JIT function. now a cousin of it lives in the codegen lib.
-  (void)address;
-  return nullptr;
-}
-
-bool XexModule::FindSaveRest() {
-  // NOTE(tomc): see XexModule::CreateFunction
-  return true;
 }
 
 // Binary introspection implementation

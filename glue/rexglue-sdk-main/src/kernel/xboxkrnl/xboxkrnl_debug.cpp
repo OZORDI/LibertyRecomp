@@ -15,8 +15,8 @@
 #include <rex/dbg.h>
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xexception.h>
 #include <rex/system/xthread.h>
@@ -58,7 +58,8 @@ void HandleSetThreadName(ppc_ptr_t<X_EXCEPTION_RECORD> record) {
 
   // TODO(gibbed): cvar for thread name encoding for conversion, some games use
   // SJIS and there's no way to automatically know this.
-  auto name = std::string(kernel_memory()->TranslateVirtual<const char*>(thread_info->name_ptr));
+  auto name =
+      std::string(REX_KERNEL_MEMORY()->TranslateVirtual<const char*>(thread_info->name_ptr));
   std::replace_if(name.begin(), name.end(), [](auto c) { return c < 32 || c > 127; }, '?');
 
   object_ref<XThread> thread;
@@ -67,7 +68,7 @@ void HandleSetThreadName(ppc_ptr_t<X_EXCEPTION_RECORD> record) {
     thread = retain_object(XThread::GetCurrentThread());
   } else {
     // Lookup thread by ID.
-    thread = kernel_state()->GetThreadByID(thread_info->thread_id);
+    thread = REX_KERNEL_STATE()->GetThreadByID(thread_info->thread_id);
   }
 
   if (thread) {
@@ -114,12 +115,12 @@ void HandleCppException(ppc_ptr_t<X_EXCEPTION_RECORD> record) {
   assert_true(record->exception_information[0] == 0x19930520);
 
   auto thrown_ptr = record->exception_information[1];
-  auto thrown = kernel_memory()->TranslateVirtual(thrown_ptr);
+  auto thrown = REX_KERNEL_MEMORY()->TranslateVirtual(thrown_ptr);
   auto vftable_ptr = *reinterpret_cast<rex::be<uint32_t>*>(thrown);
 
   auto throw_info_ptr = record->exception_information[2];
-  auto throw_info = kernel_memory()->TranslateVirtual<x_s__ThrowInfo*>(throw_info_ptr);
-  auto catchable_types = kernel_memory()->TranslateVirtual<x_s__CatchableTypeArray*>(
+  auto throw_info = REX_KERNEL_MEMORY()->TranslateVirtual<x_s__ThrowInfo*>(throw_info_ptr);
+  auto catchable_types = REX_KERNEL_MEMORY()->TranslateVirtual<x_s__CatchableTypeArray*>(
       throw_info->catchable_type_array_ptr);
 
   rex::debug::Break();
@@ -142,8 +143,7 @@ void RtlRaiseException_entry(ppc_ptr_t<X_EXCEPTION_RECORD> record) {
   rex::debug::Break();
 }
 
-void KeBugCheckEx_entry(ppc_u32_t code, ppc_u32_t param1, ppc_u32_t param2, ppc_u32_t param3,
-                        ppc_u32_t param4) {
+void KeBugCheckEx_entry(u32 code, u32 param1, u32 param2, u32 param3, u32 param4) {
   REXKRNL_DEBUG("*** STOP: 0x{:08X} (0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X})", code, param1, param2,
                 param3, param4);
   fflush(stdout);
@@ -151,29 +151,29 @@ void KeBugCheckEx_entry(ppc_u32_t code, ppc_u32_t param1, ppc_u32_t param2, ppc_
   assert_always();
 }
 
-void KeBugCheck_entry(ppc_u32_t code) {
+void KeBugCheck_entry(u32 code) {
   KeBugCheckEx_entry(code, 0, 0, 0, 0);
 }
 
 }  // namespace rex::kernel::xboxkrnl
 
-XBOXKRNL_EXPORT(__imp__DbgBreakPoint, rex::kernel::xboxkrnl::DbgBreakPoint_entry)
-XBOXKRNL_EXPORT(__imp__RtlRaiseException, rex::kernel::xboxkrnl::RtlRaiseException_entry)
-XBOXKRNL_EXPORT(__imp__KeBugCheckEx, rex::kernel::xboxkrnl::KeBugCheckEx_entry)
-XBOXKRNL_EXPORT(__imp__KeBugCheck, rex::kernel::xboxkrnl::KeBugCheck_entry)
+REX_EXPORT(__imp__DbgBreakPoint, rex::kernel::xboxkrnl::DbgBreakPoint_entry)
+REX_EXPORT(__imp__RtlRaiseException, rex::kernel::xboxkrnl::RtlRaiseException_entry)
+REX_EXPORT(__imp__KeBugCheckEx, rex::kernel::xboxkrnl::KeBugCheckEx_entry)
+REX_EXPORT(__imp__KeBugCheck, rex::kernel::xboxkrnl::KeBugCheck_entry)
 
-XBOXKRNL_EXPORT_STUB(__imp__DbgBreakPointWithStatus);
-XBOXKRNL_EXPORT_STUB(__imp__DbgPrompt);
-XBOXKRNL_EXPORT_STUB(__imp__DbgLoadImageSymbols);
-XBOXKRNL_EXPORT_STUB(__imp__DbgUnLoadImageSymbols);
-XBOXKRNL_EXPORT_STUB(__imp__DmPrintData);
+REX_EXPORT_STUB(__imp__DbgBreakPointWithStatus);
+REX_EXPORT_STUB(__imp__DbgPrompt);
+REX_EXPORT_STUB(__imp__DbgLoadImageSymbols);
+REX_EXPORT_STUB(__imp__DbgUnLoadImageSymbols);
+REX_EXPORT_STUB(__imp__DmPrintData);
 
-XBOXKRNL_EXPORT_STUB(__imp__DumpGetRawDumpInfo);
-XBOXKRNL_EXPORT_STUB(__imp__DumpRegisterDedicatedDataBlock);
-XBOXKRNL_EXPORT_STUB(__imp__DumpSetCollectionFacility);
-XBOXKRNL_EXPORT_STUB(__imp__DumpUpdateDumpSettings);
-XBOXKRNL_EXPORT_STUB(__imp__DumpWriteDump);
-XBOXKRNL_EXPORT_STUB(__imp__DumpXitThread);
-XBOXKRNL_EXPORT_STUB(__imp__RtlAssert);
-XBOXKRNL_EXPORT_STUB(__imp__RtlRaiseStatus);
-XBOXKRNL_EXPORT_STUB(__imp__RtlRip);
+REX_EXPORT_STUB(__imp__DumpGetRawDumpInfo);
+REX_EXPORT_STUB(__imp__DumpRegisterDedicatedDataBlock);
+REX_EXPORT_STUB(__imp__DumpSetCollectionFacility);
+REX_EXPORT_STUB(__imp__DumpUpdateDumpSettings);
+REX_EXPORT_STUB(__imp__DumpWriteDump);
+REX_EXPORT_STUB(__imp__DumpXitThread);
+REX_EXPORT_STUB(__imp__RtlAssert);
+REX_EXPORT_STUB(__imp__RtlRaiseStatus);
+REX_EXPORT_STUB(__imp__RtlRip);

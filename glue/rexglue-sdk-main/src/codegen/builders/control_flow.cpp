@@ -9,7 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
-#include "../builder_context.h"
+#include "builder_context.h"
 #include "helpers.h"
 
 #include <fmt/format.h>
@@ -97,7 +97,12 @@ bool build_blr(BuilderContext& ctx) {
 }
 
 bool build_blrl(BuilderContext& ctx) {
-  ctx.println("__builtin_debugtrap();");
+  // BLRL: save return address, then branch-and-link to current LR
+  ctx.println("\t{{ auto old_lr = ctx.lr;");
+  if (!ctx.config().skipLr)
+    ctx.println("\tctx.lr = 0x{:X};", ctx.base + 4);
+  ctx.println("\tREX_CALL_INDIRECT_FUNC(uint32_t(old_lr)); }}");
+  ctx.csrState = CSRState::Unknown;
   return true;
 }
 
@@ -106,12 +111,10 @@ bool build_blrl(BuilderContext& ctx) {
 //=============================================================================
 
 bool build_bctr(BuilderContext& ctx) {
-  // Check config first (manual override), then auto-detected
-  const JumpTable* jt = nullptr;
+  // Check active jump table (set by emitCpp before dispatch), then auto-detected
+  const JumpTable* jt = ctx.activeJumpTable;
 
-  if (ctx.switchTable != ctx.config().switchTables.end()) {
-    jt = &ctx.switchTable->second;
-  } else {
+  if (!jt) {
     // Check auto-detected jump tables from function analysis
     for (const auto& autoJt : ctx.fn.jumpTables()) {
       if (autoJt.bctrAddress == ctx.base) {
@@ -173,7 +176,7 @@ bool build_bctr(BuilderContext& ctx) {
     // NOTE(tomc): If this is actually an unresolved switch table, the code after
     // will be unreachable. This is caught during analysis by discover_blocks.
     // The validation phase will report missing switch tables.
-    ctx.println("\tPPC_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
+    ctx.println("\tREX_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
     ctx.println("\treturn;");
   }
   return true;
@@ -182,14 +185,14 @@ bool build_bctr(BuilderContext& ctx) {
 bool build_bctrl(BuilderContext& ctx) {
   if (!ctx.config().skipLr)
     ctx.println("\tctx.lr = 0x{:X};", ctx.base + 4);
-  ctx.println("\tPPC_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
+  ctx.println("\tREX_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
   ctx.csrState = CSRState::Unknown;  // the call could change it
   return true;
 }
 
 bool build_bnectr(BuilderContext& ctx) {
   ctx.println("\tif (!{}.eq) {{", ctx.cr(ctx.insn.operands[0]));
-  ctx.println("\t\tPPC_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
+  ctx.println("\t\tREX_CALL_INDIRECT_FUNC({}.u32);", ctx.ctr());
   ctx.println("\t\treturn;");
   ctx.println("\t}}");
   return true;
@@ -209,6 +212,12 @@ bool build_bdz(BuilderContext& ctx) {
 bool build_bdzlr(BuilderContext& ctx) {
   ctx.println("\t--{}.u64;", ctx.ctr());
   ctx.println("\tif ({}.u32 == 0) return;", ctx.ctr());
+  return true;
+}
+
+bool build_bdnzlr(BuilderContext& ctx) {
+  ctx.println("\t--{}.u64;", ctx.ctr());
+  ctx.println("\tif ({}.u32 != 0) return;", ctx.ctr());
   return true;
 }
 

@@ -14,11 +14,13 @@
 
 namespace rex::audio::nop {
 
-std::unique_ptr<AudioSystem> NopAudioSystem::Create(runtime::Processor* processor) {
-  return std::make_unique<NopAudioSystem>(processor);
+std::unique_ptr<AudioSystem> NopAudioSystem::Create(
+    runtime::FunctionDispatcher* function_dispatcher) {
+  return std::make_unique<NopAudioSystem>(function_dispatcher);
 }
 
-NopAudioSystem::NopAudioSystem(runtime::Processor* processor) : AudioSystem(processor) {}
+NopAudioSystem::NopAudioSystem(runtime::FunctionDispatcher* function_dispatcher)
+    : AudioSystem(function_dispatcher) {}
 
 NopAudioSystem::~NopAudioSystem() = default;
 

@@ -1,6 +1,21 @@
 # Third-party vendored dependencies for ReXGlue
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+#=============================================================================
+# Architecture detection
+#=============================================================================
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    set(IS_ARM64 FALSE)
+    set(IS_X86_64 TRUE)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    set(IS_ARM64 TRUE)
+    set(IS_X86_64 FALSE)
+else()
+    set(IS_ARM64 FALSE)
+    set(IS_X86_64 FALSE)
+endif()
+
 #=============================================================================
 # Verify git submodules are initialized (only vendored ones)
 #=============================================================================
@@ -16,7 +31,7 @@ set(REQUIRED_SUBMODULES
     snappy
     utfcpp
     imgui
-    sdl2
+    sdl3
 )
 
 if(REXGLUE_USE_VULKAN)
@@ -24,6 +39,11 @@ if(REXGLUE_USE_VULKAN)
         volk vulkan-headers vulkan-memory-allocator
         spirv-headers spirv-tools glslang
     )
+endif()
+
+
+if(REXGLUE_ENABLE_TRACY)
+    list(APPEND REQUIRED_SUBMODULES tracy)
 endif()
 
 if(REXGLUE_BUILD_TESTS)
@@ -107,54 +127,85 @@ target_compile_options(mspack PRIVATE -w)
 # NOTE: o1heap.c auto-detects CLZ via __builtin_clzl when __clang__/__GNUC__
 # are defined, but on Windows unsigned long is 32-bit even on x64.  We inject
 # a config header that provides a correct 64-bit CLZ
-add_library(o1heap STATIC
-    o1heap/o1heap/o1heap.c
-)
-target_include_directories(o1heap PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_compile_definitions(o1heap PRIVATE
-    "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
-target_compile_options(o1heap PRIVATE -w)
+#
+# IMPORTANT: rexglue requires o1heap v3 (alignment = 4*sizeof(void*) = 32B,
+# o1heapReallocate API). LibertyRecomp's top-level project may define an
+# older 'o1heap' target (v2, alignment = 2*sizeof(void*)) for tooling. To
+# avoid the version conflict, always create a private 'rexglue_o1heap'
+# target from this submodule and have rexkernel link against it directly.
+if(NOT TARGET rexglue_o1heap)
+    add_library(rexglue_o1heap STATIC
+        o1heap/o1heap/o1heap.c
+    )
+    target_include_directories(rexglue_o1heap PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_definitions(rexglue_o1heap PRIVATE
+        "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
+    target_compile_options(rexglue_o1heap PRIVATE -w)
+    # Provide an alias 'o1heap' only if no other target owns the name yet.
+    # Anything inside graine that still says 'o1heap' goes through the alias.
+    if(NOT TARGET o1heap)
+        add_library(o1heap ALIAS rexglue_o1heap)
+    endif()
+endif()
 
 # xxHash - extremely fast non-cryptographic hash (git submodule)
-set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
-add_subdirectory(xxHash/cmake_unofficial)
-target_compile_options(xxhash PRIVATE -w)
+if(NOT TARGET xxhash)
+    set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
+    add_subdirectory(xxHash/cmake_unofficial)
+    target_compile_options(xxhash PRIVATE -w)
+endif()
 
 # disasm - PowerPC disassembler (existing local library)
-add_subdirectory(disasm)
-# Suppress warnings in disasm
-target_compile_options(disasm PRIVATE -w)
+if(NOT TARGET disasm)
+    add_subdirectory(disasm)
+    # Suppress warnings in disasm
+    target_compile_options(disasm PRIVATE -w)
+endif()
 
 #=============================================================================
 # fmt - Formatting library (must come before spdlog)
 #=============================================================================
-set(FMT_DOC OFF CACHE BOOL "" FORCE)
-set(FMT_TEST OFF CACHE BOOL "" FORCE)
-set(FMT_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(fmt)
-target_compile_options(fmt PRIVATE -w)
+if(NOT TARGET fmt)
+    set(FMT_DOC OFF CACHE BOOL "" FORCE)
+    set(FMT_TEST OFF CACHE BOOL "" FORCE)
+    set(FMT_INSTALL ON CACHE BOOL "" FORCE)
+    add_subdirectory(fmt)
+    target_compile_options(fmt PRIVATE -w)
+endif()
 
 #=============================================================================
 # spdlog - Logging library
 #=============================================================================
-set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-set(SPDLOG_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(spdlog)
-target_compile_options(spdlog PRIVATE -w)
+if(NOT TARGET spdlog)
+    set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_INSTALL ON CACHE BOOL "" FORCE)
+    add_subdirectory(spdlog)
+    target_compile_options(spdlog PRIVATE -w)
+endif()
 
 #=============================================================================
 # snappy - Fast compression/decompression (GPU traces)
 #=============================================================================
-set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-set(SNAPPY_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(snappy)
-target_compile_options(snappy PRIVATE -w)
+if(NOT TARGET snappy)
+    set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(SNAPPY_INSTALL ON CACHE BOOL "" FORCE)
+    add_subdirectory(snappy)
+    target_compile_options(snappy PRIVATE -w)
+    # Apple Silicon (and any modern ARM64) has CRC32 instructions; snappy uses
+    # __crc32cw intrinsics gated on the 'crc' target feature. The default
+    # Clang ARM64 baseline doesn't enable it, so opt in explicitly.
+    if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        target_compile_options(snappy PRIVATE -march=armv8-a+crc)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        target_compile_options(snappy PRIVATE -march=armv8-a+crc)
+    endif()
+endif()
 
 #=============================================================================
 # utfcpp - UTF-8 string library (header-only)
@@ -185,6 +236,11 @@ if(REXGLUE_USE_VULKAN)
 endif()
 
 #=============================================================================
+# FidelityFX (optional, fetched on demand)
+#=============================================================================
+include(${PROJECT_SOURCE_DIR}/cmake/rexglue_fidelityfx.cmake)
+
+#=============================================================================
 # imgui - Immediate mode GUI (no CMakeLists.txt, manual target)
 #=============================================================================
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imgui")
@@ -202,36 +258,92 @@ target_include_directories(imgui PUBLIC
 target_compile_options(imgui PRIVATE -w)
 
 #=============================================================================
-# SDL2 - Cross-platform media layer
+# SDL3 - Cross-platform media layer
 #=============================================================================
-set(SDL2_DISABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL ON CACHE BOOL "" FORCE)
+set(SDL_SHARED  OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC  ON  CACHE BOOL "" FORCE)
+set(SDL_TEST    OFF CACHE BOOL "" FORCE)
 
-# Disable unused subsystems
-set(SDL_VIDEO OFF CACHE BOOL "" FORCE)
-set(SDL_RENDER OFF CACHE BOOL "" FORCE)
-set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
-set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
-set(SDL_POWER OFF CACHE BOOL "" FORCE)
+# LibertyRecomp uses SDL3 as a windowing + input backend on desktop; only the
+# PS4/Switch consoles use rexglue headlessly. The SDK previously forced
+# SDL_UNIX_CONSOLE_BUILD and disabled every video driver, which baked
+# SDL_VIDEO_DISABLED=1 into libSDL3.a and made SDL_CreateWindow fail at runtime
+# on macOS/Windows/Linux. Gate the headless flags on the console target flags
+# so desktop builds get a real Cocoa/Win32/X11 video driver with Metal/Vulkan.
+set(_REXGLUE_SDL_CONSOLE OFF)
+if(LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX)
+    set(_REXGLUE_SDL_CONSOLE ON)
+endif()
+
+if(_REXGLUE_SDL_CONSOLE)
+    # Headless console build: no windowing, no graphics drivers.
+    # SDL3 has no PS4/Switch port, so we won't actually add_subdirectory(sdl3)
+    # below — these cache values are harmless but kept for clarity.
+    set(SDL_UNIX_CONSOLE_BUILD ON  CACHE BOOL "" FORCE)
+    set(SDL_VIDEO      OFF CACHE BOOL "" FORCE)
+    set(SDL_RENDER     OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGL     OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGLES   OFF CACHE BOOL "" FORCE)
+    set(SDL_VULKAN     OFF CACHE BOOL "" FORCE)
+    set(SDL_METAL      OFF CACHE BOOL "" FORCE)
+    set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iOS: UIKit + Metal, no Cocoa, keep SDL_VIDEO on.
+    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
+    set(SDL_VIDEO  ON  CACHE BOOL "" FORCE)
+    set(SDL_RENDER ON  CACHE BOOL "" FORCE)
+    set(SDL_UIKIT  ON  CACHE BOOL "" FORCE)
+    set(SDL_COCOA  OFF CACHE BOOL "" FORCE)
+    set(SDL_METAL  ON  CACHE BOOL "" FORCE)
+    set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
+    # Android: native Android window system + Vulkan.
+    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
+    set(SDL_VIDEO   ON  CACHE BOOL "" FORCE)
+    set(SDL_RENDER  ON  CACHE BOOL "" FORCE)
+    set(SDL_ANDROID ON  CACHE BOOL "" FORCE)
+    set(SDL_VULKAN  ON  CACHE BOOL "" FORCE)
+    set(SDL_COCOA   OFF CACHE BOOL "" FORCE)
+    set(SDL_METAL   OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+else()
+    # Desktop (Windows / macOS / Linux): need real windows + GPU drivers.
+    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
+    set(SDL_VIDEO  ON CACHE BOOL "" FORCE)
+    set(SDL_RENDER ON CACHE BOOL "" FORCE)
+    if(APPLE)
+        set(SDL_COCOA ON CACHE BOOL "" FORCE)
+        set(SDL_METAL ON CACHE BOOL "" FORCE)
+    endif()
+    set(SDL_VULKAN ON  CACHE BOOL "" FORCE)
+    # Still keep the legacy GL paths off — rendering goes through Vulkan/Metal.
+    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+endif()
+
+# Subsystems that are genuinely unused on every target.
+set(SDL_HAPTIC     OFF CACHE BOOL "" FORCE)
+set(SDL_SENSOR     OFF CACHE BOOL "" FORCE)
+set(SDL_POWER      OFF CACHE BOOL "" FORCE)
 set(SDL_FILESYSTEM OFF CACHE BOOL "" FORCE)
-set(SDL_LOCALE OFF CACHE BOOL "" FORCE)
-set(SDL_FILE OFF CACHE BOOL "" FORCE)
-set(SDL_MISC OFF CACHE BOOL "" FORCE)
-
-# Disable graphics APIs (unused without video)
-set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
-set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
-set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
-set(SDL_METAL OFF CACHE BOOL "" FORCE)
-
-# Disable dummy drivers
-set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_LOCALE     OFF CACHE BOOL "" FORCE)
+set(SDL_FILE       OFF CACHE BOOL "" FORCE)
+set(SDL_MISC       OFF CACHE BOOL "" FORCE)
+set(SDL_DIALOG     OFF CACHE BOOL "" FORCE)
+set(SDL_TRAY       OFF CACHE BOOL "" FORCE)
+set(SDL_CAMERA     OFF CACHE BOOL "" FORCE)
+set(SDL_DISKAUDIO  OFF CACHE BOOL "" FORCE)
 set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
-set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(sdl2)
+# SDL3 has no PS4 or Switch backend — skip adding it on those consoles to
+# avoid compile/link failures. Desktop, iOS, and Android all include it.
+if(NOT _REXGLUE_SDL_CONSOLE)
+    add_subdirectory(sdl3)
+endif()
 
 #=============================================================================
 # DXC API headers (vendored from DirectXShaderCompiler, runtime-loaded)
@@ -277,6 +389,15 @@ if(REXGLUE_USE_VULKAN)
     if(NOT TARGET glslang::SPIRV)
         add_library(glslang::SPIRV ALIAS SPIRV)
     endif()
+    # Android NDK (and some other console toolchains) default to -fno-rtti.
+    # spv::Builder uses dynamic_cast in SpirvBuilder, so force RTTI back on
+    # for the glslang/SPIRV targets regardless of parent toolchain flags.
+    foreach(_glslang_target glslang SPIRV MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+        if(TARGET ${_glslang_target})
+            target_compile_options(${_glslang_target} PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:-frtti>)
+        endif()
+    endforeach()
 endif()
 
 #=============================================================================
@@ -287,12 +408,41 @@ if(REXGLUE_BUILD_TESTS)
 endif()
 
 #=============================================================================
-if(NOT APPLE)
+# Tracy Profiler (optional)
+#=============================================================================
+if(REXGLUE_ENABLE_TRACY)
+    set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+    set(TRACY_DELAYED_INIT ON CACHE BOOL "" FORCE)
+    set(TRACY_MANUAL_LIFETIME ON CACHE BOOL "" FORCE)
+    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
+    add_subdirectory(tracy)
+    target_compile_options(TracyClient PRIVATE -w)
+endif()
+
+#=============================================================================
 # FFmpeg - Audio/video codec library (for XMA decoding)
 # Only builds libavutil and libavcodec needed for WMA Pro decoding
 #=============================================================================
 
 set(FFMPEG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/FFmpeg")
+
+# Overlay generated FFmpeg list files
+set(FFMPEG_OVERLAY_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg-overlay")
+set(FFMPEG_OVERLAY_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg-overlay")
+file(MAKE_DIRECTORY "${FFMPEG_OVERLAY_BUILD_DIR}/libavcodec")
+configure_file(
+  "${FFMPEG_OVERLAY_SRC_DIR}/codec_list.c" "${FFMPEG_OVERLAY_BUILD_DIR}/libavcodec/codec_list.c"
+  COPYONLY
+)
+configure_file(
+  "${FFMPEG_OVERLAY_SRC_DIR}/parser_list.c" "${FFMPEG_OVERLAY_BUILD_DIR}/libavcodec/parser_list.c"
+  COPYONLY
+)
+configure_file(
+  "${FFMPEG_OVERLAY_SRC_DIR}/bsf_list.c" "${FFMPEG_OVERLAY_BUILD_DIR}/libavcodec/bsf_list.c"
+  COPYONLY
+)
 
 # Common defines for both libraries
 set(FFMPEG_COMMON_DEFINES
@@ -305,6 +455,30 @@ if(WIN32)
     set(FFMPEG_ATOMICS_INCLUDE "${FFMPEG_DIR}/compat/atomics/win32")
 else()
     set(FFMPEG_ATOMICS_INCLUDE "${FFMPEG_DIR}/compat/atomics/gcc")
+endif()
+
+#=============================================================================
+# ARM64 setup for FFmpeg (NEON optimizations)
+#=============================================================================
+if(IS_ARM64)
+  enable_language(ASM)
+  # NOTE: FFmpeg NEON .S sources need -march=armv8-a, but we must NOT propagate
+  # this globally because sibling targets (snappy, etc.) have their own
+  # -march requirements (e.g. +crc). Apply per-target on libavcodec/libavutil
+  # after their creation. For Switch (devkitA64) keep hard-float +fp+simd.
+  if(LIBERTY_RECOMP_NX)
+      set(_FFMPEG_ARM64_ASM_FLAGS "-march=armv8-a+fp+simd")
+  else()
+      set(_FFMPEG_ARM64_ASM_FLAGS "-march=armv8-a")
+  endif()
+endif()
+
+# PS4 is x86_64 — ensure FFmpeg uses the x86 code path (IS_X86_64 already set
+# by architecture detection if host/target triplet resolves correctly, but be
+# explicit when the Liberty PS4 flag is active).
+if(LIBERTY_RECOMP_PS4)
+    set(IS_X86_64 TRUE)
+    set(IS_ARM64 FALSE)
 endif()
 
 # libavutil - FFmpeg utility library (must build first)
@@ -387,14 +561,28 @@ add_library(libavutil STATIC
     ${FFMPEG_DIR}/libavutil/film_grain_params.c
 )
 
-# Add x86 optimizations on Windows/Linux
-if(WIN32 OR (UNIX AND NOT APPLE))
+# Add x86 optimizations
+if(IS_X86_64)
     target_sources(libavutil PRIVATE
         ${FFMPEG_DIR}/libavutil/x86/cpu.c
         ${FFMPEG_DIR}/libavutil/x86/fixed_dsp_init.c
         ${FFMPEG_DIR}/libavutil/x86/float_dsp_init.c
         ${FFMPEG_DIR}/libavutil/x86/imgutils_init.c
         ${FFMPEG_DIR}/libavutil/x86/lls_init.c
+    )
+endif()
+
+# ARM64 optimizations for libavutil
+if(IS_ARM64)
+    target_sources(libavutil PRIVATE
+        ${FFMPEG_DIR}/libavutil/aarch64/cpu.c
+        ${FFMPEG_DIR}/libavutil/aarch64/float_dsp_init.c
+        ${FFMPEG_DIR}/libavutil/aarch64/float_dsp_neon.S
+    )
+    target_compile_definitions(libavutil PRIVATE
+        HAVE_NEON=1
+        HAVE_ARMV8=1
+        HAVE_INLINE_ASM=1
     )
 endif()
 
@@ -457,8 +645,25 @@ add_library(libavcodec STATIC
     ${FFMPEG_DIR}/libavcodec/sinewin.c
     ${FFMPEG_DIR}/libavcodec/wma_freqs.c
     ${FFMPEG_DIR}/libavcodec/wmaprodec.c
+    ${FFMPEG_DIR}/libavcodec/wmadec.c
     ${FFMPEG_DIR}/libavcodec/wma.c
     ${FFMPEG_DIR}/libavcodec/wma_common.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudio.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodata.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodecheader.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodec_common.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodec_float.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodec_fixed.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodsp.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodsp_data.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodsp_float.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudiodsp_fixed.c
+    ${FFMPEG_DIR}/libavcodec/mpegaudio_parser.c
+    ${FFMPEG_DIR}/libavcodec/dct.c
+    ${FFMPEG_DIR}/libavcodec/dct32_float.c
+    ${FFMPEG_DIR}/libavcodec/dct32_fixed.c
+    ${FFMPEG_DIR}/libavcodec/rdft.c
+    ${FFMPEG_DIR}/libavcodec/aactab.c
     ${FFMPEG_DIR}/libavcodec/null_bsf.c
     ${FFMPEG_DIR}/libavcodec/pthread.c
     ${FFMPEG_DIR}/libavcodec/pthread_slice.c
@@ -476,16 +681,39 @@ if(WIN32)
     )
 endif()
 
-# Add x86 optimizations on Windows/Linux
-if(WIN32 OR (UNIX AND NOT APPLE))
+# Add x86 optimizations 
+if(IS_X86_64)
     target_sources(libavcodec PRIVATE
         ${FFMPEG_DIR}/libavcodec/x86/constants.c
         ${FFMPEG_DIR}/libavcodec/x86/fdctdsp_init.c
         ${FFMPEG_DIR}/libavcodec/x86/fft_init.c
         ${FFMPEG_DIR}/libavcodec/x86/idctdsp_init.c
         ${FFMPEG_DIR}/libavcodec/x86/fdct.c
+        ${FFMPEG_DIR}/libavcodec/x86/mpegaudiodsp.c
+        ${FFMPEG_DIR}/libavcodec/x86/dct_init.c
     )
 endif()
+
+# ARM64 optimizations for libavcodec
+if(IS_ARM64)
+    target_sources(libavcodec PRIVATE
+        ${FFMPEG_DIR}/libavcodec/aarch64/fft_init_aarch64.c
+        ${FFMPEG_DIR}/libavcodec/aarch64/fft_neon.S
+        ${FFMPEG_DIR}/libavcodec/aarch64/mdct_neon.S
+        ${FFMPEG_DIR}/libavcodec/aarch64/simple_idct_neon.S
+        ${FFMPEG_DIR}/libavcodec/aarch64/videodsp.S
+        ${FFMPEG_DIR}/libavcodec/aarch64/neon.S
+        ${FFMPEG_DIR}/libavcodec/aarch64/mpegaudiodsp_init.c
+        ${FFMPEG_DIR}/libavcodec/aarch64/mpegaudiodsp_neon.S
+    )
+    target_compile_definitions(libavcodec PRIVATE
+        HAVE_NEON=1
+        HAVE_ARMV8=1
+        HAVE_INLINE_ASM=1
+    )
+endif()
+
+target_include_directories(libavcodec BEFORE PRIVATE "${FFMPEG_OVERLAY_BUILD_DIR}")
 
 target_include_directories(libavcodec
     PUBLIC
@@ -500,6 +728,12 @@ if(WIN32)
     target_link_libraries(libavcodec PRIVATE bcrypt)
 endif()
 
+# Apply ARM64 assembler flags privately to FFmpeg targets only — do NOT let
+# them leak into sibling libraries that have their own -march requirements.
+if(IS_ARM64 AND DEFINED _FFMPEG_ARM64_ASM_FLAGS)
+    target_compile_options(libavutil  PRIVATE $<$<COMPILE_LANGUAGE:ASM>:${_FFMPEG_ARM64_ASM_FLAGS}>)
+    target_compile_options(libavcodec PRIVATE $<$<COMPILE_LANGUAGE:ASM>:${_FFMPEG_ARM64_ASM_FLAGS}>)
+endif()
+
 # IDE folder organization
 set_target_properties(libavutil libavcodec PROPERTIES FOLDER "FFmpeg")
-endif() # NOT APPLE - FFmpeg

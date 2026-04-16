@@ -18,28 +18,19 @@
 #include <string_view>
 #include <thread>
 
+#include <rex/image_info.h>
 #include <rex/runtime.h>
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/immediate_drawer.h>
+#include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/window.h>
 #include <rex/ui/window_listener.h>
 #include <rex/ui/windowed_app.h>
 
-struct PPCFuncMapping;
-
 namespace rex {
 
 class LogCaptureSink;
-
-/// PPC image layout passed from the generated config header into ReXApp.
-struct PPCImageInfo {
-  uint32_t code_base;
-  uint32_t code_size;
-  uint32_t image_base;
-  uint32_t image_size;
-  const PPCFuncMapping* func_mappings;
-};
 
 /// Content path configuration, passed to OnConfigurePaths().
 /// All paths start with sensible defaults derived from CLI args and cvars.
@@ -48,10 +39,10 @@ struct PathConfig {
   std::filesystem::path game_data_root;
   std::filesystem::path user_data_root;
   std::filesystem::path update_data_root;
+  std::filesystem::path cache_root;
 };
 
 namespace ui {
-class DebugOverlayDialog;
 class ConsoleDialog;
 class SettingsDialog;
 }  // namespace ui
@@ -62,18 +53,24 @@ class SettingsDialog;
 /// module launch, and shutdown. Consumer projects inherit this and optionally
 /// override virtual hooks for customization.
 ///
-/// The generated main.cpp from `rexglue init` / `rexglue migrate` uses this:
+/// The generated src/{name}_app.h from `rexglue init` uses this:
 /// @code
+///   // src/my_app_app.h (yours to customize)
 ///   class MyApp : public rex::ReXApp {
 ///   public:
 ///       using rex::ReXApp::ReXApp;
 ///       static std::unique_ptr<rex::ui::WindowedApp> Create(
 ///           rex::ui::WindowedAppContext& ctx) {
 ///         return std::unique_ptr<MyApp>(new MyApp(ctx, "my_app",
-///             {PPC_CODE_BASE, PPC_CODE_SIZE, PPC_IMAGE_BASE,
-///              PPC_IMAGE_SIZE, PPCFuncMappings}));
+///             PPCImageConfig));
 ///       }
+///       // Override hooks: OnPreSetup, OnPostSetup, OnCreateDialogs, etc.
 ///   };
+///
+///   // src/main.cpp
+///   #include "generated/my_app_config.h"
+///   #include "generated/my_app_init.h"
+///   #include "my_app_app.h"
 ///   REX_DEFINE_APP(my_app, MyApp::Create)
 /// @endcode
 class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::WindowInputListener {
@@ -89,6 +86,9 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   /// Called before Runtime::Setup(). Override to modify backend config.
   virtual void OnPreSetup(RuntimeConfig& config) {}
 
+  /// Called before Runtime::LoadXexImage(). Override to modify xex image.
+  virtual void OnLoadXexImage(std::string& xex_image) {}
+
   /// Called after runtime is fully initialized, before window creation.
   virtual void OnPostSetup() {}
 
@@ -102,6 +102,23 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   /// Override to adjust game/user/update data paths programmatically.
   virtual void OnConfigurePaths(PathConfig& paths) { (void)paths; }
 
+  /// Called after Runtime::LoadXexImage() succeeds. The XEX is loaded and
+  /// mapped into guest memory but the module has not launched.
+  /// Use this for data patches on the loaded image.
+  virtual void OnPostLoadXexImage() {}
+
+  /// Called immediately before the main guest thread is created.
+  /// Everything is set up -- last chance to patch guest memory/code.
+  virtual void OnPreLaunchModule() {}
+
+  /// Called after the main guest thread is created but before it starts
+  /// executing. The thread is suspended -- attach debuggers/monitors here.
+  virtual void OnPostLaunchModule(system::XThread* thread) { (void)thread; }
+
+  /// Called when the main guest thread exits. The runtime is still alive.
+  /// Use for cleanup that depends on runtime resources.
+  virtual void OnGuestThreadExit(system::XThread* thread) { (void)thread; }
+
   // --- Accessors for subclass use ---
   Runtime* runtime() const { return runtime_.get(); }
   ui::Window* window() const { return window_.get(); }
@@ -110,6 +127,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   const std::filesystem::path& game_data_root() const { return game_data_root_; }
   const std::filesystem::path& user_data_root() const { return user_data_root_; }
   const std::filesystem::path& update_data_root() const { return update_data_root_; }
+  const std::filesystem::path& cache_root() const { return cache_root_; }
+
+  /// Set a callback that provides guest frame stats to the debug overlay.
+  void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
 
  private:
   // WindowedApp overrides
@@ -126,6 +147,7 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   std::filesystem::path game_data_root_;
   std::filesystem::path user_data_root_;
   std::filesystem::path update_data_root_;
+  std::filesystem::path cache_root_;
   std::unique_ptr<Runtime> runtime_;
   std::unique_ptr<ui::Window> window_;
   std::thread module_thread_;
@@ -138,6 +160,8 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   std::unique_ptr<ui::DebugOverlayDialog> debug_overlay_;
   std::unique_ptr<ui::ConsoleDialog> console_overlay_;
   std::unique_ptr<ui::SettingsDialog> settings_overlay_;
+  ui::DebugOverlayDialog::FrameStatsProvider frame_stats_provider_;
+  std::filesystem::path config_path_;
 };
 
 }  // namespace rex

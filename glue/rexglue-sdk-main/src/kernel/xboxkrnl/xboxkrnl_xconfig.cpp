@@ -15,8 +15,8 @@
 #include <rex/cvar.h>
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
@@ -41,7 +41,7 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
           memory::store_and_swap<uint32_t>(value, 0x00001000);  // USA/Canada
           break;
         default:
-          assert_unhandled_case(setting);
+          REXKRNL_WARN("Unimplemented XConfig SECURED setting 0x{:04X}", setting);
           return X_STATUS_INVALID_PARAMETER_2;
       }
       break;
@@ -67,22 +67,30 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
           setting_size = 4;
           memory::store_and_swap<uint32_t>(value, 0x00040000);
           break;
+        case 0x000B:  // XCONFIG_USER_AUDIO_FLAGS
+          setting_size = 4;
+          memory::store_and_swap<uint32_t>(value, 0x00010001);
+          break;
         case 0x000C:  // XCONFIG_USER_RETAIL_FLAGS
           setting_size = 4;
-          // TODO(benvanik): get this value.
-          memory::store_and_swap<uint32_t>(value, 0);
+          memory::store_and_swap<uint32_t>(value, 0x40);
           break;
         case 0x000E:  // XCONFIG_USER_COUNTRY
           setting_size = 1;
           value[0] = static_cast<uint8_t>(REXCVAR_GET(user_country));
           break;
+        case 0x0019:  // XCONFIG_USER_PC_FLAGS
+          setting_size = 1;
+          // XBLAllowed | XBLMembershipCreationAllowed
+          value[0] = 0x03;
+          break;
         default:
-          assert_unhandled_case(setting);
+          REXKRNL_WARN("Unimplemented XConfig USER setting 0x{:04X}", setting);
           return X_STATUS_INVALID_PARAMETER_2;
       }
       break;
     default:
-      assert_unhandled_case(category);
+      REXKRNL_WARN("Unimplemented XConfig category 0x{:04X}", category);
       return X_STATUS_INVALID_PARAMETER_1;
   }
 
@@ -104,9 +112,8 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
   return X_STATUS_SUCCESS;
 }
 
-ppc_u32_result_t ExGetXConfigSetting_entry(ppc_u16_t category, ppc_u16_t setting,
-                                           ppc_pvoid_t buffer_ptr, ppc_u16_t buffer_size,
-                                           ppc_pu16_t required_size_ptr) {
+u32 ExGetXConfigSetting_entry(u16 category, u16 setting, mapped_void buffer_ptr, u16 buffer_size,
+                              mapped_u16 required_size_ptr) {
   uint16_t required_size = 0;
   X_STATUS result =
       xeExGetXConfigSetting(category, setting, buffer_ptr, buffer_size, &required_size);
@@ -120,5 +127,5 @@ ppc_u32_result_t ExGetXConfigSetting_entry(ppc_u16_t category, ppc_u16_t setting
 
 }  // namespace rex::kernel::xboxkrnl
 
-XBOXKRNL_EXPORT(__imp__ExGetXConfigSetting, rex::kernel::xboxkrnl::ExGetXConfigSetting_entry)
-XBOXKRNL_EXPORT_STUB(__imp__ExSetXConfigSetting);
+REX_EXPORT(__imp__ExGetXConfigSetting, rex::kernel::xboxkrnl::ExGetXConfigSetting_entry)
+REX_EXPORT_STUB(__imp__ExSetXConfigSetting);

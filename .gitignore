@@ -671,3 +671,6 @@ chat_summary*.txt
 liberty_exec_log.txt
 run.pid
 
+
+# Local agent skills cache — not source
+.agents/skills/libertyrecomp/

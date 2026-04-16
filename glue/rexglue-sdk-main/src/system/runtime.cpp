@@ -14,12 +14,14 @@
 #include <rex/filesystem/devices/null_device.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
-#include <rex/ppc/context.h>     // PPCFuncMapping
-#include <rex/ppc/exceptions.h>  // SEH exception support
+#include <rex/perf/counter.h>
+#include <rex/ppc/context.h>          // PPCFuncMapping
+#include <rex/platform/exceptions.h>  // SEH exception support
+#include <rex/kernel/crt/heap.h>
 #include <rex/runtime.h>
 #include <rex/system/export_resolver.h>
 #include <rex/system/kernel_state.h>
-#include <rex/system/processor.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xmemory.h>
 #include <rex/system/xthread.h>
@@ -32,16 +34,21 @@ Runtime* Runtime::instance_ = nullptr;
 
 Runtime::Runtime(const std::filesystem::path& game_data_root,
                  const std::filesystem::path& user_data_root,
-                 const std::filesystem::path& update_data_root)
+                 const std::filesystem::path& update_data_root,
+                 const std::filesystem::path& cache_root)
     : game_data_root_(game_data_root),
       user_data_root_(user_data_root.empty() ? game_data_root : user_data_root),
-      update_data_root_(update_data_root) {}
+      update_data_root_(update_data_root),
+      cache_root_(cache_root) {}
 
 Runtime::~Runtime() {
   Shutdown();
 }
 
 X_STATUS Runtime::Setup(RuntimeConfig config) {
+  // Start profiler (Tracy network threads, counter init)
+  rex::perf::Profiler::Startup();
+
   // Initialize SEH exception support for hardware exception handling
   rex::initialize_seh();
 
@@ -71,8 +78,9 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
 
   export_resolver_ = std::make_unique<runtime::ExportResolver>();
 
-  processor_ = std::make_unique<runtime::Processor>(memory_.get(), export_resolver_.get());
-  REXSYS_INFO("Processor initialized");
+  function_dispatcher_ =
+      std::make_unique<runtime::FunctionDispatcher>(memory_.get(), export_resolver_.get());
+  REXSYS_INFO("FunctionDispatcher initialized");
 
   // Create virtual file system
   file_system_ = std::make_unique<rex::filesystem::VirtualFileSystem>();
@@ -102,7 +110,7 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
 
   // Initialize the APU (Audio Processing Unit) from injected config
   if (config.audio_factory) {
-    audio_system_ = config.audio_factory(processor_.get());
+    audio_system_ = config.audio_factory(function_dispatcher_.get());
     if (audio_system_) {
       X_STATUS audio_status = audio_system_->Setup(kernel_state_.get());
       if (XFAILED(audio_status)) {
@@ -131,7 +139,7 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
   if (config.graphics) {
     graphics_system_ = std::move(config.graphics);
     bool with_presentation = (app_context_ != nullptr);
-    X_STATUS gpu_status = graphics_system_->Setup(processor_.get(), kernel_state_.get(),
+    X_STATUS gpu_status = graphics_system_->Setup(function_dispatcher_.get(), kernel_state_.get(),
                                                   app_context_, with_presentation);
     if (XFAILED(gpu_status)) {
       REXSYS_ERROR("Failed to initialize GPU - required for runtime");
@@ -139,6 +147,8 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
       return gpu_status;
     }
     REXSYS_INFO("GPU system initialized (presentation={})", with_presentation);
+  } else {
+    REXSYS_INFO("Runtime initialized without graphics system (native rendering mode)");
   }
 
   REXSYS_INFO("Runtime initialized successfully");
@@ -160,8 +170,9 @@ X_STATUS Runtime::Setup(uint32_t code_base, uint32_t code_size, uint32_t image_b
     return status;
   }
 
-  // Initialize function table in Processor for recompiled code dispatch
-  if (!processor_->InitializeFunctionTable(code_base, code_size, image_base, image_size)) {
+  // Initialize function table in FunctionDispatcher for recompiled code dispatch
+  if (!function_dispatcher_->InitializeFunctionTable(code_base, code_size, image_base,
+                                                     image_size)) {
     REXSYS_ERROR("Failed to initialize function table");
     return X_STATUS_UNSUCCESSFUL;
   }
@@ -171,8 +182,8 @@ X_STATUS Runtime::Setup(uint32_t code_base, uint32_t code_size, uint32_t image_b
     int count = 0;
     for (int i = 0; func_mappings[i].guest != 0; ++i) {
       if (func_mappings[i].host != nullptr) {
-        processor_->SetFunction(static_cast<uint32_t>(func_mappings[i].guest),
-                                func_mappings[i].host);
+        function_dispatcher_->SetFunction(static_cast<uint32_t>(func_mappings[i].guest),
+                                          func_mappings[i].host);
         ++count;
       }
     }
@@ -207,10 +218,12 @@ void Runtime::Shutdown() {
     input_system_.reset();
   }
   kernel_state_.reset();
-  processor_.reset();
+  function_dispatcher_.reset();
   export_resolver_.reset();
   file_system_.reset();
   memory_.reset();
+
+  rex::perf::Profiler::Shutdown();
 }
 
 uint8_t* Runtime::virtual_membase() const {
@@ -231,7 +244,8 @@ bool Runtime::SetupVfs() {
 
   // Mount game_data_root as \Device\Harddisk0\Partition1
   auto mount_path = "\\Device\\Harddisk0\\Partition1";
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(mount_path, abs_game_root, true);
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      mount_path, abs_game_root, !REXCVAR_GET(allow_game_relative_writes));
   if (!device->Initialize()) {
     REXSYS_ERROR("Runtime::SetupVfs: Failed to initialize host path device");
     return false;
@@ -279,50 +293,6 @@ bool Runtime::SetupVfs() {
   // Games handle "device not found" gracefully but don't handle actual device
   // errors (like NAME_COLLISION) well. Let cache: fail cleanly.
 
-  // ── User data (save games, settings, screenshots) ──────────────────────────
-  // Mount user_data_root_ as a *writable* device so the Xbox360 VFS layer can
-  // resolve save-data paths that the game writes through NtCreateFile / XFF.
-  //
-  // The guest game uses "hdd:\\" paths for persistent storage; we map those to
-  // this writable partition rather than the read-only game device.
-  //
-  // Platform roots (set by ReXApp::OnInitialize):
-  //   Desktop : ~/.local/share/<AppName>/   (normal writable directory)
-  //   PS4     : /savedata0/                 (sceSaveDataMount2 result)
-  //   Switch  : save:/                      (fsdevMountSaveData result)
-  if (!user_data_root_.empty()) {
-    auto abs_user_root = std::filesystem::absolute(user_data_root_);
-
-    // Create the directory if it doesn't exist (desktop; PS4/Switch already
-    // exist at mount time).
-    if (!std::filesystem::exists(abs_user_root)) {
-      std::error_code ec;
-      std::filesystem::create_directories(abs_user_root, ec);
-      if (ec) {
-        REXSYS_WARN("SetupVfs: could not create user data dir {}: {}",
-                    abs_user_root.string(), ec.message());
-      }
-    }
-
-    if (std::filesystem::exists(abs_user_root)) {
-      auto user_mount = "\\Device\\Harddisk0\\PartitionUser";
-      auto user_device = std::make_unique<rex::filesystem::HostPathDevice>(
-          user_mount, abs_user_root, /*read_only=*/false);
-
-      if (user_device->Initialize() &&
-          file_system_->RegisterDevice(std::move(user_device))) {
-        // hdd:\  — the symbolic link the Xbox360 kernel uses for the hard disk
-        // partition where user data lives.  GTA IV writes saves here.
-        file_system_->RegisterSymbolicLink("hdd:", user_mount);
-        // userdata: — convenience alias used by rexglue's content_manager
-        file_system_->RegisterSymbolicLink("userdata:", user_mount);
-        REXSYS_INFO("  Mounted {} at hdd: / userdata:", abs_user_root.string());
-      } else {
-        REXSYS_WARN("SetupVfs: failed to mount user data at {}", abs_user_root.string());
-      }
-    }
-  }
-
   return true;
 }
 
@@ -341,20 +311,29 @@ X_STATUS Runtime::LoadXexImage(const std::string_view module_path) {
   return X_STATUS_SUCCESS;
 }
 
-system::object_ref<system::XThread> Runtime::LaunchModule() {
+system::object_ref<system::XThread> Runtime::PrepareModuleLaunch() {
   auto executable = kernel_state_->GetExecutableModule();
   if (!executable) {
-    REXSYS_ERROR("Runtime::LaunchModule: No executable module loaded");
+    REXSYS_ERROR("Runtime::PrepareModuleLaunch: No executable module loaded");
     return nullptr;
   }
 
-  auto thread = kernel_state_->LaunchModule(executable);
+  auto thread = kernel_state_->PrepareModuleLaunch(executable);
   if (!thread) {
-    REXSYS_ERROR("Runtime::LaunchModule: Failed to launch module");
+    REXSYS_ERROR("Runtime::PrepareModuleLaunch: Failed to prepare module");
     return nullptr;
   }
 
-  REXSYS_DEBUG("  Module launched on thread '{}'", thread->name());
+  REXSYS_DEBUG("  Module prepared on thread '{}'", thread->name());
+  return thread;
+}
+
+system::object_ref<system::XThread> Runtime::LaunchModule() {
+  auto thread = PrepareModuleLaunch();
+  if (thread) {
+    thread->Resume();
+    REXSYS_DEBUG("  Module launched on thread '{}'", thread->name());
+  }
   return thread;
 }
 

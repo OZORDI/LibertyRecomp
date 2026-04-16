@@ -15,10 +15,11 @@
 #include <atomic>
 #include <mutex>
 #include <optional>
+#include <vector>
 
 #include <rex/input/input_driver.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #define HID_SDL_USER_COUNT 4
 #define HID_SDL_THUMB_THRES 0x4E00
@@ -28,7 +29,7 @@
 
 namespace rex::input::sdl {
 
-class SDLInputDriver final : public InputDriver {
+class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener {
  public:
   explicit SDLInputDriver(rex::ui::Window* window, size_t window_z_order);
   ~SDLInputDriver() override;
@@ -41,10 +42,11 @@ class SDLInputDriver final : public InputDriver {
   X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) override;
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                         X_INPUT_KEYSTROKE* out_keystroke) override;
+  void OnWindowAvailable(rex::ui::Window* window) override;
 
  private:
   struct ControllerState {
-    SDL_GameController* sdl;
+    SDL_Gamepad* sdl;
     X_INPUT_CAPABILITIES caps;
     X_INPUT_STATE state;
     bool state_changed;
@@ -65,11 +67,18 @@ class SDLInputDriver final : public InputDriver {
     uint32_t repeat_time;
   };
 
+  // WindowListener
+  void OnClosing(rex::ui::UIEvent& e) override;
+  void OnLostFocus(rex::ui::UISetupEvent& e) override;
+  void OnGotFocus(rex::ui::UISetupEvent& e) override;
+
   void HandleEvent(const SDL_Event& event);
-  void OnControllerDeviceAdded(const SDL_Event& event);
-  void OnControllerDeviceRemoved(const SDL_Event& event);
-  void OnControllerDeviceAxisMotion(const SDL_Event& event);
-  void OnControllerDeviceButtonChanged(const SDL_Event& event);
+  std::unique_lock<std::mutex> DrainAndLock();
+  void ProcessEventLocked(const SDL_Event& event);
+  void OnControllerDeviceAddedLocked(const SDL_Event& event);
+  void OnControllerDeviceRemovedLocked(const SDL_Event& event);
+  void OnControllerDeviceAxisMotionLocked(const SDL_Event& event);
+  void OnControllerDeviceButtonChangedLocked(const SDL_Event& event);
 
   inline uint64_t AnalogToKeyfield(const X_INPUT_GAMEPAD& gamepad) const;
   std::optional<size_t> GetControllerIndexFromInstanceID(SDL_JoystickID instance_id);
@@ -78,12 +87,15 @@ class SDLInputDriver final : public InputDriver {
   void UpdateXCapabilities(ControllerState& state);
   void QueueControllerUpdate();
 
+  rex::ui::Window* attached_window_ = nullptr;
   bool sdl_events_initialized_;
-  bool sdl_gamecontroller_initialized_;
-  int sdl_events_unflushed_;
+  bool SDL_Gamepad_initialized_;
+  std::atomic<int> sdl_events_unflushed_;
   std::atomic<bool> sdl_pumpevents_queued_;
   std::array<ControllerState, HID_SDL_USER_COUNT> controllers_;
   std::mutex controllers_mutex_;
+  std::mutex event_queue_mutex_;
+  std::vector<SDL_Event> pending_events_;
   std::array<KeystrokeState, HID_SDL_USER_COUNT> keystroke_states_;
 };
 

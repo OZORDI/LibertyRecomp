@@ -14,10 +14,11 @@
 #include <rex/cvar.h>
 #include <rex/dbg.h>
 #include <rex/logging.h>
+#include <rex/perf/counter.h>
 #include <rex/math.h>
 #include <rex/memory/ring_buffer.h>
 #include <rex/string/buffer.h>
-#include <rex/system/processor.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/system/thread_state.h>
 #include <rex/system/xthread.h>
 
@@ -53,8 +54,8 @@ REXCVAR_DEFINE_BOOL(ffmpeg_verbose, false, "Audio", "Verbose FFmpeg output (debu
 
 namespace rex::audio {
 
-XmaDecoder::XmaDecoder(runtime::Processor* processor)
-    : memory_(processor->memory()), processor_(processor) {}
+XmaDecoder::XmaDecoder(runtime::FunctionDispatcher* function_dispatcher)
+    : memory_(function_dispatcher->memory()), function_dispatcher_(function_dispatcher) {}
 
 XmaDecoder::~XmaDecoder() = default;
 
@@ -137,18 +138,17 @@ X_STATUS XmaDecoder::Setup(system::KernelState* kernel_state) {
 }
 
 void XmaDecoder::WorkerThreadMain() {
-  uint32_t idle_loop_count = 0;
   while (worker_running_) {
     // Okay, let's loop through XMA contexts to find ones we need to decode!
     bool did_work = false;
     for (uint32_t n = 0; n < kContextCount && worker_running_; n++) {
       XmaContext& context = contexts_[n];
-      did_work = context.Work() || did_work;
-
-      // TODO: Need thread safety to do this.
-      // Probably not too important though.
-      // registers_.current_context = n;
-      // registers_.next_context = (n + 1) % kContextCount;
+      bool worked = context.Work();
+      if (worked) {
+        context.SignalWorkDone();
+        PROFILE_XMA_FRAME_DECODED();
+      }
+      did_work = did_work || worked;
     }
 
     if (paused_) {
@@ -156,18 +156,11 @@ void XmaDecoder::WorkerThreadMain() {
       resume_fence_.Wait();
     }
 
-    if (!did_work) {
-      idle_loop_count++;
-    } else {
-      idle_loop_count = 0;
+    if (did_work) {
+      continue;
     }
-
-    if (idle_loop_count > 500) {
-      // Idle for an extended period. Introduce a 20ms wait.
-      rex::thread::Wait(work_event_.get(), false, std::chrono::milliseconds(20));
-    }
-
-    rex::thread::MaybeYield();
+    // No work done this iteration, block until signaled.
+    rex::thread::Wait(work_event_.get(), false);
   }
 }
 
@@ -265,9 +258,9 @@ uint32_t XmaDecoder::ReadRegister(uint32_t addr) {
     default:
       const auto register_info = register_file_.GetRegisterInfo(r);
       if (register_info) {
-        REXAPU_WARN("XMA: Read from unhandled register ({:04X}, {})", r, register_info->name);
+        REXAPU_DEBUG("XMA: Read from unhandled register ({:04X}, {})", r, register_info->name);
       } else {
-        REXAPU_WARN("XMA: Read from unknown register ({:04X})", r);
+        REXAPU_DEBUG("XMA: Read from unknown register ({:04X})", r);
       }
       break;
   }
@@ -292,6 +285,7 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
 
     // The context ID is a bit in the range of the entire context array.
     uint32_t base_context_id = (r - XmaRegister::Context0Kick) * 32;
+    uint32_t kicked_value = value;
     for (int i = 0; value && i < 32; ++i, value >>= 1) {
       if (value & 1) {
         uint32_t context_id = base_context_id + i;
@@ -301,6 +295,13 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
     }
     // Signal the decoder thread to start processing.
     work_event_->Set();
+    // Block until the worker finishes, so the game sees updated context data.
+    for (int i = 0; kicked_value && i < 32; ++i, kicked_value >>= 1) {
+      if (kicked_value & 1) {
+        uint32_t context_id = base_context_id + i;
+        contexts_[context_id].WaitForWorkDone();
+      }
+    }
   } else if (r >= XmaRegister::Context0Lock && r <= XmaRegister::Context9Lock) {
     // Context lock command.
     // This requests a lock by flagging the context.
@@ -311,6 +312,11 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
         uint32_t context_id = base_context_id + i;
         auto& context = contexts_[context_id];
         context.Disable();
+        // [XMA fix] Added Block(false) after Disable(). Without this, the game
+        // could call XMADisableContext and start modifying the context struct
+        // while a decode was still in progress on the worker thread. Block()
+        // waits for the context mutex to be free (poll=false means wait, not spin).
+        context.Block(false);
       }
     }
     // Signal the decoder thread to start processing.
@@ -333,10 +339,10 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
       default: {
         const auto register_info = register_file_.GetRegisterInfo(r);
         if (register_info) {
-          REXAPU_WARN("XMA: Write to unhandled register ({:04X}, {}): {:08X}", r,
-                      register_info->name, value);
+          REXAPU_DEBUG("XMA: Write to unhandled register ({:04X}, {}): {:08X}", r,
+                       register_info->name, value);
         } else {
-          REXAPU_WARN("XMA: Write to unknown register ({:04X}): {:08X}", r, value);
+          REXAPU_DEBUG("XMA: Write to unknown register ({:04X}): {:08X}", r, value);
         }
         break;
       }
@@ -351,6 +357,9 @@ void XmaDecoder::Pause() {
   }
   paused_ = true;
 
+  if (work_event_) {
+    work_event_->Set();
+  }
   pause_fence_.Wait();
 }
 

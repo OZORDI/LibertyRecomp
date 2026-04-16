@@ -32,7 +32,7 @@ namespace rex {
 
 // Forward declarations
 namespace runtime {
-class Processor;
+class FunctionDispatcher;
 class ExportResolver;
 }  // namespace runtime
 namespace system {
@@ -48,11 +48,11 @@ class ImGuiDrawer;
 /// Configuration for Runtime subsystem injection.
 /// Graphics and audio backends are provided by the caller, keeping the runtime
 /// library decoupled from concrete backend implementations.
-/// Audio uses a factory because AudioSystem requires a Processor* at
+/// Audio uses a factory because AudioSystem requires a FunctionDispatcher* at
 /// construction time, which is only available during Setup().
 struct RuntimeConfig {
   std::unique_ptr<system::IGraphicsSystem> graphics;
-  std::function<std::unique_ptr<system::IAudioSystem>(runtime::Processor*)> audio_factory;
+  std::function<std::unique_ptr<system::IAudioSystem>(runtime::FunctionDispatcher*)> audio_factory;
   std::function<std::unique_ptr<system::IInputSystem>(bool tool_mode)> input_factory;
   std::function<void(Runtime*, system::KernelState*)> kernel_init;
   bool tool_mode = false;
@@ -64,9 +64,9 @@ struct RuntimeConfig {
 ///   config.graphics      = REX_GRAPHICS_BACKEND(rex::graphics::vulkan::VulkanGraphicsSystem);
 ///   config.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
 #define REX_GRAPHICS_BACKEND(Type) std::make_unique<Type>()
-#define REX_AUDIO_BACKEND(Type)                                                          \
-  [](::rex::runtime::Processor* _proc) -> std::unique_ptr<::rex::system::IAudioSystem> { \
-    return Type::Create(_proc);                                                          \
+#define REX_AUDIO_BACKEND(Type)                                                                 \
+  [](::rex::runtime::FunctionDispatcher* _fd) -> std::unique_ptr<::rex::system::IAudioSystem> { \
+    return Type::Create(_fd);                                                                   \
   }
 #define REX_INPUT_BACKEND(SetupFunc)                                    \
   [](bool _tool_mode) -> std::unique_ptr<::rex::system::IInputSystem> { \
@@ -85,7 +85,8 @@ class Runtime {
  public:
   explicit Runtime(const std::filesystem::path& game_data_root,
                    const std::filesystem::path& user_data_root = {},
-                   const std::filesystem::path& update_data_root = {});
+                   const std::filesystem::path& update_data_root = {},
+                   const std::filesystem::path& cache_root = {});
   ~Runtime();
 
   // Non-copyable
@@ -103,8 +104,8 @@ class Runtime {
   system::IAudioSystem* audio_system() const { return audio_system_.get(); }
   system::IInputSystem* input_system() const { return input_system_.get(); }
 
-  // Processor for IRQL and interrupt synchronization
-  runtime::Processor* processor() const { return processor_.get(); }
+  // FunctionDispatcher for guest function dispatch and interrupt execution
+  runtime::FunctionDispatcher* function_dispatcher() const { return function_dispatcher_.get(); }
   // Export resolver - used for variable import resolution in guest memory
   runtime::ExportResolver* export_resolver() const { return export_resolver_.get(); }
 
@@ -112,6 +113,7 @@ class Runtime {
   const std::filesystem::path& game_data_root() const { return game_data_root_; }
   const std::filesystem::path& user_data_root() const { return user_data_root_; }
   const std::filesystem::path& update_data_root() const { return update_data_root_; }
+  const std::filesystem::path& cache_root() const { return cache_root_; }
 
   // Set the app context for presentation (call before Setup)
   void set_app_context(ui::WindowedAppContext* context) { app_context_ = context; }
@@ -144,6 +146,10 @@ class Runtime {
   // Call after LoadXexImage to start execution
   system::object_ref<system::XThread> LaunchModule();
 
+  // Prepare module launch: creates suspended main thread without resuming.
+  // Call thread->Resume() after any pre-launch hooks.
+  system::object_ref<system::XThread> PrepareModuleLaunch();
+
   // Access the memory base pointer for recompiled code
   uint8_t* virtual_membase() const;
 
@@ -154,6 +160,7 @@ class Runtime {
   std::filesystem::path game_data_root_;
   std::filesystem::path user_data_root_;
   std::filesystem::path update_data_root_;
+  std::filesystem::path cache_root_;
 
   ui::WindowedAppContext* app_context_ = nullptr;
   ui::Window* display_window_ = nullptr;
@@ -161,7 +168,7 @@ class Runtime {
   bool tool_mode_ = false;
 
   std::unique_ptr<memory::Memory> memory_;
-  std::unique_ptr<runtime::Processor> processor_;
+  std::unique_ptr<runtime::FunctionDispatcher> function_dispatcher_;
   std::unique_ptr<rex::filesystem::VirtualFileSystem> file_system_;
   std::unique_ptr<system::KernelState> kernel_state_;
   std::unique_ptr<system::IGraphicsSystem> graphics_system_;

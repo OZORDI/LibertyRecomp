@@ -61,6 +61,12 @@ if(WIN32)
         window_win.cpp
         windowed_app_context_win.cpp
     )
+elseif(APPLE)
+    set(REXUI_PLATFORM_SOURCES
+        surface_macos.mm
+        window_macos.mm
+        windowed_app_context_macos.mm
+    )
 else()
     set(REXUI_PLATFORM_SOURCES
         surface_gnulinux.cpp
@@ -101,12 +107,36 @@ target_link_libraries(rexui PUBLIC
     imgui::imgui
 )
 
+if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include")
+    target_include_directories(rexui PRIVATE
+        "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include"
+        "${REXGLUE_FIDELITYFX_SOURCE_DIR}/ffx-api/include"
+    )
+    target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_SDK=1)
+endif()
+
+set(REXUI_HAS_FIDELITYFX_RUNTIME OFF)
+if(TARGET amd_fidelityfx_vk)
+    target_link_libraries(rexui PRIVATE amd_fidelityfx_vk)
+    set(REXUI_HAS_FIDELITYFX_RUNTIME ON)
+endif()
+if(TARGET amd_fidelityfx_dx12)
+    target_link_libraries(rexui PRIVATE amd_fidelityfx_dx12)
+    set(REXUI_HAS_FIDELITYFX_RUNTIME ON)
+endif()
+if(REXUI_HAS_FIDELITYFX_RUNTIME)
+    target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_RUNTIME=1)
+endif()
+
 if(REXGLUE_USE_VULKAN)
     target_link_libraries(rexui PUBLIC
         volk::volk
         GPUOpen::VulkanMemoryAllocator
         SPIRV-Tools-static
     )
+    if(APPLE)
+        target_compile_definitions(rexui PRIVATE VK_USE_PLATFORM_METAL_EXT)
+    endif()
 endif()
 
 # Platform-specific dependencies
@@ -114,6 +144,12 @@ if(WIN32)
     target_link_libraries(rexui PUBLIC
         dwmapi
         Shcore
+    )
+elseif(APPLE)
+    target_link_libraries(rexui PUBLIC
+        "-framework AppKit"
+        "-framework Foundation"
+        "-framework QuartzCore"
     )
 else()
     find_package(PkgConfig REQUIRED)
@@ -137,5 +173,3 @@ if(REXGLUE_USE_D3D12)
         dxc-headers
     )
 endif()
-
-
