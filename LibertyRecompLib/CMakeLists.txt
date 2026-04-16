@@ -15,9 +15,11 @@ if(APPLE)
     add_compile_definitions(_XOPEN_SOURCE=600 _DARWIN_C_SOURCE)
 endif()
 
-target_compile_definitions(XenonRecomp PRIVATE 
-    XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml\"
-    XENON_RECOMP_HEADER_FILE_PATH=\"${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/ppc_context.h\")
+if(TARGET XenonRecomp)
+    target_compile_definitions(XenonRecomp PRIVATE
+        XENON_RECOMP_CONFIG_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/config/GTA4.toml\"
+        XENON_RECOMP_HEADER_FILE_PATH=\"${LIBERTY_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/ppc_context.h\")
+endif()
 
 # =============================================================================
 # PPC Recompiled Sources: use RexGlue's gta4-recomp generated code
@@ -49,12 +51,12 @@ set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES ${GENERATED_SOURCES})
 set(XENOS_RECOMP_ROOT "${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp/XenosRecomp")
 set(XENOS_RECOMP_INCLUDE "${XENOS_RECOMP_ROOT}/shader_common.h")
 
-target_compile_definitions(XenosRecomp PRIVATE 
-    XENOS_RECOMP_INPUT=\"${CMAKE_CURRENT_SOURCE_DIR}/private/shader\" 
-    XENOS_RECOMP_OUTPUT=\"${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp\"
-    XENOS_RECOMP_INCLUDE_INPUT=\"${XENOS_RECOMP_INCLUDE}\"
-    LIBERTY_RECOMP
-)
+target_compile_definitions(XenosRecomp PRIVATE LIBERTY_RECOMP)
+# NOTE: XENOS_RECOMP_INPUT / OUTPUT / INCLUDE_INPUT were previously hardcoded
+# to LibertyRecompLib/private/shader (a dir that doesn't exist), which made
+# the binary ignore argv and crash with SIGSEGV on readAllBytes(nullptr).
+# We now pass the three paths on the command line when regenerating:
+#   XenosRecomp <fxc_dir> <output.cpp> <shader_common.h>
 
 file(GLOB XENOS_RECOMP_SOURCES 
     "${XENOS_RECOMP_ROOT}/*.h"
