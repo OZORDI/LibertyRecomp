@@ -1,8 +1,0 @@
-# Copy this file to local.properties and fill in your local paths.
-# DO NOT commit local.properties to version control.
-
-# Path to the Android SDK
-sdk.dir=/path/to/Android/sdk
-
-# Optional: path to the NDK if you want a specific version
-# ndk.dir=/path/to/Android/ndk/26.2.11394342

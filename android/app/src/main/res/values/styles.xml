@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="AppTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen">
-        <item name="android:windowBackground">@drawable/splash</item>
-        <item name="android:windowDrawsSystemBarBackgrounds">false</item>
-    </style>
-</resources>
