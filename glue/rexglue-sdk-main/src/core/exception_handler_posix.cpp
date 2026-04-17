@@ -221,6 +221,15 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
     }
+    // Ignore SIGPIPE process-wide so that writes to closed sockets (multiplayer,
+    // remote logging, tracy profiler, etc.) return EPIPE instead of killing the
+    // process. Matches the empty swallower RPCS3 installs in Utilities/Thread.cpp.
+    struct sigaction sigpipe_action;
+    std::memset(&sigpipe_action, 0, sizeof(sigpipe_action));
+    sigpipe_action.sa_handler = SIG_IGN;
+    if (sigaction(SIGPIPE, &sigpipe_action, nullptr) != 0) {
+      assert_always("Failed to install new SIGPIPE handler");
+    }
     signal_handlers_installed_ = true;
   }
 

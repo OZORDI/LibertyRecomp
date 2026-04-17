@@ -211,10 +211,10 @@ For development purposes, you can manually convert shaders:
 
 ```bash
 # Extract shaders from RAGE FXC files
-./tools/rage_fxc_extractor/build/rage_fxc_extractor --batch shader_batch/ extracted_shaders/
+./tools/rage_fxc_extractor/build/rage_fxc_extractor --batch shader_batch/ LibertyRecompLib/shader/rage_shaders/
 
 # Compile to shader cache
-./build_xenosrecomp/XenosRecomp/XenosRecomp extracted_shaders/ LibertyRecompLib/shader/shader_cache.cpp tools/XenosRecomp/XenosRecomp/shader_common.h
+./build_xenosrecomp/XenosRecomp/XenosRecomp LibertyRecompLib/shader/rage_shaders/ LibertyRecompLib/shader/shader_cache.cpp tools/XenosRecomp/XenosRecomp/shader_common.h
 ```
 
 For more details, see [SHADER_PIPELINE.md](SHADER_PIPELINE.md).

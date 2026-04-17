@@ -85,8 +85,8 @@ void os::logger::Init()
 {
     rex::LogConfig cfg;
     cfg.log_to_console = false;      // PlatformInitSinks adds the real console sink.
-    cfg.default_level  = spdlog::level::info;
-    cfg.flush_level    = spdlog::level::info;
+    cfg.default_level  = spdlog::level::trace;
+    cfg.flush_level    = spdlog::level::trace;
     rex::InitLogging(cfg);
 
     PlatformInitSinks();

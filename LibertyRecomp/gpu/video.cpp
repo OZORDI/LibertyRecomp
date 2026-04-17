@@ -8461,14 +8461,14 @@ static void ConvertToDegenerateTriangles(uint16_t* indices, uint32_t indexCount,
     }
 }
 
-struct MeshResource
-{
-    LIBERTY_INSERT_PADDING(0x4);
-    be<uint32_t> indexCount;
-    be<uint32_t> indices;
-};
+// struct MeshResource
+// {
+//     LIBERTY_INSERT_PADDING(0x4);
+//     be<uint32_t> indexCount;
+//     be<uint32_t> indices;
+// };
 
-static std::vector<uint16_t*> g_newIndicesToFree;
+// static std::vector<uint16_t*> g_newIndicesToFree;
 
 // Hedgehog::Mirage::CMeshData::Make
 // PPC_FUNC_IMPL(__imp__sub_82E44AF8);
@@ -8526,12 +8526,12 @@ static std::vector<uint16_t*> g_newIndicesToFree;
 //     g_newIndicesToFree.clear();
 // }
 
-struct LightAndIndexBufferResourceV1
-{
-    LIBERTY_INSERT_PADDING(0x4);
-    be<uint32_t> indexCount;
-    be<uint32_t> indices;
-};
+// struct LightAndIndexBufferResourceV1
+// {
+//     LIBERTY_INSERT_PADDING(0x4);
+//     be<uint32_t> indexCount;
+//     be<uint32_t> indices;
+// };
 
 // Hedgehog::Mirage::CLightAndIndexBufferData::MakeV1
 // PPC_FUNC_IMPL(__imp__sub_82E3AFC8);
@@ -8565,12 +8565,12 @@ struct LightAndIndexBufferResourceV1
 //         g_userHeap.Free(newIndices);
 // }
 
-struct LightAndIndexBufferResourceV5
-{
-    LIBERTY_INSERT_PADDING(0x8);
-    be<uint32_t> indexCount;
-    be<uint32_t> indices;
-};
+// struct LightAndIndexBufferResourceV5
+// {
+//     LIBERTY_INSERT_PADDING(0x8);
+//     be<uint32_t> indexCount;
+//     be<uint32_t> indices;
+// };
 
 // Hedgehog::Mirage::CLightAndIndexBufferData::MakeV5
 // PPC_FUNC_IMPL(__imp__sub_82E3B1C0);
@@ -9631,14 +9631,16 @@ PPC_FUNC_HOOK(sub_82A46578)
 // from the device context, call FlushRenderStateForMainThread + enqueue draw.
 // The existing render thread processes RenderCommands → host GPU draws.
 //
-// PM4 state setters INTENTIONALLY UNHOOKED (recompiled code runs freely):
+// PM4 state setters UNHOOKED (recompiled code runs freely):
 //   sub_82A3E7A0  — VS PM4 builder (updates device+12700, emits PM4 -> no-op'd)
 //   sub_82A47AE0  — VS+PS PM4 builder (updates device+12700/12704)
+//   sub_82A3A890  — VDecl writer (updates device+10456)
+//   sub_82A3BF50  — SetShader (updates device+12432+type*4)
+//
+// PM4 state setters HOOKED (require host-side state translation):
 //   sub_82A44B78  — Texture fetch const (updates device+12536+slot*4)
 //   sub_82A3B690  — RT register writer (updates device+12452+idx*4)
 //   sub_82A3B7B0  — DS register writer (updates device+12428)
-//   sub_82A3A890  — VDecl writer (updates device+10456)
-//   sub_82A3BF50  — SetShader (updates device+12432+type*4)
 //
 // PM4 state setters HOOKED (shader binding requires handle translation):
 //   sub_82A42760  — SetVertexShader (stores VS handle at device[3172]=+12688)
@@ -9740,6 +9742,102 @@ PPC_FUNC_HOOK(sub_82A424A8)
     auto* device = reinterpret_cast<GuestDevice*>(
         static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
     SetPixelShader(device, shader);
+}
+
+// =============================================================================
+// Render State Hooks — sub_82A3B690 (SetRenderTarget) / sub_82A3B7B0 (SetDS)
+//                       sub_82A44B78 (SetTexture)
+//
+// These PM4 state setters update device context fields AND emit PM4 packets.
+// We let the recompiled code run (to populate device state), then translate
+// the guest surface/texture handle to a host object and enqueue the
+// corresponding render command so the host GPU tracks state changes.
+//
+// sub_82A3B690: r3=device, r4=RT index, r5=surfacePtr, r6/r7/r8=register data
+// sub_82A3B7B0: r3=device, r4=surfacePtr
+// sub_82A44B78: r3=device, r4=slot, r5=texturePtr, r6=dirty mask
+// =============================================================================
+
+PPC_FUNC_IMPL(__imp__sub_82A3B690);
+PPC_FUNC_HOOK(sub_82A3B690)
+{
+    uint32_t deviceAddr  = ctx.r3.u32;
+    uint32_t rtIndex     = ctx.r4.u32;
+    uint32_t surfaceAddr = ctx.r5.u32;
+
+    // Let recompiled code run: updates device RT slots + dirty flags
+    __imp__sub_82A3B690(ctx, base);
+
+    GuestSurface* surface = nullptr;
+    if (surfaceAddr != 0) {
+        surface = GTAIV::LookupSurface(surfaceAddr);
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || s_count % 5000 == 0) {
+        LOGF_WARNING("[SetRT] #{} idx={} addr={:#x} -> surface={}",
+                     s_count, rtIndex, surfaceAddr, surface ? "OK" : "NULL");
+    }
+
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+    SetRenderTarget(device, rtIndex, surface);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82A3B7B0);
+PPC_FUNC_HOOK(sub_82A3B7B0)
+{
+    uint32_t deviceAddr  = ctx.r3.u32;
+    uint32_t surfaceAddr = ctx.r4.u32;
+
+    // Let recompiled code run: updates device DS slot
+    __imp__sub_82A3B7B0(ctx, base);
+
+    GuestSurface* surface = nullptr;
+    if (surfaceAddr != 0) {
+        surface = GTAIV::LookupSurface(surfaceAddr);
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || s_count % 5000 == 0) {
+        LOGF_WARNING("[SetDS] #{} addr={:#x} -> surface={}",
+                     s_count, surfaceAddr, surface ? "OK" : "NULL");
+    }
+
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+    SetDepthStencilSurface(device, surface);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82A44B78);
+PPC_FUNC_HOOK(sub_82A44B78)
+{
+    uint32_t deviceAddr  = ctx.r3.u32;
+    uint32_t slot        = ctx.r4.u32;
+    uint32_t textureAddr = ctx.r5.u32;
+
+    // Let recompiled code run: updates device texture fetch slots
+    __imp__sub_82A44B78(ctx, base);
+
+    GuestTexture* texture = nullptr;
+    if (textureAddr != 0) {
+        texture = GTAIV::LookupTexture(textureAddr);
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 50 || s_count % 10000 == 0) {
+        LOGF_WARNING("[SetTex] #{} slot={} addr={:#x} -> texture={}",
+                     s_count, slot, textureAddr, texture ? "OK" : "NULL");
+    }
+
+    if (slot < 16) {
+        auto* device = reinterpret_cast<GuestDevice*>(
+            static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+        SetTexture(device, slot, texture);
+    }
 }
 
 // =============================================================================

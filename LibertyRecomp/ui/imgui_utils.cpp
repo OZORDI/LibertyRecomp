@@ -1,4 +1,5 @@
 #include "imgui_utils.h"
+#include <api/Liberty.inl>
 #include <gpu/imgui/imgui_snapshot.h>
 #include <hid/hid.h>
 #include <patches/aspect_ratio_patches.h>

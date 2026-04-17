@@ -330,8 +330,9 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/gta4_aspect_ratio_patches.cpp"
     "patches/postfx_hooks.cpp"               # PostFX (bloom, sun shafts)
     "patches/shader_collection_patches.cpp"  # fiCollection shader VFS mount chain
+    "patches/host_gpu_init.cpp"              # host device already ready — initState=2, render gate, GPU flag
     # Removed (interfered with rexglue):
-    # "patches/grm_setup_patches.cpp"        # force-wrote grmSetup initState
+    # "patches/grm_setup_patches.cpp"        # old vtable dispatch thunks broke shader factory init
     # "patches/scene_render_patches.cpp"     # duplicate sub_828C1228 hook
     # "patches/render_phase_patches.cpp"     # mislabeled __imp__ bypasses
     #                                        #   (SetVertexShader called as

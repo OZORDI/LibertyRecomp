@@ -78,7 +78,7 @@ elseif(APPLE)
         dynlib_posix.cpp
         exception_handler_mac.cpp
         filesystem_posix.cpp
-        fiber_posix.cpp
+        fiber_mac.cpp
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_mac.cpp

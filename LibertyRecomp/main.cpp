@@ -58,6 +58,9 @@
 #include <rex/exception_handler.h>
 #include <rex/platform/exceptions.h>  // rex::SehException
 #include <rex/logging.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include <rex/runtime.h>
 // #include <rex/runtime/guest/exceptions.h>  // Not present in graine SDK; unused
 // #include <rex/runtime/processor.h>         // Not present in graine SDK; unused
@@ -69,6 +72,7 @@
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/crt/heap.h>
 #include <rex/chrono/clock.h>
+#include <rex/input/input_system.h>
 #if defined(LIBERTY_RECOMP_PS4)
 #include "../glue/rexglue-sdk-main/src/audio/orbis/orbis_audio_system.h"
 #elif defined(LIBERTY_RECOMP_NX)
@@ -240,6 +244,78 @@ void HostStartup()
 #endif
 
     hid::Init();
+}
+
+// ----------------------------------------------------------------------------
+// Liberty watchdog: periodically dumps every XThread's lr/r1 so we can tell
+// where each guest thread is stuck when the game goes silent. Race-tolerant by
+// design — snapshots are approximate, but a stable repeated lr across ticks
+// unambiguously identifies a hung thread.
+// ----------------------------------------------------------------------------
+static std::atomic<bool> g_libertyWatchdogRunning{false};
+static std::thread g_libertyWatchdogThread;
+
+static void LibertyWatchdogLoop()
+{
+    using namespace std::chrono;
+    uint64_t tick = 0;
+    auto started = steady_clock::now();
+    while (g_libertyWatchdogRunning.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(milliseconds(500));
+        auto* ks = rex::runtime::current_kernel_state();
+        if (!ks) continue;
+        auto threads = ks->object_table()->GetObjectsByType<rex::system::XThread>();
+        double elapsed_s = duration<double>(steady_clock::now() - started).count();
+        fprintf(stderr, "[WATCHDOG] tick=%llu t=%.1fs threads=%zu\n",
+                (unsigned long long)tick, elapsed_s, threads.size());
+        uint8_t* mem_base = g_memory.base;
+        auto read_guest_u32 = [mem_base](uint32_t ea) -> uint32_t {
+            if (!mem_base) return 0;
+            if (ea < 0x10000u || ea >= PPC_MEMORY_SIZE - 4) return 0;
+            uint32_t raw;
+            std::memcpy(&raw, mem_base + ea, 4);
+            return __builtin_bswap32(raw);
+        };
+        for (auto& t : threads) {
+            if (!t) continue;
+            auto* ts = t->thread_state();
+            uint32_t lr_lo = 0, lr_hi = 0, r1 = 0, r3 = 0;
+            bool have_ctx = false;
+            if (ts && ts->context()) {
+                auto* ctx = ts->context();
+                uint64_t lr = ctx->lr;
+                lr_lo = static_cast<uint32_t>(lr);
+                lr_hi = static_cast<uint32_t>(lr >> 32);
+                r1 = ctx->r1.u32;
+                r3 = ctx->r3.u32;
+                have_ctx = true;
+            }
+            fprintf(stderr,
+                    "  tid=%u name='%s' run=%d guest=%d main=%d lr=0x%08X%08X r1=0x%08X r3=0x%08X ctx=%d\n",
+                    t->thread_id(), t->name().c_str(),
+                    (int)t->is_running(), (int)t->is_guest_thread(),
+                    (int)t->main_thread(), lr_hi, lr_lo, r1, r3, (int)have_ctx);
+            // Stack-walk disabled: it served its purpose (identifying
+            // sub_82847D48/buddy-allocator as the suspected hang site) but
+            // faults when it reaches unmapped pages near the top of a guest
+            // thread's stack. Re-enable with mincore-based page probing if
+            // deeper stack visibility is needed again.
+        }
+        fflush(stderr);
+        ++tick;
+    }
+}
+
+static void StartLibertyWatchdog()
+{
+    if (g_libertyWatchdogRunning.exchange(true)) return;
+    g_libertyWatchdogThread = std::thread(LibertyWatchdogLoop);
+}
+
+static void StopLibertyWatchdog()
+{
+    if (!g_libertyWatchdogRunning.exchange(false)) return;
+    if (g_libertyWatchdogThread.joinable()) g_libertyWatchdogThread.join();
 }
 
 // Forward declarations from imports.cpp
@@ -540,7 +616,9 @@ int main(int argc, char *argv[])
         static std::unique_ptr<rex::Runtime> s_rexRuntime;
         fprintf(stderr, "[Main] Constructing rex::Runtime...\n");
         s_rexRuntime = std::make_unique<rex::Runtime>(
-            rexContentRoot /* game_data_root - SDK v0.2.1 first arg */);
+            rexContentRoot,                // game_data_root
+            std::filesystem::path{},       // user_data_root (default)
+            rexContentRoot / "update");    // update_data_root — mounts update: VFS device
         fprintf(stderr, "[Main] Runtime constructed, calling Setup() with func mappings...\n");
 
         // Let guest::initialize() (called inside Setup) install its SEH
@@ -561,6 +639,7 @@ int main(int argc, char *argv[])
 #else
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
 #endif
+        rexConfig.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
 
         uint32_t rt_status = s_rexRuntime->Setup(
             static_cast<uint32_t>(PPC_CODE_BASE),
@@ -973,6 +1052,7 @@ int main(int argc, char *argv[])
         printf("[EXIT-TRACE] main.cpp:884 calling _Exit\n"); fflush(stdout);
         std::_Exit(1);
     }
+    StartLibertyWatchdog();
     // rexglue's own XThread::Execute log already covers this; suppress the
     // duplicate printf (was polluting stdout with an untagged line).
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)
@@ -1026,6 +1106,7 @@ int main(int argc, char *argv[])
 #endif
     }
 
+    StopLibertyWatchdog();
     printf("[Main] Main XThread finished\n");
     fflush(stdout);
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)

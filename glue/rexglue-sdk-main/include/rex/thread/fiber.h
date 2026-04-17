@@ -14,16 +14,13 @@
 #include <rex/platform.h>
 #include <cstddef>
 
-#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
-#if REX_PLATFORM_MAC && !defined(_XOPEN_SOURCE)
-#define _XOPEN_SOURCE 700
-#endif
+#if REX_PLATFORM_LINUX
 #include <ucontext.h>
 #include <cstdint>
 #include <vector>
 #endif
 
-#if REX_PLATFORM_IOS
+#if REX_PLATFORM_IOS || REX_PLATFORM_MAC
 #include <csetjmp>
 #include <cstdint>
 #endif
@@ -59,7 +56,7 @@ struct Fiber {
 #if REX_PLATFORM_WIN32
   void* handle_ = nullptr;
   bool is_thread_fiber_ = false;
-#elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+#elif REX_PLATFORM_LINUX
   ucontext_t context_{};
   std::vector<uint8_t> stack_;
   void (*entry_)(void*) = nullptr;
@@ -67,7 +64,7 @@ struct Fiber {
   bool is_thread_fiber_ = false;
 
   static void Trampoline();
-#elif REX_PLATFORM_IOS
+#elif REX_PLATFORM_IOS || REX_PLATFORM_MAC
   // iOS: ucontext/makecontext are deprecated on Darwin and effectively
   // unusable on arm64. Use setjmp/longjmp + an aarch64 stack pivot.
   alignas(16) char jmpbuf_[512] = {};

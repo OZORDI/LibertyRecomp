@@ -30,6 +30,10 @@ namespace rex::arch {
 bool signal_handlers_installed_ = false;
 struct sigaction original_sigill_handler_;
 struct sigaction original_sigsegv_handler_;
+// macOS delivers page-protection and MMU faults as SIGBUS, not SIGSEGV.
+// Guest memory uses mprotect()'d regions that must route through the same
+// access-violation handler as SIGSEGV, or the process dies with bus error.
+struct sigaction original_sigbus_handler_;
 
 // This can be as large as needed, but isn't often needed.
 // As we will be sometimes firing many exceptions we want to avoid having to
@@ -95,6 +99,7 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
     case SIGILL:
       ex.InitializeIllegalInstruction(&thread_context);
       break;
+    case SIGBUS:
     case SIGSEGV: {
       Exception::AccessViolationOperation access_violation_operation;
 #if REX_ARCH_AMD64
@@ -205,6 +210,24 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
     }
+    // Apple routes guest-memory page protection faults to SIGBUS instead of
+    // SIGSEGV. Reuse the same signal_handler; si_addr / ESR decoding is
+    // identical across the two signals on Darwin.
+    if (sigaction(SIGBUS, &signal_handler, &original_sigbus_handler_) != 0) {
+      assert_always("Failed to install new SIGBUS handler");
+    }
+    // Ignore SIGPIPE process-wide. Writes to closed sockets (multiplayer,
+    // remote telemetry, spdlog tcp sink, etc.) otherwise terminate the process
+    // by default on Darwin. macOS does not respect SO_NOSIGPIPE / MSG_NOSIGNAL
+    // for every syscall path the game may take, so match RPCS3's approach of
+    // installing an empty swallower. POSIX guarantees signal dispositions are
+    // process-wide, so this covers every thread including the RexGlue kernel.
+    struct sigaction sigpipe_action;
+    std::memset(&sigpipe_action, 0, sizeof(sigpipe_action));
+    sigpipe_action.sa_handler = SIG_IGN;
+    if (sigaction(SIGPIPE, &sigpipe_action, nullptr) != 0) {
+      assert_always("Failed to install new SIGPIPE handler");
+    }
     signal_handlers_installed_ = true;
   }
 
@@ -244,6 +267,9 @@ void ExceptionHandler::Uninstall(Handler fn, void* data) {
       }
       if (sigaction(SIGSEGV, &original_sigsegv_handler_, NULL) != 0) {
         assert_always("Failed to restore original SIGSEGV handler");
+      }
+      if (sigaction(SIGBUS, &original_sigbus_handler_, NULL) != 0) {
+        assert_always("Failed to restore original SIGBUS handler");
       }
       signal_handlers_installed_ = false;
     }

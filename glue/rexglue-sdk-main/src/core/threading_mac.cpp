@@ -23,7 +23,11 @@ static_assert(REX_PLATFORM_MAC || REX_PLATFORM_IOS,
 #include <memory>
 
 #include <pthread.h>
-#include <semaphore.h>
+#include <pthread/qos.h>
+#include <dispatch/dispatch.h>
+#include <mach/mach_init.h>
+#include <mach/thread_act.h>
+#include <mach/thread_policy.h>
 #if REX_PLATFORM_LINUX
 #include <sys/eventfd.h>
 #endif
@@ -599,7 +603,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
         exit_code_(0),
         state_(State::kUninitialized),
         suspend_count_(0) {
-    sem_init(&suspend_sem_, 0, 0);
+    suspend_sem_ = dispatch_semaphore_create(0);
 #if REX_PLATFORM_ANDROID
     android_pre_api_26_name_[0] = '\0';
 #endif
@@ -609,14 +613,24 @@ class PosixCondition<Thread> : public PosixConditionBase {
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0)
       return false;
+    if (params.stack_size < 0x800000) params.stack_size = 0x800000;  // 8 MiB minimum on macOS
     if (pthread_attr_setstacksize(&attr, params.stack_size) != 0) {
       pthread_attr_destroy(&attr);
       return false;
     }
-    if (params.initial_priority != 0) {
+    // Boost macOS thread QoS to avoid scheduler starvation of guest threads.
+    pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
+    // Apple denies SCHED_FIFO with EPERM; SDL3 notes "Apple requires SCHED_RR
+    // for high priority threads". RPCS3 applies SCHED_RR + priority 99
+    // unconditionally on every guest thread. Matching that behavior here
+    // prevents low-priority guest threads from being starved on contested
+    // cores.
+    {
       sched_param sched{};
-      sched.sched_priority = params.initial_priority + 1;
-      if (pthread_attr_setschedpolicy(&attr, SCHED_FIFO) != 0) {
+      sched.sched_priority = params.initial_priority != 0
+                                 ? params.initial_priority + 1
+                                 : 99;
+      if (pthread_attr_setschedpolicy(&attr, SCHED_RR) != 0) {
         pthread_attr_destroy(&attr);
         return false;
       }
@@ -642,7 +656,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
         state_(State::kRunning),
         suspend_count_(0),
         system_id_(current_thread_system_id()) {
-    sem_init(&suspend_sem_, 0, 0);
+    suspend_sem_ = dispatch_semaphore_create(0);
 #if REX_PLATFORM_ANDROID
     android_pre_api_26_name_[0] = '\0';
 #endif
@@ -722,11 +736,18 @@ class PosixCondition<Thread> : public PosixConditionBase {
 
   void set_affinity_mask(uint64_t mask) {
     WaitStarted();
-    // pthread affinity on macOS uses tags rather than the Windows/Linux CPU
-    // mask semantics this API expects, so keep the unsupported behavior
-    // explicit instead of pretending to honor the mask.
-    (void)mask;
-    REXSYS_WARN("set_affinity_mask is not supported on macOS");
+    // Darwin's THREAD_AFFINITY_POLICY is a tag-based hint used by the Mach
+    // scheduler to co-locate threads that share an L2 cache. It is ignored on
+    // Apple Silicon (M-series) and merely advisory on Intel, but submitting
+    // it costs nothing and matches RPCS3's behavior. Use the lowest set bit
+    // of the mask as the affinity tag (RPCS3: Utilities/Thread.cpp:3326-3330).
+    thread_affinity_policy_data_t policy;
+    policy.affinity_tag =
+        mask ? static_cast<integer_t>(__builtin_ctzll(mask)) : 0;
+    thread_port_t mach_thread = pthread_mach_thread_np(thread_);
+    thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY,
+                      reinterpret_cast<thread_policy_t>(&policy),
+                      mask ? THREAD_AFFINITY_POLICY_COUNT : 0);
   }
 
   int priority() {
@@ -743,9 +764,17 @@ class PosixCondition<Thread> : public PosixConditionBase {
 
   void set_priority(int new_priority) {
     WaitStarted();
+    // Apple denies SCHED_FIFO; SCHED_RR is the supported high-priority policy.
+    // Read the current policy first so we don't downgrade a thread that was
+    // created with a different scheduler (per SDL3's pattern).
+    int policy = SCHED_RR;
     sched_param param{};
+    if (pthread_getschedparam(thread_, &policy, &param) != 0 ||
+        policy == SCHED_FIFO) {
+      policy = SCHED_RR;
+    }
     param.sched_priority = new_priority;
-    int result = pthread_setschedparam(thread_, SCHED_FIFO, &param);
+    int result = pthread_setschedparam(thread_, policy, &param);
     if (result != 0) {
       switch (result) {
         case EPERM:
@@ -831,7 +860,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
     if (suspend_count_ == 0 && state_ == State::kSuspended) {
       state_ = State::kRunning;
       // Async-signal-safe wakeup for WaitSuspended() from signal handler path.
-      sem_post(&suspend_sem_);
+      dispatch_semaphore_signal(suspend_sem_);
     }
     state_signal_.notify_all();
     return true;
@@ -906,12 +935,8 @@ class PosixCondition<Thread> : public PosixConditionBase {
     state_signal_.wait(lock, [this] { return state_ != State::kUninitialized; });
   }
 
-  /// Uses sem_wait because it may be called from signal handler context.
   void WaitSuspended() {
-    int ret;
-    do {
-      ret = sem_wait(&suspend_sem_);
-    } while (ret == -1 && errno == EINTR);
+    dispatch_semaphore_wait(suspend_sem_, DISPATCH_TIME_FOREVER);
   }
 
   void* native_handle() const override { return reinterpret_cast<void*>(thread_); }
@@ -923,7 +948,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
     if (thread_) {
       pthread_join(thread_, nullptr);
     }
-    sem_destroy(&suspend_sem_);
+    dispatch_release(suspend_sem_);
   }
   pthread_t thread_;
   bool signaled_;
@@ -931,7 +956,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
   State state_;             // Protected by state_mutex_
   uint32_t suspend_count_;  // Protected by state_mutex_
   uint32_t system_id_ = 0;  // Set once the thread starts.
-  sem_t suspend_sem_;
+  dispatch_semaphore_t suspend_sem_;
   mutable std::mutex state_mutex_;
   mutable std::mutex callback_mutex_;
   mutable std::condition_variable state_signal_;

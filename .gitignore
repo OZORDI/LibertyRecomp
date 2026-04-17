@@ -92,6 +92,7 @@ tools/rage_fxc_extractor/extracted_shaders/
 
 # Extracted game assets - DO NOT COMMIT
 extracted_shaders/
+LibertyRecompLib/shader/rage_shaders/
 
 # App resources (fonts, images, music, sounds) - managed separately
 MarathonRecompResources/
