@@ -67,7 +67,7 @@ namespace GTAIV {
 #include <ui/button_window.h>
 #include <ui/fader.h>
 #include <ui/imgui_utils.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <ui/installer_wizard.h>
 #endif
 #include <ui/message_window.h>
@@ -77,7 +77,7 @@ namespace GTAIV {
 #include <ui/main_menu.h>
 #include <patches/aspect_ratio_patches.h>
 #include <user/config.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <sdl_listener.h>
 #endif
 #include <xxHashMap.h>
@@ -1778,11 +1778,11 @@ static void CreateImGuiBackend()
     AchievementMenu::Init();
     AchievementOverlay::Init();
     OptionsMenu::Init();
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     InstallerWizard::Init();
 #endif
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     ImGui_ImplSDL3_InitForOther(GameWindow::s_pWindow);
 #endif
 
@@ -2905,7 +2905,7 @@ static uint16_t g_debugAchievementId = 1;
 
 static void HandleAchievementDebugKey()
 {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     bool toggleAchievement = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F10];
 
     if (!g_achievementDebugWasToggled && toggleAchievement)
@@ -2922,7 +2922,7 @@ static void HandleAchievementDebugKey()
 
 static void DrawProfiler()
 {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     bool toggleProfiler = SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1];
 
     if (!g_profilerWasToggled && toggleProfiler)
@@ -3049,7 +3049,7 @@ static void DrawProfiler()
             {
                 IMGUI_GENERIC_ROW("API", "%s", backend.c_str());
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
                 if (auto pSDLVideoDriver = SDL_GetCurrentVideoDriver())
                 {
                     IMGUI_GENERIC_ROW("SDL Video Driver", "%s", pSDLVideoDriver);
@@ -3166,7 +3166,7 @@ static void DrawFPS()
 
 static void DrawImGui()
 {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     ImGui_ImplSDL3_NewFrame();
 #endif
 
@@ -3179,7 +3179,7 @@ static void DrawImGui()
     // Skip this adjustment during main menu / installer as it can cause issues
     // when the viewport equals the swap chain size.
     if (!MainMenu::s_isVisible
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         && !InstallerWizard::s_isVisible
 #endif
     )
@@ -3234,7 +3234,7 @@ static void DrawImGui()
     AchievementMenu::Draw();
     OptionsMenu::Draw();
     AchievementOverlay::Draw();
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     InstallerWizard::Draw();
 #endif
     ButtonWindow::Draw();
@@ -3655,7 +3655,7 @@ void Video::Present()
     // ImGui has threading issues during gameplay - crashes with iterator assertions
     // But the installer and main menu run single-threaded, so enable ImGui for their UI
     if (
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         InstallerWizard::s_isVisible ||
 #endif
         MainMenu::s_isVisible)
@@ -5219,16 +5219,39 @@ static std::unique_ptr<RenderPipeline> CreateGraphicsPipeline(const PipelineStat
 
 static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipelineState)
 {
+    // [WATCH] pipeline-creation sub-checkpoints
+    static uint64_t s_cgpl_seq = 0;
+    uint64_t cgpl_seq = ++s_cgpl_seq;
+    const bool logp = (cgpl_seq <= 3);
+    #define PWATCH(tag) do { if (logp) { LOGF_WARNING("[WATCH] CreateGPL seq={} {}", cgpl_seq, tag); } } while(0)
+    PWATCH("ENTER");
+    if (logp) {
+        LOGF_WARNING("[WATCH] CreateGPL seq={} vs={} ps={} vdecl={} topo={} strides=[{},{},{},{}] rtFmt={} dsFmt={}",
+                     cgpl_seq,
+                     (void*)pipelineState.vertexShader,
+                     (void*)pipelineState.pixelShader,
+                     (void*)pipelineState.vertexDeclaration,
+                     static_cast<int>(pipelineState.primitiveTopology),
+                     pipelineState.vertexStrides[0], pipelineState.vertexStrides[1],
+                     pipelineState.vertexStrides[2], pipelineState.vertexStrides[3],
+                     static_cast<int>(pipelineState.renderTargetFormat),
+                     static_cast<int>(pipelineState.depthStencilFormat));
+    }
     SanitizePipelineState(pipelineState);
+    PWATCH("post-Sanitize");
 
     XXH64_hash_t hash = XXH3_64bits(&pipelineState, sizeof(pipelineState));
+    PWATCH("post-hash");
     auto& pipeline = g_pipelines[hash];
+    PWATCH("post-map-lookup");
     if (pipeline == nullptr)
     {
+        PWATCH("cache-miss: pre-CreateGraphicsPipeline");
         // Track pipeline cache miss for GTAIV statistics
         GTAIV::RecordPipelineCacheMiss();
-        
+
         pipeline = CreateGraphicsPipeline(pipelineState);
+        PWATCH("cache-miss: post-CreateGraphicsPipeline");
 
 #ifdef ASYNC_PSO_DEBUG
         bool loading = *SWA::SGlobals::ms_IsLoading;
@@ -5344,6 +5367,8 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
         GTAIV::RecordPipelineCacheHit();
     }
     
+    PWATCH("EXIT");
+    #undef PWATCH
     return pipeline.get();
 }
 
@@ -5575,8 +5600,17 @@ static constexpr float COMMON_SLOPE_SCALED_DEPTH_BIAS_VALUE = 1.0f;
 
 static void FlushRenderStateForRenderThread()
 {
+    // [WATCH] sequential checkpoints to localize the crash within this function.
+    // Rate-limited; only first 5 invocations log every checkpoint.
+    static uint64_t s_flush_seq = 0;
+    uint64_t flush_seq = ++s_flush_seq;
+    const bool logf = (flush_seq <= 5);
+    #define FWATCH(tag) do { if (logf) { LOGF_WARNING("[WATCH] Flush seq={} {}", flush_seq, tag); } } while(0)
+    FWATCH("ENTER");
+
     auto renderTarget = g_pipelineState.colorWriteEnable ? g_renderTarget : nullptr;
     auto depthStencil = g_pipelineState.zEnable || g_pipelineState.stencilEnable ? g_depthStencil : nullptr;
+    if (logf) { LOGF_WARNING("[WATCH] Flush seq={} targets rt={} ds={}", flush_seq, (void*)renderTarget, (void*)depthStencil); }
 
     bool foundAny = PopulateBarriersForStretchRect(renderTarget, depthStencil);
 
@@ -5601,15 +5635,21 @@ static void FlushRenderStateForRenderThread()
     if (!g_pendingResolves.empty())
         g_pendingResolves.clear();
 
+    FWATCH("pre-AddBarrier");
     AddBarrier(renderTarget, RenderTextureLayout::COLOR_WRITE);
     AddBarrier(depthStencil, RenderTextureLayout::DEPTH_WRITE);
 
+    FWATCH("pre-FlushBarriers");
     FlushBarriers();
 
+    FWATCH("pre-SetFramebuffer");
     SetFramebuffer(renderTarget, depthStencil, false);
+    FWATCH("pre-FlushViewport");
     FlushViewport();
 
+    FWATCH("pre-commandList");
     auto& commandList = g_commandLists[g_frame];
+    if (logf) { LOGF_WARNING("[WATCH] Flush seq={} commandList={}", flush_seq, (void*)commandList.get()); }
 
     // D3D12 resets depth bias values to the pipeline values, even if they are dynamic.
     // We can reduce unnecessary calls by making common depth bias values part of the pipeline.
@@ -5624,9 +5664,12 @@ static void FlushRenderStateForRenderThread()
         SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.slopeScaledDepthBias, slopeScaledDepthBias);
     }
 
+    FWATCH("pre-pipelineState-check");
     if (g_dirtyStates.pipelineState)
     {
+        FWATCH("pre-CreatePipeline");
         commandList->setPipeline(CreateGraphicsPipelineInRenderThread(g_pipelineState));
+        FWATCH("post-CreatePipeline");
 
         // D3D12 resets the depth bias values. Check if they need to be set again.
         if (g_capabilities.dynamicDepthBias && g_backend == Backend::D3D12)
@@ -5654,19 +5697,33 @@ static void FlushRenderStateForRenderThread()
         SetRootDescriptor(sharedConstants, 2);
     }
 
+    FWATCH("pre-setVertexBuffers-check");
     if (g_dirtyStates.vertexStreamFirst <= g_dirtyStates.vertexStreamLast)
     {
+        if (logf) {
+            LOGF_WARNING("[WATCH] Flush seq={} setVB range=[{},{}] cnt={} view0.buf={} view0.size={}",
+                         flush_seq,
+                         g_dirtyStates.vertexStreamFirst, g_dirtyStates.vertexStreamLast,
+                         g_dirtyStates.vertexStreamLast - g_dirtyStates.vertexStreamFirst + 1,
+                         (void*)g_vertexBufferViews[g_dirtyStates.vertexStreamFirst].buffer.ref,
+                         g_vertexBufferViews[g_dirtyStates.vertexStreamFirst].size);
+        }
+        FWATCH("pre-setVertexBuffers");
         commandList->setVertexBuffers(
             g_dirtyStates.vertexStreamFirst,
             g_vertexBufferViews + g_dirtyStates.vertexStreamFirst,
             g_dirtyStates.vertexStreamLast - g_dirtyStates.vertexStreamFirst + 1,
             g_inputSlots + g_dirtyStates.vertexStreamFirst);
+        FWATCH("post-setVertexBuffers");
     }
 
+    FWATCH("pre-setIndexBuffer-check");
     if (g_dirtyStates.indices && (g_backend == Backend::D3D12 || g_indexBufferView.buffer.ref != nullptr))
         commandList->setIndexBuffer(&g_indexBufferView);
 
+    FWATCH("EXIT");
     g_dirtyStates = DirtyStates(false);
+    #undef FWATCH
 }
 
 static RenderPrimitiveTopology ConvertPrimitiveType(uint32_t primitiveType)
@@ -5846,6 +5903,20 @@ static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 {
     const auto& args = cmd.drawPrimitiveUP;
 
+    // [WATCH] trace render-thread processing of each DrawPrimitiveUP. Rate-limit.
+    static uint64_t s_proc_seq = 0;
+    uint64_t proc_seq = ++s_proc_seq;
+    bool log_this = (proc_seq <= 30 || (proc_seq % 500) == 0);
+
+    if (log_this) {
+        LOGF_WARNING("[WATCH] ProcDP seq={} entry prim={} primCnt={} vdataBytes={} stride={} csd={} vs={} ps={} rt={} ds={} frame={}",
+                     proc_seq, args.primitiveType, args.primitiveCount,
+                     args.vertexStreamZeroSize, args.vertexStreamZeroStride,
+                     static_cast<int>(args.csdFilterState),
+                     (void*)g_pipelineState.vertexShader, (void*)g_pipelineState.pixelShader,
+                     (void*)g_renderTarget, (void*)g_depthStencil, g_frame);
+    }
+
     SetPrimitiveType(args.primitiveType);
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexStrides[0], uint8_t(args.vertexStreamZeroStride));
 
@@ -5873,12 +5944,26 @@ static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 
     if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
 
+    if (log_this) {
+        LOGF_WARNING("[WATCH] ProcDP seq={} pre-flush rt={} ds={} cmdList={} pipelineState_dirty={} vtx_dirty=[{},{}] idxCount={}",
+                     proc_seq, (void*)g_renderTarget, (void*)g_depthStencil,
+                     (void*)g_commandLists[g_frame].get(),
+                     g_dirtyStates.pipelineState ? 1 : 0,
+                     g_dirtyStates.vertexStreamFirst, g_dirtyStates.vertexStreamLast,
+                     indexCount);
+    }
     FlushRenderStateForRenderThread();
+    if (log_this) {
+        LOGF_WARNING("[WATCH] ProcDP seq={} post-flush — flush survived", proc_seq);
+    }
 
     if (indexCount != 0)
         g_commandLists[g_frame]->drawIndexedInstanced(indexCount, 1, 0, 0, 0);
     else
         g_commandLists[g_frame]->drawInstanced(args.primitiveCount, 1, 0, 0);
+    if (log_this) {
+        LOGF_WARNING("[WATCH] ProcDP seq={} post-draw — draw survived", proc_seq);
+    }
 }
 
 static const char* ConvertDeclUsage(uint32_t usage)
@@ -9863,6 +9948,17 @@ static thread_local struct {
 
 PPC_FUNC_HOOK(sub_82A3DAB0) {
     uint32_t deviceAddr = ctx.r3.u32;
+    // [WATCH] per-entry log: capture setup args + whether we're trampling a prior unmatched setup
+    {
+        static thread_local uint64_t s_dab0_seq = 0;
+        uint64_t seq = ++s_dab0_seq;
+        if (seq <= 50 || (seq % 1000) == 0) {
+            LOGF_WARNING("[WATCH] DAB0 seq={} LR=0x{:08X} dev=0x{:08X} prim={} vc={} str={} prior_active={}{}",
+                         seq, ctx.lr, deviceAddr, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32,
+                         s_pendingDrawUP.active ? "yes" : "no",
+                         s_pendingDrawUP.active ? " *** TRAMPLING UNMATCHED SETUP ***" : "");
+        }
+    }
     s_pendingDrawUP.primType  = ctx.r4.u32;
     s_pendingDrawUP.vertCount = ctx.r5.u32;
     s_pendingDrawUP.stride    = ctx.r6.u32;
@@ -9883,12 +9979,61 @@ PPC_FUNC_HOOK(sub_82A3DAB0) {
 // --- sub_82A3DF50: Commit (captures vertex data + enqueues DrawPrimitiveUP) ---
 // Original function: device[48] = device[13428] (3-line pointer advance)
 PPC_FUNC_HOOK(sub_82A3DF50) {
+    // [WATCH] per-entry log: capture r3, active state, and correlation-key match.
+    // The core hypothesis: dispatch based on s_pendingDrawUP.active is wrong because
+    // sub_82A3DF50 has two unrelated callers. The correct key is ctx.r3 == deviceAddr.
+    {
+        static thread_local uint64_t s_df50_seq = 0;
+        uint64_t seq = ++s_df50_seq;
+        bool key_match = (ctx.r3.u32 == s_pendingDrawUP.deviceAddr);
+        if (seq <= 50 || (seq % 1000) == 0 ||
+            (s_pendingDrawUP.active && !key_match)) {
+            const char* branch = s_pendingDrawUP.active
+                ? (key_match ? "DRAW(match)" : "DRAW(MISMATCH)")
+                : "epilogue";
+            LOGF_WARNING("[WATCH] DF50 seq={} LR=0x{:08X} r3=0x{:08X} active={} pending.dev=0x{:08X} key_match={} branch={}",
+                         seq, ctx.lr, ctx.r3.u32,
+                         s_pendingDrawUP.active ? "yes" : "no",
+                         s_pendingDrawUP.deviceAddr, key_match ? "yes" : "no", branch);
+        }
+    }
+    if (ctx.r3.u32 < 0x80000000u || ctx.r3.u32 == 0xFFE1E1E1u) {
+        LOGF_WARNING("[WATCH] DEREF sub_82A3DF50 LR=0x{:08X} r3=0x{:08X} pendingDrawUP={} *** WILL DEREF ***",
+                     ctx.lr, ctx.r3.u32, s_pendingDrawUP.active ? "yes" : "no");
+    }
     if (s_pendingDrawUP.active) {
         s_pendingDrawUP.active = false;
 
         auto* device = reinterpret_cast<GuestDevice*>(
             static_cast<uint8_t*>(g_memory.Translate(s_pendingDrawUP.deviceAddr)));
         void* vertexData = static_cast<uint8_t*>(g_memory.Translate(s_pendingDrawUP.bufferAddr));
+
+        // [WATCH] log the first vertex + DrawPrimitiveUP args. sub_828C2290 writes
+        // 9 words per vertex: [0..5]=f1..f6, [6]=r9 (color/u32 — can be 0xFFE1E1E1 poison
+        // if upstream handle is freed), [7..8]=f7..f8. Rate-limit to avoid flooding.
+        {
+            static thread_local uint64_t s_call_seq = 0;
+            uint64_t seq = ++s_call_seq;
+            if (seq <= 30 || (seq % 500) == 0) {
+                uint32_t* vd = static_cast<uint32_t*>(vertexData);
+                // Byte-swap (guest is big-endian)
+                uint32_t w[9];
+                for (int i = 0; i < 9; ++i) w[i] = __builtin_bswap32(vd[i]);
+                float f[9];
+                for (int i = 0; i < 9; ++i) { std::memcpy(&f[i], &w[i], 4); }
+                LOGF_WARNING("[WATCH] DrawPrimUP seq={} dev={} prim={} vc={} str={} buf_guest=0x{:08X} v0.pos=[{:.3f},{:.3f},{:.3f},{:.3f}] v0.extra=[{:.3f},{:.3f}] v0.color=0x{:08X} v0.uv=[{:.3f},{:.3f}]",
+                             seq, (void*)device,
+                             s_pendingDrawUP.primType, s_pendingDrawUP.vertCount, s_pendingDrawUP.stride,
+                             s_pendingDrawUP.bufferAddr,
+                             f[0], f[1], f[2], f[3],
+                             f[4], f[5],
+                             w[6],
+                             f[7], f[8]);
+                if (w[6] == 0xFFE1E1E1u) {
+                    LOGF_WARNING("[WATCH] DrawPrimUP seq={} *** COLOR IS RAGE POISON 0xFFE1E1E1 ***", seq);
+                }
+            }
+        }
 
         DrawPrimitiveUP(device,
             s_pendingDrawUP.primType,

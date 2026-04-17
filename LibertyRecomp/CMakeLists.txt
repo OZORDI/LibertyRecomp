@@ -124,8 +124,10 @@ if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQUAL 
     add_compile_definitions(LIBERTY_RECOMP_PS4)
 endif()
 if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch")
+    # CMake variable retained for conditional source lists / link targets below.
+    # Preprocessor side: REX_PLATFORM_NX is auto-set by rex/platform.h via the
+    # toolchain's -D__SWITCH__ (see toolchains/switch-libnx.cmake).
     set(LIBERTY_RECOMP_NX TRUE)
-    add_compile_definitions(LIBERTY_RECOMP_NX)
 endif()
 
 set(LIBERTY_RECOMP_PRECOMPILED_HEADERS
@@ -331,6 +333,7 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/postfx_hooks.cpp"               # PostFX (bloom, sun shafts)
     "patches/shader_collection_patches.cpp"  # fiCollection shader VFS mount chain
     "patches/host_gpu_init.cpp"              # host device already ready — initState=2, render gate, GPU flag
+    "patches/draw_pool_watchpoint.cpp"       # WATCH: trace lifecycle of *0x831C22A4 (mgr ptr UAF investigation)
     # Removed (interfered with rexglue):
     # "patches/grm_setup_patches.cpp"        # old vtable dispatch thunks broke shader factory init
     # "patches/scene_render_patches.cpp"     # duplicate sub_828C1228 hook
