@@ -2,8 +2,9 @@
 // Uses libnx pad.h wrapper for controller input
 
 #include <stdafx.h>
+#include <rex/platform.h>
 
-#ifdef LIBERTY_RECOMP_NX
+#if REX_PLATFORM_NX
 
 #include <switch/runtime/pad.h>
 #include <switch/services/hid.h>
@@ -313,4 +314,4 @@ void ShutdownDualSense() {}
 
 } // namespace hid
 
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

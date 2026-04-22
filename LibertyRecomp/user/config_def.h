@@ -30,7 +30,7 @@ CONFIG_DEFINE_LOCALISED("Input", bool, MotionReload, true, false);         // Sh
 CONFIG_DEFINE_LOCALISED("Input", bool, MotionHelicopter, false, false);    // Tilt to control helicopters
 
 // GTA IV Control Scheme - Face Buttons
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_A, SDL_SCANCODE_LSHIFT, false);      // Sprint (on foot) / Handbrake (in car)
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_B, SDL_SCANCODE_LCTRL, false);       // Crouch/Duck
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_X, SDL_SCANCODE_SPACE, false);       // Jump

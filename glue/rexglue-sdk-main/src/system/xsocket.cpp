@@ -70,7 +70,15 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
 }
 
 X_STATUS XSocket::Close() {
+  // Idempotent: a prior Close() (or a never-initialized socket) leaves
+  // native_handle_ == kInvalidSocket. The dtor calls Close() too, so without
+  // this guard an explicit Close() followed by ~XSocket() races on fd reuse.
+  if (native_handle_ == static_cast<uint64_t>(rex::net::kInvalidSocket)) {
+    return X_STATUS_SUCCESS;
+  }
+
   int ret = rex::net::socket_close(native_handle_);
+  native_handle_ = static_cast<uint64_t>(rex::net::kInvalidSocket);
   if (ret != 0) {
     return X_STATUS_UNSUCCESSFUL;
   }
@@ -201,7 +209,11 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
                      (sockaddr*)&nfrom, &nfromlen);
   if (from) {
     from->sin_family = nfrom.sin_family;
-    from->sin_addr = ntohl(nfrom.sin_addr.s_addr);  // BE <- BE
+    // nfrom.sin_{addr,port} are already network byte order (BE). N_XSOCKADDR_IN
+    // fields are rex::be<>, whose operator= byte-swaps on LE hosts. Feeding it
+    // the raw BE value is correct on every platform; ntohl()/ntohs() here would
+    // double-swap on LE and be a no-op on BE.
+    from->sin_addr = nfrom.sin_addr.s_addr;
     from->sin_port = nfrom.sin_port;
     std::memset(from->x_sin_zero, 0, sizeof(from->x_sin_zero));
   }
@@ -232,6 +244,7 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
 
   sockaddr_in nto;
   if (to) {
+    std::memset(&nto, 0, sizeof(nto));
     nto.sin_addr.s_addr = to->sin_addr;
     nto.sin_family = to->sin_family;
     nto.sin_port = to->sin_port;

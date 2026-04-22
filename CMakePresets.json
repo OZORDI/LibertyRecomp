@@ -269,7 +269,11 @@
                     "type": "STRING"
                 },
                 "ANDROID_PLATFORM": {
-                    "value": "android-28",
+                    "value": "android-26",
+                    "type": "STRING"
+                },
+                "ANDROID_STL": {
+                    "value": "c++_static",
                     "type": "STRING"
                 },
                 "LIBERTY_RECOMP_EMBEDDED_GAME_PATH": {
@@ -277,6 +281,10 @@
                     "type": "PATH"
                 },
                 "LIBERTY_RECOMP_EMBEDDED_ASSETS": {
+                    "value": "ON",
+                    "type": "BOOL"
+                },
+                "LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS": {
                     "value": "ON",
                     "type": "BOOL"
                 }

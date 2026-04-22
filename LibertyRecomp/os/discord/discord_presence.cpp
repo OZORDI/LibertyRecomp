@@ -13,11 +13,11 @@
 #include "discord_presence.h"
 
 // Only compile on non-PS4 desktop targets.
-#if !defined(LIBERTY_RECOMP_PS4)  && \
+#include <rex/platform.h>
+#if !REX_PLATFORM_CONSOLE     && \
     !defined(LIBERTY_RECOMP_PS5)  && \
-    !defined(LIBERTY_RECOMP_NX)   && \
-    !defined(__ANDROID__)         && \
-    !defined(TARGET_OS_IOS)
+    !REX_PLATFORM_ANDROID     && \
+    !REX_PLATFORM_IOS
 
 #include <discord_rpc.h>
 #include <cstring>

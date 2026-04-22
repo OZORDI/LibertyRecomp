@@ -67,6 +67,12 @@ elseif(APPLE)
         window_macos.mm
         windowed_app_context_macos.mm
     )
+elseif(ANDROID)
+    set(REXUI_PLATFORM_SOURCES
+        surface_android.cpp
+        window_android.cpp
+        windowed_app_context_android.cpp
+    )
 else()
     set(REXUI_PLATFORM_SOURCES
         surface_gnulinux.cpp
@@ -135,6 +141,8 @@ if(REXGLUE_USE_VULKAN)
         SPIRV-Tools-static
     )
     if(APPLE)
+        # Covers both macOS (CMAKE_SYSTEM_NAME=Darwin) and iOS — MoltenVK
+        # exposes VK_EXT_metal_surface on both, backed by a CAMetalLayer.
         target_compile_definitions(rexui PRIVATE VK_USE_PLATFORM_METAL_EXT)
     endif()
 endif()
@@ -150,6 +158,12 @@ elseif(APPLE)
         "-framework AppKit"
         "-framework Foundation"
         "-framework QuartzCore"
+    )
+elseif(ANDROID)
+    # Android: SDL handles windowing — no GTK/X11 deps needed.
+    target_link_libraries(rexui PUBLIC
+        android
+        log
     )
 else()
     find_package(PkgConfig REQUIRED)

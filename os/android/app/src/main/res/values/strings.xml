@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Liberty Recompiled</string>
+
+    <!-- Folder picker (pre-SDL UI). -->
+    <string name="picker_title">Liberty Recompiled</string>
+    <string name="picker_subtitle">Select your extracted GTA IV Xbox 360 game folder to continue.</string>
+    <string name="picker_pick_folder">Pick game folder…</string>
+    <string name="picker_play">Play</string>
+    <string name="picker_change_folder">Change folder</string>
+    <string name="picker_current_path">Current: %1$s</string>
+    <string name="picker_no_folder">No game folder selected.</string>
+    <string name="picker_missing_files">Selected folder is missing required files:\n%1$s</string>
+
+    <!-- Storage permission prompt. -->
+    <string name="perm_title">All-files access required</string>
+    <string name="perm_body">LibertyRecomp reads your extracted game files directly from disk. Tap below to grant Android\'s \"Allow access to manage all files\" permission for this app.</string>
+    <string name="perm_grant">Open settings</string>
+    <string name="perm_retry">I granted access, try again</string>
+</resources>

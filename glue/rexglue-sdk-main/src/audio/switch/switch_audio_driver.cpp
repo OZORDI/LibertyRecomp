@@ -31,6 +31,8 @@
 extern "C" {
 #include <switch/audio/driver.h>
 #include <switch/kernel/event.h>
+#include <switch/kernel/svc.h>
+#include <switch/kernel/thread.h>
 #include <switch/services/audren.h>
 }
 
@@ -51,26 +53,39 @@ SwitchAudioDriver::~SwitchAudioDriver() {
 }
 
 bool SwitchAudioDriver::Initialize() {
-  // Configure audio renderer: 1 voice, 1 sink, 1 mix (final mix), 2 mix buffers (stereo).
-  AudioRendererConfig ar_config = {};
-  ar_config.output_rate = AudioRendererOutputRate_48kHz;
-  ar_config.num_voices = 1;
-  ar_config.num_effects = 0;
-  ar_config.num_sinks = 1;
-  ar_config.num_mix_objs = 1;
-  ar_config.num_mix_buffers = kOutputChannels;
+  // Configure audio renderer. Follows the libnx `audren_user` sample: minimal
+  // voice/mix/sink counts. 1 voice (stereo PCM16 downmix of the guest 5.1),
+  // 1 final mix with 2 mix buffers for stereo output, 1 device sink.
+  // NOTE: AudioRendererConfig in vendored libnx has no `revision` field —
+  // the renderer revision is negotiated internally by audrenInitialize()
+  // (uses the latest supported rev, currently AUDREN_REVISION_6).
+  const AudioRendererConfig ar_config = {
+      .output_rate     = AudioRendererOutputRate_48kHz,
+      .num_voices      = 1,
+      .num_effects     = 0,
+      .num_sinks       = 1,
+      .num_mix_objs    = 1,
+      .num_mix_buffers = static_cast<int>(kOutputChannels),
+  };
 
-  // Create the high-level audio driver.
-  Result rc = audrvCreate(&audren_driver_, &ar_config, static_cast<int>(kOutputChannels));
+  // STEP 1: Connect to the audren service. `audrvCreate` cannot be called
+  // before this — it assumes the renderer service session exists.
+  Result rc = audrenInitialize(&ar_config);
+  if (R_FAILED(rc)) {
+    REXAPU_ERROR("audrenInitialize failed: 0x{:08X}", rc);
+    return false;
+  }
+  audren_service_initialized_ = true;
+
+  // STEP 2: Create the high-level audio driver wrapper over audren.
+  rc = audrvCreate(&audren_driver_, &ar_config, static_cast<int>(kOutputChannels));
   if (R_FAILED(rc)) {
     REXAPU_ERROR("audrvCreate failed: 0x{:08X}", rc);
     return false;
   }
-  audren_initialized_ = true;
+  audren_driver_initialized_ = true;
 
   // Compute aligned memory pool size for double-buffered PCM16 output.
-  // Each buffer: kChannelSamples * kOutputChannels * sizeof(int16_t) bytes,
-  // aligned up to kBufferAlign.
   size_t per_buf_size = kOutputFrameSize;
   per_buf_size = (per_buf_size + kBufferAlign - 1) & ~(kBufferAlign - 1);
 
@@ -86,13 +101,16 @@ bool SwitchAudioDriver::Initialize() {
   }
   std::memset(mempool_ptr_, 0, mempool_size_);
 
-  // Register the memory pool with audren.
+  // STEP 3 + 4: Register the PCM memory pool with audren and attach it.
   mempool_id_ = audrvMemPoolAdd(&audren_driver_, mempool_ptr_, mempool_size_);
   if (mempool_id_ < 0) {
     REXAPU_ERROR("audrvMemPoolAdd failed");
     return false;
   }
-  audrvMemPoolAttach(&audren_driver_, mempool_id_);
+  if (!audrvMemPoolAttach(&audren_driver_, mempool_id_)) {
+    REXAPU_ERROR("audrvMemPoolAttach failed");
+    return false;
+  }
 
   // Set up pointers into the memory pool for each wave buffer.
   auto* pool_bytes = static_cast<uint8_t*>(mempool_ptr_);
@@ -119,7 +137,7 @@ bool SwitchAudioDriver::Initialize() {
   audrvVoiceSetMixFactor(&audren_driver_, 0, 1.0f, 1, 1);  // right -> right
   audrvVoiceSetVolume(&audren_driver_, 0, 1.0f);
 
-  // Add a device sink for the default audio output.
+  // STEP 5: Add a device sink for the default audio output.
   const u8 sink_channels[] = {0, 1};
   int sink_id = audrvDeviceSinkAdd(&audren_driver_, AUDREN_DEFAULT_DEVICE_NAME,
                                    static_cast<int>(kOutputChannels), sink_channels);
@@ -128,23 +146,56 @@ bool SwitchAudioDriver::Initialize() {
     return false;
   }
 
-  // Push initial state to the renderer and start it.
+  // STEP 6: Push initial state to the renderer.
   rc = audrvUpdate(&audren_driver_);
   if (R_FAILED(rc)) {
     REXAPU_ERROR("Initial audrvUpdate failed: 0x{:08X}", rc);
     return false;
   }
 
+  // STEP 7: Start the audio renderer.
   rc = audrenStartAudioRenderer();
   if (R_FAILED(rc)) {
     REXAPU_ERROR("audrenStartAudioRenderer failed: 0x{:08X}", rc);
     return false;
   }
 
+  // Raise thread priority for the audio worker that calls SubmitFrame.
+  // Switch default is 0x2C; audio glitches under rendering load unless we
+  // bump to 0x28 (higher priority on Switch = lower numeric value).
+  Result prio_rc = svcSetThreadPriority(CUR_THREAD_HANDLE, 0x28);
+  if (R_FAILED(prio_rc)) {
+    REXAPU_WARN("svcSetThreadPriority(0x28) failed: 0x{:08X} (non-fatal)", prio_rc);
+  }
+
   // Start the voice.
   audrvVoiceStart(&audren_driver_, 0);
 
   return true;
+}
+
+// Returns true if the current-slot wave buffer is no longer owned by the
+// renderer (Free/Done) and may be safely overwritten. Caller must hold
+// `audren_mutex_` before invoking audrvUpdate.
+bool SwitchAudioDriver::CurrentSlotIsReusable() {
+  const auto state = wavebufs_[current_buf_].state;
+  return state == AudioDriverWaveBufState_Done ||
+         state == AudioDriverWaveBufState_Free;
+}
+
+// Wait for the current wave-buffer slot to transition to Done/Free before
+// returning. Polls audrvUpdate, gated on audrenWaitFrame() to avoid a busy
+// loop. Caller passes the unique_lock owning `audren_mutex_`; this function
+// drops and reacquires it around the blocking frame wait. On return the
+// caller's lock is re-held.
+void SwitchAudioDriver::WaitForCurrentSlotReusable(
+    std::unique_lock<std::mutex>& drv_lock) {
+  while (!CurrentSlotIsReusable()) {
+    drv_lock.unlock();
+    audrenWaitFrame();
+    drv_lock.lock();
+    audrvUpdate(&audren_driver_);
+  }
 }
 
 void SwitchAudioDriver::SubmitFrame(uint32_t frame_ptr) {
@@ -162,57 +213,68 @@ void SwitchAudioDriver::SubmitFrame(uint32_t frame_ptr) {
 
   std::memcpy(output_frame, input_frame, kFrameSamples * sizeof(float));
 
-  // Find a free wave buffer slot and submit immediately.
-  // If both buffers are still in flight, queue the frame for later.
+  // Try to submit directly; if the current slot is still owned by the
+  // renderer (Queued/Waiting/Playing), queue the frame for drain below.
+  bool submitted_directly = false;
   {
-    std::unique_lock<std::mutex> guard(frames_mutex_);
-
-    // Check if current buffer slot is done playing.
-    if (wavebufs_[current_buf_].state == AudioDriverWaveBufState_Done ||
-        wavebufs_[current_buf_].state == AudioDriverWaveBufState_Free) {
-      // Convert directly into the wave buffer and submit.
-      guard.unlock();
-      ConvertAndSubmit(output_frame);
-      guard.lock();
-      frames_unused_.push(output_frame);
-
-      if (semaphore_) {
-        auto ret = semaphore_->Release(1, nullptr);
-        assert_true(ret);
-      }
-    } else {
-      // Both buffers busy -- queue the frame to be consumed on next opportunity.
-      frames_queued_.push(output_frame);
+    std::unique_lock<std::mutex> drv_guard(audren_mutex_);
+    // Refresh renderer-side buffer state.
+    audrvUpdate(&audren_driver_);
+    if (CurrentSlotIsReusable()) {
+      ConvertAndSubmit(output_frame);  // holds audren_mutex_
+      submitted_directly = true;
     }
   }
 
-  // Drain any queued frames into free buffer slots.
-  {
+  if (submitted_directly) {
+    {
+      std::unique_lock<std::mutex> guard(frames_mutex_);
+      frames_unused_.push(output_frame);
+    }
+    if (semaphore_) {
+      auto ret = semaphore_->Release(1, nullptr);
+      assert_true(ret);
+    }
+  } else {
     std::unique_lock<std::mutex> guard(frames_mutex_);
-    while (!frames_queued_.empty()) {
-      // Poll audren to update buffer states.
-      audrvUpdate(&audren_driver_);
+    frames_queued_.push(output_frame);
+  }
 
-      if (wavebufs_[current_buf_].state != AudioDriverWaveBufState_Done &&
-          wavebufs_[current_buf_].state != AudioDriverWaveBufState_Free) {
-        break;  // No free slot yet.
-      }
-
-      float* queued = frames_queued_.front();
+  // Drain any queued frames into free buffer slots. CRITICAL: we must not
+  // overwrite pcm_buffers_[idx] while the hardware is still referencing it.
+  // WaitForCurrentSlotReusable blocks until state transitions to Done/Free.
+  while (true) {
+    float* queued = nullptr;
+    {
+      std::unique_lock<std::mutex> guard(frames_mutex_);
+      if (frames_queued_.empty()) break;
+      queued = frames_queued_.front();
       frames_queued_.pop();
-      guard.unlock();
-      ConvertAndSubmit(queued);
-      guard.lock();
-      frames_unused_.push(queued);
+    }
 
-      if (semaphore_) {
-        auto ret = semaphore_->Release(1, nullptr);
-        assert_true(ret);
-      }
+    {
+      std::unique_lock<std::mutex> drv_guard(audren_mutex_);
+      // Block until the current slot is safe to overwrite (per libnx
+      // `audren_user` sample: do NOT write a wave buffer whose state is
+      // Queued / Waiting / Playing).
+      WaitForCurrentSlotReusable(drv_guard);
+      ConvertAndSubmit(queued);
+    }
+
+    {
+      std::unique_lock<std::mutex> guard(frames_mutex_);
+      frames_unused_.push(queued);
+    }
+    if (semaphore_) {
+      auto ret = semaphore_->Release(1, nullptr);
+      assert_true(ret);
     }
   }
 }
 
+// Convert a single guest 5.1 float frame to stereo PCM16 and submit to the
+// current wave-buffer slot. Caller MUST hold `audren_mutex_` and MUST have
+// verified that the current slot is Done/Free (see WaitForCurrentSlotReusable).
 void SwitchAudioDriver::ConvertAndSubmit(const float* input) {
   // Temporary buffer for stereo float conversion.
   float stereo_float[kChannelSamples * kOutputChannels];
@@ -240,21 +302,34 @@ void SwitchAudioDriver::ConvertAndSubmit(const float* input) {
 }
 
 void SwitchAudioDriver::Shutdown() {
-  if (voice_initialized_) {
-    audrvVoiceStop(&audren_driver_, 0);
-    audrvVoiceDrop(&audren_driver_, 0);
-    voice_initialized_ = false;
-  }
+  // Teardown order per libnx `audren_user` sample:
+  //   audrvVoiceStop -> audrvClose -> audrenStopAudioRenderer -> audrenExit
+  // Serialize against the audio worker: anything touching audrv_* needs
+  // audren_mutex_.
+  {
+    std::unique_lock<std::mutex> drv_guard(audren_mutex_);
 
-  if (audren_initialized_) {
-    audrenStopAudioRenderer();
-    if (mempool_id_ >= 0) {
-      audrvMemPoolDetach(&audren_driver_, mempool_id_);
-      audrvMemPoolRemove(&audren_driver_, mempool_id_);
-      mempool_id_ = -1;
+    if (voice_initialized_) {
+      audrvVoiceStop(&audren_driver_, 0);
+      audrvVoiceDrop(&audren_driver_, 0);
+      voice_initialized_ = false;
     }
-    audrvClose(&audren_driver_);
-    audren_initialized_ = false;
+
+    if (audren_driver_initialized_) {
+      if (mempool_id_ >= 0) {
+        audrvMemPoolDetach(&audren_driver_, mempool_id_);
+        audrvMemPoolRemove(&audren_driver_, mempool_id_);
+        mempool_id_ = -1;
+      }
+      audrvClose(&audren_driver_);
+      audren_driver_initialized_ = false;
+    }
+
+    if (audren_service_initialized_) {
+      audrenStopAudioRenderer();
+      audrenExit();
+      audren_service_initialized_ = false;
+    }
   }
 
   if (mempool_ptr_) {

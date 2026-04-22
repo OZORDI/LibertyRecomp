@@ -15,9 +15,12 @@
 # Tell rexglue SDK we're targeting PS4 console
 set(LIBERTY_RECOMP_TARGET_PLATFORM "ps4" CACHE STRING "" FORCE)
 
-# Resolve toolchain root
-if(NOT DEFINED OO_PS4_TOOLCHAIN)
-    if(DEFINED ENV{OO_PS4_TOOLCHAIN})
+# Resolve toolchain root.
+# CMake presets forward parent env via `$penv{OO_PS4_TOOLCHAIN}`, which
+# evaluates to an EMPTY STRING when the parent var is unset — that still
+# counts as DEFINED, so treat empty-string the same as unset.
+if(NOT DEFINED OO_PS4_TOOLCHAIN OR OO_PS4_TOOLCHAIN STREQUAL "")
+    if(DEFINED ENV{OO_PS4_TOOLCHAIN} AND NOT "$ENV{OO_PS4_TOOLCHAIN}" STREQUAL "")
         set(OO_PS4_TOOLCHAIN "$ENV{OO_PS4_TOOLCHAIN}")
     else()
         # Default: repo-local clone (use CMAKE_CURRENT_LIST_DIR for try_compile safety)
@@ -69,26 +72,60 @@ set(CMAKE_ASM_COMPILER_TARGET "x86_64-pc-freebsd12-elf")
 # -B tells clang where to find toolchain programs.
 # Link PS4 system libraries: C/C++ runtime, kernel, and SDK stubs.
 set(_PS4_LINK_FLAGS "-B ${OO_PS4_TOOLCHAIN}/bin")
-# PS4 CRT objects: crt1.o provides _start entry point, crti/crtn provide
-# _init/_fini sections for constructors/destructors.
+# Match the canonical OpenOrbis sample build (samples/hello_world/Makefile):
+# `-m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr crt1.o`.
+# The clang freebsd12 driver would otherwise inject its own crt1.o + crti.o +
+# crtbegin.o + crtend.o + crtn.o + -lgcc/-lgcc_s + a default PT_INTERP
+# pointing at /libexec/ld-elf.so.1 — none of which PS4 wants.
+string(APPEND _PS4_LINK_FLAGS " -nostdlib")
+# -pie: PS4 SELFs are position-independent; without this, lld emits absolute
+# relocations that break create-fself's relro/dynamic-section rewriting.
+string(APPEND _PS4_LINK_FLAGS " -pie")
+# --eh-frame-hdr: emit a proper PT_GNU_EH_FRAME with version=1 byte. Without
+# it, our libcxx_ps4_compat unwind tables get a malformed header and shadPS4
+# logs `Critical: Unsupported .eh_frame_hdr version: 0x0`.
+string(APPEND _PS4_LINK_FLAGS " -Wl,--eh-frame-hdr")
+# CANONICAL OpenOrbis linker script. It (a) embeds the interp string
+# `/libexec/ld-elf.so.1` as 4 inline QUADs in .text so no PT_INTERP segment
+# is needed (avoids "Unimplemented type Interpreter Path x2"), (b) defines
+# explicit output sections for .eh_frame, .eh_frame_hdr, .data.sce_process_param,
+# .data.sce_module_param, .dynamic, .tls, .got, .got.plt, .init_array — the
+# exact layout create-fself's OELFGenProgramHeaders expects.
+# Replaces our previous ps4-orbis-sections.ld INSERT-BEFORE script, which let
+# lld defaults emit PT_GNU_STACK/RELRO/EH_FRAME and a PT_INTERP segment that
+# shadPS4 doesn't recognize.
+string(APPEND _PS4_LINK_FLAGS " -Wl,--script=${OO_PS4_TOOLCHAIN}/link.x")
+# libunwind (in OpenOrbis libc++.a) references __eh_frame_start/end and
+# __eh_frame_hdr_start/end. link.x defines these as section bracket symbols
+# (KEEP(*(.eh_frame))), so our os/ps4/eh_frame_stub.cpp weak symbols are
+# now redundant — kept compiled-in for safety since they're zero-length.
+
+# PS4 CRT: ONLY crt1.o (provides _start entry point + .data.sce_process_param).
+# Drop crti.o/crtn.o — those are FreeBSD's _init/_fini wrappers; PS4 uses
+# .ctors/.dtors arrays processed by crt1.o, not _init/_fini sections.
 string(APPEND _PS4_LINK_FLAGS " ${OO_PS4_TOOLCHAIN}/lib/crt1.o")
-string(APPEND _PS4_LINK_FLAGS " ${OO_PS4_TOOLCHAIN}/lib/crti.o")
 # C/C++ standard libraries (musl libc, libc++, libc++abi, unwind, compiler-rt)
 # libcxx_ps4_compat.a: LLVM 21 libc++/libc++abi compiled for PS4 (replaces old OO SDK versions)
+# --allow-multiple-definition kept because libcxx_ps4_compat overlaps SDK libc++.
+# TODO(ps4): move to one libc++ source — drop either the compat archive or
+# the SDK -lc++/-lc++abi/-lunwind, and remove the workaround.
+string(APPEND _PS4_LINK_FLAGS " -Wl,--allow-multiple-definition")
 string(APPEND _PS4_LINK_FLAGS " ${OO_PS4_TOOLCHAIN}/lib/libcxx_ps4_compat.a")
 string(APPEND _PS4_LINK_FLAGS " -lc++ -lc++abi -lunwind -lc -lm")
 string(APPEND _PS4_LINK_FLAGS " ${OO_PS4_TOOLCHAIN}/lib/libclang_rt.builtins-x86_64.a")
 # PS4 kernel (provides pthread, sceKernel*, mmap, etc.)
 string(APPEND _PS4_LINK_FLAGS " -lkernel")
-# PS4 SDK stub libraries
+# PS4 SDK stub libraries — each adds one DT_SCE_IMPORT_LIB_ATTR. shadPS4 logs
+# `unsupported DT_SCE_IMPORT_LIB_ATTR` for each (~23 entries today). TODO(ps4):
+# audit which Sce* APIs the recomp actually calls and trim the list, since
+# every speculatively-linked stub forces shadPS4/PS4 to runtime-resolve a PRX.
 string(APPEND _PS4_LINK_FLAGS " -lSceSystemService -lSceSysmodule -lScePad -lSceUserService")
 string(APPEND _PS4_LINK_FLAGS " -lSceAudioOut -lSceAudioIn -lSceVideoOut")
 string(APPEND _PS4_LINK_FLAGS " -lSceNet -lSceNetCtl -lSceHttp -lSceSsl")
 string(APPEND _PS4_LINK_FLAGS " -lSceNpManager -lSceNpTrophy -lSceNpSignaling -lSceNpMatching2")
 string(APPEND _PS4_LINK_FLAGS " -lSceSaveData -lSceCommonDialog -lSceMsgDialog")
 string(APPEND _PS4_LINK_FLAGS " -lSceGnmDriver -lSceFios2 -lScePosix")
-string(APPEND _PS4_LINK_FLAGS " -lSceRtc -lSceFreeType")
-string(APPEND _PS4_LINK_FLAGS " ${OO_PS4_TOOLCHAIN}/lib/crtn.o")
+string(APPEND _PS4_LINK_FLAGS " -lSceRtc")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld ${_PS4_LINK_FLAGS}")
 
 # Cross-compilation: skip try_compile linking
@@ -143,8 +180,15 @@ set(_PS4_DEFINES "-D__ORBIS__ -D_GNU_SOURCE -U__FreeBSD__ -D_LIBCPP_PROVIDES_DEF
 # Modern clang may define wchar_t via stddef.h before OpenOrbis musl headers,
 # or reach stdlib.h without it depending on include order. Force stddef.h in
 # first for C and suppress the duplicate musl typedef in that mode.
-set(CMAKE_C_FLAGS_INIT   "${_PS4_DEFINES} -D__DEFINED_wchar_t -include stddef.h -nostdinc ${_PS4_C_ISYSTEM}")
-set(CMAKE_CXX_FLAGS_INIT "${_PS4_DEFINES} -fexceptions -fcxx-exceptions -frtti -nostdinc++ -nostdinc ${_PS4_CXX_ISYSTEM}")
+#
+# -fPIC + -funwind-tables match the canonical OpenOrbis sample CFLAGS:
+# -fPIC is required because we link with -pie (PS4 SELFs are PIE).
+# -funwind-tables ensures clang emits .eh_frame entries for every function
+# even without try/catch, so libunwind has the data it needs at signal time.
+# Without these, exception unwinding from signal handlers crashes (which is
+# exactly what we hit at rex::arch::ExceptionHandlerCallback).
+set(CMAKE_C_FLAGS_INIT   "${_PS4_DEFINES} -D__DEFINED_wchar_t -include stddef.h -nostdinc -fPIC -funwind-tables ${_PS4_C_ISYSTEM}")
+set(CMAKE_CXX_FLAGS_INIT "${_PS4_DEFINES} -fexceptions -fcxx-exceptions -frtti -nostdinc++ -nostdinc -fPIC -funwind-tables ${_PS4_CXX_ISYSTEM}")
 
 # Prevent CMake from finding host (macOS) libraries during cross-compilation
 set(CMAKE_FIND_ROOT_PATH "${OO_PS4_TOOLCHAIN}")
@@ -152,11 +196,16 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
-# PS4 uses a custom Vulkan-like GNM API via OpenOrbis's SDL-PS4 or GNM headers.
-# For now we target SDL-PS4 with software-emulated Vulkan layer.
-set(LIBERTY_RECOMP_VULKAN ON CACHE BOOL "Use Vulkan renderer (via PS4 layer)" FORCE)
+# PS4 has no Vulkan ICD via OpenOrbis (no vkGetInstanceProcAddr, no WSI
+# extensions, no dynamic loader). The SDK's Vulkan UI subsystem is therefore
+# disabled here AND in glue/rexglue-sdk-main/CMakeLists.txt — the recomp uses
+# the GNM-backed path in LibertyRecomp/gpu/video.cpp directly. If a Vulkan-
+# on-GNM translation layer (e.g. a future community port) becomes available,
+# flip both knobs in tandem.
+set(LIBERTY_RECOMP_VULKAN OFF CACHE BOOL "PS4 uses GNM directly; no Vulkan ICD available" FORCE)
 set(LIBERTY_RECOMP_D3D12 OFF CACHE BOOL "" FORCE)
 set(LIBERTY_RECOMP_METAL OFF CACHE BOOL "" FORCE)
+set(LIBERTY_RECOMP_GNM ON CACHE BOOL "Use GNM-native renderer on PS4" FORCE)
 
 # No installer wizard on PS4
 set(LIBERTY_RECOMP_EMBEDDED_ASSETS ON CACHE BOOL "Package assets at build time (no installer UI)" FORCE)

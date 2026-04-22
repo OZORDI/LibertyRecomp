@@ -22,9 +22,20 @@ namespace PlatformPaths
     /**
      * Get the game files directory (where extracted game content goes).
      * Returns: <install_dir>/game/
+     * On PS4 this returns /app0/game (read-only PKG mount); use
+     * GetWritableCacheDirectory() for any runtime writes.
      */
     std::filesystem::path GetGameDirectory();
-    
+
+    /**
+     * Get a writable directory for runtime-generated files that would
+     * otherwise go under the game tree (e.g. button-prompt XTD cache).
+     * On PS4 this lives under /user/data/<title> which is writable, while
+     * GetGameDirectory() points at /app0 which is read-only.
+     * On desktop platforms this sits next to the game install.
+     */
+    std::filesystem::path GetWritableCacheDirectory();
+
     /**
      * Get the shader cache directory.
      * Returns: <install_dir>/shader_cache/

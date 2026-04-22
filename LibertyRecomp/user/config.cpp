@@ -52,7 +52,7 @@ CONFIG_DEFINE_ENUM_TEMPLATE(ESlidingAttack)
     { "X", ESlidingAttack::X }
 };
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 CONFIG_DEFINE_ENUM_TEMPLATE(SDL_Scancode)
 {
     { "???", SDL_SCANCODE_UNKNOWN },
@@ -911,7 +911,7 @@ void Config::CreateCallbacks()
 
     Config::WindowSize.LockCallback = [](ConfigDef<int32_t>* def)
     {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         // Try matching the current window size with a known configuration.
         if (def->Value < 0)
             def->Value = GameWindow::FindNearestDisplayMode();
@@ -920,7 +920,7 @@ void Config::CreateCallbacks()
 
     Config::WindowSize.ApplyCallback = [](ConfigDef<int32_t>* def)
     {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         auto displayModes = GameWindow::GetDisplayModes();
 
         // Use largest supported resolution if overflowed.
@@ -936,14 +936,14 @@ void Config::CreateCallbacks()
 
     Config::Monitor.Callback = [](ConfigDef<int32_t>* def)
     {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         GameWindow::SetDisplay(def->Value);
 #endif
     };
 
     Config::Fullscreen.Callback = [](ConfigDef<bool>* def)
     {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         GameWindow::SetFullscreen(def->Value);
         GameWindow::SetDisplay(Config::Monitor);
 #endif

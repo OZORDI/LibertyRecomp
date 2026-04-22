@@ -8,10 +8,6 @@
 
 #if REX_PLATFORM_PS4
 
-#include <mutex>
-#include <queue>
-#include <stack>
-
 #include <rex/audio/audio_driver.h>
 #include <rex/thread.h>
 
@@ -40,12 +36,10 @@ class OrbisAudioDriver : public AudioDriver {
   static const uint32_t kInputFrameSamples = kInputChannels * kSamplesPerChannel;
   static const uint32_t kOutputFrameSamples = kOutputChannels * kSamplesPerChannel;
 
-  // Double-buffer: one frame being submitted to sceAudioOut, one being filled.
+  // Scratch buffer for the downmixed stereo frame submitted each SubmitFrame.
+  // sceAudioOutOutput is synchronous (paces the audio thread), so no pool
+  // is needed -- the buffer is reused on each call.
   float output_buffer_[kOutputFrameSamples];
-
-  std::queue<float*> frames_queued_;
-  std::stack<float*> frames_unused_;
-  std::mutex frames_mutex_;
 };
 
 }  // namespace rex::audio::orbis

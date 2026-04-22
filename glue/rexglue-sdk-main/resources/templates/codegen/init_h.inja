@@ -270,56 +270,16 @@ inline std::unordered_map<u32, jmp_buf>& get_jmp_buf_map() {
 }
 
 //=============================================================================
-// Trap Handling
+// Trap Handling / Interrupt Locks
 //=============================================================================
+// `ppc_trap`, `ppc_global_lock_count_`, and PPC_{CHECK,ENTER,LEAVE}_GLOBAL_LOCK
+// are provided by <rex/ppc/context.h> as inline defs. Emitting them here too
+// causes ODR redefinition in every TU that includes gta4_init.h. Map the
+// REX_*_GLOBAL_LOCK aliases to the PPC_* forms context.h provides.
 
-inline void ppc_trap(PPCContext& ctx, u8* base, u16 trap_type) {
-  switch (trap_type) {
-    case 20:
-    case 26: {
-      auto str = REX_LOAD_STRING(ctx.r3.u32, ctx.r4.u16);
-      REXCPU_DEBUG("(service trap) {}", str);
-      break;
-    }
-    case 0:
-    case 22:
-      REXCPU_WARN("tw/td trap hit (type {})", trap_type);
-      break;
-    case 25:
-      break;
-    default:
-      REXCPU_WARN("Unknown trap type {}", trap_type);
-      break;
-  }
-}
-
-//=============================================================================
-// Interrupt Locks
-//=============================================================================
-
-inline std::atomic<i32>& ppc_global_lock_count_() {
-  static std::atomic<i32> count{0};
-  return count;
-}
-
-#define REX_CHECK_GLOBAL_LOCK()                                        \
-  ([&]() -> u64 {                                                      \
-    auto lock_ = rex::thread::global_critical_region::AcquireDirect(); \
-    return ppc_global_lock_count_().load() ? 0 : 0x8000;               \
-  }())
-
-#define REX_ENTER_GLOBAL_LOCK()                          \
-  do {                                                   \
-    rex::thread::global_critical_region::mutex().lock(); \
-    ppc_global_lock_count_().fetch_add(1);               \
-  } while (0)
-
-#define REX_LEAVE_GLOBAL_LOCK()                                                           \
-  do {                                                                                    \
-    auto old_count_ = ppc_global_lock_count_().fetch_sub(1);                              \
-    assert(old_count_ >= 1 && "LeaveGlobalLock called without matching EnterGlobalLock"); \
-    rex::thread::global_critical_region::mutex().unlock();                                \
-  } while (0)
+#define REX_CHECK_GLOBAL_LOCK() PPC_CHECK_GLOBAL_LOCK()
+#define REX_ENTER_GLOBAL_LOCK() PPC_ENTER_GLOBAL_LOCK()
+#define REX_LEAVE_GLOBAL_LOCK() PPC_LEAVE_GLOBAL_LOCK()
 
 //=============================================================================
 // PPC_ Compat Aliases
@@ -332,9 +292,7 @@ inline std::atomic<i32>& ppc_global_lock_count_() {
 #define PPC_SET_FLUSH_MODE(x) REX_SET_FLUSH_MODE(x)
 #define PPC_UNIMPLEMENTED(addr, opcode) REX_UNIMPLEMENTED(addr, opcode)
 #define PPC_QUERY_TIMEBASE() REX_QUERY_TIMEBASE()
-#define PPC_CHECK_GLOBAL_LOCK() REX_CHECK_GLOBAL_LOCK()
-#define PPC_ENTER_GLOBAL_LOCK() REX_ENTER_GLOBAL_LOCK()
-#define PPC_LEAVE_GLOBAL_LOCK() REX_LEAVE_GLOBAL_LOCK()
+// PPC_{CHECK,ENTER,LEAVE}_GLOBAL_LOCK provided by <rex/ppc/context.h>
 #define PPC_PHYS_HOST_OFFSET(addr) REX_PHYS_HOST_OFFSET(addr)
 #define PPC_RAW_ADDR(x) REX_RAW_ADDR(x)
 #define PPC_LOAD_U8(x) REX_LOAD_U8(x)

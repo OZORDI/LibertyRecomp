@@ -1,4 +1,5 @@
-#ifdef LIBERTY_RECOMP_NX
+#include <rex/platform.h>
+#if REX_PLATFORM_NX
 // Nintendo Switch entry point / runtime init for LibertyRecomp (libnx/devkitPro)
 // Runs before main() via __appInit(), which libnx calls from its own _start.
 //
@@ -148,4 +149,4 @@ extern "C" bool SwitchAppletIsRunning(void)
     return true;
 }
 
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

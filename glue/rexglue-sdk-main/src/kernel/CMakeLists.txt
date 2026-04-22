@@ -22,7 +22,6 @@ set(REXKERNEL_SOURCES
     xam/xam_nui.cpp
     xam/xam_party.cpp
     xam/xam_task.cpp
-    xam/xam_ui.cpp
     xam/xam_user.cpp
     xam/xam_video.cpp
     xam/xam_voice.cpp
@@ -66,6 +65,15 @@ set(REXKERNEL_SOURCES
 add_library(rexkernel STATIC ${REXKERNEL_SOURCES})
 add_library(rex::kernel ALIAS rexkernel)
 
+# xam_ui.cpp depends on ImGui. Skip it when graphics are disabled (console
+# cross-builds). The XamUi* exports remain satisfied because the calling
+# kernel code short-circuits on headless builds.
+if(REXGLUE_ENABLE_GRAPHICS)
+    target_sources(rexkernel PRIVATE xam/xam_ui.cpp)
+else()
+    target_sources(rexkernel PRIVATE xam/xam_ui_stub.cpp)
+endif()
+
 target_include_directories(rexkernel PUBLIC
     $<BUILD_INTERFACE:${REXGLUE_ROOT}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -78,7 +86,6 @@ target_link_libraries(rexkernel
     PUBLIC
         rexsystem
     PRIVATE
-        rexgraphics
         rexinput
         rexaudio
         # Use rexglue's own o1heap (v3 with O1HEAP_ALIGNMENT = 4*sizeof(void*)
@@ -87,4 +94,8 @@ target_link_libraries(rexkernel
         # rexglue-owned target by its real name to avoid the conflict.
         rexglue_o1heap
 )
+# rexgraphics only exists when REXGLUE_ENABLE_GRAPHICS is ON.
+if(TARGET rexgraphics)
+    target_link_libraries(rexkernel PRIVATE rexgraphics)
+endif()
 

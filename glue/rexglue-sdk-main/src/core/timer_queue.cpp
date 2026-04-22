@@ -18,6 +18,7 @@
 #include <disruptorplus/spin_wait_strategy.hpp>
 
 #include <rex/assert.h>
+#include <rex/compat/jthread.h>
 #include <rex/thread.h>
 #include <rex/thread/timer_queue.h>
 

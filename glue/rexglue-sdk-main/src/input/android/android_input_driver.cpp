@@ -25,6 +25,7 @@
 #include <cstring>
 
 #include <rex/logging.h>
+#include <rex/logging/macros.h>
 
 #if REX_PLATFORM_ANDROID
 #include <android/input.h>
@@ -128,7 +129,7 @@ void AndroidInputDriver::InitSensorsLocked() {
     sensor_looper_ = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
   }
   if (!sensor_looper_) {
-    REX_LOG_WARN("android_input", "no ALooper available; sensors disabled");
+    REXLOG_WARN("no ALooper available; sensors disabled");
     return;
   }
 
@@ -136,19 +137,19 @@ void AndroidInputDriver::InitSensorsLocked() {
   // signature-less variant, but it still functions).
   sensor_manager_ = ASensorManager_getInstance();
   if (!sensor_manager_) {
-    REX_LOG_WARN("android_input", "ASensorManager_getInstance failed");
+    REXLOG_WARN("ASensorManager_getInstance failed");
     return;
   }
   accel_sensor_ = ASensorManager_getDefaultSensor(sensor_manager_,
                                                   ASENSOR_TYPE_ACCELEROMETER);
   if (!accel_sensor_) {
-    REX_LOG_INFO("android_input", "no accelerometer present");
+    REXLOG_INFO("no accelerometer present");
     return;
   }
   sensor_queue_ = ASensorManager_createEventQueue(
       sensor_manager_, sensor_looper_, kAndroidLooperSensorId, nullptr, nullptr);
   if (!sensor_queue_) {
-    REX_LOG_WARN("android_input", "failed to create sensor event queue");
+    REXLOG_WARN("failed to create sensor event queue");
     return;
   }
   ASensorEventQueue_enableSensor(sensor_queue_, accel_sensor_);

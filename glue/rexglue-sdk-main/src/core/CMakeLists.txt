@@ -96,7 +96,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
         dbg_posix.cpp
         dynlib_posix.cpp
         exception_handler_posix.cpp
-        fiber_posix.cpp
+        fiber_android.cpp
         mapped_memory_posix.cpp
         math_gcc.cpp
         seh_posix.cpp
@@ -163,6 +163,7 @@ elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
         socket_posix.cpp
         string_posix.cpp
         threading_ps4.cpp
+        logging_ps4.cpp
     )
     target_sources(rexcore PRIVATE dynlib_ps4.cpp)
 elseif(UNIX)
@@ -227,7 +228,7 @@ if(UNIX)
     if(CMAKE_DL_LIBS)
         target_link_libraries(rexcore PRIVATE ${CMAKE_DL_LIBS})
     endif()
-    if(NOT APPLE)
+    if(NOT APPLE AND NOT ANDROID)
         target_link_libraries(rexcore PRIVATE rt)
     endif()
 endif()

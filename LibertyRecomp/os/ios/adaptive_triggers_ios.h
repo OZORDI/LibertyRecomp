@@ -1,8 +1,8 @@
 #pragma once
 
-#include <TargetConditionals.h>
+#include <rex/platform.h>
 
-#if TARGET_OS_IOS
+#if REX_PLATFORM_IOS
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,4 +61,4 @@ void ios_adaptive_trigger_apply_vehicle_profile(void* controller,
 }
 #endif
 
-#endif // TARGET_OS_IOS
+#endif // REX_PLATFORM_IOS

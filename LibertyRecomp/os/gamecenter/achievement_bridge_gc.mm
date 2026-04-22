@@ -20,6 +20,7 @@
 
 #ifdef LIBERTY_RECOMP_GAMECENTER
 
+#include <rex/platform.h>
 #import <GameKit/GameKit.h>
 #import <Foundation/Foundation.h>
 #include "achievement_bridge_gc.h"
@@ -103,7 +104,7 @@ void LibertyGCInit()
     dispatch_once(&token, ^{
         s_initCalled = YES;
 
-#if TARGET_OS_IOS
+#if REX_PLATFORM_IOS
         // On iOS, GK may present a sign-in view controller on first launch.
         // We store it in the window's rootViewController when available.
         GKLocalPlayer.localPlayer.authenticateHandler =

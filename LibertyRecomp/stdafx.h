@@ -36,7 +36,7 @@ using Microsoft::WRL::ComPtr;
 #include <zstd.h>
 #include <stb_image.h>
 #include <blockingconcurrentqueue.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <SDL3/SDL.h>
 // SDL3_mixer not yet integrated — embedded_player.cpp has #if 0 guards
 // #include <SDL3_mixer/SDL_mixer.h>
@@ -70,7 +70,7 @@ using SDL_Scancode = int;
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <implot.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <backends/imgui_impl_sdl3.h>
 #endif
 #include <cstddef>

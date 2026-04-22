@@ -74,3 +74,12 @@ PPC_FUNC_IMPL(__imp__sub_826078D8) { }
 PPC_FUNC_IMPL(__imp__sub_82619D00) { }
 PPC_FUNC_IMPL(__imp__sub_82619B88) { }
 PPC_FUNC_IMPL(__imp__sub_82619FF0) { }
+
+// gta4_ds4_patches.cpp
+PPC_FUNC_IMPL(__imp__sub_82578B80) { }
+PPC_FUNC_IMPL(__imp__sub_82546D20) { }
+PPC_FUNC_IMPL(__imp__sub_82563DD0) { }
+PPC_FUNC_IMPL(__imp__sub_82586680) { }
+PPC_FUNC_IMPL(__imp__sub_82596428) { }
+PPC_FUNC_IMPL(__imp__sub_82563E30) { }
+PPC_FUNC_IMPL(__imp__sub_825A2518) { }

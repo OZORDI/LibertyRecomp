@@ -47,7 +47,10 @@ X_STATUS SwitchAudioSystem::CreateDriver([[maybe_unused]] size_t index,
 
 void SwitchAudioSystem::DestroyDriver(AudioDriver* driver) {
   assert_not_null(driver);
-  auto nx_driver = dynamic_cast<SwitchAudioDriver*>(driver);
+  // devkitA64 typically builds with -fno-rtti, so dynamic_cast is unavailable.
+  // SwitchAudioSystem is the only source of AudioDriver on NX (see
+  // CreateDriver above), so a static_cast is safe here.
+  auto nx_driver = static_cast<SwitchAudioDriver*>(driver);
   assert_not_null(nx_driver);
   nx_driver->Shutdown();
   delete nx_driver;

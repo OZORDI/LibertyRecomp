@@ -13,6 +13,11 @@
 #include <windows.h>
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
+#elif defined(__APPLE__)
+#include <CommonCrypto/CommonCrypto.h>
+#elif defined(__ANDROID__)
+// Android: RPF decryption not needed — game data is pre-extracted.
+// Provide a stub that always fails so the code compiles.
 #else
 #include <CommonCrypto/CommonCrypto.h>
 #endif
@@ -117,6 +122,10 @@ namespace RpfExtractor
         BCryptDestroyKey(hKey);
         BCryptCloseAlgorithmProvider(hAlg, 0);
         return true;
+#elif defined(__ANDROID__)
+        // Android: RPF decryption not supported — game data is pre-extracted.
+        (void)data; (void)key; (void)dataLen;
+        return false;
 #else
         // macOS/iOS CommonCrypto - decrypt 16 times like SparkIV
         for (int round = 0; round < 16; round++)

@@ -1,4 +1,5 @@
 #include "achievement_manager.h"
+#include <rex/platform.h>
 #include <os/logger.h>
 #include <ui/achievement_overlay.h>
 #include <user/config.h>
@@ -7,7 +8,7 @@
 #include <os/gamecenter/achievement_bridge_gc.h>
 #endif
 
-#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+#if REX_PLATFORM_ANDROID
 #include <os/android/achievement_bridge_android.h>
 #endif
 
@@ -74,7 +75,7 @@ void AchievementManager::Unlock(uint16_t id)
     if (Config::AchievementNotifications)
         AchievementOverlay::Open(id);
 
-#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+#if REX_PLATFORM_ANDROID
     // Mirror the Xbox unlock into Google Play Games.
     LibertyAndroidOnXboxAchievementUnlocked(static_cast<uint32_t>(id));
 #endif

@@ -26,6 +26,8 @@ endif()
 # =============================================================================
 # RexGlue's codegen output is authoritative. Legacy LibertyRecompLib/ppc/
 # files are preserved but no longer built.
+# Lives inside the SDK tree (single canonical copy — the former out-of-tree
+# consumer copy at glue/gta4-recomp was removed 2026-04-18).
 set(REXGLUE_GTA4_RECOMP "${CMAKE_CURRENT_SOURCE_DIR}/../glue/rexglue-sdk-main/gta4-recomp")
 
 include("${REXGLUE_GTA4_RECOMP}/generated/sources.cmake")
@@ -51,7 +53,12 @@ set(LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES ${GENERATED_SOURCES})
 set(XENOS_RECOMP_ROOT "${LIBERTY_RECOMP_TOOLS_ROOT}/XenosRecomp/XenosRecomp")
 set(XENOS_RECOMP_INCLUDE "${XENOS_RECOMP_ROOT}/shader_common.h")
 
-target_compile_definitions(XenosRecomp PRIVATE LIBERTY_RECOMP)
+# XenosRecomp is a host-side shader-translator tool — skipped on console
+# cross-compiles (see top-level CMakeLists.txt:143). Only tag the define when
+# the target actually exists.
+if(TARGET XenosRecomp)
+    target_compile_definitions(XenosRecomp PRIVATE LIBERTY_RECOMP)
+endif()
 # NOTE: XENOS_RECOMP_INPUT / OUTPUT / INCLUDE_INPUT were previously hardcoded
 # to LibertyRecompLib/private/shader (a dir that doesn't exist), which made
 # the binary ignore argv and crash with SIGSEGV on readAllBytes(nullptr).

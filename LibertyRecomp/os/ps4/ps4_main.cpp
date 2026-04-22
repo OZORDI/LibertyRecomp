@@ -11,6 +11,8 @@
 #include <orbis/Net.h>
 #include <orbis/NetCtl.h>
 #include "np_conf_ps4.h"
+#include "savedata_ps4.h"
+#include <user/paths.h>
 
 // Forward declarations
 extern "C" int  user_malloc_init(void);
@@ -150,11 +152,28 @@ int ps4_main(size_t argc, const void* argv)
     // 5. Stand up NP Trophy context (non-fatal; game runs without trophies)
     InitNpTrophy();
 
+    // 5b. Mount the SCE SaveData container for this user and expose the
+    // returned mount point (e.g. "/savedata0") via g_ps4SaveMountPoint so
+    // GetSavePath() resolves writes through the encrypted save container
+    // instead of trying to write into the read-only /app0 PKG mount.
+    // Non-fatal — if the mount fails, save I/O will no-op on PS4.
+    if (g_ps4_user_id != 0)
+    {
+        g_ps4SaveMountPoint = os::savedata::MountSaveData(g_ps4_user_id, "GTAIV00");
+        if (g_ps4SaveMountPoint.empty())
+            sceKernelDebugOutText(0, "LibertyRecomp: save-data mount failed (saves disabled)\n");
+    }
+
     // 6. Hand off to SDL/main
     const char* fake_argv[] = { "LibertyRecomp", nullptr };
     int ret = main(1, const_cast<char**>(fake_argv));
 
-    // 7. Tear down NP, net, and heap
+    // 7. Tear down save data, NP, net, and heap
+    if (!g_ps4SaveMountPoint.empty())
+    {
+        os::savedata::UmountSaveData(g_ps4SaveMountPoint);
+        g_ps4SaveMountPoint.clear();
+    }
     if (g_np_handle)  sceNpTrophyDestroyHandle(g_np_handle);
     if (g_np_context) sceNpTrophyDestroyContext(g_np_context);
     sceNetTerm();

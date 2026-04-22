@@ -10,8 +10,10 @@
 #if REX_PLATFORM_MAC
 
 #include <signal.h>
+#include <unistd.h>  // write(), STDERR_FILENO
 
 #include <cstdint>
+#include <cstdlib>   // _Exit
 #include <cstring>
 
 #include <rex/assert.h>
@@ -26,6 +28,47 @@
 #include <ucontext.h>
 
 namespace rex::arch {
+
+// --------------------------------------------------------------------------
+// Async-signal-safe helpers (POSIX.1-2017 list).
+//
+// Calls to spdlog / REXLOG_* / fmt::format / std::string from a signal
+// handler can self-deadlock if the faulting thread holds the spdlog sink
+// mutex. Everything in the SIGSEGV / SIGBUS / SIGILL path below must use
+// only functions from the async-signal-safe list.
+// --------------------------------------------------------------------------
+
+static inline void SigSafeWriteCStr(const char* s) {
+  if (!s) return;
+  size_t n = 0;
+  while (s[n]) ++n;
+  (void)::write(STDERR_FILENO, s, n);
+}
+
+static inline size_t SigSafeFormatHex(char* buf, size_t cap, uint64_t value) {
+  static const char kHex[] = "0123456789abcdef";
+  if (cap < 4) return 0;
+  size_t w = 0;
+  buf[w++] = '0';
+  buf[w++] = 'x';
+  int shift = 60;
+  while (shift > 0 && ((value >> shift) & 0xF) == 0) shift -= 4;
+  while (shift >= 0 && w < cap) {
+    buf[w++] = kHex[(value >> shift) & 0xF];
+    shift -= 4;
+  }
+  return w;
+}
+
+static inline void SigSafeWriteLabelHex(const char* label, uint64_t value) {
+  char buf[96];
+  size_t w = 0;
+  for (const char* p = label; *p && w < sizeof(buf) - 1; ++p) buf[w++] = *p;
+  if (w < sizeof(buf) - 1) buf[w++] = '=';
+  w += SigSafeFormatHex(buf + w, sizeof(buf) - w - 1, value);
+  if (w < sizeof(buf)) buf[w++] = '\n';
+  (void)::write(STDERR_FILENO, buf, w);
+}
 
 bool signal_handlers_installed_ = false;
 struct sigaction original_sigill_handler_;
@@ -125,9 +168,11 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
                                            ? Exception::AccessViolationOperation::kWrite
                                            : Exception::AccessViolationOperation::kRead;
         } else {
-          assert_always(
-              "No usable ESR in the macOS exception thread context and the "
-              "faulting instruction is not a known load, prefetch or store instruction");
+          // Signal-safe: can't call assert_always (spdlog / abort path).
+          SigSafeWriteCStr(
+              "[rex] macOS SIGSEGV/SIGBUS: no usable ESR + unknown faulting "
+              "instruction\n");
+          SigSafeWriteLabelHex("pc", static_cast<uint64_t>(thread_state.__pc));
           access_violation_operation = Exception::AccessViolationOperation::kUnknown;
         }
       }
@@ -139,7 +184,10 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
                                    access_violation_operation);
     } break;
     default:
-      assert_unhandled_case(signal_number);
+      // Signal-safe: no spdlog. Dump sig and die with 128+sig.
+      SigSafeWriteCStr("[rex] macOS unhandled signal in exception handler ");
+      SigSafeWriteLabelHex("sig", static_cast<uint64_t>(signal_number));
+      _Exit(128 + signal_number);
   }
 
   for (size_t i = 0; i < rex::countof(handlers_) && handlers_[i].first; ++i) {

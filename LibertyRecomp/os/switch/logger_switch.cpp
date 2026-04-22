@@ -1,6 +1,7 @@
 // Switch logger — custom spdlog sink routing through svcOutputDebugString
 // (visible to Atmosphere's sysmodule log, Goldleaf, and nxlink).
-#ifdef LIBERTY_RECOMP_NX
+#include <rex/platform.h>
+#if REX_PLATFORM_NX
 #include <os/logger.h>
 
 #include <cstdio>
@@ -53,4 +54,4 @@ void os::logger::PlatformInitSinks()
     rex::logging::AddSink(sink);
 }
 
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

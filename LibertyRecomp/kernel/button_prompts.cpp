@@ -69,10 +69,23 @@ namespace ButtonPrompts
     void Initialize()
     {
         std::lock_guard<std::mutex> lock(s_mutex);
-        
+
         if (s_initialized)
             return;
-        
+
+#if defined(LIBERTY_RECOMP_PS4)
+        // PS4: the PKG already ships a baked buttons_360.xtd at
+        // /app0/game/xbox360/textures/. /app0 is a read-only mount, so there
+        // is nothing to do at runtime — the game opens the baked file via the
+        // "platform:\textures\buttons_360.xtd" VFS prefix on its own.
+        s_cacheDir = PlatformPaths::GetGameDirectory() / "xbox360" / "textures";
+        s_cachedXtdPath = s_cacheDir / "buttons_360.xtd";
+        s_cachedPlatform = "ps4";
+        s_initFailed = false;
+        s_initialized = true;
+        LOG_UTILITY("[ButtonPrompts] Initialized (PS4 baked mode)");
+        return;
+#else
         // Write to the game textures directory so RexGlue VFS can find the file.
         // The game opens "platform:\textures\buttons_360.xtd" which resolves to
         // <gameDir>/xbox360/textures/buttons_360.xtd via the RexGlue VFS.
@@ -97,6 +110,7 @@ namespace ButtonPrompts
 
         s_initialized = true;
         LOG_UTILITY("[ButtonPrompts] Initialized");
+#endif
     }
 
     std::string GetCurrentPlatformName()
@@ -165,7 +179,7 @@ namespace ButtonPrompts
                 // always match the device the game is actually running on.
 #if defined(LIBERTY_RECOMP_PS4)
                 return "ps4";
-#elif defined(LIBERTY_RECOMP_NX) || defined(LIBERTY_RECOMP_SWITCH) || defined(__SWITCH__)
+#elif REX_PLATFORM_NX
                 return "switch";
 #else
                 // Default to Xbox One for unknown controllers on PC platforms
@@ -226,7 +240,20 @@ namespace ButtonPrompts
     std::filesystem::path GetCurrentButtonPromptsPath()
     {
         std::lock_guard<std::mutex> lock(s_mutex);
-        
+
+#if defined(LIBERTY_RECOMP_PS4)
+        // PS4: baked file at /app0/game/xbox360/textures/buttons_360.xtd.
+        // No runtime switching — the baked set matches the platform default.
+        if (!s_initialized)
+        {
+            s_cacheDir = PlatformPaths::GetGameDirectory() / "xbox360" / "textures";
+            s_cachedXtdPath = s_cacheDir / "buttons_360.xtd";
+            s_cachedPlatform = "ps4";
+            s_initFailed = false;
+            s_initialized = true;
+        }
+        return s_cachedXtdPath;
+#else
         if (!s_initialized)
         {
             // Late initialization — mirror the same path used in Initialize()
@@ -240,15 +267,15 @@ namespace ButtonPrompts
             }
             s_initialized = true;
         }
-        
+
         // If init failed, return empty path to trigger fallback to original game file
         if (s_initFailed)
         {
             return {};
         }
-        
+
         std::string currentPlatform = GetCurrentPlatformName();
-        
+
         // Check if we already have the correct platform cached
         if (!s_cachedXtdPath.empty() && s_cachedPlatform == currentPlatform)
         {
@@ -258,15 +285,16 @@ namespace ButtonPrompts
                 return s_cachedXtdPath;
             }
         }
-        
+
         // Need to write/refresh the cache
         if (WriteXtdToCache(currentPlatform))
         {
             return s_cachedXtdPath;
         }
-        
+
         // Failed - return empty path
         return {};
+#endif
     }
 
     void RefreshCache()

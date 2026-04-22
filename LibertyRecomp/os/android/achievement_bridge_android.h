@@ -20,7 +20,9 @@
 
 #pragma once
 
-#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+#include <rex/platform.h>
+
+#if REX_PLATFORM_ANDROID
 
 #include <cstdint>
 #include <jni.h>
@@ -58,4 +60,4 @@ namespace os::achievements::android
 // Delegates to os::achievements::android::AwardAchievement().
 void LibertyAndroidOnXboxAchievementUnlocked(uint32_t xbox_id);
 
-#endif // LIBERTY_RECOMP_ANDROID || __ANDROID__
+#endif // REX_PLATFORM_ANDROID

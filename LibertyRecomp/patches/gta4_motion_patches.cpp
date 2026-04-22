@@ -40,7 +40,7 @@
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <user/config.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <SDL3/SDL.h>
 #endif
 #include <cmath>

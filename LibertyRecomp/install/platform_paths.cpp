@@ -1,25 +1,26 @@
 #include "platform_paths.h"
 
+#include <rex/platform.h>
 #include <cstdlib>
 
 #if defined(_WIN32)
 #include <shlobj.h>
 #include <windows.h>
-#elif defined(__ANDROID__)
+#elif REX_PLATFORM_ANDROID
 // Android — paths set by JNI glue (os/android/jni_glue.cpp)
 extern "C" const char* g_androidAppInternalPath;
-#elif defined(__ORBIS__)
+#elif REX_PLATFORM_PS4
 // PS4 (OpenOrbis) — fixed filesystem layout under /app0, saves under /user/data
-#elif defined(__SWITCH__)
+#elif REX_PLATFORM_NX
 // Switch — RomFS mounted at romfs:/ by main(), saves on sdmc:/LibertyRecomp/
 #include <switch.h>
-#elif defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#elif REX_PLATFORM_IOS
 // iOS — sandbox paths; resolved at runtime via Foundation
 #include <unistd.h>
 // These are implemented in os/ios/ios_paths_objc.mm to avoid mixing ObjC here
 extern "C" const char* LIBERTY_IOS_GetDocumentsPath();
 extern "C" const char* LIBERTY_IOS_GetBundlePath();
-#elif defined(__APPLE__)
+#elif REX_PLATFORM_MAC
 #include <pwd.h>
 #include <unistd.h>
 #include <mach-o/dyld.h>
@@ -112,9 +113,27 @@ namespace PlatformPaths
     
     std::filesystem::path GetGameDirectory()
     {
+#if defined(__ORBIS__)
+        // PS4: game assets ship inside the PKG and are exposed read-only at
+        // /app0/game. Any writes to this path silently fail. Callers that
+        // need to write (e.g. runtime-generated button-prompt cache files)
+        // must use GetWritableCacheDirectory() instead.
+        return std::filesystem::path("/app0/game");
+#else
         return GetInstallDirectory() / "game";
+#endif
     }
-    
+
+    std::filesystem::path GetWritableCacheDirectory()
+    {
+        // Writable runtime cache that mirrors parts of the game tree (e.g.
+        // button-prompt XTDs generated from embedded data). On PS4 the
+        // install dir is /user/data/LBTY00001, which is separate from the
+        // read-only /app0 PKG mount; on desktop it sits next to the game
+        // install. Either way, this path is always writable.
+        return GetInstallDirectory() / "cache";
+    }
+
     std::filesystem::path GetShaderCacheDirectory()
     {
         return GetInstallDirectory() / "shader_cache";

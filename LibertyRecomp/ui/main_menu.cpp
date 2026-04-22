@@ -1,7 +1,7 @@
 #include "main_menu.h"
 
 #include <imgui.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <SDL3/SDL.h>
 #endif
 
@@ -14,12 +14,12 @@
 #include <ui/message_window.h>
 #include <ui/game_window.h>
 #include <ui/gta4_style.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <ui/installer_wizard.h>
 #endif
 #include <user/config.h>
 #include <user/paths.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <sdl_listener.h>
 #endif
 #include <app.h>
@@ -82,7 +82,7 @@ static int g_settingsOptionCount = 0;
 static bool g_pendingChanges = false;
 
 // SDL Event Listener for Main Menu
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 class MainMenuEventListener : public SDLEventListener
 {
 public:
@@ -181,7 +181,7 @@ void MainMenu::Open()
     s_stateTime = ImGui::GetTime();
     s_animTime = ImGui::GetTime();
     
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     GameWindow::SetFullscreenCursorVisibility(true);
 #endif
 }
@@ -422,7 +422,7 @@ void MainMenu::DrawHeader()
     drawList->AddText(g_pFntNewRodin, titleFontSize, {titleX, titleY}, 
                       GTA4Style::WithAlpha(GTA4Style::Colors::Orange, alpha), title);
     
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     // Debug: Show mouse position (desktop only; consoles have no mouse)
     auto& io = ImGui::GetIO();
     char mouseDebug[128];
@@ -1319,7 +1319,7 @@ bool MainMenu::Run()
     while (s_isVisible)
     {
         Video::WaitOnSwapChain();
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
 #endif
@@ -1333,7 +1333,7 @@ bool MainMenu::Run()
         }
     }
     
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     GameWindow::SetFullscreenCursorVisibility(false);
 #endif
     

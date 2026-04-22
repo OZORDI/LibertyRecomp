@@ -37,6 +37,10 @@
 #define REX_ANDROID_LOGI(...) \
   __android_log_print(ANDROID_LOG_INFO, REX_ANDROID_LOG_TAG, __VA_ARGS__)
 
+// Provided by the host Android app (LibertyRecomp jni_glue.cpp). Returns
+// the JavaVM captured in JNI_OnLoad, or null in non-JVM builds.
+extern "C" JavaVM* rex_android_get_jvm();
+
 namespace rex {
 
 std::string path_to_utf8(const std::filesystem::path& path) {
@@ -61,6 +65,60 @@ std::mutex g_android_paths_mutex;
 std::filesystem::path g_filesDir;
 std::filesystem::path g_cacheDir;
 std::filesystem::path g_externalFilesDir;
+
+// Global ref to the hosting Activity / application Context. Owned by
+// SetAndroidJavaContext; cleared by passing a null context. Used by the
+// content-URI resolver which must call Context.getContentResolver() off
+// an arbitrary thread (so the local ref from nativeSetActivity cannot be
+// reused).
+jobject g_android_context = nullptr;
+
+// Scoped thread attach helper. Uses GetEnv first so already-attached
+// threads (the JNI caller itself) don't detach on destruction.
+struct JniAttach {
+  JavaVM* vm = nullptr;
+  JNIEnv* env = nullptr;
+  bool detach = false;
+  explicit JniAttach(JavaVM* v) : vm(v) {
+    if (!vm) return;
+    int status = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+      if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+        detach = true;
+      } else {
+        env = nullptr;
+      }
+    } else if (status != JNI_OK) {
+      env = nullptr;
+    }
+  }
+  ~JniAttach() {
+    if (detach && vm) vm->DetachCurrentThread();
+  }
+};
+
+// Cached JNI identifiers for content-URI resolution. Guarded by
+// g_android_content_mutex. Populated by AndroidInitialize(), torn down by
+// AndroidShutdown(). All jclass refs are global; method IDs remain valid
+// for the lifetime of the referenced class.
+std::mutex g_android_content_mutex;
+jobject g_content_resolver = nullptr;          // ContentResolver (global ref)
+jclass g_content_resolver_class = nullptr;     // global ref
+jmethodID g_open_file_descriptor_mid = nullptr;
+jclass g_parcel_file_descriptor_class = nullptr;
+jmethodID g_detach_fd_mid = nullptr;
+jclass g_uri_class = nullptr;
+jmethodID g_uri_parse_mid = nullptr;
+bool g_content_resolver_initialized = false;
+
+// Helper: UTF-8 -> Java String containing UTF-16 code units, matching
+// Android's internal representation. Xenia uses the same pattern; avoids
+// NewStringUTF's modified-UTF8 quirks (which mangle 4-byte sequences).
+jstring NewJavaStringFromUtf8(JNIEnv* env, const std::string_view s) {
+  std::u16string u16 = rex::string::to_utf16(s);
+  return env->NewString(reinterpret_cast<const jchar*>(u16.data()),
+                        static_cast<jsize>(u16.size()));
+}
 
 // Calls Context.<methodName>().getAbsolutePath() and writes to out.
 // Returns true on success.
@@ -195,12 +253,24 @@ namespace android {
 void SetAndroidJavaContext(JNIEnv* env, jobject context) {
   std::lock_guard<std::mutex> lock(g_android_paths_mutex);
 
+  // Drop any previous global ref before replacing. Safe even with a null
+  // env because DeleteGlobalRef doesn't strictly require the same env
+  // that created the ref, but we need *some* env to free it — on null
+  // env we just leak the previous ref rather than crash. This branch is
+  // only expected at shutdown.
+  if (g_android_context && env) {
+    env->DeleteGlobalRef(g_android_context);
+  }
+  g_android_context = nullptr;
+
   if (!env || !context) {
     g_filesDir.clear();
     g_cacheDir.clear();
     g_externalFilesDir.clear();
     return;
   }
+
+  g_android_context = env->NewGlobalRef(context);
 
   std::filesystem::path filesDir, cacheDir, extDir;
   if (QueryContextDirMethod(env, context, "getFilesDir", filesDir)) {
@@ -387,6 +457,242 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
   }
   closedir(dir);
   return result;
+}
+
+// -----------------------------------------------------------------------
+// Android content-URI support
+//
+// Ported from Xenia (tools/xenia-master-1/src/xenia/base/filesystem_android.cc):
+//   - AndroidInitializeContentResolver / AndroidShutdownContentResolver
+//   - IsAndroidContentUri
+//   - OpenAndroidContentFileDescriptor
+// Adapted to:
+//   - use rex_android_get_jvm() for off-thread JNIEnv acquisition (Xenia
+//     has GetAndroidThreadJniEnv() built into main_android.h)
+//   - read the Activity/Context global ref stashed by SetAndroidJavaContext
+// Lifecycle: AndroidInitialize() caches JNI globals; AndroidShutdown()
+// releases them. Re-entrancy: last call wins; safe to re-init after
+// shutdown.
+
+namespace {
+
+void ShutdownContentResolverLocked(JNIEnv* env) {
+  g_content_resolver_initialized = false;
+  g_uri_parse_mid = nullptr;
+  g_detach_fd_mid = nullptr;
+  g_open_file_descriptor_mid = nullptr;
+  if (env) {
+    if (g_uri_class) env->DeleteGlobalRef(g_uri_class);
+    if (g_parcel_file_descriptor_class)
+      env->DeleteGlobalRef(g_parcel_file_descriptor_class);
+    if (g_content_resolver_class)
+      env->DeleteGlobalRef(g_content_resolver_class);
+    if (g_content_resolver) env->DeleteGlobalRef(g_content_resolver);
+  }
+  g_uri_class = nullptr;
+  g_parcel_file_descriptor_class = nullptr;
+  g_content_resolver_class = nullptr;
+  g_content_resolver = nullptr;
+}
+
+}  // namespace
+
+void AndroidInitialize() {
+  std::lock_guard<std::mutex> lock(g_android_content_mutex);
+  if (g_content_resolver_initialized) return;
+
+  JavaVM* vm = rex_android_get_jvm();
+  JniAttach att(vm);
+  JNIEnv* env = att.env;
+  if (!env) {
+    REX_ANDROID_LOGE("AndroidInitialize: no JNIEnv");
+    return;
+  }
+
+  jobject context = nullptr;
+  {
+    std::lock_guard<std::mutex> paths_lock(g_android_paths_mutex);
+    context = g_android_context;
+  }
+  if (!context) {
+    REX_ANDROID_LOGE("AndroidInitialize: no Java Context cached");
+    return;
+  }
+
+  // Context.getContentResolver()
+  jclass context_class = env->GetObjectClass(context);
+  if (!context_class) {
+    REX_ANDROID_LOGE("AndroidInitialize: no Context class");
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  jmethodID get_cr_mid = env->GetMethodID(
+      context_class, "getContentResolver", "()Landroid/content/ContentResolver;");
+  if (!get_cr_mid) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    REX_ANDROID_LOGE("AndroidInitialize: no getContentResolver method");
+    env->DeleteLocalRef(context_class);
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  jobject cr_local = env->CallObjectMethod(context, get_cr_mid);
+  env->DeleteLocalRef(context_class);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  if (!cr_local) {
+    REX_ANDROID_LOGE("AndroidInitialize: ContentResolver null");
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_content_resolver = env->NewGlobalRef(cr_local);
+  env->DeleteLocalRef(cr_local);
+  if (!g_content_resolver) {
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+
+  // ContentResolver.openFileDescriptor(Uri, String) : ParcelFileDescriptor
+  jclass cr_class_local = env->GetObjectClass(g_content_resolver);
+  if (!cr_class_local) {
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_content_resolver_class = reinterpret_cast<jclass>(
+      env->NewGlobalRef(reinterpret_cast<jobject>(cr_class_local)));
+  env->DeleteLocalRef(cr_class_local);
+  if (!g_content_resolver_class) {
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_open_file_descriptor_mid = env->GetMethodID(
+      g_content_resolver_class, "openFileDescriptor",
+      "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;");
+  if (!g_open_file_descriptor_mid) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    REX_ANDROID_LOGE("AndroidInitialize: no openFileDescriptor method");
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+
+  // ParcelFileDescriptor.detachFd() : int
+  jclass pfd_local = env->FindClass("android/os/ParcelFileDescriptor");
+  if (!pfd_local) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_parcel_file_descriptor_class = reinterpret_cast<jclass>(
+      env->NewGlobalRef(reinterpret_cast<jobject>(pfd_local)));
+  env->DeleteLocalRef(pfd_local);
+  if (!g_parcel_file_descriptor_class) {
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_detach_fd_mid =
+      env->GetMethodID(g_parcel_file_descriptor_class, "detachFd", "()I");
+  if (!g_detach_fd_mid) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+
+  // android.net.Uri.parse(String) : Uri
+  jclass uri_local = env->FindClass("android/net/Uri");
+  if (!uri_local) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_uri_class = reinterpret_cast<jclass>(
+      env->NewGlobalRef(reinterpret_cast<jobject>(uri_local)));
+  env->DeleteLocalRef(uri_local);
+  if (!g_uri_class) {
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+  g_uri_parse_mid = env->GetStaticMethodID(
+      g_uri_class, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
+  if (!g_uri_parse_mid) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    ShutdownContentResolverLocked(env);
+    return;
+  }
+
+  g_content_resolver_initialized = true;
+  REX_ANDROID_LOGI("AndroidInitialize: content resolver ready");
+}
+
+void AndroidShutdown() {
+  std::lock_guard<std::mutex> lock(g_android_content_mutex);
+  JavaVM* vm = rex_android_get_jvm();
+  JniAttach att(vm);
+  ShutdownContentResolverLocked(att.env);
+}
+
+bool IsAndroidContentUri(const std::string_view source) {
+  // URI schemes are case-insensitive. Matching "content://" (not just
+  // "content:") avoids misclassifying a path whose filename begins with
+  // "content:".
+  static constexpr char kContentSchema[] = "content://";
+  constexpr size_t kContentSchemaLength = sizeof(kContentSchema) - 1;
+  if (source.size() < kContentSchemaLength) return false;
+  return strncasecmp(source.data(), kContentSchema, kContentSchemaLength) == 0;
+}
+
+int OpenAndroidContentFileDescriptor(const std::string_view uri,
+                                     const char* mode) {
+  std::lock_guard<std::mutex> lock(g_android_content_mutex);
+  if (!g_content_resolver_initialized) {
+    REX_ANDROID_LOGE("OpenAndroidContentFileDescriptor: not initialized");
+    return -1;
+  }
+
+  JavaVM* vm = rex_android_get_jvm();
+  JniAttach att(vm);
+  JNIEnv* env = att.env;
+  if (!env) return -1;
+
+  // Uri.parse(uri_string)
+  jstring uri_string = NewJavaStringFromUtf8(env, uri);
+  if (!uri_string) return -1;
+  jobject uri_object =
+      env->CallStaticObjectMethod(g_uri_class, g_uri_parse_mid, uri_string);
+  env->DeleteLocalRef(uri_string);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return -1;
+  }
+  if (!uri_object) return -1;
+
+  jstring mode_string = env->NewStringUTF(mode ? mode : "r");
+  if (!mode_string) {
+    env->DeleteLocalRef(uri_object);
+    return -1;
+  }
+
+  jobject pfd = env->CallObjectMethod(g_content_resolver,
+                                      g_open_file_descriptor_mid, uri_object,
+                                      mode_string);
+  env->DeleteLocalRef(mode_string);
+  env->DeleteLocalRef(uri_object);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return -1;
+  }
+  if (!pfd) return -1;
+
+  // detachFd() transfers ownership to the caller — the ParcelFileDescriptor
+  // will NOT close the fd when GC'd.
+  int fd = env->CallIntMethod(pfd, g_detach_fd_mid);
+  env->DeleteLocalRef(pfd);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return -1;
+  }
+  return fd;
 }
 
 }  // namespace filesystem

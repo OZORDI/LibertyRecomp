@@ -664,18 +664,21 @@ class PosixCondition<Thread> : public PosixConditionBase {
 
   uint64_t affinity_mask() {
     // Switch: svcGetThreadCoreMask(preferred_core*, affinity_mask*, handle)
+    // Must query THIS thread's handle, not the calling thread's.
     WaitStarted();
     s32 preferred_core = -2;
     u64 affinity = 0;
-    svcGetThreadCoreMask(&preferred_core, &affinity, threadGetCurHandle());
+    svcGetThreadCoreMask(&preferred_core, &affinity, this->nx_handle_);
     return static_cast<uint64_t>(affinity);
   }
 
   void set_affinity_mask(uint64_t mask) {
     // Switch: svcSetThreadCoreMask(handle, preferred_core, affinity_mask)
     // preferred_core -2 = auto-select from affinity set.
+    // Must target THIS thread's handle, not the calling thread's.
+    // Mask cores 0-2 only; core 3 is OS-reserved on HOS.
     WaitStarted();
-    svcSetThreadCoreMask(threadGetCurHandle(), -2, static_cast<u32>(mask & 0xF));
+    svcSetThreadCoreMask(this->nx_handle_, -2, static_cast<u32>(mask & 0x7));
   }
 
   int priority() {
@@ -813,9 +816,31 @@ class PosixCondition<Thread> : public PosixConditionBase {
     if (is_current_thread) {
       pthread_exit(reinterpret_cast<void*>(exit_code));
     } else {
-      // Switch: no pthread_cancel. Thread will observe signaled_==true at next
-      // check point and exit cooperatively.
-      pthread_join(thread_, nullptr);
+      // Switch / libnx: no pthread_cancel and no async cancellation primitive.
+      // A hard pthread_join here blocks forever if the target thread is parked
+      // in a blocking syscall that never observes signaled_. Degrade to a
+      // bounded wait using svcWaitSynchronization on the thread's kernel
+      // handle, which signals when the thread exits. If the thread has not
+      // exited by the timeout, log and return — the runtime will leak the
+      // pthread rather than deadlock the shutdown path.
+      REXSYS_WARN(
+          "Thread::Terminate: libnx lacks async cancellation; waiting up to "
+          "5s for cooperative exit on handle {:#x}",
+          static_cast<uint32_t>(nx_handle_));
+      constexpr u64 kTerminateTimeoutNs = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+      if (nx_handle_ != INVALID_HANDLE) {
+        Result rc = svcWaitSynchronizationSingle(nx_handle_, kTerminateTimeoutNs);
+        if (R_FAILED(rc)) {
+          REXSYS_WARN(
+              "Thread::Terminate: svcWaitSynchronizationSingle returned "
+              "{:#x}; thread may not have exited.",
+              static_cast<uint32_t>(rc));
+        }
+      }
+      // Best-effort detach so the pthread record is released even if the
+      // kernel thread is stuck. Cannot use pthread_join here — it is
+      // unbounded on libnx without async cancel.
+      (void)pthread_detach(thread_);
     }
   }
 

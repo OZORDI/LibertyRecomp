@@ -16,12 +16,21 @@
 #include <rex/input/flags.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
+#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
 #include <rex/input/mnk/mnk_input_driver.h>
+#endif
 #include <rex/input/nop/nop_input_driver.h>
-#include <rex/input/sdl/sdl_input_driver.h>
-#include <rex/input/xinput/xinput_input_driver.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+// The SDL + XInput drivers both include backend headers (SDL3/SDL.h,
+// Windows.h) that aren't usable on console cross-builds. Gate on the
+// platforms where they actually compile.
+#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
+#include <rex/input/sdl/sdl_input_driver.h>
+#endif
+#if REX_PLATFORM_WIN32
+#include <rex/input/xinput/xinput_input_driver.h>
+#endif
 #if REX_PLATFORM_IOS
 #include "ios/ios_input_driver.h"
 #endif
@@ -185,12 +194,14 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
     }
 #endif
 
+#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
     if (REXCVAR_GET(input_backend) == "sdl") {
       auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0);
       if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
         input->AddDriver(std::move(sdl_driver));
       }
     }
+#endif
 
 #if REX_PLATFORM_IOS
     // iOS: add the GameController.framework driver alongside SDL so MFi
@@ -235,11 +246,13 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
     }
 #endif
 
+#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
     // MnK driver (keyboard/mouse -> controller emulation)
     auto mnk_driver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
     if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
       input->AddDriver(std::move(mnk_driver));
     }
+#endif
   }
 
   // NOP driver (primary in tool mode, fallback otherwise)

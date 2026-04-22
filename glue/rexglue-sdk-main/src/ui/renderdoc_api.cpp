@@ -30,6 +30,12 @@ std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
   // Try to load the RenderDoc library. If RenderDoc is attached, the library
   // should already be loaded into the process and this will increment the
   // reference count. If not attached, the load will fail and we return nullptr.
+  // On platforms where RenderDoc is unavailable (PS4/Switch/iOS),
+  // kRenderDoc is nullptr — constructing std::filesystem::path(nullptr) is
+  // UB, so bail before calling Load.
+  if (platform::lib_names::kRenderDoc == nullptr) {
+    return nullptr;
+  }
   if (!renderdoc_api->library_.Load(platform::lib_names::kRenderDoc)) {
     return nullptr;
   }

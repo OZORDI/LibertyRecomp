@@ -67,7 +67,7 @@ namespace GTAIV {
 #include <ui/button_window.h>
 #include <ui/fader.h>
 #include <ui/imgui_utils.h>
-#if !REX_PLATFORM_CONSOLE
+#if !REX_PLATFORM_CONSOLE && !REX_PLATFORM_ANDROID
 #include <ui/installer_wizard.h>
 #endif
 #include <ui/message_window.h>
@@ -208,6 +208,7 @@ struct PipelineState
     GuestShader* vertexShader = nullptr;
     GuestShader* pixelShader = nullptr;
     GuestVertexDeclaration* vertexDeclaration = nullptr;
+    bool instancing = false;
     bool zEnable = true;
     bool zWriteEnable = true;
     bool stencilEnable = false;
@@ -257,7 +258,7 @@ struct UploadAllocation
 struct SharedConstants
 {
     uint32_t texture2DIndices[16]{};
-    uint32_t texture2DArrayIndices[16]{};
+    uint32_t texture3DIndices[16]{};
     uint32_t textureCubeIndices[16]{};
     uint32_t samplerIndices[16]{};
     uint32_t booleans{};
@@ -472,7 +473,7 @@ static std::unique_ptr<RenderDescriptorSet> g_conditionalSurveyDescriptorSet;
 enum
 {
     TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D,
-    TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D_ARRAY,
+    TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D,
     TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE,
     TEXTURE_DESCRIPTOR_NULL_COUNT
 };
@@ -552,21 +553,19 @@ struct PipelineTask
 static Mutex g_pipelineTaskMutex;
 static std::vector<PipelineTask> g_pipelineTaskQueue;
 
-//static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<Hedgehog::Database::CDatabaseData>& databaseData)
-//{
-//    // Precompiled pipelines deliberately do not increment
-//    // this counter to overlap the compilation with intro logos.
-//    if (type != PipelineTaskType::PrecompilePipelines)
-//        ++g_compilingPipelineTaskCount;
-//
-//    {
-//        std::lock_guard lock(g_pipelineTaskMutex);
-//        g_pipelineTaskQueue.emplace_back(type, databaseData);
-//    }
-//
-//    if ((++g_pendingPipelineTaskCount) == 1)
-//        g_pendingPipelineTaskCount.notify_one();
-//}
+static void EnqueuePipelineTask(PipelineTaskType type)
+{
+    if (type != PipelineTaskType::PrecompilePipelines)
+        ++g_compilingPipelineTaskCount;
+
+    {
+        std::lock_guard lock(g_pipelineTaskMutex);
+        g_pipelineTaskQueue.emplace_back(PipelineTask{type});
+    }
+
+    if ((++g_pendingPipelineTaskCount) == 1)
+        g_pendingPipelineTaskCount.notify_one();
+}
 
 static const PipelineState g_pipelineStateCache[] =
 {
@@ -1294,11 +1293,6 @@ static void SetRenderState(GuestDevice* device, uint32_t value)
     g_renderQueue.enqueue(cmd);
 }
 
-static void SetRenderStateUnimplemented(GuestDevice* device, uint32_t value)
-{
-    LOGF_WARNING("{:x}\n", value);
-}
-
 static void SetAlphaTestMode(bool enable)
 {
     uint32_t specConstants = 0;
@@ -1778,7 +1772,7 @@ static void CreateImGuiBackend()
     AchievementMenu::Init();
     AchievementOverlay::Init();
     OptionsMenu::Init();
-#if !REX_PLATFORM_CONSOLE
+#if !REX_PLATFORM_CONSOLE && !REX_PLATFORM_ANDROID
     InstallerWizard::Init();
 #endif
 
@@ -1931,6 +1925,19 @@ static void CreateImGuiBackend()
 
 static void CheckSwapChain()
 {
+#if defined(__ANDROID__)
+    // When Android sends the app to the background the ANativeWindow is
+    // destroyed and the Vulkan surface becomes invalid.  Touching the
+    // swapchain in that state will crash; just mark it invalid and bail.
+    // The lifecycle handler in game_window.cpp sets s_isFocused = false
+    // on SDL_EVENT_DID_ENTER_BACKGROUND and true again on foreground.
+    if (!GameWindow::s_isFocused)
+    {
+        g_swapChainValid = false;
+        return;
+    }
+#endif
+
     g_swapChain->setVsyncEnabled(Config::VSync);
     g_swapChainValid &= !g_swapChain->needsResize();
 
@@ -1999,7 +2006,7 @@ static void BeginCommandList()
     for (size_t i = 0; i < 16; i++)
     {
         g_sharedConstants.texture2DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D;
-        g_sharedConstants.texture2DArrayIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D_ARRAY;
+        g_sharedConstants.texture3DIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D;
         g_sharedConstants.textureCubeIndices[i] = TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE;
     }
 
@@ -2333,10 +2340,10 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
             viewDesc.dimension = RenderTextureViewDimension::TEXTURE_2D;
             break;
 
-        case TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D_ARRAY:
-            desc.dimension = RenderTextureDimension::TEXTURE_2D;
+        case TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D:
+            desc.dimension = RenderTextureDimension::TEXTURE_3D;
             desc.arraySize = 1;
-            viewDesc.dimension = RenderTextureViewDimension::TEXTURE_2D;
+            viewDesc.dimension = RenderTextureViewDimension::TEXTURE_3D;
             break;
 
         case TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE:
@@ -2556,12 +2563,6 @@ void Video::WaitForGPU()
     g_queue->waitForCommandFence(g_commandFences[0].get());
 }
 
-static uint32_t getSetAddress(uint32_t base, int index) {
-    uint32_t entryOffset = index * 0xC;
-    uint32_t entryAddress = base + entryOffset;
-    uint32_t setAddress = entryAddress + sizeof(uint32_t);
-    return setAddress;
-}
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
@@ -2597,31 +2598,12 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
     auto device = g_userHeap.AllocPhysical<GuestDevice>();
     memset(device, 0, sizeof(*device));
 
-    // Append render state functions to the end of guest function table.
-    uint32_t functionOffsetUnimplemented = PPC_CODE_BASE + PPC_CODE_SIZE;
-    g_memory.InsertFunction(functionOffsetUnimplemented, HostToGuestFunction<SetRenderStateUnimplemented>);
-    
-    uint32_t functionOffset = 0x82B79868;
-    for (size_t i = 0; i < std::size(device->setRenderStateFunctions); i++) {
-        device->setRenderStateFunctions[i] = functionOffsetUnimplemented;
-    }
-
-    // InsertFucntion doesn't work, so we have to do this manually in the end
-    for (auto& [state, function] : g_setRenderStateFunctions)
-    {
-        auto funcOffset = getSetAddress(functionOffset, state/4);
-        uint32_t addr = __builtin_bswap32(*(uint32_t*)g_memory.Translate(funcOffset));
-        REXLOG_DEBUG("state {} of {:x} is {:x}", static_cast<uint32_t>(state), funcOffset, addr);
-        g_memory.InsertFunction(addr, function);
-        device->setRenderStateFunctions[state / 4] = addr;
-    }
-
-    for (size_t i = 0; i < std::size(device->setSamplerStateFunctions); i++)
-        device->setSamplerStateFunctions[i] = *reinterpret_cast<uint32_t*>(g_memory.Translate(0x82B79CFC + i * 0xC));
-
-    device->viewport.width = 1280.0f;
-    device->viewport.height = 720.0f;
-    device->viewport.maxZ = 1.0f;
+    // NOTE: GTA IV's renderstate funnel (sub_828C19C0) is an inline `bctr`
+    // switch against a rodata jump table — it does NOT dispatch through
+    // per-device function-pointer LUTs like Sonic/Unleashed do. Liberty's
+    // old Unleashed-style LUT install at 0x82B79868 / 0x82B79CFC landed on
+    // non-symbol addresses and was dead. It has been removed. Render-state
+    // interception will be wired via a binary hook on sub_828C19C0.
 
     *a6 = g_memory.MapVirtual(device);
 
@@ -3179,7 +3161,7 @@ static void DrawImGui()
     // Skip this adjustment during main menu / installer as it can cause issues
     // when the viewport equals the swap chain size.
     if (!MainMenu::s_isVisible
-#if !REX_PLATFORM_CONSOLE
+#if !REX_PLATFORM_CONSOLE && !REX_PLATFORM_ANDROID
         && !InstallerWizard::s_isVisible
 #endif
     )
@@ -3234,7 +3216,7 @@ static void DrawImGui()
     AchievementMenu::Draw();
     OptionsMenu::Draw();
     AchievementOverlay::Draw();
-#if !REX_PLATFORM_CONSOLE
+#if !REX_PLATFORM_CONSOLE && !REX_PLATFORM_ANDROID
     InstallerWizard::Draw();
 #endif
     ButtonWindow::Draw();
@@ -3655,7 +3637,7 @@ void Video::Present()
     // ImGui has threading issues during gameplay - crashes with iterator assertions
     // But the installer and main menu run single-threaded, so enable ImGui for their UI
     if (
-#if !REX_PLATFORM_CONSOLE
+#if !REX_PLATFORM_CONSOLE && !REX_PLATFORM_ANDROID
         InstallerWizard::s_isVisible ||
 #endif
         MainMenu::s_isVisible)
@@ -3669,7 +3651,7 @@ void Video::Present()
     // All the shaders are available at this point. We can precompile embedded PSOs then.
     if (g_shouldPrecompilePipelines)
     {
-//        EnqueuePipelineTask(PipelineTaskType::PrecompilePipelines, {});
+        EnqueuePipelineTask(PipelineTaskType::PrecompilePipelines);
         g_shouldPrecompilePipelines = false;
     }
 
@@ -4264,13 +4246,6 @@ static void SetDefaultViewport(GuestDevice* device, GuestSurface* surface)
         cmd.setViewport.minDepth = 0.0f;
         cmd.setViewport.maxDepth = 1.0f;
         g_renderQueue.enqueue(cmd);
-
-        device->viewport.x = 0.0f;
-        device->viewport.y = 0.0f;
-        device->viewport.width = float(surface->width);
-        device->viewport.height = float(surface->height);
-        device->viewport.minZ = 0.0f;
-        device->viewport.maxZ = 1.0f;
     }
 }
 
@@ -4736,13 +4711,6 @@ static void SetViewport(GuestDevice* device, GuestViewport* viewport)
     cmd.setViewport.minDepth = viewport->minZ;
     cmd.setViewport.maxDepth = viewport->maxZ;
     g_renderQueue.enqueue(cmd);
-
-    device->viewport.x = float(viewport->x);
-    device->viewport.y = float(viewport->y);
-    device->viewport.width = float(viewport->width);
-    device->viewport.height = float(viewport->height);
-    device->viewport.minZ = viewport->minZ;
-    device->viewport.maxZ = viewport->maxZ;
 }
 
 static void ProcSetViewport(const RenderCommand& cmd)
@@ -4790,8 +4758,8 @@ static void SetTextureInRenderThread(uint32_t index, GuestTexture* texture)
     SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture2DIndices[index],
         viewDimension == RenderTextureViewDimension::TEXTURE_2D ? texture->descriptorIndex : TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D);
 
-    SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture2DArrayIndices[index], texture != nullptr &&
-        viewDimension == RenderTextureViewDimension::TEXTURE_2D ? texture->descriptorIndex : TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D_ARRAY);
+    SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture3DIndices[index], texture != nullptr &&
+        viewDimension == RenderTextureViewDimension::TEXTURE_3D ? texture->descriptorIndex : TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D);
 
     SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.textureCubeIndices[index], texture != nullptr &&
         viewDimension == RenderTextureViewDimension::TEXTURE_CUBE ? texture->descriptorIndex : TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE);
@@ -4802,7 +4770,7 @@ static void SetSurface(uint32_t index, GuestSurface* surface)
     AddBarrier(surface, RenderTextureLayout::SHADER_READ);
 
     SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture2DIndices[index], surface->descriptorIndex);
-    SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture2DArrayIndices[index], uint32_t(TEXTURE_DESCRIPTOR_NULL_TEXTURE_2D_ARRAY));
+    SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.texture3DIndices[index], uint32_t(TEXTURE_DESCRIPTOR_NULL_TEXTURE_3D));
     SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.textureCubeIndices[index], uint32_t(TEXTURE_DESCRIPTOR_NULL_TEXTURE_CUBE));
 }
 
@@ -5110,15 +5078,51 @@ static void SanitizePipelineState(PipelineState& pipelineState)
         pipelineState.blendOpAlpha = RenderBlendOperation::ADD;
     }
 
-    for (size_t i = 0; i < 16; i++)
+    // [DIAG-PS] Instrumentation: when entering SanitizePipelineState with null
+    // vertexDeclaration or vertexShader, something earlier in the draw chain
+    // failed to populate these. Log the first N occurrences + a rough
+    // identifier so we can trace back to which SetVertexDeclaration /
+    // CreateVertexShader hook should have run. Skipping the bad deref isn't
+    // masking — it's a diagnostic guard we'll remove once the root cause is
+    // identified.
+    if (pipelineState.vertexDeclaration == nullptr)
     {
-        if (!pipelineState.vertexDeclaration->vertexStreams[i])
-            pipelineState.vertexStrides[i] = 0;
+        static std::atomic<uint32_t> diag_vd_counter{0};
+        uint32_t n = diag_vd_counter.fetch_add(1, std::memory_order_relaxed);
+        if (n < 32)
+        {
+            LOGF_WARNING("[DIAG-PS seq={}] SanitizePipelineState: vertexDeclaration=null "
+                         "VS={:p} PS={:p} vertexStrides[0]={} primitiveType={}",
+                         n, (void*)pipelineState.vertexShader, (void*)pipelineState.pixelShader,
+                         pipelineState.vertexStrides[0], (int)pipelineState.primitiveTopology);
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < 16; i++)
+        {
+            if (!pipelineState.vertexDeclaration->vertexStreams[i])
+                pipelineState.vertexStrides[i] = 0;
+        }
     }
 
     uint32_t specConstantsMask = 0;
-    if (pipelineState.vertexShader->shaderCacheEntry != nullptr)
+    if (pipelineState.vertexShader == nullptr)
+    {
+        static std::atomic<uint32_t> diag_vs_counter{0};
+        uint32_t n = diag_vs_counter.fetch_add(1, std::memory_order_relaxed);
+        if (n < 32)
+        {
+            LOGF_WARNING("[DIAG-PS seq={}] SanitizePipelineState: vertexShader=null "
+                         "VDecl={:p} PS={:p} primitiveType={}",
+                         n, (void*)pipelineState.vertexDeclaration, (void*)pipelineState.pixelShader,
+                         (int)pipelineState.primitiveTopology);
+        }
+    }
+    else if (pipelineState.vertexShader->shaderCacheEntry != nullptr)
+    {
         specConstantsMask |= pipelineState.vertexShader->shaderCacheEntry->specConstantsMask;
+    }
 
     if (pipelineState.pixelShader != nullptr && pipelineState.pixelShader->shaderCacheEntry != nullptr)
         specConstantsMask |= pipelineState.pixelShader->shaderCacheEntry->specConstantsMask;
@@ -5202,7 +5206,11 @@ static std::unique_ptr<RenderPipeline> CreateGraphicsPipeline(const PipelineStat
         auto& inputSlot = inputSlots[inputSlotIndex - 1];
         inputSlot.index = inputElement.slotIndex;
         inputSlot.stride = pipelineState.vertexStrides[inputElement.slotIndex];
-        inputSlot.classification = RenderInputSlotClassification::PER_VERTEX_DATA;
+
+        if (pipelineState.instancing && inputElement.slotIndex != 0 && inputElement.slotIndex != 15)
+            inputSlot.classification = RenderInputSlotClassification::PER_INSTANCE_DATA;
+        else
+            inputSlot.classification = RenderInputSlotClassification::PER_VERTEX_DATA;
     }
     
     desc.inputSlots = inputSlots;
@@ -5216,6 +5224,9 @@ static std::unique_ptr<RenderPipeline> CreateGraphicsPipeline(const PipelineStat
 
     return pipeline;
 }
+
+// Forward declaration — defined at line ~7425, needed by CreateGraphicsPipelineInRenderThread.
+static xxHashMap<PipelineState> g_asyncPipelineStates;
 
 static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipelineState)
 {
@@ -5249,6 +5260,9 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
         PWATCH("cache-miss: pre-CreateGraphicsPipeline");
         // Track pipeline cache miss for GTAIV statistics
         GTAIV::RecordPipelineCacheMiss();
+
+        // Record for RecompilePipelines support
+        g_asyncPipelineStates.emplace(hash, pipelineState);
 
         pipeline = CreateGraphicsPipeline(pipelineState);
         PWATCH("cache-miss: post-CreateGraphicsPipeline");
@@ -5441,19 +5455,19 @@ struct LocalRenderCommandQueue
 static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderCommandQueue& queue)
 {
     constexpr size_t BOOL_MASK = 0x2ull;
-    if ((device->dirtyFlags[3].get() & BOOL_MASK) != 0)
+    if ((device->dirtyFlagTexture.get() & BOOL_MASK) != 0)
     {
         auto& cmd = queue.enqueue();
         cmd.type = RenderCommandType::SetBooleans;
         cmd.setBooleans.booleans = (device->vertexShaderBoolConstants[0].get() & 0xFF) | ((device->pixelShaderBoolConstants[0].get() & 0xFF) << 16);
 
-        device->dirtyFlags[3] = device->dirtyFlags[3].get() & ~BOOL_MASK;
+        device->dirtyFlagTexture = device->dirtyFlagTexture.get() & ~BOOL_MASK;
     }
 
     for (uint32_t i = 0; i < 16; i++)
     {
         const size_t mask = 0x8000000000000000ull >> (i + 20);
-        if (device->dirtyFlags[2].get() & mask)
+        if (device->dirtyFlagState.get() & mask)
         {
             auto& cmd = queue.enqueue();
             cmd.type = RenderCommandType::SetSamplerState;
@@ -5462,11 +5476,11 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
             cmd.setSamplerState.data3 = device->samplerStates[i].data[3];
             cmd.setSamplerState.data5 = device->samplerStates[i].data[5];
 
-            device->dirtyFlags[2] = device->dirtyFlags[2].get() & ~mask;
+            device->dirtyFlagState = device->dirtyFlagState.get() & ~mask;
         }
     }
 
-    uint64_t dirtyFlags = device->dirtyFlags[0].get();
+    uint64_t dirtyFlags = device->dirtyFlagVsFloat.get();
     if (dirtyFlags != 0)
     {
         int startRegister = std::countl_zero(dirtyFlags);
@@ -5481,10 +5495,10 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
         cmd.setVertexShaderConstants.index = index;
         cmd.setVertexShaderConstants.size = size;
 
-        device->dirtyFlags[0] = 0;
+        device->dirtyFlagVsFloat = 0;
     }
 
-    dirtyFlags = device->dirtyFlags[1].get();
+    dirtyFlags = device->dirtyFlagPsFloat.get();
     if (dirtyFlags != 0)
     {
         int startRegister = std::countl_zero(dirtyFlags);
@@ -5499,7 +5513,7 @@ static void FlushRenderStateForMainThread(GuestDevice* device, LocalRenderComman
         cmd.setPixelShaderConstants.index = index;
         cmd.setPixelShaderConstants.size = size;
 
-        device->dirtyFlags[1] = 0;
+        device->dirtyFlagPsFloat = 0;
     }
 }
 
@@ -5820,28 +5834,64 @@ static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t 
     queue.submit();
 }
 
+static uint32_t CheckInstancing()
+{
+    uint32_t indexCount = 0;
+
+    SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.instancing, g_pipelineState.vertexDeclaration->indexVertexStream != 0);
+    if (g_pipelineState.instancing)
+    {
+        // Index buffer is passed as a vertex stream
+        indexCount = g_vertexBufferViews[g_pipelineState.vertexDeclaration->indexVertexStream].size / 4;
+    }
+
+    return indexCount;
+}
+
+static void UnsetInstancingStream()
+{
+    bool dirty = false;
+    uint32_t index = g_pipelineState.vertexDeclaration->indexVertexStream;
+
+    SetDirtyValue(dirty, g_vertexBufferViews[index].buffer, RenderBufferReference{});
+    SetDirtyValue(dirty, g_vertexBufferViews[index].size, 0u);
+    SetDirtyValue(dirty, g_inputSlots[index].stride, 0u);
+
+    if (dirty)
+    {
+        g_dirtyStates.vertexStreamFirst = std::min<uint8_t>(g_dirtyStates.vertexStreamFirst, index);
+        g_dirtyStates.vertexStreamLast = std::max<uint8_t>(g_dirtyStates.vertexStreamLast, index);
+    }
+}
+
 static void ProcDrawPrimitive(const RenderCommand& cmd)
 {
-    static uint32_t s_procDrawCount = 0;
-    ++s_procDrawCount;
-    
     const auto& args = cmd.drawPrimitive;
-    
-    if (s_procDrawCount <= 10 || (s_procDrawCount % 1000) == 0) {
-        LOGF_WARNING("ProcDrawPrimitive #{} type={} start={} count={} VS={:p} PS={:p} VDecl={:p}",
-            s_procDrawCount, args.primitiveType, args.startVertex, args.primitiveCount,
-            (void*)g_pipelineState.vertexShader, (void*)g_pipelineState.pixelShader,
-            (void*)g_pipelineState.vertexDeclaration);
-    }
 
     if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
 
     SetPrimitiveType(args.primitiveType);
 
+    uint32_t indexCount = CheckInstancing();
+    if (indexCount > 0)
+    {
+        auto& vertexBufferView = g_vertexBufferViews[g_pipelineState.vertexDeclaration->indexVertexStream];
+
+        SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.buffer, vertexBufferView.buffer);
+        SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.size, vertexBufferView.size);
+        SetDirtyValue(g_dirtyStates.indices, g_indexBufferView.format, RenderFormat::R32_UINT);
+
+        UnsetInstancingStream();
+    }
+
     FlushRenderStateForRenderThread();
 
     auto& commandList = g_commandLists[g_frame];
-    commandList->drawInstanced(PrimCountToVertexCount(args.primitiveType, args.primitiveCount), 1, args.startVertex, 0);
+
+    if (indexCount > 0)
+        commandList->drawIndexedInstanced(indexCount, args.primitiveCount / indexCount, 0, 0, 0);
+    else
+        commandList->drawInstanced(PrimCountToVertexCount(args.primitiveType, args.primitiveCount), 1, args.startVertex, 0);
 }
 
 static void DrawIndexedPrimitive(GuestDevice* device, uint32_t primitiveType, int32_t baseVertexIndex, uint32_t minVertexIndex,
@@ -5876,6 +5926,10 @@ static void ProcDrawIndexedPrimitive(const RenderCommand& cmd)
 
     if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
 
+    uint32_t indexCount = CheckInstancing();
+    if (indexCount > 0)
+        UnsetInstancingStream();
+
     SetPrimitiveType(args.primitiveType);
     FlushRenderStateForRenderThread();
 
@@ -5903,19 +5957,9 @@ static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 {
     const auto& args = cmd.drawPrimitiveUP;
 
-    // [WATCH] trace render-thread processing of each DrawPrimitiveUP. Rate-limit.
-    static uint64_t s_proc_seq = 0;
-    uint64_t proc_seq = ++s_proc_seq;
-    bool log_this = (proc_seq <= 30 || (proc_seq % 500) == 0);
-
-    if (log_this) {
-        LOGF_WARNING("[WATCH] ProcDP seq={} entry prim={} primCnt={} vdataBytes={} stride={} csd={} vs={} ps={} rt={} ds={} frame={}",
-                     proc_seq, args.primitiveType, args.primitiveCount,
-                     args.vertexStreamZeroSize, args.vertexStreamZeroStride,
-                     static_cast<int>(args.csdFilterState),
-                     (void*)g_pipelineState.vertexShader, (void*)g_pipelineState.pixelShader,
-                     (void*)g_renderTarget, (void*)g_depthStencil, g_frame);
-    }
+    uint32_t instIndexCount = CheckInstancing();
+    if (instIndexCount > 0)
+        UnsetInstancingStream();
 
     SetPrimitiveType(args.primitiveType);
     SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexStrides[0], uint8_t(args.vertexStreamZeroStride));
@@ -5944,26 +5988,12 @@ static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 
     if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
 
-    if (log_this) {
-        LOGF_WARNING("[WATCH] ProcDP seq={} pre-flush rt={} ds={} cmdList={} pipelineState_dirty={} vtx_dirty=[{},{}] idxCount={}",
-                     proc_seq, (void*)g_renderTarget, (void*)g_depthStencil,
-                     (void*)g_commandLists[g_frame].get(),
-                     g_dirtyStates.pipelineState ? 1 : 0,
-                     g_dirtyStates.vertexStreamFirst, g_dirtyStates.vertexStreamLast,
-                     indexCount);
-    }
     FlushRenderStateForRenderThread();
-    if (log_this) {
-        LOGF_WARNING("[WATCH] ProcDP seq={} post-flush — flush survived", proc_seq);
-    }
 
     if (indexCount != 0)
         g_commandLists[g_frame]->drawIndexedInstanced(indexCount, 1, 0, 0, 0);
     else
         g_commandLists[g_frame]->drawInstanced(args.primitiveCount, 1, 0, 0);
-    if (log_this) {
-        LOGF_WARNING("[WATCH] ProcDP seq={} post-draw — draw survived", proc_seq);
-    }
 }
 
 static const char* ConvertDeclUsage(uint32_t usage)
@@ -6140,6 +6170,10 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
 
             switch (vertexElement->usage)
             {
+            case D3DDECLUSAGE_POSITION:
+                if (vertexElement->usageIndex == 1)
+                    vertexDeclaration->indexVertexStream = vertexElement->stream;
+                break;
             case D3DDECLUSAGE_NORMAL:
                 switch (vertexElement->type)
                 {
@@ -7265,7 +7299,7 @@ void MovieRendererMidAsmHook(PPCRegister& r3)
         device->samplerStates[i].data[3] = (device->samplerStates[i].data[3].get() & ~0x1f80000) | 0x1280000;
     }
 
-    device->dirtyFlags[2] = device->dirtyFlags[2].get() | 0xe0000000000ull;
+    device->dirtyFlagState = device->dirtyFlagState.get() | 0xe0000000000ull;
 }
 
 // Normally, we could delay setting IsMadeOne, but the game relies on that flag
@@ -7308,17 +7342,16 @@ enum
 //    }
 //};
 
-//struct PipelineStateQueueItem
-//{
-//    XXH64_hash_t pipelineHash;
-//    PipelineState pipelineState;
-//    std::shared_ptr<PipelineTaskToken> token;
-//#ifdef ASYNC_PSO_DEBUG
-//    std::string pipelineName;
-//#endif
-//};
+struct PipelineStateQueueItem
+{
+    XXH64_hash_t pipelineHash;
+    PipelineState pipelineState;
+#ifdef ASYNC_PSO_DEBUG
+    std::string pipelineName;
+#endif
+};
 
-//static moodycamel::BlockingConcurrentQueue<PipelineStateQueueItem> g_pipelineStateQueue;
+static moodycamel::BlockingConcurrentQueue<PipelineStateQueueItem> g_pipelineStateQueue;
 
 static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipelineState
 #ifdef ASYNC_PSO_DEBUG
@@ -7349,38 +7382,22 @@ static void PipelineCompilerThread()
 
     std::unique_ptr<GuestThreadContext> ctx;
 
-//    while (true)
-//    {
-//        PipelineStateQueueItem queueItem;
-//        g_pipelineStateQueue.wait_dequeue(queueItem);
-//
-//        if (ctx == nullptr)
-//            ctx = std::make_unique<GuestThreadContext>(0);
-//
-//#ifdef _WIN32
-//        int newThreadPriority = threadPriority;
-//
-//        bool loading = *SWA::SGlobals::ms_IsLoading;
-//        if (loading)
-//            newThreadPriority = THREAD_PRIORITY_HIGHEST;
-//        else
-//            newThreadPriority = THREAD_PRIORITY_LOWEST;
-//
-//        if (newThreadPriority != threadPriority)
-//        {
-//            SetThreadPriority(GetCurrentThread(), newThreadPriority);
-//            threadPriority = newThreadPriority;
-//        }
-//#endif
-//
-//        CompilePipeline(queueItem.pipelineHash, queueItem.pipelineState
-//#ifdef ASYNC_PSO_DEBUG
-//            , queueItem.pipelineName.c_str()
-//#endif
-//        );
-//
-//        std::this_thread::yield();
-//    }
+    while (true)
+    {
+        PipelineStateQueueItem queueItem;
+        g_pipelineStateQueue.wait_dequeue(queueItem);
+
+        if (ctx == nullptr)
+            ctx = std::make_unique<GuestThreadContext>(0);
+
+        CompilePipeline(queueItem.pipelineHash, queueItem.pipelineState
+#ifdef ASYNC_PSO_DEBUG
+            , queueItem.pipelineName.c_str()
+#endif
+        );
+
+        std::this_thread::yield();
+    }
 }
 
 static std::vector<std::unique_ptr<std::thread>> g_pipelineCompilerThreads = []()
@@ -7408,61 +7425,47 @@ struct PipelineTaskTokenPair
 
 // Having this separate, because I don't want to lock a mutex in the render thread before
 // every single draw. Might be worth profiling to see if it actually has an impact and merge them.
-static xxHashMap<PipelineState> g_asyncPipelineStates;
+// (Moved to earlier in the file — see forward declaration above CreateGraphicsPipelineInRenderThread)
 
-//static void EnqueueGraphicsPipelineCompilation(
-//    const PipelineState& pipelineState,
-//    PipelineTaskTokenPair& tokenPair,
-//    const char* name,
-//    bool isPrecompiledPipeline = false)
-//{
-//    XXH64_hash_t hash = XXH3_64bits(&pipelineState, sizeof(pipelineState));
-//    bool shouldCompile = g_asyncPipelineStates.emplace(hash, pipelineState).second;
-//
-//    if (shouldCompile)
-//    {
-//        bool loading = *SWA::SGlobals::ms_IsLoading;
-//        if (!loading && isPrecompiledPipeline)
-//        {
-//            // We can just compile here during the logos.
-//            CompilePipeline(hash, pipelineState
-//#ifdef ASYNC_PSO_DEBUG
-//                , fmt::format("CACHE {} {:X}", name, hash)
-//#endif
-//            );
-//        }
-//        else
-//        {
-//            if (tokenPair.sharedToken == nullptr && tokenPair.token.type != PipelineTaskType::Null)
-//                tokenPair.sharedToken = std::make_shared<PipelineTaskToken>(std::move(tokenPair.token));
-//
-//            PipelineStateQueueItem queueItem;
-//            queueItem.pipelineHash = hash;
-//            queueItem.pipelineState = pipelineState;
-//            queueItem.token = tokenPair.sharedToken;
-//#ifdef ASYNC_PSO_DEBUG
-//            queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
-//#endif
-//            g_pipelineStateQueue.enqueue(queueItem);
-//        }
-//    }
-//
-//#ifdef PSO_CACHING_CLEANUP
-//    if (shouldCompile && isPrecompiledPipeline)
-//    {
-//        std::lock_guard lock(g_pipelineCacheMutex);
-//        g_pipelineStatesToCache.emplace(hash, pipelineState);
-//    }
-//#endif
-//
-//#ifdef PSO_CACHING
-//    if (!isPrecompiledPipeline)
-//    {
-//        std::lock_guard lock(g_pipelineCacheMutex);
-//        g_pipelineStatesToCache.erase(hash);
-//    }
-//#endif
-//}
+static void EnqueueGraphicsPipelineCompilation(
+    const PipelineState& pipelineState,
+    const char* name,
+    bool isPrecompiledPipeline = false)
+{
+    XXH64_hash_t hash = XXH3_64bits(&pipelineState, sizeof(pipelineState));
+    bool shouldCompile = g_asyncPipelineStates.emplace(hash, pipelineState).second;
+
+    if (shouldCompile)
+    {
+        if (isPrecompiledPipeline)
+        {
+            // Compile synchronously during loading/logos.
+            CompilePipeline(hash, pipelineState
+#ifdef ASYNC_PSO_DEBUG
+                , fmt::format("CACHE {} {:X}", name, hash)
+#endif
+            );
+        }
+        else
+        {
+            PipelineStateQueueItem queueItem;
+            queueItem.pipelineHash = hash;
+            queueItem.pipelineState = pipelineState;
+#ifdef ASYNC_PSO_DEBUG
+            queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
+#endif
+            g_pipelineStateQueue.enqueue(queueItem);
+        }
+    }
+
+#ifdef PSO_CACHING
+    if (!isPrecompiledPipeline)
+    {
+        std::lock_guard lock(g_pipelineCacheMutex);
+        g_pipelineStatesToCache.erase(hash);
+    }
+#endif
+}
 
 struct CompilationArgs
 {
@@ -8193,263 +8196,152 @@ static bool CheckMadeAll(const T& modelData)
 
 //static void PipelineTaskConsumerThread()
 //{
-//#ifdef _WIN32
-//    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
-//    GuestThread::SetThreadName(GetCurrentThreadId(), "Pipeline Task Consumer Thread");
-//#endif
-//
-//    std::vector<PipelineTask> localPipelineTaskQueue;
-//    std::unique_ptr<GuestThreadContext> ctx;
-//
-//    while (true)
-//    {
-//        // Wait for tasks to arrive.
-//        uint32_t pendingPipelineTaskCount;
-//        while ((pendingPipelineTaskCount = g_pendingPipelineTaskCount.load()) == 0)
-//            g_pendingPipelineTaskCount.wait(pendingPipelineTaskCount);
-//
-//        if (ctx == nullptr)
-//            ctx = std::make_unique<GuestThreadContext>(0);
-//
-//        {
-//            std::lock_guard lock(g_pipelineTaskMutex);
-//            localPipelineTaskQueue.insert(localPipelineTaskQueue.end(), g_pipelineTaskQueue.begin(), g_pipelineTaskQueue.end());
-//            g_pipelineTaskQueue.clear();
-//        }
-//
-//        bool allHandled = true;
-//
-//        for (auto& [type, databaseData] : localPipelineTaskQueue)
-//        {
-//            switch (type)
-//            {
-//            case PipelineTaskType::DatabaseData:
-//            {
-//                bool ready = false;
-//
-//                if (databaseData->m_pVftable.ptr == MODEL_DATA_VFTABLE)
-//                    ready = CheckMadeAll(*reinterpret_cast<Hedgehog::Mirage::CModelData*>(databaseData.get()));
-//                else
-//                    ready = databaseData->IsMadeOne();
-//
-//                if (ready || databaseData.unique())
-//                {
-//                    if (databaseData->m_pVftable.ptr == TERRAIN_MODEL_DATA_VFTABLE)
-//                    {
-//                        CompilationArgs args{};
-//                        args.tokenPair.token.type = type;
-//                        args.tokenPair.token.databaseData = databaseData;
-//                        args.instancing = strncmp(databaseData->m_TypeAndName.c_str() + 3, "ins", 3) == 0;
-//                        CompileMeshPipelines(*reinterpret_cast<Hedgehog::Mirage::CTerrainModelData*>(databaseData.get()), args);
-//                    }
-//                    else if (databaseData->m_pVftable.ptr == PARTICLE_MATERIAL_VFTABLE)
-//                    {
-//                        PipelineTaskTokenPair tokenPair;
-//                        tokenPair.token.type = type;
-//                        tokenPair.token.databaseData = databaseData;
-//                        CompileParticleMaterialPipeline(*reinterpret_cast<Hedgehog::Sparkle::CParticleMaterial*>(databaseData.get()), tokenPair);
-//                    }
-//                    else
-//                    {
-//                        assert(databaseData->m_pVftable.ptr == MODEL_DATA_VFTABLE);
-//
-//                        auto modelData = reinterpret_cast<Hedgehog::Mirage::CModelData*>(databaseData.get());
-//
-//                        CompilationArgs args{};
-//                        args.tokenPair.token.type = type;
-//                        args.tokenPair.token.databaseData = databaseData;
-//                        args.noGI = true;
-//                        args.hasMoreThanOneBone = modelData->m_NodeNum > 1;
-//                        args.velocityMapQuickStep = strcmp(databaseData->m_TypeAndName.c_str() + 2, "SonicRoot") == 0;
-//
-//                        // Check for the on screen items, eg. rings going to HUD.
-//                        auto items = reinterpret_cast<xpointer<const char>*>(g_memory.Translate(0x832A8DD0));
-//                        for (size_t i = 0; i < 50; i++)
-//                        {
-//                            if (strcmp(databaseData->m_TypeAndName.c_str() + 2, (*items).get()) == 0)
-//                            {
-//                                args.objectIcon = true;
-//                                break;
-//                            }
-//                            items += 7;
-//                        }
-//
-//                        CompileMeshPipelines(*modelData, args);
-//                    }
-//
-//                    type = PipelineTaskType::Null;
-//                    databaseData = nullptr;
-//
-//                    --g_pendingPipelineTaskCount;
-//                }
-//                else
-//                {
-//                    allHandled = false;
-//                }
-//
-//                break;
-//            }
-//
-//            case PipelineTaskType::PrecompilePipelines:
-//            {
-//                // Deliberately leaving the type null to account for the enqueue
-//                // call not incrementing the compiling pipeline task counter.
-//                PipelineTaskTokenPair tokenPair;
-//
-//                for (auto vertexElements : g_vertexDeclarationCache)
-//                    CreateVertexDeclarationWithoutAddRef(reinterpret_cast<GuestVertexElement*>(vertexElements));
-//
-//                for (auto pipelineState : g_pipelineStateCache)
-//                {
-//                    // The hashes were reinterpret casted to pointers in the cache.
-//                    pipelineState.vertexShader = FindShaderCacheEntry(reinterpret_cast<XXH64_hash_t>(pipelineState.vertexShader))->guestShader;
-//
-//                    if (pipelineState.pixelShader != nullptr)
-//                        pipelineState.pixelShader = FindShaderCacheEntry(reinterpret_cast<XXH64_hash_t>(pipelineState.pixelShader))->guestShader;
-//
-//                    {
-//                        std::lock_guard lock(g_vertexDeclarationMutex);
-//                        pipelineState.vertexDeclaration = g_vertexDeclarations[reinterpret_cast<XXH64_hash_t>(pipelineState.vertexDeclaration)];
-//                    }
-//
-//                    if (!g_capabilities.triangleFan && pipelineState.primitiveTopology == RenderPrimitiveTopology::TRIANGLE_FAN)
-//                        pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_LIST;
-//
-//                    // Zero out depth bias for Vulkan, we only store common values for D3D12.
-//                    if (g_capabilities.dynamicDepthBias && g_backend != Backend::D3D12)
-//                    {
-//                        pipelineState.depthBias = 0;
-//                        pipelineState.slopeScaledDepthBias = 0.0f;
-//                    }
-//
-//                    if (Config::GITextureFiltering == EGITextureFiltering::Bicubic)
-//                        pipelineState.specConstants |= SPEC_CONSTANT_BICUBIC_GI_FILTER;
-//
-//                    auto createGraphicsPipeline = [&](PipelineState& pipelineStateToCreate, const char* name)
-//                        {
-//                            SanitizePipelineState(pipelineStateToCreate);
-//                            EnqueueGraphicsPipelineCompilation(pipelineStateToCreate, tokenPair, name, true);
-//                        };
-//
-//                    // Compile both MSAA and non MSAA variants to work with reflection maps. The render formats are an assumption but it should hold true.
-//                    if (Config::AntiAliasing != EAntiAliasing::None &&
-//                        pipelineState.renderTargetFormat == RenderFormat::R16G16B16A16_FLOAT &&
-//                        pipelineState.depthStencilFormat == RenderFormat::D32_FLOAT_S8_UINT)
-//                    {
-//                        auto msaaPipelineState = pipelineState;
-//                        msaaPipelineState.sampleCount = int32_t(Config::AntiAliasing.Value);
-//
-//                        if (Config::TransparencyAntiAliasing && (msaaPipelineState.specConstants & SPEC_CONSTANT_ALPHA_TEST) != 0)
-//                        {
-//                            msaaPipelineState.enableAlphaToCoverage = true;
-//                            msaaPipelineState.specConstants &= ~SPEC_CONSTANT_ALPHA_TEST;
-//                            msaaPipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TO_COVERAGE;
-//                        }
-//
-//                        createGraphicsPipeline(msaaPipelineState, "Precompiled Pipeline MSAA");
-//                    }
-//
-//                    if (pipelineState.pixelShader != nullptr &&
-//                        pipelineState.pixelShader->shaderCacheEntry != nullptr)
-//                    {
-//                        XXH64_hash_t hash = pipelineState.pixelShader->shaderCacheEntry->hash;
-//
-//                        // Compile the custom gaussian blur shaders that we pass to the game.
-//                        if (hash == 0x4294510C775F4EE8)
-//                        {
-//                            for (auto& shader : g_gaussianBlurShaders)
-//                            {
-//                                auto newPipelineState = pipelineState;
-//                                newPipelineState.pixelShader = shader.get();
-//                                createGraphicsPipeline(newPipelineState, "Precompiled Gaussian Blur Pipeline");
-//                            }
-//                        }
-//                        // Compile enhanced motion blur shader.
-//                        else if (hash == 0x6B9732B4CD7E7740)
-//                        {
-//                            auto newPipelineState = pipelineState;
-//                            newPipelineState.pixelShader = g_enhancedMotionBlurShader.get();
-//                            createGraphicsPipeline(newPipelineState, "Precompiled Enhanced Motion Blur Pipeline");
-//                        }
-//                    }
-//
-//                    createGraphicsPipeline(pipelineState, "Precompiled Pipeline");
-//
-//                    // Compile the CSD filter shader that we pass to the game when point filtering is used.
-//                    if (pipelineState.pixelShader == g_csdShader)
-//                    {
-//                        pipelineState.pixelShader = g_csdFilterShader.get();
-//                        createGraphicsPipeline(pipelineState, "Precompiled CSD Filter Pipeline");
-//                    }
-//                }
-//
-//                type = PipelineTaskType::Null;
-//                --g_pendingPipelineTaskCount;
-//
-//                break;
-//            }
-//
-//            case PipelineTaskType::RecompilePipelines:
-//            {
-//                PipelineTaskTokenPair tokenPair;
-//                tokenPair.token.type = type;
-//
-//                auto asyncPipelines = g_asyncPipelineStates.values();
-//
-//                for (auto& [hash, pipelineState] : asyncPipelines)
-//                {
-//                    bool alphaTest = (pipelineState.specConstants & (SPEC_CONSTANT_ALPHA_TEST | SPEC_CONSTANT_ALPHA_TO_COVERAGE)) != 0;
-//                    bool msaa = pipelineState.sampleCount != 1 || (pipelineState.renderTargetFormat == RenderFormat::R16G16B16A16_FLOAT && pipelineState.depthStencilFormat == RenderFormat::D32_FLOAT_S8_UINT);
-//
-//                    pipelineState.sampleCount = 1;
-//                    pipelineState.enableAlphaToCoverage = false;
-//                    pipelineState.specConstants &= ~(SPEC_CONSTANT_BICUBIC_GI_FILTER | SPEC_CONSTANT_ALPHA_TEST | SPEC_CONSTANT_ALPHA_TO_COVERAGE);
-//
-//                    if (msaa && Config::AntiAliasing != EAntiAliasing::None)
-//                    {
-//                        pipelineState.sampleCount = int32_t(Config::AntiAliasing.Value);
-//
-//                        if (alphaTest)
-//                        {
-//                            if (Config::TransparencyAntiAliasing)
-//                            {
-//                                pipelineState.enableAlphaToCoverage = true;
-//                                pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TO_COVERAGE;
-//                            }
-//                            else
-//                            {
-//                                pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
-//                            }
-//                        }
-//                    }
-//                    else if (alphaTest)
-//                    {
-//                        pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
-//                    }
-//
-//                    if (Config::GITextureFiltering == EGITextureFiltering::Bicubic)
-//                        pipelineState.specConstants |= SPEC_CONSTANT_BICUBIC_GI_FILTER;
-//
-//                    SanitizePipelineState(pipelineState);
-//                    EnqueueGraphicsPipelineCompilation(pipelineState, tokenPair, "Recompiled Pipeline State");
-//                }
-//
-//                type = PipelineTaskType::Null;
-//                --g_pendingPipelineTaskCount;
-//
-//                break;
-//            }
-//            }
-//        }
-//
-//        if (allHandled)
-//            localPipelineTaskQueue.clear();
-//
-//        std::this_thread::yield();
-//    }
-//}
+static void PipelineTaskConsumerThread()
+{
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+    GuestThread::SetThreadName(GetCurrentThreadId(), "Pipeline Task Consumer Thread");
+#endif
 
-//static std::thread g_pipelineTaskConsumerThread(PipelineTaskConsumerThread);
+    std::vector<PipelineTask> localPipelineTaskQueue;
+    std::unique_ptr<GuestThreadContext> ctx;
+
+    while (true)
+    {
+        uint32_t pendingPipelineTaskCount;
+        while ((pendingPipelineTaskCount = g_pendingPipelineTaskCount.load()) == 0)
+            g_pendingPipelineTaskCount.wait(pendingPipelineTaskCount);
+
+        if (ctx == nullptr)
+            ctx = std::make_unique<GuestThreadContext>(0);
+
+        {
+            std::lock_guard lock(g_pipelineTaskMutex);
+            localPipelineTaskQueue.insert(localPipelineTaskQueue.end(), g_pipelineTaskQueue.begin(), g_pipelineTaskQueue.end());
+            g_pipelineTaskQueue.clear();
+        }
+
+        for (auto& task : localPipelineTaskQueue)
+        {
+            switch (task.type)
+            {
+            case PipelineTaskType::PrecompilePipelines:
+            {
+                for (auto vertexElements : g_vertexDeclarationCache)
+                    CreateVertexDeclarationWithoutAddRef(reinterpret_cast<GuestVertexElement*>(vertexElements));
+
+                for (auto pipelineState : g_pipelineStateCache)
+                {
+                    pipelineState.vertexShader = FindShaderCacheEntry(reinterpret_cast<XXH64_hash_t>(pipelineState.vertexShader))->guestShader;
+
+                    if (pipelineState.pixelShader != nullptr)
+                        pipelineState.pixelShader = FindShaderCacheEntry(reinterpret_cast<XXH64_hash_t>(pipelineState.pixelShader))->guestShader;
+
+                    {
+                        std::lock_guard lock(g_vertexDeclarationMutex);
+                        pipelineState.vertexDeclaration = g_vertexDeclarations[reinterpret_cast<XXH64_hash_t>(pipelineState.vertexDeclaration)];
+                    }
+
+                    if (!g_capabilities.triangleFan && pipelineState.primitiveTopology == RenderPrimitiveTopology::TRIANGLE_FAN)
+                        pipelineState.primitiveTopology = RenderPrimitiveTopology::TRIANGLE_LIST;
+
+                    if (g_capabilities.dynamicDepthBias && g_backend != Backend::D3D12)
+                    {
+                        pipelineState.depthBias = 0;
+                        pipelineState.slopeScaledDepthBias = 0.0f;
+                    }
+
+                    auto createPipeline = [&](PipelineState& ps, const char* name)
+                        {
+                            SanitizePipelineState(ps);
+                            EnqueueGraphicsPipelineCompilation(ps, name, true);
+                        };
+
+                    if (Config::AntiAliasing != EAntiAliasing::Off &&
+                        pipelineState.renderTargetFormat == RenderFormat::R16G16B16A16_FLOAT &&
+                        pipelineState.depthStencilFormat == RenderFormat::D32_FLOAT_S8_UINT)
+                    {
+                        auto msaaPipelineState = pipelineState;
+                        msaaPipelineState.sampleCount = int32_t(Config::AntiAliasing.Value);
+
+                        if (Config::TransparencyAntiAliasing && (msaaPipelineState.specConstants & SPEC_CONSTANT_ALPHA_TEST) != 0)
+                        {
+                            msaaPipelineState.enableAlphaToCoverage = true;
+                            msaaPipelineState.specConstants &= ~SPEC_CONSTANT_ALPHA_TEST;
+                            msaaPipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TO_COVERAGE;
+                        }
+
+                        createPipeline(msaaPipelineState, "Precompiled Pipeline MSAA");
+                    }
+
+                    createPipeline(pipelineState, "Precompiled Pipeline");
+
+                    if (pipelineState.pixelShader == g_csdShader)
+                    {
+                        pipelineState.pixelShader = g_csdFilterShader.get();
+                        createPipeline(pipelineState, "Precompiled CSD Filter Pipeline");
+                    }
+                }
+
+                task.type = PipelineTaskType::Null;
+                --g_pendingPipelineTaskCount;
+                break;
+            }
+
+            case PipelineTaskType::RecompilePipelines:
+            {
+                auto asyncPipelines = g_asyncPipelineStates.values();
+
+                for (auto& [hash, pipelineState] : asyncPipelines)
+                {
+                    bool alphaTest = (pipelineState.specConstants & (SPEC_CONSTANT_ALPHA_TEST | SPEC_CONSTANT_ALPHA_TO_COVERAGE)) != 0;
+                    bool msaa = pipelineState.sampleCount != 1 || (pipelineState.renderTargetFormat == RenderFormat::R16G16B16A16_FLOAT && pipelineState.depthStencilFormat == RenderFormat::D32_FLOAT_S8_UINT);
+
+                    pipelineState.sampleCount = 1;
+                    pipelineState.enableAlphaToCoverage = false;
+                    pipelineState.specConstants &= ~(SPEC_CONSTANT_ALPHA_TEST | SPEC_CONSTANT_ALPHA_TO_COVERAGE);
+
+                    if (msaa && Config::AntiAliasing != EAntiAliasing::Off)
+                    {
+                        pipelineState.sampleCount = int32_t(Config::AntiAliasing.Value);
+
+                        if (alphaTest)
+                        {
+                            if (Config::TransparencyAntiAliasing)
+                            {
+                                pipelineState.enableAlphaToCoverage = true;
+                                pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TO_COVERAGE;
+                            }
+                            else
+                            {
+                                pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
+                            }
+                        }
+                    }
+                    else if (alphaTest)
+                    {
+                        pipelineState.specConstants |= SPEC_CONSTANT_ALPHA_TEST;
+                    }
+
+                    SanitizePipelineState(pipelineState);
+                    EnqueueGraphicsPipelineCompilation(pipelineState, "Recompiled Pipeline State");
+                }
+
+                task.type = PipelineTaskType::Null;
+                --g_pendingPipelineTaskCount;
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        localPipelineTaskQueue.clear();
+        std::this_thread::yield();
+    }
+}
+
+static std::thread g_pipelineTaskConsumerThread(PipelineTaskConsumerThread);
 
 #ifdef ASYNC_PSO_DEBUG
 
@@ -8504,8 +8396,8 @@ void VideoConfigValueChangedCallback(IConfigDef* config)
         config == &Config::AntiAliasing ||
         config == &Config::TransparencyAntiAliasing;
 
-//    if (shouldRecompile)
-//        EnqueuePipelineTask(PipelineTaskType::RecompilePipelines, {});
+    if (shouldRecompile)
+        EnqueuePipelineTask(PipelineTaskType::RecompilePipelines);
 }
 
 // There is a bug on AMD where restart indices cause incorrect culling and prevent some triangles from being rendered.
@@ -9305,9 +9197,9 @@ PPC_FUNC_HOOK(sub_828BEC78)
 // in GTA IV's D3D wrapper layer before enabling these.
 #if 0 // DISABLED - parameter layout investigation needed
 // Resource creation functions
-GUEST_FUNCTION_HOOK(sub_82A44850, CreateTexture);  // Allocates 52-byte GuestTexture struct
-GUEST_FUNCTION_HOOK(sub_82A44970, CreateVertexBuffer);  // Allocates 48-byte GuestBuffer struct
-// TODO: Find CreateIndexBuffer address (likely similar to CreateVertexBuffer pattern)
+GUEST_FUNCTION_HOOK(sub_82A44850, CreateTexture);  // D3DDevice_CreateTexture (FLIRT trusted)
+GUEST_FUNCTION_HOOK(sub_82A44970, CreateSurface);  // D3DDevice_CreateSurface (FLIRT trusted)
+// TODO: Find CreateVertexBuffer and CreateIndexBuffer addresses
 
 // Surface descriptor functions
 GUEST_FUNCTION_HOOK(sub_82A44A98, GetSurfaceDesc);
@@ -10222,12 +10114,12 @@ int D3DDevice_BeginShaderConstantF4(GuestDevice* device, uint32_t isPixelShader,
     if (isPixelShader)
     {
         constants = &device->pixelShaderFloatConstants[startRegister * 4];
-        dirtyFlags = &device->dirtyFlags[1];
+        dirtyFlags = &device->dirtyFlagPsFloat;
     }
     else
     {
         constants = &device->vertexShaderFloatConstants[startRegister * 4];
-        dirtyFlags = &device->dirtyFlags[0];
+        dirtyFlags = &device->dirtyFlagVsFloat;
     }
 
     const uint32_t addr = g_memory.MapVirtual(constants);

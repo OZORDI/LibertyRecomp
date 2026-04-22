@@ -14,6 +14,16 @@ static_assert(REX_PLATFORM_PS4, "This file is PS4-only");
 #include <signal.h>
 #include <orbis/libkernel.h>    // scePthreadGetthreadid, scePthreadGetaffinity, scePthreadAttrSetaffinity
 
+// OpenOrbis declares `void scePthreadSetaffinity();` with an empty parameter
+// list (line 671 of orbis/libkernel.h). Provide a properly-typed local
+// prototype under a distinct name. The C++ name-mangling difference is benign
+// because this symbol resolves via the PS4 sceLibKernel NID imports at link
+// time; the calling convention for (ptr, uint64_t) is identical between the
+// two declarations.
+extern "C" {
+int32_t scePthreadSetaffinity_proper(OrbisPthread, uint64_t) asm("scePthreadSetaffinity");
+}
+
 #include <atomic>
 #include <array>
 #include <cerrno>
@@ -656,6 +666,10 @@ class PosixCondition<Thread> : public PosixConditionBase {
         std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
         std::strcpy(result.data(), android_pre_api_26_name_);
       }
+#elif REX_PLATFORM_PS4
+      // OpenOrbis libc does not expose pthread_getname_np; thread names are
+      // only meaningful for debugging on PS4, so return empty. We could track
+      // names in a map keyed on thread_ if needed in future.
 #else
       if (pthread_getname_np(thread_, result.data(), result.size() - 1) != 0) {
         assert_always();
@@ -698,14 +712,17 @@ class PosixCondition<Thread> : public PosixConditionBase {
   }
 
   void set_affinity_mask(uint64_t mask) {
-    // PS4: use OrbisPthreadAttr + scePthreadAttrSetaffinity. OpenOrbis does not
-    // expose pthread_setaffinity_np directly on live threads, so we apply via
-    // an attr object — effectively a best-effort affinity hint.
+    // PS4: affinity must be applied to the LIVE thread. The previous
+    // implementation mutated a throw-away OrbisPthreadAttr and destroyed it
+    // without ever binding it to thread_, making this a no-op. scePthreadSetaffinity
+    // targets the running thread directly. Mask to cores 0-6; core 7 is
+    // OS-reserved on PS4.
     WaitStarted();
-    OrbisPthreadAttr attr;
-    scePthreadAttrInit(&attr);
-    scePthreadAttrSetaffinity(&attr, mask);
-    scePthreadAttrDestroy(&attr);
+    uint64_t mask64 = mask & 0x7F;
+    int result = scePthreadSetaffinity_proper(thread_, mask64);
+    if (result != 0) {
+      REXSYS_WARN("scePthreadSetaffinity failed: {:#x}", result);
+    }
   }
 
   int priority() {
@@ -1183,7 +1200,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetOnceAt(WClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
-    return SetOnceAt(std::chrono::clock_cast<GClock_>(due_time), std::move(opt_callback));
+    return SetOnceAt(rex::chrono::clock_cast<GClock_, WClock_>(due_time), std::move(opt_callback));
   };
   bool SetOnceAt(GClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
@@ -1197,7 +1214,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetRepeatingAt(WClock_::time_point due_time, std::chrono::milliseconds period,
                       std::function<void()> opt_callback = nullptr) override {
-    return SetRepeatingAt(std::chrono::clock_cast<GClock_>(due_time), period,
+    return SetRepeatingAt(rex::chrono::clock_cast<GClock_, WClock_>(due_time), period,
                           std::move(opt_callback));
   }
   bool SetRepeatingAt(GClock_::time_point due_time, std::chrono::milliseconds period,

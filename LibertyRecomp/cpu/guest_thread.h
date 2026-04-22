@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rex/platform.h>
 #include <kernel/xdm.h>
 #include "ppc_context.h"
 
@@ -10,8 +11,7 @@
 //     scePthread* wrappers also exist but pthread_* works directly.
 //   - Switch (libnx/newlib): default std::thread stack (~1 MiB) is too tight
 //     for 512 KiB guest stack plus host overhead (~64 KiB); force 8 MiB.
-#if defined(__APPLE__) || defined(__ORBIS__) || defined(LIBERTY_RECOMP_PS4) || \
-    defined(__SWITCH__) || defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS || REX_PLATFORM_PS4 || REX_PLATFORM_NX
 #define USE_PTHREAD 1
 #endif
 

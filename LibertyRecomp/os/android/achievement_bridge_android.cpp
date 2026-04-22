@@ -17,7 +17,9 @@
 // maps to a zero-padded "ach_NNN" identifier. Titles can override by editing
 // kAchievementIds[] to match their App Store Connect / Play Console IDs.
 
-#if defined(LIBERTY_RECOMP_ANDROID) || defined(__ANDROID__)
+#include <rex/platform.h>
+
+#if REX_PLATFORM_ANDROID
 
 #include "achievement_bridge_android.h"
 #include "jni_glue.h"
@@ -309,4 +311,4 @@ void LibertyAndroidOnXboxAchievementUnlocked(uint32_t xbox_id) {
     os::achievements::android::AwardAchievement(xbox_id);
 }
 
-#endif // LIBERTY_RECOMP_ANDROID || __ANDROID__
+#endif // REX_PLATFORM_ANDROID

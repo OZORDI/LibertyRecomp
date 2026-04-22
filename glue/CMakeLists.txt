@@ -9,9 +9,10 @@
 # This file only does three things now:
 #   1. Point REXSDK_DIR at graine and add_subdirectory it.
 #   2. add_subdirectory the gta4-recomp consumer project (sibling dir).
-#   3. Keep two LR-specific bits the SDK doesn't provide:
-#        - rexglue_stubs static library (ImGuiDialog / XmaDecoder linker stubs)
-#        - LIBERTY_RECOMP_OVERRIDES compile def on rex::kernel
+#   3. LIBERTY_RECOMP_OVERRIDES compile def on rex::kernel
+#
+# NOTE: LR intentionally does NOT link rex::ui (we provide our own UI).
+# ImGuiDialog linker stubs live in LibertyRecomp/kernel/compat_stubs.cpp.
 # =============================================================================
 
 # --- Graphics backend selection (consumed by graine) -------------------------
@@ -57,18 +58,3 @@ endif()
 if(TARGET rexkernel)
     target_compile_definitions(rexkernel PRIVATE LIBERTY_RECOMP_OVERRIDES)
 endif()
-
-# --- rexglue_stubs ------------------------------------------------------------
-# rexkernel references ImGuiDialog / WindowedAppContext / XmaDecoder. LR provides
-# its own UI and (on desktop) its own XMA decoder, but the SDK's rex::ui and
-# rex::audio targets still expect these symbols. Supply empty impls so the
-# linker is satisfied when LR uses its own equivalents.
-add_library(rexglue_stubs STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/rexglue_stubs.cpp"
-)
-target_include_directories(rexglue_stubs PRIVATE
-    "${REXSDK_DIR}/include"
-    "${CMAKE_BINARY_DIR}/glue/rexglue-sdk/include"   # generated version.h
-)
-target_compile_options(rexglue_stubs PRIVATE -w)
-message(STATUS "glue: rexglue_stubs built (ImGuiDialog/XmaDecoder linker stubs)")

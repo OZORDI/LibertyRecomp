@@ -42,7 +42,9 @@
 #if REX_PLATFORM_WIN32
 #include <rex/ui/surface_win.h>
 #endif
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
+// iOS and macOS both present via CAMetalLayer / VK_EXT_metal_surface under
+// MoltenVK, so they share surface_macos.h.
 #include <rex/ui/surface_macos.h>
 #endif
 
@@ -438,11 +440,18 @@ Surface::TypeFlags VulkanPresenter::GetSurfaceTypesSupportedByInstance(
     type_flags |= Surface::kTypeFlag_Win32Hwnd;
   }
 #endif
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
+  // MoltenVK on iOS also exposes VK_EXT_metal_surface (same code path as
+  // macOS — a CAMetalLayer backed VkSurfaceKHR).
   if (instance_extensions.ext_EXT_metal_surface) {
     type_flags |= Surface::kTypeFlag_MetalLayer;
   }
 #endif
+  // PS4 and Switch don't expose any VK_KHR_*_surface extension via their
+  // consumer SDKs — the GNM/NVN backends present natively. Presenting via
+  // Vulkan surfaces on those platforms is unsupported, so the presenter will
+  // simply report no surface types and the app falls back to the native
+  // graphics backend.
   return type_flags;
 }
 
@@ -832,7 +841,11 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
             instance, &surface_create_info, nullptr, &paint_context_.vulkan_surface);
       } break;
 #endif
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
+      // iOS goes through the same VK_EXT_metal_surface path as macOS (MoltenVK
+      // exposes the extension on both). The only difference is the backing
+      // CAMetalLayer comes from a UIView on iOS vs. an NSView on macOS, which
+      // is already abstracted behind MetalLayerSurface::layer().
       case Surface::kTypeIndex_MetalLayer: {
         auto& metal_layer_surface = static_cast<const MetalLayerSurface&>(new_surface);
         VkMetalSurfaceCreateInfoEXT surface_create_info;
@@ -845,11 +858,23 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
       } break;
 #endif
       default:
+#if REX_PLATFORM_PS4 || REX_PLATFORM_NX
+        // PS4/Switch: no WSI extension is exposed on these consoles. Getting
+        // here means a caller asked the Vulkan presenter to attach to a
+        // surface — which isn't wired up — so return a clean error instead
+        // of asserting. The renderer should select the native backend.
+        REXLOG_ERROR(
+            "VulkanPresenter: Vulkan WSI is unavailable on this platform "
+            "(surface_type={}); use the native graphics backend.",
+            int(surface_type));
+        return SurfacePaintConnectResult::kFailureSurfaceUnusable;
+#else
         assert_unhandled_case(surface_type);
         REXLOG_ERROR(
             "VulkanPresenter: Tried to create a Vulkan surface for an "
             "unknown Xenia surface type");
         return SurfacePaintConnectResult::kFailureSurfaceUnusable;
+#endif
     }
     if (vulkan_surface_create_result != VK_SUCCESS) {
       REXLOG_ERROR("VulkanPresenter: Failed to create a Vulkan surface");

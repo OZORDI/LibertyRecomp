@@ -437,11 +437,7 @@ Java_com_libertyrecomp_LibertySDLActivity_nativeSetContext(
     LOGI("nativeSetContext: ctx=%p vm=%p", g_context, g_vm);
 }
 
-// If this translation unit is the primary JNI_OnLoad, it will capture the
-// JavaVM*. If another TU already defines JNI_OnLoad, the linker will resolve
-// to that one; nativeSetContext above still captures the VM as a fallback.
-extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /*reserved*/)
-{
-    g_vm = vm;
-    return JNI_VERSION_1_6;
-}
+// NOTE: JNI_OnLoad lives in jni_glue.cpp (single source of truth for the
+// JavaVM* handle on Android). This TU captures the VM lazily via
+// nativeSetContext() above, or via an env->GetJavaVM() call the first time
+// any public API is invoked with a live JNIEnv.

@@ -27,6 +27,16 @@ bool SpirvToolsContext::Initialize(unsigned int spirv_version) {
     Shutdown();
     return false;
   }
+  // On PS4/Switch/iOS, kSpirvToolsSdkPath is nullptr — the runtime host has
+  // no place to dlopen a shared SPIRV-Tools library from. Bail cleanly;
+  // callers should be disabling shader validation on those platforms.
+  if (platform::lib_names::kSpirvToolsSdkPath == nullptr) {
+    REXLOG_ERROR(
+        "SPIRV-Tools: host platform does not ship a dynamically-loadable "
+        "SPIRV-Tools library; validation unavailable.");
+    Shutdown();
+    return false;
+  }
   std::filesystem::path vulkan_sdk_path(vulkan_sdk_env);
   auto library_path = vulkan_sdk_path / platform::lib_names::kSpirvToolsSdkPath;
   if (!library_.Load(library_path)) {

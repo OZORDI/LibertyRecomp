@@ -92,7 +92,7 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
 
 void ModLoader::Init()
 {
-#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_CONSOLE
     // No mod support on console
     return;
 #else

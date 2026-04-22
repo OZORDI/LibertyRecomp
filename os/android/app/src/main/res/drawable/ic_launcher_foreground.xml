@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple stylised "LR" monogram. Adaptive-icon safe-zone is the centre
+         72x72dp viewport; corners may be cropped by the launcher shape. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M34,34 L34,74 L52,74 L52,68 L40,68 L40,34 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,34 L58,74 L64,74 L64,58 L70,58 L74,74 L80,74 L75,56 C78,54 80,51 80,47 C80,39 74,34 66,34 Z M64,40 L66,40 C71,40 74,43 74,47 C74,51 71,54 66,54 L64,54 Z" />
+</vector>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="picker_bg">#FF0D1117</color>
+    <color name="picker_card">#FF161B22</color>
+    <color name="picker_text">#FFF0F6FC</color>
+    <color name="picker_muted">#FF8B949E</color>
+    <color name="picker_accent">#FFFFFFFF</color>
+    <color name="picker_btn_disabled">#FF21262D</color>
+    <color name="picker_error">#FFFF6B6B</color>
+</resources>

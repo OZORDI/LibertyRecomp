@@ -42,11 +42,11 @@ else()
     message(FATAL_ERROR "Unsupported CPU architecture: ${BASE_ARCHITECTURE}")
 endif()
 
-# Disable vcpkg for msdf-atlas-gen on console cross-compile builds
-if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
+# Disable vcpkg for msdf-atlas-gen on console/Android cross-compile builds
+if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR ANDROID)
     set(MSDF_ATLAS_USE_VCPKG OFF)
     set(MSDFGEN_USE_VCPKG OFF)
-    # Build Freetype from source for console platforms
+    # Build Freetype from source for console/Android platforms
     include(FetchContent)
     FetchContent_Declare(
         freetype
@@ -68,8 +68,8 @@ if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATF
 endif()
 
 add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/msdf-atlas-gen")
-# NFD (native file dialogs) — desktop only, consoles use embedded assets
-if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+# NFD (native file dialogs) — desktop only, consoles/Android use embedded assets or picker
+if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR ANDROID))
     add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/nativefiledialog-extended")
 endif()
 add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/o1heap")
@@ -82,7 +82,7 @@ if (NOT LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
     add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/plume")
 endif()
 # ffmpeg-core downloads prebuilt binaries — only available for desktop platforms
-if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR ANDROID))
     add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/ffmpeg-core")
 endif()
 
@@ -90,8 +90,8 @@ if (APPLE)
     add_subdirectory("${LIBERTY_RECOMP_THIRDPARTY_ROOT}/MoltenVK")
 endif()
 
-# GameNetworkingSockets for P2P multiplayer (desktop only — consoles use raw-socket fallback)
-if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+# GameNetworkingSockets for P2P multiplayer (desktop only — consoles/Android use raw-socket fallback)
+if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR ANDROID))
     set(BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

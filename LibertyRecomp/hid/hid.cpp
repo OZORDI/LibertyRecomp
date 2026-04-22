@@ -1,11 +1,11 @@
 #include "hid.h"
-#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+#if !REX_PLATFORM_CONSOLE
 #include <ui/game_window.h>
 #include <user/config.h>
 #endif
 
 // Globals are defined in ps4_hid.cpp / switch_hid.cpp Init() on consoles
-#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+#if !REX_PLATFORM_CONSOLE
 hid::EInputDevice hid::g_inputDevice;
 hid::EInputDevice hid::g_inputDeviceController;
 hid::EInputDeviceExplicit hid::g_inputDeviceExplicit;

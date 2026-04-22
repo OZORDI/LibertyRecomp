@@ -1,20 +1,23 @@
 #include "guest_thread.h"
 #include "ppc_context.h"
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <SDL3/SDL.h>
 #endif
 #include <cstdio>
+#ifdef USE_PTHREAD
+#include <sys/resource.h>
+#endif
 #include <kernel/function.h>
 #include <kernel/heap.h>
 #include <kernel/memory.h>
 #include <runtime/rex_thread_state.h>
 #include <stdafx.h>
 
-// Forward declaration from imports.cpp
-extern void PumpSdlEventsIfNeeded();
-
-// Forward declaration for shared device context (from imports.cpp)
-extern "C" uint32_t GetGuestDeviceAddr();
+// imports.cpp was removed in the rexglue migration (commit d4572c4f). These
+// helpers previously lived there; provide weak-linked no-op fallbacks so the
+// link succeeds. A host override can still replace them with a strong symbol.
+__attribute__((weak)) void PumpSdlEventsIfNeeded() {}
+extern "C" __attribute__((weak)) uint32_t GetGuestDeviceAddr() { return 0; }
 
 // TLS offset for device context
 constexpr uint32_t TLS_DEVICE_OFFSET = 1676;

@@ -1,6 +1,8 @@
 #include <stdafx.h>
 #include "memory.h"
 
+#include "../cpu/ppc_context.h"
+
 #include <rex/system/xmemory.h>
 #include <rex/logging.h>
 

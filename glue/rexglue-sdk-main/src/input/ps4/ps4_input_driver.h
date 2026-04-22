@@ -13,6 +13,11 @@
 
 #include <rex/input/input_driver.h>
 
+// Forward-declared at global scope so the in-class reference below resolves
+// to the OrbisPadData from <orbis/_types/pad.h>, not a new type in
+// rex::input::ps4::.
+struct OrbisPadData;
+
 namespace rex::input::ps4 {
 
 static constexpr size_t kPS4UserCount = 4;
@@ -45,7 +50,7 @@ class PS4InputDriver final : public InputDriver {
   void RefreshUsers();
 
   // Convert raw OrbisPadData into an X_INPUT_GAMEPAD (writes to out).
-  static void TranslatePadState(const struct OrbisPadData& pad,
+  static void TranslatePadState(const ::OrbisPadData& pad,
                                 X_INPUT_GAMEPAD& out);
 
   std::mutex mutex_;

@@ -214,6 +214,8 @@ elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQ
         "os/ps4/mspace_ps4.cpp"
         "os/ps4/np_activity_ps4.cpp"
         "os/ps4/atomic_wait_ps4.cpp"
+        "os/ps4/flags_ps4.cpp"
+        "os/ps4/eh_frame_stub.cpp"
     )
 elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch")
     set(LIBERTY_RECOMP_OS_CXX_SOURCES
@@ -246,6 +248,10 @@ elseif (APPLE)
 endif()
 
 # ── Embedded assets compile definition ──────────────────────────────────────
+# Android always uses embedded assets (runtime or build-time).
+if (ANDROID AND NOT LIBERTY_RECOMP_EMBEDDED_ASSETS)
+    set(LIBERTY_RECOMP_EMBEDDED_ASSETS ON)
+endif()
 if (LIBERTY_RECOMP_EMBEDDED_ASSETS)
     add_compile_definitions(
     LIBERTY_RECOMP_OVERRIDES
@@ -334,6 +340,7 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/shader_collection_patches.cpp"  # fiCollection shader VFS mount chain
     "patches/host_gpu_init.cpp"              # host device already ready — initState=2, render gate, GPU flag
     "patches/draw_pool_watchpoint.cpp"       # WATCH: trace lifecycle of *0x831C22A4 (mgr ptr UAF investigation)
+    "patches/createdevice_diag.cpp"          # DIAG: trace CreateDevice gate bail — which of 6 PPC gates returns 0?
     # Removed (interfered with rexglue):
     # "patches/grm_setup_patches.cpp"        # old vtable dispatch thunks broke shader factory init
     # "patches/scene_render_patches.cpp"     # duplicate sub_828C1228 hook
@@ -358,7 +365,8 @@ set(LIBERTY_RECOMP_UI_CXX_SOURCES
 )
 # Installer wizard — desktop only (uses NFD file dialogs)
 if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
-         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch"))
+         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch" OR
+         ANDROID))
     list(APPEND LIBERTY_RECOMP_UI_CXX_SOURCES "ui/installer_wizard.cpp")
 endif()
 
@@ -380,7 +388,6 @@ else()
         "install/rpf_extractor.cpp"
         "install/shader_converter.cpp"
         "install/thread_pool.cpp"
-        "install/update_checker.cpp"
         "install/xcontent_file_system.cpp"
         "install/xbox360/stfs_parser.cpp"
         "install/xbox360/xex_patcher.cpp"
@@ -391,6 +398,13 @@ else()
         "install/hashes/dlc_tbogt.cpp"
         "install/hashes/title_update.cpp"
     )
+endif()
+
+# update_checker requires CURL — only include when CURL is available
+if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
+         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch" OR
+         ANDROID))
+    list(APPEND LIBERTY_RECOMP_INSTALL_CXX_SOURCES "install/update_checker.cpp")
 endif()
 
 set(LIBERTY_RECOMP_USER_CXX_SOURCES
@@ -639,6 +653,15 @@ elseif (APPLE)
     add_custom_target(CopyMoltenVK DEPENDS ${MVK_ICD_DST} ${MVK_DYLIB_DST})
     add_dependencies(CopyMoltenVK MoltenVK)
     add_dependencies(LibertyRecomp CopyMoltenVK)
+elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "android" OR ANDROID)
+    # ── Android shared library (loaded by LibertySDLActivity via System.loadLibrary) ─
+    # Gradle packages this .so into the APK under jniLibs/<abi>/; Java code
+    # pulls it in through org.libsdl.app.SDLActivity.getLibraries().
+    add_library(LibertyRecomp SHARED ${LIBERTY_RECOMP_CXX_SOURCES})
+    set_target_properties(LibertyRecomp PROPERTIES
+        OUTPUT_NAME "LibertyRecomp"
+        POSITION_INDEPENDENT_CODE ON
+    )
 else()
     add_executable(LibertyRecomp ${LIBERTY_RECOMP_CXX_SOURCES})
 
@@ -926,7 +949,7 @@ else()
                 "Failed to parse TITLE_ID / CONTENT_ID from ${LIBERTY_PS4_NP_CONF_H}")
         endif()
         set(LIBERTY_PS4_VERSION     "01.00")
-        set(LIBERTY_PS4_TITLE_STR   "Liberty Recompiled")
+        set(LIBERTY_PS4_TITLE_STR   "Grand Theft Auto IV")
         set(LIBERTY_PS4_CATEGORY    "gd")  # gd = game data
 
         message(STATUS "PS4: TITLE_ID=${LIBERTY_PS4_TITLE_ID}  CONTENT_ID=${LIBERTY_PS4_CONTENT_ID}")
@@ -983,6 +1006,28 @@ else()
         find_program(LIBERTY_PS4_CREATE_GP4   create-gp4   HINTS "${LIBERTY_PS4_BINDIR}")
         find_program(LIBERTY_PS4_PKGTOOL      PkgTool.Core HINTS "${LIBERTY_PS4_BINDIR}")
 
+        # Separate pkg_build binary: the stock OpenOrbis PkgTool.Core hard-throws
+        # "Playgo Chunk hash file was not allocated enough space" on PKGs larger
+        # than ~2 GB because its hash-file reservation estimate undercounts PFS
+        # overhead. avan06's LibOrbisPkg fork demotes that throw to a log
+        # warning (commit 9569b67, release 0.2.0.12), letting the build complete.
+        # For a full-size game PKG (LibertyRecomp's ~7 GB payload) we MUST use
+        # avan06's binary. Shipped in tools/PkgTool.avan06/ as a self-contained
+        # .NET 8 macOS ARM64 publish.
+        find_program(LIBERTY_PS4_PKGBUILDER   PkgTool.Core
+            HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/PkgTool.avan06"
+            NO_DEFAULT_PATH)
+        if (NOT LIBERTY_PS4_PKGBUILDER)
+            # Fall back to stock PkgTool.Core for smaller dev PKGs.
+            set(LIBERTY_PS4_PKGBUILDER "${LIBERTY_PS4_PKGTOOL}")
+            message(WARNING
+                "PS4: avan06 PkgTool.Core not found at "
+                "tools/PkgTool.avan06/PkgTool.Core — falling back to stock "
+                "PkgTool.Core which will fail on PKGs > ~2 GB.")
+        else()
+            message(STATUS "PS4: Using avan06 PkgTool.Core: ${LIBERTY_PS4_PKGBUILDER}")
+        endif()
+
         if (NOT LIBERTY_PS4_CREATE_GP4)
             message(WARNING
                 "PS4: create-gp4 not found in ${LIBERTY_PS4_BINDIR} — "
@@ -1018,11 +1063,11 @@ else()
                 DEPENDS "${LIBERTY_PS4_SFO_PY}" "${LIBERTY_PS4_NP_CONF_H}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_SCE_SYS_DIR}"
                 COMMAND ${Python3_EXECUTABLE} "${LIBERTY_PS4_SFO_PY}"
+                    "${LIBERTY_PS4_PARAM_SFO}"
                     "${LIBERTY_PS4_TITLE_ID}"
                     "${LIBERTY_PS4_CONTENT_ID}"
                     "${LIBERTY_PS4_TITLE_STR}"
                     "${LIBERTY_PS4_VERSION}"
-                    "${LIBERTY_PS4_PARAM_SFO}"
                 COMMENT "PS4: Generating sce_sys/param.sfo (make_param_sfo.py)"
                 VERBATIM
             )
@@ -1178,6 +1223,21 @@ else()
                 # Ensure staging dirs exist
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_SCE_SYS_DIR}/trophy"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_PKG_STAGING}/game"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_PKG_STAGING}/sce_module"
+
+                # Stage OpenOrbis system PRXes alongside the eboot.
+                # On PS4, /app0/sce_module/libSceFios2.prx + libc.prx are
+                # preloaded by libkernel before eboot start — without them
+                # shadPS4 logs "Failed to preload libSceFios2, expect crashes"
+                # and real hardware hangs at boot. These PRXes are identical
+                # across all OpenOrbis sample projects; hello_world is the
+                # canonical copy.
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${LIBERTY_PS4_TOOLCHAIN}/samples/hello_world/sce_module/libSceFios2.prx"
+                    "${LIBERTY_PS4_PKG_STAGING}/sce_module/libSceFios2.prx"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${LIBERTY_PS4_TOOLCHAIN}/samples/hello_world/sce_module/libc.prx"
+                    "${LIBERTY_PS4_PKG_STAGING}/sce_module/libc.prx"
 
                 # Copy static sce_sys image assets
                 COMMAND ${CMAKE_COMMAND} -E copy
@@ -1204,14 +1264,48 @@ else()
                     "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}"
                     "${LIBERTY_PS4_PKG_STAGING}/game"
 
-                # Generate .gp4 manifest
-                COMMAND "${LIBERTY_PS4_CREATE_GP4}"
-                    -out "${LIBERTY_PS4_PKG_STAGING}/pkg.gp4"
-                    --content-id="${LIBERTY_PS4_CONTENT_ID}"
-                    --files "eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_sys/pic1.png sce_sys/snd0.wav sce_sys/npbind.dat sce_sys/nptitle.dat sce_sys/trophy/trophy00.trp"
+                # Bake the PS4 button-prompt XTD into the read-only /app0
+                # tree. On PS4 we can't write to the PKG mount at runtime,
+                # so ButtonPrompts::Initialize() is a no-op and the game
+                # opens this baked file via "platform:\textures\buttons_360.xtd".
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${LIBERTY_PS4_PKG_STAGING}/game/xbox360/textures"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../LibertyRecompLib/private/button_prompts/ps4/buttons_360.xtd"
+                    "${LIBERTY_PS4_PKG_STAGING}/game/xbox360/textures/buttons_360.xtd"
 
-                # Build the .pkg
-                COMMAND "${LIBERTY_PS4_PKGTOOL}" pkg_build
+                # avan06's PkgTool.Core auto-injects gp4 entries for
+                # right.sprx, sce_discmap.plt, and every sce_sys/(icon|pic)*.png
+                # mirrored to .dds. The gp4 entries reference orig_path =
+                # same dir, so the corresponding files MUST exist on disk at
+                # pkg_build time. make_gp4.py skips these 5 paths so our gp4
+                # doesn't duplicate the fork's auto-injected entries.
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${LIBERTY_PS4_SCE_SYS_DIR}/about"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/OpenOrbis-PS4-Toolchain/src/modules/right.sprx"
+                    "${LIBERTY_PS4_SCE_SYS_DIR}/about/right.sprx"
+                COMMAND ${CMAKE_COMMAND} -E touch
+                    "${LIBERTY_PS4_PKG_STAGING}/sce_discmap.plt"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/res/ps4/sce_sys/icon0.png"
+                    "${LIBERTY_PS4_SCE_SYS_DIR}/icon0.dds"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/res/ps4/sce_sys/pic1.png"
+                    "${LIBERTY_PS4_SCE_SYS_DIR}/pic1.dds"
+
+                # Generate .gp4 manifest by scanning the staging dir.
+                # (OpenOrbis create-gp4 only emits files from its --files
+                # arg and omits matching <dir> entries, which trips up
+                # PkgTool.Core's PfsProperties.FindDir.)
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/os/ps4/make_gp4.py"
+                    "${LIBERTY_PS4_PKG_STAGING}"
+                    "${LIBERTY_PS4_PKG_STAGING}/pkg.gp4"
+                    "${LIBERTY_PS4_CONTENT_ID}"
+
+                # Build the .pkg (avan06 fork for the hash-reservation fix)
+                COMMAND "${LIBERTY_PS4_PKGBUILDER}" pkg_build
                     "${LIBERTY_PS4_PKG_STAGING}/pkg.gp4"
                     "${LIBERTY_PS4_PKG_STAGING}"
 
@@ -1227,6 +1321,15 @@ else()
             add_custom_target(LibertyRecomp-pkg
                 DEPENDS LibertyRecomp LibertyRecomp-sfo LibertyRecomp-trp
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_PKG_STAGING}/game"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${LIBERTY_PS4_PKG_STAGING}/sce_module"
+                # Stage OpenOrbis system PRXes (libSceFios2 + libc) — see
+                # matching block in the LibertyRecomp-pkg "full" branch above.
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${LIBERTY_PS4_TOOLCHAIN}/samples/hello_world/sce_module/libSceFios2.prx"
+                    "${LIBERTY_PS4_PKG_STAGING}/sce_module/libSceFios2.prx"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${LIBERTY_PS4_TOOLCHAIN}/samples/hello_world/sce_module/libc.prx"
+                    "${LIBERTY_PS4_PKG_STAGING}/sce_module/libc.prx"
                 COMMAND ${CMAKE_COMMAND} -E copy
                     "$<TARGET_FILE_DIR:LibertyRecomp>/eboot.bin"
                     "${LIBERTY_PS4_PKG_STAGING}/eboot.bin"
@@ -1255,12 +1358,13 @@ if (LIBERTY_RECOMP_FLATPAK)
     )
 endif()
 
-# ── CURL (desktop only — consoles have no update checker / session tracker HTTP) ──
+# ── CURL (desktop only — consoles/Android have no update checker / session tracker HTTP) ──
 set(LIBERTY_RECOMP_HAS_CURL TRUE)
 if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
-    LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch")
+    LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch" OR
+    ANDROID)
     set(LIBERTY_RECOMP_HAS_CURL FALSE)
-    message(STATUS "CURL: DISABLED — console embedded build")
+    message(STATUS "CURL: DISABLED — non-desktop build")
 else()
     find_package(CURL REQUIRED)
     message(STATUS "CURL: ENABLED")
@@ -1271,17 +1375,21 @@ set(LIBERTY_RECOMP_HAS_GNS TRUE)
 if (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR
     CMAKE_SYSTEM_NAME STREQUAL "PS4"                 OR
     LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR
-    CMAKE_SYSTEM_NAME STREQUAL "Switch")
+    CMAKE_SYSTEM_NAME STREQUAL "Switch"              OR
+    ANDROID)
     set(LIBERTY_RECOMP_HAS_GNS FALSE)
-    message(STATUS "GameNetworkingSockets: DISABLED — PS4/Switch use raw-socket P2P fallback")
+    message(STATUS "GameNetworkingSockets: DISABLED — non-desktop platform")
 else()
     message(STATUS "GameNetworkingSockets: ENABLED")
 endif()
 
 # ── Embedded-build payload validation ────────────────────────────────────────
-# For platforms that bundle the game at build time (iOS / Android / PS4 / Switch),
+# For platforms that bundle the game at build time (iOS / PS4 / Switch),
 # fail fast with a clear message if the required XEX / RPF files are missing.
-if (LIBERTY_RECOMP_EMBEDDED_ASSETS)
+# Android with LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS=ON is skipped — the user
+# picks the game folder at runtime via the SAF folder picker, so there is no
+# build-time payload to validate.
+if (LIBERTY_RECOMP_EMBEDDED_ASSETS AND NOT LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS)
     if (NOT LIBERTY_RECOMP_EMBEDDED_GAME_PATH)
         message(FATAL_ERROR
             "LIBERTY_RECOMP_EMBEDDED_ASSETS is ON but "
@@ -1394,9 +1502,11 @@ if (NOT (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX))
     target_link_libraries(LibertyRecomp PRIVATE SDL3::SDL3-static)
 endif()
 
-# zlib — system on desktop, built from source on console
+# zlib — system on desktop, built from source on console, NDK sysroot on Android
 if (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX)
     target_link_libraries(LibertyRecomp PRIVATE zlibstatic)
+elseif(ANDROID)
+    target_link_libraries(LibertyRecomp PRIVATE z)
 endif()
 
 # Console SDK include paths
@@ -1410,9 +1520,10 @@ elseif (LIBERTY_RECOMP_NX)
     )
 endif()
 
-# NFD (native file dialogs) — desktop only, consoles use embedded assets
+# NFD (native file dialogs) — desktop only, consoles/Android use embedded assets or folder picker
 if (NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"   OR CMAKE_SYSTEM_NAME STREQUAL "PS4" OR
-         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch"))
+         LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch" OR
+         ANDROID))
     target_link_libraries(LibertyRecomp PRIVATE nfd::nfd)
 else()
     target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_NO_NFD)
@@ -1460,8 +1571,8 @@ if (APPLE)
             "-framework GameController"
         )
     endif()
-elseif (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX)
-    # Force-load on console targets too (ELF --whole-archive)
+elseif (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX OR ANDROID)
+    # Force-load on console/Android targets too (ELF --whole-archive)
     target_link_libraries(LibertyRecomp PRIVATE -Wl,--whole-archive $<TARGET_FILE:LibertyRecompLib> -Wl,--no-whole-archive)
 else()
     target_link_libraries(LibertyRecomp PRIVATE LibertyRecompLib)
@@ -1484,7 +1595,7 @@ endif()
 # Without force-load the platform linker will dead-strip every object file
 # that defines a decoder body, and avcodec_find_decoder returns null for
 # every lookup at runtime → 320 "XmaContext N: Codec not found" errors.
-if (NOT (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX))
+if (NOT (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX OR ANDROID))
     target_link_libraries(LibertyRecomp PRIVATE libavcodec libavutil)
 
     if(APPLE)
@@ -1511,7 +1622,6 @@ if(USE_REXGLUE_RUNTIME)
         rex::system
         rex::kernel
         rex::audio
-        rexglue_stubs
     )
 endif()
 
@@ -1622,7 +1732,7 @@ function(compile_shader FILE_PATH TARGET_NAME)
     # On console cross-builds (PS4/Switch), DXC is a host-only tool that can't be located
     # through CMAKE_FIND_ROOT_PATH. The .spirv.h files are pre-generated and checked in,
     # so we skip regeneration. On desktop builds DXC is always available.
-    if(NOT LIBERTY_RECOMP_PS4 AND NOT LIBERTY_RECOMP_NX)
+    if(NOT LIBERTY_RECOMP_PS4 AND NOT LIBERTY_RECOMP_NX AND NOT ANDROID)
     add_custom_command(
         OUTPUT ${HLSL_FILE_PATH}.spirv.h
         COMMAND ${DIRECTX_DXC_TOOL} -T ${TARGET_NAME} -HV 2021 -all-resources-bound -spirv -fvk-use-dx-layout ${ARGN} -E shaderMain -Fh ${HLSL_FILE_PATH}.spirv.h ${HLSL_FILE_PATH} -Vn g_${HLSL_NAME}_spirv

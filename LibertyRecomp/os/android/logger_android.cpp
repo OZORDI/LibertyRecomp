@@ -1,5 +1,6 @@
 // Android logger — uses spdlog's built-in android_sink (logcat via __android_log_write).
-#ifdef LIBERTY_RECOMP_ANDROID
+#include <rex/platform.h>
+#if REX_PLATFORM_ANDROID
 #include <os/logger.h>
 
 #include <memory>
@@ -21,7 +22,7 @@ void os::logger::PlatformInitSinks()
 {
     Init();
     auto sink = std::make_shared<spdlog::sinks::android_sink_mt>(LIBERTY_LOG_TAG);
-    rex::logging::AddSink(sink);
+    rex::AddSink(sink);
 }
 
-#endif // LIBERTY_RECOMP_ANDROID
+#endif // REX_PLATFORM_ANDROID

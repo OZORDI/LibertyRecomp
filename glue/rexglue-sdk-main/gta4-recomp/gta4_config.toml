@@ -24,9 +24,16 @@ large_function_threshold = 1048576
 # Addresses verified via IDA Pro Hex-Rays decompilation + xref tracing.
 # Format: FunctionName = guest_address
 [rexcrt]
-# String/memory CRT (verified PR #180 — corrected pass 2)
-memset   = 0x82A11D08   # 255 xrefs - extsb fill byte + stb loop + VMX vspltb fast path
-memcpy   = 0x82A11940   # 183 xrefs - alignment-aware ld/std copy + dcbz128 prefetch
+# String/memory CRT (verified PR #180 — corrected pass 3)
+# memset/memcpy addresses were WRONG in pass 2: 0x82A11D08/0x82A11940 are
+# format-parser helpers (scanf/sprintf specifier dispatch, call __savegprlr),
+# not memset/memcpy. FLIRT (dolphin.sig/gow3.sig) trust-flags the real entries:
+#   memset = 0x829FF840 (357 callers, pure leaf, classic stb+rlwimi+stw pattern)
+#   memcpy = 0x82A00DC0 (577 callers, pure leaf, dcbt+ld/std cache-line aware)
+# Using the wrong addresses silently corrupted memory on 149+161 call sites,
+# cascading into the XObject::GetNativeObject null crash post-DrawPrim.
+memset   = 0x829FF840   # 357 callers - leaf, stb/rlwimi fill + stw loop
+memcpy   = 0x82A00DC0   # 577 callers - leaf, dcbt-prefetched ld/std copy
 _stricmp = 0x829FFCF0   # 477 xrefs - A-Z case folding (cmpwi 0x41/0x5A + ori r6,r6,0x20)
 strncmp  = 0x82A00C40   # 113 xrefs - byte compare with count (subfc. + bdnzf null-stop)
 strncpy  = 0x82A00BA0   # 101 xrefs - copy with null-pad remainder
@@ -62,6 +69,9 @@ FlushFileBuffers   = 0x82A188E0   # thin wrapper calling NtFlushBuffersFile
 CreateDirectoryA   = 0x82A14E98   # NtCreateFile + FILE_DIRECTORY_FILE, returns 1/0
 RemoveDirectoryA   = 0x82A1A160
 
+# New additions (FLIRT verified 2026-04-18 via dolphin.sig + gow3.sig)
+memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory.cpp
+
 [functions]
 # NOTE (2026-04-01): 13 of 14 original entries were verified as BAD addresses
 # by reading raw PPC bytes from default.bin. They pointed to mid-function code,
@@ -74,7 +84,6 @@ RemoveDirectoryA   = 0x82A1A160
 #   0x82A77E28 — outside .text (epilogue in padding)
 #   0x8219E410 — mid-function VMX instruction
 #   0x8219ACA0 — mid-function rlwinm (codegen fabricated synthetic stub)
-#   0x828764B8 — switch/case jump table dispatch (lwzx/mtctr/bctr)
 #   0x82A6C218 — mid-function addi (real entry at 0x82A6C208)
 #   0x82A69CC8 — mid-function addi
 #   0x82A69CA8 — epilogue lwz r12
@@ -93,16 +102,20 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A77E28" = {}   # tail-call thunk: b sub_82812248
 "0x8219E410" = {}   # branch target from sub_821A2EDC
 
-# REMOVED: 9 CRT ctor entries (0x82A6xxxx) — proven redundant.
-# Codegen auto-discovers all 1447 CRT constructors without explicit entries.
-
-# Mid-function vtable dispatchers — NOT restored (genuinely mid-function)
-# 0x8219ACA0 and 0x828764B8 were mid-function offsets, not CRT ctors
+# REVERTED (9 CRT ctor entries + 0x828764B8): these were mask-fixes for crashes
+# that were actually cascade symptoms of the wrong memset/memcpy addresses (see
+# [rexcrt] pass-3 fix above). Now that the real memset/memcpy are bound, the
+# original xinit dispatch and RPF parser crashes should no longer occur, since
+# memory isn't being silently corrupted on every call site. If any crash here
+# returns, the fix belongs at the caller — not here.
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
-"0x82A11D08" = { name = "memset" }
-"0x82A11940" = { name = "memcpy" }
+# NOTE: 0x82A11D08 and 0x82A11940 are NOT memset/memcpy — they're format-parser
+# helpers called by sprintf/scanf. Kept as forced-split entries with no name so
+# codegen emits them as ordinary sub_XXXXXXXX PPC_FUNC_IMPLs.
+"0x82A11D08" = {}   # format-parser helper (was mislabelled memset in pass 2)
+"0x82A11940" = {}   # format-parser helper (was mislabelled memcpy in pass 2)
 "0x829FFCF0" = { name = "_stricmp" }
 "0x82A00C40" = { name = "strncmp" }
 "0x82A00BA0" = { name = "strncpy" }
@@ -137,3 +150,67 @@ RemoveDirectoryA   = 0x82A1A160
 "0x82A188E0" = { name = "FlushFileBuffers" }
 "0x82A14E98" = { name = "CreateDirectoryA" }
 "0x82A1A160" = { name = "RemoveDirectoryA" }
+
+# =============================================================================
+# FLIRT-verified additions (2026-04-18)
+# Applied dolphin.sig + gow3.sig via idat in IDA 9.2 → 2,576 LIB-flagged funcs.
+# All entries below verified:
+#   (a) FLIRT match is TRUSTED (D3D/NT/CRT/X* family, not UE/GoW3 internals)
+#   (b) address resolves to a real sub_* function via MCP resolve_address
+#   (c) call count > 0 OR explicit indirect-call helper
+# =============================================================================
+
+# --- Extra CRT variants (bare-libc; coexist with VMX variants above) -----------
+"0x82A02230" = { name = "memmove" }            # 40 xrefs — also [rexcrt]
+# 0x829FF840 and 0x82A00DC0 are the REAL memset/memcpy per FLIRT-TRUSTED match.
+# Moved to [rexcrt] block above; these [functions] entries force the codegen
+# split so the native rexcrt_memset/rexcrt_memcpy bindings resolve cleanly.
+"0x829FF840" = { name = "memset" }             # 357 callers — real memset (pass-3 fix)
+"0x82A00DC0" = { name = "memcpy" }             # 577 callers — real memcpy (pass-3 fix)
+# NOTE: libc clash — codegen emits DECLARE_REX_FUNC(name) which collides with
+# macOS <stdlib.h>/<malloc.h>. Prefix with ppc_ to avoid redeclaration errors.
+"0x829FFB50" = { name = "ppc_srand" }          #   3 xrefs
+"0x82A00B48" = { name = "ppc_atol" }           #  82 xrefs
+"0x82A03EB8" = { name = "ppc_free" }           #  26 xrefs — thin GetProcessHeap() → RtlFreeHeap wrapper
+"0x82A04338" = { name = "ppc_calloc" }         #   7 xrefs
+"0x82A043A0" = { name = "ppc_realloc" }        #   3 xrefs
+"0x82A10F48" = { name = "XMemFree" }           #   1 xref
+
+# --- XMemCpyStreaming helpers (VMX streaming copy internals) -------------------
+"0x82A18D90" = { name = "XMemCpyStreaming128_Writecombined_Helper" }
+"0x82A190B4" = { name = "XMemCpyStreaming_Unaligned_Writecombined_Helper" }
+"0x82A19580" = { name = "XMemCpyStreaming128_Cached_Helper" }
+"0x82A19910" = { name = "XMemCpyStreaming_Unaligned_Cached_Helper" }
+
+# --- NT Rtl error API ---------------------------------------------------------
+"0x82A19E30" = { name = "RtlSetLastError" }    #   9 xrefs
+"0x82A19E48" = { name = "RtlSetLastNTError" }  #  36 xrefs
+"0x82A19E80" = { name = "RtlGetLastError" }    #  24 xrefs
+"0x82A1A420" = { name = "RtlOutputDebugString" }
+
+# --- D3DDevice HIGH priority (actual D3D9-shape APIs, not dispatcher innards) --
+# NOTE: 150+ SetRenderState_*/SamplerState_* labels from FLIRT are INSIDE three
+# dispatcher functions (sub_82A38F28, sub_82A39928, sub_82A3AB50) — adding them
+# as [[functions]] entries would split mid-function. Skipped intentionally.
+"0x82A413F8" = { name = "D3DDevice_Release" }
+"0x82A423F8" = { name = "D3DDevice_SetVertexShaderConstantI" }
+"0x82A42450" = { name = "D3DDevice_SetPixelShaderConstantI" }
+"0x82A3BE98" = { name = "D3DDevice_SetViewportF" }
+"0x82A44808" = { name = "D3DBaseTexture_GetLevelCount" }           # 7 xrefs
+"0x82A49AB8" = { name = "D3DDevice_InsertFence" }
+"0x82A4A150" = { name = "D3DResource_GetType" }                    # 13 xrefs
+"0x82A4A710" = { name = "D3DResource_AddRef" }                     # 9 xrefs
+"0x82A4A788" = { name = "D3DResource_Release" }                    # 20 xrefs
+"0x82A4A920" = { name = "D3DVertexBuffer_Unlock" }
+"0x82A4BD20" = { name = "D3D_PatchVertexShaderToMatchPixelShader" }
+"0x82A50700" = { name = "D3D_VideoModeInitialize" }
+"0x82A4CE38" = { name = "D3D_SetRawGammaRamp" }
+"0x82A47248" = { name = "CCommandBuffer_Destroy" }
+
+# --- D3D MED priority (helpers / query funcs) ---------------------------------
+"0x82A412D0" = { name = "D3D_MemAllocAligned" }
+"0x82A42F10" = { name = "D3D_BlockSizeOfGpuFormat" }               # 9 xrefs
+"0x82A43030" = { name = "D3D_AlignTextureDimensions" }             # 10 xrefs
+"0x82A3C598" = { name = "D3D_IsFloatGpuFormat" }
+"0x82A3C690" = { name = "D3D_ConvertD32FS8ToD24FS8" }
+"0x82A53340" = { name = "D3D_XBMAllocateFrameMemory" }

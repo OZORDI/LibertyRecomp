@@ -76,6 +76,20 @@ bool LoadMacVulkanLoader(platform::DynamicLibrary& loader) {
 }  // namespace
 #endif
 
+// Platforms where the Vulkan entry points are linked statically into the app
+// binary — either because (a) the system has no dynamic Vulkan loader we can
+// dlopen (PS4 GNM-bridged stacks, Switch's nvn/deko3d Vulkan WSI), or (b)
+// dynamic loading of system dylibs is restricted (iOS sandbox; MoltenVK is
+// linked as a framework). In those cases we bypass platform::DynamicLibrary
+// entirely and pull `vkGetInstanceProcAddr` straight from the linker.
+#if REX_PLATFORM_IOS || REX_PLATFORM_PS4 || REX_PLATFORM_NX
+#define REX_VULKAN_STATIC_LOADER 1
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+vkGetInstanceProcAddr(VkInstance instance, const char* pName);
+#else
+#define REX_VULKAN_STATIC_LOADER 0
+#endif
+
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
   std::unique_ptr<VulkanInstance> vulkan_instance(new VulkanInstance());
@@ -90,11 +104,22 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
 
   bool functions_loaded = true;
   bool loader_loaded = false;
-#if REX_PLATFORM_MAC
+#if REX_VULKAN_STATIC_LOADER
+  // iOS / PS4 / NX: no external loader to dlopen. Use the statically linked
+  // vkGetInstanceProcAddr and fetch vkDestroyInstance through it.
+  ifn.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+  ifn.vkDestroyInstance = PFN_vkDestroyInstance(
+      ifn.vkGetInstanceProcAddr(nullptr, "vkDestroyInstance"));
+  if (!ifn.vkDestroyInstance) {
+    REXLOG_ERROR(
+        "Failed to resolve vkDestroyInstance via statically-linked "
+        "vkGetInstanceProcAddr; host Vulkan may be unavailable on this "
+        "platform.");
+    return nullptr;
+  }
+  loader_loaded = true;
+#elif REX_PLATFORM_MAC
   loader_loaded = LoadMacVulkanLoader(vulkan_instance->loader_);
-#else
-  loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
-#endif
   if (!loader_loaded) {
     REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
     return nullptr;
@@ -108,6 +133,32 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     REXLOG_ERROR("Failed to get Vulkan loader function pointers");
     return nullptr;
   }
+#else
+  // Defensive: some targets (theoretical future platforms) may leave
+  // kVulkanLoader as nullptr. Bail cleanly instead of invoking
+  // std::filesystem::path(nullptr) inside DynamicLibrary::Load.
+  if (platform::lib_names::kVulkanLoader == nullptr) {
+    REXLOG_ERROR(
+        "Vulkan loader is unavailable on this platform; falling back to "
+        "native backend.");
+    return nullptr;
+  }
+  loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
+  if (!loader_loaded) {
+    REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
+    return nullptr;
+  }
+#define XE_VULKAN_LOAD_LOADER_FUNCTION(name) \
+  functions_loaded &= (ifn.name = vulkan_instance->loader_.GetSymbol<PFN_##name>(#name)) != nullptr;
+  XE_VULKAN_LOAD_LOADER_FUNCTION(vkGetInstanceProcAddr);
+  XE_VULKAN_LOAD_LOADER_FUNCTION(vkDestroyInstance);
+#undef XE_VULKAN_LOAD_LOADER_FUNCTION
+  if (!functions_loaded) {
+    REXLOG_ERROR("Failed to get Vulkan loader function pointers");
+    return nullptr;
+  }
+#endif
+  (void)loader_loaded;
 
   // Load global functions.
 
@@ -151,8 +202,9 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   // #129.
   requested_extensions.emplace("VK_EXT_debug_utils",
                                &vulkan_instance->extensions_.ext_EXT_debug_utils);
-#if REX_PLATFORM_MAC
-  // #395.
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
+  // #395. MoltenVK is technically a portability subset implementation on
+  // Apple platforms, so the enumeration bit is needed on both macOS and iOS.
   requested_extensions.emplace(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
                                &vulkan_instance->extensions_.ext_KHR_portability_enumeration);
 #endif
@@ -363,7 +415,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instance_create_info.pNext = nullptr;
   instance_create_info.flags = 0;
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
   // VK_KHR_get_physical_device_properties2 is needed to get the portability
   // subset features.
   if (vulkan_instance->extensions_.ext_KHR_portability_enumeration &&

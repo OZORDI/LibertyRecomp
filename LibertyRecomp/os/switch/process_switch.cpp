@@ -1,4 +1,5 @@
-#ifdef LIBERTY_RECOMP_NX
+#include <rex/platform.h>
+#if REX_PLATFORM_NX
 // Switch process helpers (libnx)
 #include <os/process.h>
 #include <switch.h>
@@ -48,4 +49,4 @@ void os::process::ShowConsole()
 {
     // No-op on Switch
 }
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

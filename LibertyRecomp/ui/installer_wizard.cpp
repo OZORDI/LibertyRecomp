@@ -1,4 +1,5 @@
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#include <rex/platform.h>
+#if !REX_PLATFORM_CONSOLE
 
 #include "installer_wizard.h"
 

@@ -3,9 +3,14 @@
 
 add_library(rexinput STATIC
     input_system.cpp
-    mnk/mnk_input_driver.cpp
     nop/nop_input_driver.cpp
 )
+# MnK (keyboard/mouse) driver pulls in rex::ui::Window symbols that aren't
+# available on headless console builds. Desktop targets only.
+if(NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR
+        LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
+    target_sources(rexinput PRIVATE mnk/mnk_input_driver.cpp)
+endif()
 add_library(rex::input ALIAS rexinput)
 
 target_include_directories(rexinput PUBLIC

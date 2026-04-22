@@ -10,7 +10,10 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #endif
-#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+#ifdef __ANDROID__
+#include <dlfcn.h>
+#endif
+#if REX_PLATFORM_CONSOLE
 #include <unistd.h>
 #endif
 #ifndef _WIN32
@@ -29,7 +32,7 @@
 #include <user/paths.h>
 #include <user/registry.h>
 #include <kernel/xdbf.h>
-#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+#if !REX_PLATFORM_CONSOLE
 #include <install/auto_installer.h>
 #include <install/installer.h>
 #endif
@@ -46,7 +49,7 @@
 #endif
 #include <install/embedded_assets.h>
 #include <ui/game_window.h>
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <ui/installer_wizard.h>
 #endif
 #include <ui/main_menu.h>
@@ -75,7 +78,7 @@
 #include <rex/input/input_system.h>
 #if defined(LIBERTY_RECOMP_PS4)
 #include "../glue/rexglue-sdk-main/src/audio/orbis/orbis_audio_system.h"
-#elif defined(LIBERTY_RECOMP_NX)
+#elif REX_PLATFORM_NX
 #include <rex/audio/switch/switch_audio_system.h>
 #else
 #include <rex/audio/sdl/sdl_audio_system.h>
@@ -92,6 +95,16 @@ static std::array<std::string_view, 3> g_D3D12RequiredModules =
     "dxcompiler.dll",
     "dxil.dll"
 };
+#endif
+
+// On Android, SDL3 runs the native entry point through SDLActivity.nativeRunMain,
+// which invokes SDL_main() rather than main(). Including <SDL3/SDL_main.h> in the
+// translation unit that defines main() aliases `main` → `SDL_main` at preprocess
+// time, so the existing main() body below gets picked up correctly. On desktop
+// this header is also a no-op unless SDL_MAIN_HANDLED is NOT defined; we leave
+// it Android-only to avoid perturbing the other platforms.
+#if defined(__ANDROID__)
+#include <SDL3/SDL_main.h>
 #endif
 
 const size_t XMAIOBegin = 0x7FEA0000;
@@ -134,7 +147,7 @@ static bool RexFallbackCrashHandler(rex::arch::Exception* ex, void* /*data*/) {
             (unsigned long long)ex->fault_address());
     fprintf(stderr, "PC:            0x%016llX\n",
             (unsigned long long)ex->pc());
-#if !defined(_WIN32) && !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !defined(_WIN32) && !REX_PLATFORM_CONSOLE
     {
         Dl_info info;
         if (dladdr((void*)ex->pc(), &info)) {
@@ -222,7 +235,7 @@ static void InstallRexGlueExceptionHandlers() {
 
 static void ShowVideoBackendErrorAndExit()
 {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     if (GameWindow::s_pWindow)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
@@ -331,7 +344,7 @@ void KiSystemStartup()
     
     if (g_memory.base == nullptr)
     {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
 #endif
         fprintf(stderr, "[Main] Memory allocation failed\n"); fflush(stderr);
@@ -510,7 +523,7 @@ int main(int argc, char *argv[])
 
     // Extract title update files BEFORE VFS init — HostPathDevice snapshots the
     // directory at mount time, so default.xexp must exist before rex::Runtime::Setup().
-#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+#if !REX_PLATFORM_CONSOLE
     {
         AutoInstallResult aiResult = AutoInstaller::Run(gamePath);
         if (!aiResult.errorMessage.empty())
@@ -522,6 +535,11 @@ int main(int argc, char *argv[])
     // The packfile device at audio:/ has an AES-encrypted TOC that fails to decrypt in
     // the recompiled env. The fallback relative device uses root game:/xbox360/audio/,
     // but extracted config files live at audio/config/. Copy the directory tree.
+    //
+    // On console builds (PS4 /app0 is read-only), the PKG must pre-lay this out:
+    // make_gp4.py packages the staging tree as-is, so the payload has to already
+    // contain xbox360/audio/config/* at build time.
+#if !REX_PLATFORM_CONSOLE
     {
         auto destPath   = rexContentRoot / "xbox360" / "audio" / "config";
         auto srcPath    = gamePath / "game" / "audio" / "config";
@@ -543,12 +561,17 @@ int main(int argc, char *argv[])
             }
         }
     }
+#endif  // !REX_PLATFORM_CONSOLE (audio config bridge)
 
     // Bridge DLC directories to where RexGlue's ContentManager expects them.
     // ContentManager::ListContent() scans: content_root / title_id / content_type / *
     // GTA IV title_id = 545407F2, DLC content_type = 00000002 (kMarketplaceContent).
     // Our DLC is at gamePath/dlc/TLAD and gamePath/dlc/TBOGT.
     // Copy instead of symlink so there are no filesystem portability issues.
+    //
+    // Console builds ship DLC pre-laid-out in the PKG at the ContentManager
+    // path (or simply omit DLC); no runtime copy into /app0 is possible.
+#if !REX_PLATFORM_CONSOLE
     {
         const auto dlcContentDir = rexContentRoot / "545407F2" / "00000002";
         std::error_code ec;
@@ -573,12 +596,14 @@ int main(int argc, char *argv[])
             }
         }
     }
+#endif  // !REX_PLATFORM_CONSOLE (ContentManager DLC bridge)
 
     // Bridge DLC directories into game root for direct file probing.
     // GTA IV's DLC discovery probes hardcoded paths: game:\DLC1\setup2.xml
     // and game:\DLC1\DLC.rpf (TLAD = DLC1, TBOGT = DLC2). These bypass the
     // XAM content system and open files directly via the game: VFS mount.
     // The game: mount points to rexContentRoot, so we copy DLC content there.
+#if !REX_PLATFORM_CONSOLE
     {
         struct DlcGameMapping {
             const char* gameDirName;  // What the game probes (game:\DLC1\)
@@ -611,6 +636,7 @@ int main(int argc, char *argv[])
             }
         }
     }
+#endif  // !REX_PLATFORM_CONSOLE (DLC1/DLC2 direct-probe bridge)
 
     {
         static std::unique_ptr<rex::Runtime> s_rexRuntime;
@@ -634,7 +660,7 @@ int main(int argc, char *argv[])
         rex::RuntimeConfig rexConfig;
 #if defined(LIBERTY_RECOMP_PS4)
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::orbis::OrbisAudioSystem);
-#elif defined(LIBERTY_RECOMP_NX)
+#elif REX_PLATFORM_NX
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::nx::SwitchAudioSystem);
 #else
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
@@ -758,7 +784,7 @@ int main(int argc, char *argv[])
 
     if (forceInstallationCheck)
     {
-#if !LIBERTY_RECOMP_PS4 && !LIBERTY_RECOMP_NX
+#if !REX_PLATFORM_CONSOLE
         // Create the console to show progress to the user, otherwise it will seem as if the game didn't boot at all.
         os::process::ShowConsole();
 
@@ -803,7 +829,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "%s\n", resultText);
         }
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         uint32_t messageBoxStyle = (journal.lastResult == Journal::Result::Success)
             ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR;
         SDL_ShowSimpleMessageBox(messageBoxStyle, GameWindow::GetTitle(), resultText, GameWindow::s_pWindow);
@@ -842,17 +868,41 @@ int main(int argc, char *argv[])
     // Game files are already present in the package; skip installer wizard and
     // main menu entirely.  modulePath points directly at the embedded XEX.
     //
-    // On Android, extract the OBB payload to internal storage on first boot.
+    // On Android we support two delivery modes:
+    //   (a) Folder picker — LibertySDLActivity pushes an already-extracted
+    //       game directory via nativeSetGameRoot(). g_androidGameRoot is set,
+    //       GetGameRoot() returns it verbatim, and there is no OBB to unpack.
+    //   (b) OBB expansion file — the APK ships alongside a .obb zip under
+    //       /sdcard/Android/obb/<pkg>/main.<versionCode>.<pkg>.obb. We locate
+    //       the zip, unzip it into internal storage, and update the cached
+    //       game root. Only runs when a .obb file actually exists; the env
+    //       var that names the OBB directory (g_androidObbPath) always points
+    //       at the sandboxed OBB directory even when empty, so we probe for
+    //       the specific .obb file before attempting extraction.
 #if defined(__ANDROID__)
     {
         extern const char* g_androidObbPath;
-        if (g_androidObbPath) {
-            auto obbPath  = std::filesystem::path(g_androidObbPath);
-            auto destPath = EmbeddedAssets::GetGameRoot().parent_path();
-            if (!EmbeddedAssets::ExtractObbIfNeeded(obbPath, destPath)) {
-                printf("[Main] FATAL: Failed to extract OBB payload\n");
-                fflush(stdout);
-                std::_Exit(1);
+        extern const char* g_androidGameRoot;
+        const bool folderPickerMode = g_androidGameRoot && g_androidGameRoot[0] != '\0';
+        if (!folderPickerMode && g_androidObbPath) {
+            std::error_code ec;
+            std::filesystem::path obbDir(g_androidObbPath);
+            std::filesystem::path obbFile;
+            if (std::filesystem::is_directory(obbDir, ec)) {
+                for (const auto& e : std::filesystem::directory_iterator(obbDir, ec)) {
+                    if (!ec && e.is_regular_file(ec) && e.path().extension() == ".obb") {
+                        obbFile = e.path();
+                        break;
+                    }
+                }
+            }
+            if (!obbFile.empty()) {
+                auto destPath = EmbeddedAssets::GetGameRoot().parent_path();
+                if (!EmbeddedAssets::ExtractObbIfNeeded(obbFile, destPath)) {
+                    printf("[Main] FATAL: Failed to extract OBB payload\n");
+                    fflush(stdout);
+                    std::_Exit(1);
+                }
             }
         }
     }
@@ -1061,7 +1111,7 @@ int main(int argc, char *argv[])
 
     // Wait for the XThread to actually begin executing.
     for (int i = 0; i < 5000 && !main_xthread->is_running(); ++i) {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         SDL_Delay(1);
 #else
         usleep(1000);
@@ -1078,18 +1128,18 @@ int main(int argc, char *argv[])
 
     // Main thread: pump SDL events while game runs on XThread.
     // SDL requires event pumping on the main thread (macOS Cocoa requirement).
-#if defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_NX
     extern bool SwitchAppletIsRunning();
 #endif
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)
     static int s_discordCallbackTick = 0;
 #endif
     while (main_xthread->is_running()
-#if defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_NX
            && SwitchAppletIsRunning()
 #endif
     ) {
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         SDL_PumpEvents();
 #endif
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)
@@ -1099,7 +1149,7 @@ int main(int argc, char *argv[])
             s_discordCallbackTick = 0;
         }
 #endif
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
         SDL_Delay(1);
 #else
         usleep(1000);

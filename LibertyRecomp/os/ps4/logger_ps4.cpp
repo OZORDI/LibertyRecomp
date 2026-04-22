@@ -51,7 +51,7 @@ void os::logger::PlatformInitSinks()
 {
     Init();
     auto sink = std::make_shared<ps4_debug_sink_mt>();
-    rex::logging::AddSink(sink);
+    rex::AddSink(sink);
 }
 
 #endif // LIBERTY_RECOMP_PS4

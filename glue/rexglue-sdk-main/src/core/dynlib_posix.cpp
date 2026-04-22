@@ -9,6 +9,8 @@
 
 #include <dlfcn.h>
 
+#include <rex/logging/macros.h>
+
 namespace rex::platform {
 
 DynamicLibrary::~DynamicLibrary() {
@@ -30,8 +32,21 @@ DynamicLibrary& DynamicLibrary::operator=(DynamicLibrary&& other) noexcept {
 
 bool DynamicLibrary::Load(const std::filesystem::path& path) {
   Close();
-  handle_ = dlopen(path.c_str(), RTLD_LAZY);
-  return handle_ != kInvalidDynamicLibraryHandle;
+  // RTLD_LOCAL keeps the opened library's symbols out of the global
+  // namespace. Without it, Vulkan loaders and similar re-exporting
+  // libraries can collide (e.g. a later dlopen() resolving a symbol
+  // back into the first loaded library instead of its own copy).
+  // Clear any prior dlerror state so the message we read below
+  // belongs to this call.
+  (void)dlerror();
+  handle_ = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+  if (handle_ == kInvalidDynamicLibraryHandle) {
+    const char* err = dlerror();
+    REXLOG_WARN("dlopen('{}') failed: {}", path.string(),
+                err ? err : "(null)");
+    return false;
+  }
+  return true;
 }
 
 void DynamicLibrary::Close() {
@@ -42,7 +57,7 @@ void DynamicLibrary::Close() {
 }
 
 void* DynamicLibrary::GetRawSymbol(const char* name) const {
-  if (!handle_)
+  if (handle_ == kInvalidDynamicLibraryHandle || !name)
     return nullptr;
   return dlsym(handle_, name);
 }

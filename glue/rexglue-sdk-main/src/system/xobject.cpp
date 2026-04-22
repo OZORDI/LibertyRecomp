@@ -11,9 +11,13 @@
 
 #include <vector>
 
+#include <atomic>
+
 #include <rex/chrono/clock.h>
+#include <rex/logging.h>
 #include <rex/stream.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/thread_state.h>
 #include <rex/system/util/string_utils.h>  // For TranslateAnsiStringAddress
 #include <rex/system/xobject.h>
 // #include <rex/kernel/xboxkrnl/private.h>  // TODO: JIT only
@@ -364,7 +368,39 @@ void XObject::SetNativePointer(uint32_t native_ptr, bool uninitialized) {
 
 object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* native_ptr,
                                              int32_t as_type) {
-  assert_not_null(native_ptr);
+  // [DIAG-GNO] Instrumentation: when the guest passes an invalid native_ptr to
+  // a Ke*/Nt* API, log the guest LR/r3/r4/r5 so we can identify the guest
+  // function that failed to initialize the object. Early-returns nullptr so
+  // the process stays alive long enough to collect diagnostic data — callers
+  // already null-check the return and convert to X_STATUS_UNSUCCESSFUL.
+  //
+  // Two null flavours:
+  //   1. native_ptr == nullptr: literal null
+  //   2. native_ptr == virtual_membase: MappedPtr<void>(guest=0) converts to
+  //      host base + 0, which is non-null but in guest page 0 (PROT_NONE).
+  const bool is_literal_null = (native_ptr == nullptr);
+  const bool is_guest_zero = (kernel_state && kernel_state->memory() &&
+                               native_ptr == kernel_state->memory()->virtual_membase());
+  if (is_literal_null || is_guest_zero) {
+    static std::atomic<uint32_t> diag_gno_counter{0};
+    uint32_t n = diag_gno_counter.fetch_add(1, std::memory_order_relaxed);
+    if (n < 256) {
+      auto* ts = rex::runtime::ThreadState::Get();
+      ::PPCContext* ctx = ts ? ts->context() : nullptr;
+      if (ctx) {
+        REXSYS_WARN(
+          "[DIAG-GNO seq={}] null native_ptr ({}): "
+          "guest_lr=0x{:08X} r3=0x{:08X} r4=0x{:08X} r5=0x{:08X} as_type={}",
+          n, (is_literal_null ? "literal" : "guest=0 via base"),
+          (uint32_t)ctx->lr, (uint32_t)ctx->r3.u32,
+          (uint32_t)ctx->r4.u32, (uint32_t)ctx->r5.u32, as_type);
+      } else {
+        REXSYS_WARN("[DIAG-GNO seq={}] null native_ptr ({}): no PPC context",
+                     n, (is_literal_null ? "literal" : "guest=0 via base"));
+      }
+    }
+    return nullptr;
+  }
 
   // Unfortunately the XDK seems to inline some KeInitialize calls, meaning
   // we never see it and just randomly start getting passed events/timers/etc.

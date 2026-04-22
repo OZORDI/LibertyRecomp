@@ -51,30 +51,47 @@ if(DEFINED ENV{GAME_PATH})
     message(STATUS "GAME_PATH env var set — using: ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
 endif()
 
+# Android-only opt-in: game files are delivered at runtime via
+# LibertySDLActivity's folder-picker flow (see docs/ANDROID_BUILDING.md),
+# so the CMake-time payload check is a blocker rather than a safety net.
+# Defaults ON for Android (inherited from `android-*` CMake presets), OFF
+# for every other embedded target (PS4 / Switch / iOS).
+option(LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS
+    "Android: expect the game payload to be supplied at runtime (skip CMake-time validation)"
+    OFF)
+
 if(NOT LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
     message(STATUS "Embedded game path: ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
 
-    if(NOT EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
-        message(FATAL_ERROR
-            "LIBERTY_RECOMP_EMBEDDED_GAME_PATH does not exist:\n"
-            "  ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}\n"
-            "Set the GAME_PATH environment variable to your extracted game directory,\n"
-            "or populate tools/local_game_payload/, or pass "
-            "-DLIBERTY_RECOMP_EMBEDDED_GAME_PATH=... to CMake.\n"
-            "See tools/local_game_payload/README.md for the required layout.")
-    endif()
-
-    # Validate required files
-    foreach(_req_file default.xex common.rpf xbox360.rpf audio.rpf)
-        if(NOT EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_req_file}")
+    if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "android" AND LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS)
+        message(STATUS
+            "Android: LIBERTY_RECOMP_ANDROID_RUNTIME_ASSETS=ON — skipping build-time\n"
+            "         game-file validation. The Activity's folder-picker flow is\n"
+            "         expected to hand the path to the native runtime via\n"
+            "         Java_com_libertyrecomp_LibertySDLActivity_nativeSetGameRoot.")
+    else()
+        if(NOT EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}")
             message(FATAL_ERROR
-                "Required game file missing from embedded payload:\n"
-                "  ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_req_file}\n"
+                "LIBERTY_RECOMP_EMBEDDED_GAME_PATH does not exist:\n"
+                "  ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}\n"
+                "Set the GAME_PATH environment variable to your extracted game directory,\n"
+                "or populate tools/local_game_payload/, or pass "
+                "-DLIBERTY_RECOMP_EMBEDDED_GAME_PATH=... to CMake.\n"
                 "See tools/local_game_payload/README.md for the required layout.")
         endif()
-    endforeach()
 
-    message(STATUS "Embedded payload validated successfully.")
+        # Validate required files
+        foreach(_req_file default.xex common.rpf xbox360.rpf audio.rpf)
+            if(NOT EXISTS "${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_req_file}")
+                message(FATAL_ERROR
+                    "Required game file missing from embedded payload:\n"
+                    "  ${LIBERTY_RECOMP_EMBEDDED_GAME_PATH}/${_req_file}\n"
+                    "See tools/local_game_payload/README.md for the required layout.")
+            endif()
+        endforeach()
+
+        message(STATUS "Embedded payload validated successfully.")
+    endif()
 
     # ── Detect optional DLC ───────────────────────────────────────────────
     set(LIBERTY_PAYLOAD_HAS_TLAD  "false")

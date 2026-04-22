@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rex/platform.h>
 #include <mod/mod_loader.h>
 #include <install/embedded_assets.h>
 
@@ -38,7 +39,7 @@ inline std::string g_ps4SaveMountPoint;
 /// This global is set by SaveSystem::Initialize() after fsdevMountSaveData succeeds,
 /// and consumed by GetSavePath() so stdio-based I/O resolves through the journalled
 /// save-data container instead of the read-only romfs/user path.
-#ifdef LIBERTY_RECOMP_NX
+#if REX_PLATFORM_NX
 inline std::string g_switchSaveMountPoint;
 #endif
 
@@ -50,7 +51,7 @@ inline std::filesystem::path GetSavePath(bool checkForMods)
     if (!g_ps4SaveMountPoint.empty())
         return std::filesystem::path(g_ps4SaveMountPoint);
 #endif
-#ifdef LIBERTY_RECOMP_NX
+#if REX_PLATFORM_NX
     if (!g_switchSaveMountPoint.empty())
         return std::filesystem::path(g_switchSaveMountPoint);
 #endif
@@ -75,7 +76,7 @@ static std::string toLower(std::string str) {
 inline void BuildPathCache(const std::string& gamePath) {
     std::error_code ec;
     constexpr size_t kMaxEntries =
-#if defined(__ORBIS__) || defined(__SWITCH__)
+#if REX_PLATFORM_CONSOLE
         // Console encrypted/romfs filesystems: cap iteration to avoid
         // slow recursive enumeration on /app0 or romfs:/
         8192;

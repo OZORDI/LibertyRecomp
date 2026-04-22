@@ -23,6 +23,7 @@
 
 extern "C" {
 #include <switch/audio/driver.h>
+#include <switch/services/audren.h>
 }
 
 namespace rex::audio::nx {
@@ -42,8 +43,11 @@ class SwitchAudioDriver : public AudioDriver {
   // libnx audio renderer state
   ::AudioDriver audren_driver_ = {};
   int mempool_id_ = -1;
-  bool audren_initialized_ = false;
+  bool audren_service_initialized_ = false;
+  bool audren_driver_initialized_ = false;
   bool voice_initialized_ = false;
+  // Serializes access to audrv* calls (audrvUpdate is NOT thread-safe).
+  std::mutex audren_mutex_ = {};
 
   // Audio format constants matching Xbox 360 XMA output:
   // 6-channel (5.1) 48kHz float, 256 samples per channel per frame.
@@ -76,6 +80,15 @@ class SwitchAudioDriver : public AudioDriver {
   std::mutex frames_mutex_ = {};
 
   void ConvertAndSubmit(const float* input);
+
+  // True iff `wavebufs_[current_buf_]` is no longer owned by the renderer
+  // (state is Done or Free) and may be safely overwritten. Caller holds
+  // `audren_mutex_`.
+  bool CurrentSlotIsReusable();
+  // Block (poll via audrenWaitFrame + audrvUpdate) until the current wave
+  // buffer slot is reusable. Caller's unique_lock owns `audren_mutex_` on
+  // entry; the function may drop and reacquire it, but returns with it held.
+  void WaitForCurrentSlotReusable(std::unique_lock<std::mutex>& drv_lock);
 };
 
 }  // namespace rex::audio::nx

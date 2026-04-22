@@ -22,6 +22,8 @@
 
 #include <rex/exception_handler.h>
 
+#include <unistd.h>  // write(), STDERR_FILENO — used from the fault-handler path.
+
 #include <cstdint>
 #include <cstring>
 
@@ -93,6 +95,48 @@ void FillThreadContext(HostThreadContext& tc, const ThreadExceptionDump* ctx) {
   }
 }
 
+// --------------------------------------------------------------------------
+// Async-signal-safe / fault-handler-safe helpers.
+//
+// __libnx_exception_handler runs in the same restricted context as a POSIX
+// signal handler: spdlog / fmt::format / std::string / malloc are all
+// unsafe (spdlog may be mid-write on the faulting thread's mutex). Route
+// diagnostic output through write(2) with stack buffers only before the
+// final svcBreak.
+// --------------------------------------------------------------------------
+
+inline void SigSafeWriteCStr(const char* s) {
+  if (!s) return;
+  size_t n = 0;
+  while (s[n]) ++n;
+  (void)::write(STDERR_FILENO, s, n);
+}
+
+inline size_t SigSafeFormatHex(char* buf, size_t cap, uint64_t value) {
+  static const char kHex[] = "0123456789abcdef";
+  if (cap < 4) return 0;
+  size_t w = 0;
+  buf[w++] = '0';
+  buf[w++] = 'x';
+  int shift = 60;
+  while (shift > 0 && ((value >> shift) & 0xF) == 0) shift -= 4;
+  while (shift >= 0 && w < cap) {
+    buf[w++] = kHex[(value >> shift) & 0xF];
+    shift -= 4;
+  }
+  return w;
+}
+
+inline void SigSafeWriteLabelHex(const char* label, uint64_t value) {
+  char buf[96];
+  size_t w = 0;
+  for (const char* p = label; *p && w < sizeof(buf) - 1; ++p) buf[w++] = *p;
+  if (w < sizeof(buf) - 1) buf[w++] = '=';
+  w += SigSafeFormatHex(buf + w, sizeof(buf) - w - 1, value);
+  if (w < sizeof(buf)) buf[w++] = '\n';
+  (void)::write(STDERR_FILENO, buf, w);
+}
+
 }  // namespace
 
 void ExceptionHandler::Install(Handler fn, void* data) {
@@ -129,8 +173,12 @@ extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
   const bool is_write       = IsDataAbortWrite(esr);
 
   if (!IsAccessViolation(ctx->error_desc)) {
-    REXLOG_ERROR("Switch exception: non-AV error_desc={:#x} pc={:#x} far={:#x} esr={:#x}",
-                 ctx->error_desc, fault_pc, fault_addr, esr);
+    // Signal-safe only: spdlog / fmt::format are not async-safe.
+    SigSafeWriteCStr("[rex] Switch exception (non-AV)\n");
+    SigSafeWriteLabelHex("error_desc", static_cast<uint64_t>(ctx->error_desc));
+    SigSafeWriteLabelHex("pc", fault_pc);
+    SigSafeWriteLabelHex("far", fault_addr);
+    SigSafeWriteLabelHex("esr", static_cast<uint64_t>(esr));
     PanicBreak();
   }
 
@@ -173,9 +221,12 @@ extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
     }
   }
 
-  REXLOG_ERROR(
-      "Unhandled Switch access violation: pc={:#x} far={:#x} esr={:#x} is_write={}",
-      fault_pc, fault_addr, esr, is_write ? 1 : 0);
+  // Signal-safe only: spdlog / fmt::format are not async-safe.
+  SigSafeWriteCStr("[rex] Unhandled Switch access violation\n");
+  SigSafeWriteLabelHex("pc", fault_pc);
+  SigSafeWriteLabelHex("far", fault_addr);
+  SigSafeWriteLabelHex("esr", static_cast<uint64_t>(esr));
+  SigSafeWriteLabelHex("is_write", is_write ? 1ULL : 0ULL);
   PanicBreak();
 }
 

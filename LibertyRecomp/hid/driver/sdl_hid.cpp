@@ -16,12 +16,10 @@
 #include <cstring>
 #include <cmath>
 
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#if TARGET_OS_IOS
+#include <rex/platform.h>
+#if REX_PLATFORM_IOS
 #include <os/ios/haptics_ios.h>
 #define LR_USE_IOS_HAPTICS 1
-#endif
 #endif
 
 #ifndef LR_USE_IOS_HAPTICS

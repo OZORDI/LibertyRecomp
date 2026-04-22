@@ -1,7 +1,8 @@
-#ifdef LIBERTY_RECOMP_NX
+#include <rex/platform.h>
+#if REX_PLATFORM_NX
 #include <os/media.h>
 bool os::media::IsExternalMediaPlaying()
 {
     return false;
 }
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

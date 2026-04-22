@@ -9,7 +9,7 @@
 #include <rex/platform.h>
 #include <rex/platform/seh.h>
 
-static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
+static_assert(REX_PLATFORM_POSIX, "This file is POSIX-only");
 
 #include <signal.h>
 #include <cstdlib>  // std::abort()

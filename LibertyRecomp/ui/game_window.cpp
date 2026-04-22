@@ -1,6 +1,6 @@
 #include "game_window.h"
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 
 #include <gpu/video.h>
 #include <os/logger.h>
@@ -153,6 +153,32 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
             GameWindow::s_playerCharacter = static_cast<EPlayerCharacter>(event->user.code);
             GameWindow::SetIcon(GameWindow::s_playerCharacter);
             break;
+
+#if defined(__ANDROID__)
+        // ---- Android lifecycle events ----
+        // When the app goes to the background the ANativeWindow is destroyed
+        // by the OS.  SDL3 signals this via SDL_EVENT_DID_ENTER_BACKGROUND
+        // and a matching SDL_EVENT_WILL_ENTER_FOREGROUND when the user
+        // switches back.  We set s_isFocused = false so the render loop
+        // skips frame submission (the Vulkan surface is gone), and re-enable
+        // it on foreground.  SDL internally recreates the ANativeWindow;
+        // CheckSwapChain() handles the swapchain resize on the next valid
+        // acquireTexture.
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+            LOGFN("Android: entered background — pausing rendering");
+            GameWindow::s_isFocused = false;
+            break;
+
+        case SDL_EVENT_WILL_ENTER_FOREGROUND:
+            LOGFN("Android: entering foreground — resuming rendering");
+            GameWindow::s_isFocused = true;
+            break;
+
+        case SDL_EVENT_TERMINATING:
+            LOGFN("Android: OS terminating — exiting");
+            App::Exit();
+            break;
+#endif
     }
 
     return false;
@@ -208,7 +234,18 @@ bool GameWindow::Init(const char* sdlVideoDriver)
         {
             int logicalW = displayMode->w;
             int logicalH = displayMode->h;
-            
+
+#if defined(__ANDROID__)
+            // Android: SDL3's Android backend reports display size in physical
+            // pixels already. Creating a hidden probe window is flaky (the
+            // platform enforces a single foreground window) and the density
+            // scale is available via Configuration.densityDpi on the Java
+            // side if a DIP-based layout is ever needed. Just take the
+            // display mode at face value.
+            s_width  = logicalW;
+            s_height = logicalH;
+            LOGFN("Android display size: {}x{}", s_width, s_height);
+#else
             // Create a small temporary hidden window to detect the HiDPI scale factor
             // SDL3: SDL_WINDOW_ALLOW_HIGHDPI removed (always on), position set separately
             SDL_Window* tempWindow = SDL_CreateWindow(
@@ -216,41 +253,42 @@ bool GameWindow::Init(const char* sdlVideoDriver)
                 100, 100,
                 SDL_WINDOW_HIDDEN
             );
-            
+
             float scaleX = 1.0f;
             float scaleY = 1.0f;
-            
+
             if (tempWindow)
             {
                 int windowW, windowH;
                 int pixelW, pixelH;
-                
+
                 SDL_GetWindowSize(tempWindow, &windowW, &windowH);
                 SDL_GetWindowSizeInPixels(tempWindow, &pixelW, &pixelH);
-                
+
                 if (windowW > 0 && windowH > 0)
                 {
                     scaleX = static_cast<float>(pixelW) / static_cast<float>(windowW);
                     scaleY = static_cast<float>(pixelH) / static_cast<float>(windowH);
                 }
-                
+
                 SDL_DestroyWindow(tempWindow);
             }
-            
+
             // Apply the HiDPI scale factor to get native pixel resolution
             s_width = static_cast<int>(logicalW * scaleX);
             s_height = static_cast<int>(logicalH * scaleY);
-            
+
             if (scaleX > 1.0f || scaleY > 1.0f)
             {
                 LOGFN("Detected HiDPI/Retina display (scale: {:.1f}x{:.1f})", scaleX, scaleY);
-                LOGFN("Logical resolution: {}x{}, Native pixel resolution: {}x{}", 
+                LOGFN("Logical resolution: {}x{}, Native pixel resolution: {}x{}",
                       logicalW, logicalH, s_width, s_height);
             }
             else
             {
                 LOGFN("Using native display resolution: {}x{}", s_width, s_height);
             }
+#endif
         }
         else
         {
@@ -295,6 +333,10 @@ bool GameWindow::Init(const char* sdlVideoDriver)
         DWM_WINDOW_CORNER_PREFERENCE wcp = DWMWCP_DONOTROUND;
         DwmSetWindowAttribute(s_renderWindow, DWMWA_WINDOW_CORNER_PREFERENCE, &wcp, sizeof(wcp));
     }
+#elif defined(__ANDROID__)
+    // Android: get the ANativeWindow* from SDL's window properties.
+    s_renderWindow = (ANativeWindow*)SDL_GetPointerProperty(
+        SDL_GetWindowProperties(s_pWindow), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 #elif defined(SDL_VULKAN_ENABLED)
     s_renderWindow = s_pWindow;
 #elif defined(__linux__)
@@ -526,6 +568,12 @@ void GameWindow::ResetDimensions()
 
 uint32_t GameWindow::GetWindowFlags()
 {
+#if defined(__ANDROID__)
+    // Android: a single foreground window, always fullscreen, always Vulkan,
+    // no resize / maximize / hide semantics. SDL_WINDOW_HIDDEN on Android
+    // prevents the surface from ever being attached, so we drop it.
+    return SDL_WINDOW_VULKAN | SDL_WINDOW_FULLSCREEN;
+#else
     // SDL3: SDL_WINDOW_ALLOW_HIGHDPI removed (always on)
     uint32_t flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE;
 
@@ -540,6 +588,7 @@ uint32_t GameWindow::GetWindowFlags()
 #endif
 
     return flags;
+#endif
 }
 
 int GameWindow::GetDisplayCount()
@@ -829,7 +878,7 @@ void GameWindow::Update()
 
 #endif // LIBERTY_RECOMP_PS4
 
-#if defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_NX
 
 // Nintendo Switch windowing backend — libnx NWindow / vi layer.
 // The default NWindow created at application startup is used as the surface

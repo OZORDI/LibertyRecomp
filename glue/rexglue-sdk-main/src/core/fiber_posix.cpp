@@ -10,7 +10,7 @@
  */
 
 #include <rex/platform.h>
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
 
 #include <rex/thread/fiber.h>
 
@@ -75,4 +75,4 @@ void Fiber::Destroy() {
 
 }  // namespace rex::thread
 
-#endif  // REX_PLATFORM_LINUX
+#endif  // REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID

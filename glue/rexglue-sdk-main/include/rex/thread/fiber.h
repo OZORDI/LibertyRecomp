@@ -14,13 +14,29 @@
 #include <rex/platform.h>
 #include <cstddef>
 
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
 #include <ucontext.h>
 #include <cstdint>
 #include <vector>
 #endif
 
+#if REX_PLATFORM_ANDROID
+#include <csetjmp>
+#include <cstdint>
+#endif
+
 #if REX_PLATFORM_IOS || REX_PLATFORM_MAC
+#include <csetjmp>
+#include <cstdint>
+#endif
+
+#if REX_PLATFORM_PS4
+#include <ucontext.h>
+#include <cstdint>
+#include <vector>
+#endif
+
+#if REX_PLATFORM_NX
 #include <csetjmp>
 #include <cstdint>
 #endif
@@ -56,6 +72,18 @@ struct Fiber {
 #if REX_PLATFORM_WIN32
   void* handle_ = nullptr;
   bool is_thread_fiber_ = false;
+#elif REX_PLATFORM_ANDROID
+  // Android (Bionic): ucontext is removed. Use setjmp/longjmp + aarch64
+  // stack pivot, same pattern as Darwin/Switch backends.
+  alignas(16) char jmpbuf_[256] = {};
+  void* stack_ = nullptr;
+  size_t stack_size_ = 0;
+  void (*entry_)(void*) = nullptr;
+  void* arg_ = nullptr;
+  bool is_thread_fiber_ = false;
+  bool started_ = false;
+
+  static void Trampoline();
 #elif REX_PLATFORM_LINUX
   ucontext_t context_{};
   std::vector<uint8_t> stack_;
@@ -68,6 +96,34 @@ struct Fiber {
   // iOS: ucontext/makecontext are deprecated on Darwin and effectively
   // unusable on arm64. Use setjmp/longjmp + an aarch64 stack pivot.
   alignas(16) char jmpbuf_[512] = {};
+  void* stack_ = nullptr;
+  size_t stack_size_ = 0;
+  void (*entry_)(void*) = nullptr;
+  void* arg_ = nullptr;
+  bool is_thread_fiber_ = false;
+  bool started_ = false;
+
+  static void Trampoline();
+#elif REX_PLATFORM_PS4
+  // PS4 (OpenOrbis): musl-declared ucontext_t, implementation supplied by
+  // ucontext_ps4.c. Mirrors the Linux layout.
+  //
+  // fxsave_ captures the x87+MXCSR+XMM state across a swapcontext — the base
+  // getcontext/swapcontext in ucontext_ps4.c save GPRs only, and the AMD64
+  // SysV ABI marks MXCSR and the x87 control word callee-saved. 512-byte,
+  // 16-byte aligned as required by fxsave/fxrstor.
+  ucontext_t context_{};
+  alignas(16) uint8_t fxsave_[512] = {};
+  std::vector<uint8_t> stack_;
+  void (*entry_)(void*) = nullptr;
+  void* arg_ = nullptr;
+  bool is_thread_fiber_ = false;
+
+  static void Trampoline();
+#elif REX_PLATFORM_NX
+  // Switch (libnx/newlib): no ucontext.h. Use setjmp/longjmp + an aarch64
+  // stack pivot, same pattern as the Darwin backends.
+  alignas(16) char jmpbuf_[256] = {};
   void* stack_ = nullptr;
   size_t stack_size_ = 0;
   void (*entry_)(void*) = nullptr;

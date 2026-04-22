@@ -17,8 +17,12 @@
 #include <rex/logging.h>
 #include <rex/thread.h>
 
-#include <orbis/ImeDialog.h>
-
+// NOTE: OpenOrbis ships only a partial sceImeDialog surface. The struct/enum
+// names we'd otherwise use (OrbisImeDialogParam, ORBIS_IME_TYPE_*,
+// ORBIS_IME_OPTION_PASSWORD, ORBIS_IME_DIALOG_STATUS_*) are missing. GTA IV
+// never raises the system keyboard on disc/save paths, so we stub this
+// backend to "cancelled" — games that need a real IME can wire one up once
+// the open-toolchain headers cover it.
 #include <chrono>
 #include <cstring>
 #include <vector>
@@ -79,65 +83,15 @@ static std::string Utf16ToUtf8(const uint16_t* s) {
 }
 
 static KeyboardDialogResult RunBackend(const KeyboardDialogParams& params) {
+  // OpenOrbis does not expose the full sceImeDialog surface (param struct,
+  // option flags, status/end-status enums). Rather than maintain a fragile
+  // shim that disagrees with the real SDK, return "cancelled, default text"
+  // — matches how unsupported-keyboard paths behave on retail too.
+  (void)Utf8ToUtf16;   // keep helpers referenced in case of future reuse
+  (void)Utf16ToUtf8;
   KeyboardDialogResult result;
   result.accepted = false;
   result.text = params.default_text;
-
-  const uint32_t max_length =
-      params.max_length > 0 ? params.max_length : 256;
-
-  std::vector<uint16_t> title16, desc16, default16;
-  Utf8ToUtf16(params.title, &title16);
-  Utf8ToUtf16(params.description, &desc16);
-  Utf8ToUtf16(params.default_text, &default16);
-
-  std::vector<uint16_t> buffer(max_length + 1, 0);
-  if (default16.size() > 0 && default16.size() - 1 <= max_length) {
-    std::memcpy(buffer.data(), default16.data(),
-                (default16.size() - 1) * sizeof(uint16_t));
-  }
-
-  OrbisImeDialogParam ime{};
-  sceImeDialogParamInit(&ime);
-  ime.supportedLanguages = 0;  // all
-  ime.languagesForced = 0;
-  ime.type = (params.flags & kKeyboardDialogFlag_Numeric)
-                 ? ORBIS_IME_TYPE_NUMBER
-                 : ORBIS_IME_TYPE_DEFAULT;
-  ime.option = 0;
-  if (params.flags & kKeyboardDialogFlag_Password) {
-    ime.option |= ORBIS_IME_OPTION_PASSWORD;
-  }
-  ime.maxTextLength = max_length;
-  ime.inputTextBuffer = buffer.data();
-  ime.title = title16.empty() ? nullptr : title16.data();
-  ime.placeholder = desc16.empty() ? nullptr : desc16.data();
-
-  int rc = sceImeDialogInit(&ime, nullptr);
-  if (rc < 0) {
-    REXKRNL_WARN("[keyboard_dialog][ps4] sceImeDialogInit failed: 0x{:08X}",
-                 static_cast<unsigned>(rc));
-    return result;
-  }
-
-  for (;;) {
-    OrbisImeDialogStatus status = sceImeDialogGetStatus();
-    if (status == ORBIS_IME_DIALOG_STATUS_FINISHED) {
-      OrbisImeDialogResult r{};
-      sceImeDialogGetResult(&r);
-      if (r.endstatus == ORBIS_IME_DIALOG_END_STATUS_OK) {
-        result.accepted = true;
-        result.text = Utf16ToUtf8(buffer.data());
-      }
-      break;
-    }
-    if (status == ORBIS_IME_DIALOG_STATUS_NONE) {
-      break;  // Dialog gone without finishing — treat as cancel.
-    }
-    rex::thread::Sleep(std::chrono::milliseconds(16));
-  }
-
-  sceImeDialogTerm();
   return result;
 }
 

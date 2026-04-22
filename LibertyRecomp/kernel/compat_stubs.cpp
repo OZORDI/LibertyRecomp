@@ -54,3 +54,38 @@ void XamNotifyEnqueueEvent(uint32_t /*dwId*/, uint32_t /*dwParam*/)
 {
     // No-op — TODO: route through rex::system::XNotifyListener.
 }
+
+// =============================================================================
+// rex::ui::ImGuiDialog — linker stubs
+//
+// rexkernel's xam_ui.cpp subclasses ImGuiDialog for XamShowMessageBoxUI, but
+// LibertyRecomp intentionally does NOT link rex::ui (we provide our own UI).
+// Forward-declare the class layout to avoid pulling in the full rex::ui header
+// tree (which drags in Vulkan/graphics includes), then supply empty bodies so
+// the linker is satisfied.
+// =============================================================================
+
+namespace rex { namespace thread { class Fence; } }
+namespace rex { namespace ui {
+
+class ImGuiDrawer;
+
+class ImGuiDialog {
+public:
+    ~ImGuiDialog();
+    void Then(rex::thread::Fence* fence);
+    void Close();
+protected:
+    ImGuiDialog(ImGuiDrawer* imgui_drawer);
+private:
+    ImGuiDrawer* imgui_drawer_ = nullptr;
+    bool has_close_pending_ = false;
+    std::vector<rex::thread::Fence*> waiting_fences_;
+};
+
+ImGuiDialog::ImGuiDialog(ImGuiDrawer*) {}
+ImGuiDialog::~ImGuiDialog() {}
+void ImGuiDialog::Then(rex::thread::Fence*) {}
+void ImGuiDialog::Close() {}
+
+}}  // namespace rex::ui

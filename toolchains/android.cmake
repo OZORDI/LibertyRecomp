@@ -1,8 +1,8 @@
 # Android NDK CMake Toolchain wrapper
 # Requirements:
-#   - Android SDK >= 34  (set ANDROID_HOME or ANDROID_SDK_ROOT)
-#   - NDK r25c+          (set ANDROID_NDK or let SDK manager install it)
-#   - Java 17+           (for Gradle)
+#   - Android SDK >= 34        (set ANDROID_HOME or ANDROID_SDK_ROOT)
+#   - NDK r26b (26.1.10909125) (set ANDROID_NDK or let SDK manager install it)
+#   - Java 17+                 (for Gradle)
 #
 # Usage:
 #   cmake -DCMAKE_TOOLCHAIN_FILE=toolchains/android.cmake \
@@ -34,8 +34,11 @@ endif()
 if(NOT EXISTS "${ANDROID_NDK}")
     message(FATAL_ERROR
         "Android NDK not found. Set ANDROID_NDK, ANDROID_HOME, or ANDROID_SDK_ROOT.\n"
-        "Install via: sdkmanager --install 'ndk;25.2.9519653'")
+        "Install via: sdkmanager --install 'ndk;26.1.10909125'")
 endif()
+
+# Canonical NDK version for this project (for docs/reference; not enforced):
+#   NDK 26.1.10909125 (r26b) — matches Gradle `ndkVersion` and the CI workflow.
 
 message(STATUS "Using Android NDK: ${ANDROID_NDK}")
 
@@ -50,7 +53,10 @@ if(NOT DEFINED ANDROID_PLATFORM)
     set(ANDROID_PLATFORM "android-26")
 endif()
 if(NOT DEFINED ANDROID_STL)
-    set(ANDROID_STL "c++_shared")
+    # c++_static: LibertyRecomp ships as a single native library (libLibertyRecomp.so).
+    # With only one .so there is no risk of duplicated STL instances across libraries,
+    # and static linking keeps APK packaging simpler. Matches Gradle build.gradle.kts.
+    set(ANDROID_STL "c++_static")
 endif()
 
 # Force Vulkan on Android

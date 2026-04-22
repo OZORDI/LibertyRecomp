@@ -1,4 +1,5 @@
-#ifdef LIBERTY_RECOMP_NX
+#include <rex/platform.h>
+#if REX_PLATFORM_NX
 #include <os/version.h>
 #include <switch.h>
 
@@ -16,4 +17,4 @@ os::version::OSVersion os::version::GetOSVersion()
                  static_cast<uint32_t>(fw.micro) };
     return { 0, 0, 0 };
 }
-#endif // LIBERTY_RECOMP_NX
+#endif // REX_PLATFORM_NX

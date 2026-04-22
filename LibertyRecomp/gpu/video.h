@@ -51,39 +51,122 @@ struct GuestSamplerState
     be<uint32_t> data[6];
 };
 
+// grcDevice — GTA IV v8 (default.xex). Size 0x5780, allocated 128-byte aligned
+// by sub_82A416B8. Name kept as "GuestDevice" for search-compat with the
+// UnleashedRecomp hook heritage; field offsets verified against PPC
+// addi/rlwinm/mulli index math in the recomp codegen — see
+// docs/unleashed-mirror-research/03-grcdevice-header-spec.md.
+//
+// NOTE: GTA IV does NOT use Sonic/Unleashed's per-device
+// setRenderStateFunctions[] / setSamplerStateFunctions[] LUTs — its
+// renderstate funnel sub_828C19C0 is an inline `bctr` switch against a
+// read-only jump table at .rodata:0x828C1A04. Those fields are absent here.
 struct GuestDevice
 {
-    be<uint64_t> dirtyFlags[7]; // 0x0 + 0x38
+    // ---- 0x0000 : Dirty-flag qwords (5 words, 40 bytes) ----
+    be<uint64_t> dirtyFlagVsFloat;      // +0x00  sub_82A42168  VS float-const bitmask
+    be<uint64_t> dirtyFlagPsFloat;      // +0x08  sub_82A42250  PS float-const bitmask
+    be<uint64_t> dirtyFlagState;        // +0x10  sub_82A424A8/760/930
+    be<uint64_t> dirtyFlagTexture;      // +0x18  sub_82A44B78  texture-stage bitmask
+    be<uint64_t> dirtyFlagBoolInt;      // +0x20  sub_82A42338/398/3F8/450
 
-    be<uint32_t> setRenderStateFunctions[0x61]; // 0x38 + 0x184
-    uint32_t setSamplerStateFunctions[0x14]; // 0x1BC + 0x50
+    // ---- 0x0028..0x0480 : PM4 work-pointer pair + uncharted filler ----
+    uint8_t padding0028[0x458];
 
-    uint8_t padding20C[0x1F4]; // 0x20C + 0x1F4
+    // ---- 0x0480 : Sampler state array (24 × 24 bytes) ----
+    GuestSamplerState samplerStates[24];        // +0x480..+0x6C0
+    uint8_t padding06C0[0xC0];                  // +0x6C0..+0x780
 
-    GuestSamplerState samplerStates[0x20]; // 0x400 + 0x300
+    // ---- 0x0780 : VS float constants [256 × vec4] (raw big-endian bytes) ----
+    uint32_t vertexShaderFloatConstants[256 * 4];   // +0x0780..+0x1780
 
-    uint32_t vertexShaderFloatConstants[0x400]; // 0x700 + 0x1000
-    uint32_t pixelShaderFloatConstants[0x400]; // 0x1700 + 0x1000
+    // ---- 0x1780 : PS float constants [256 × vec4] (raw big-endian bytes) ----
+    uint32_t pixelShaderFloatConstants[256 * 4];    // +0x1780..+0x2780
 
-    be<uint32_t> vertexShaderBoolConstants[0x4]; // 0x2700 + 0x10
-    be<uint32_t> pixelShaderBoolConstants[0x4]; // 0x2710 + 0x10
+    // ---- 0x2780 : VS/PS bool + int constants ----
+    be<uint32_t> vertexShaderBoolConstants[4];      // +0x2780
+    be<uint32_t> pixelShaderBoolConstants[4];       // +0x2790
+    be<uint32_t> vertexShaderIntConstants[16];      // +0x27A0
+    be<uint32_t> pixelShaderIntConstants[16];       // +0x27E0
 
-    uint8_t padding2720[0x5F0]; // 0x2720 + 0x5F0
-    be<uint32_t> vertexDeclaration; // 0x2D10 + 0x4
-    uint8_t padding2D14[0x344]; // 0x2D14 + 0x344
-    struct
-    {
-        be<float> x;
-        be<float> y;
-        be<float> width;
-        be<float> height;
-        be<float> minZ;
-        be<float> maxZ;
-    } viewport; // 0x3058 + 0x18
-    uint8_t padding3070[0x1F90]; // 0x3070 + 0x1F90
+    // ---- 0x2820..0x2A94 : uncharted (sub_82A50820 writes qword at +0x2A80) ----
+    uint8_t padding2820[0x274];
+
+    // ---- 0x2A94 : PM4 / shader-push state ----
+    be<uint32_t> streamSourceLive;              // +0x2A94
+    uint8_t padding2A98[0x04];
+    be<uint32_t> shaderPushCmdPtr;              // +0x2A9C
+    be<uint32_t> shaderPushMask;                // +0x2AA0
+    uint8_t padding2AA4[0x04];
+    be<uint32_t> renderStatePacked;             // +0x2AA8
+
+    uint8_t padding2AAC[0x10];                  // +0x2AAC..+0x2ABC
+    uint8_t stateByteA;                         // +0x2ABC
+    uint8_t stateByteB;                         // +0x2ABD
+    uint8_t currentShaderDirty;                 // +0x2ABE
+    uint8_t padding2ABF[0x365];                 // +0x2ABF..+0x2E24
+
+    // ---- 0x2E24 : Vertex declaration + shadow ----
+    be<uint32_t> vertexDeclaration;             // +0x2E24
+    uint8_t padding2E28[0x08];
+    uint8_t currentVdeclStreamCount;            // +0x2E30
+    uint8_t padding2E31[0x75];                  // +0x2E31..+0x2EA6
+
+    // ---- 0x2EA6 / 0x2EC0 : per-sampler shadow bytes (26 each) ----
+    uint8_t samplerMipFilter[26];               // +0x2EA6..+0x2EC0
+    uint8_t samplerMaxAniso[26];                // +0x2EC0..+0x2EDA
+    uint8_t padding2EDA[0x20E];                 // +0x2EDA..+0x30E8
+
+    // ---- 0x30E8 : stream-source count ----
+    uint8_t streamSourceCount;                  // +0x30E8
+    uint8_t padding30E9[0x0F];                  // +0x30E9..+0x30F8
+
+    // ---- 0x30F8 : Texture slot array (26 slots, matches sampler count) ----
+    be<uint32_t> textures[26];                  // +0x30F8..+0x3160
+    uint8_t padding3160[0x2C];                  // +0x3160..+0x318C
+
+    // ---- 0x318C : Current shader pointers ----
+    be<uint32_t> currentPixelShader;            // +0x318C
+    be<uint32_t> currentVertexShader;           // +0x3190
+    uint8_t padding3194[0x10];
+    be<uint32_t> previousPixelShader;           // +0x31A4
+    uint8_t padding31A8[0x31C];                 // +0x31A8..+0x34C4
+
+    // ---- 0x34C4 : PM4 ring head/tail (draw-prologue writer side) ----
+    be<uint32_t> pm4RingHead;                   // +0x34C4
+    be<uint32_t> pm4RingTail;                   // +0x34C8
+    uint8_t padding34CC[0xF8];                  // +0x34CC..+0x35C4
+
+    // ---- 0x35C4 : Primary PM4 command-buffer descriptor ----
+    be<uint32_t> cmdBufBase;                    // +0x35C4
+    be<uint32_t> cmdBufHeadPacked;              // +0x35C8
+    be<uint32_t> cmdBufGpuAddr;                 // +0x35CC
+    uint8_t padding35D0[0x80];                  // +0x35D0..+0x3650
+
+    // ---- 0x3650 : PM4 descriptor ring (112 × 8 B) ----
+    struct { be<uint32_t> flags; be<uint32_t> gpuAddr; } pm4Ring[112];
+                                                // +0x3650..+0x39D0
+
+    // ---- 0x39D0 : Secondary swap-chain head / GPU pointer ----
+    be<uint32_t> swapRingHead;                  // +0x39D0
+    be<uint32_t> swapRingGpu;                   // +0x39D4
+    uint8_t padding39D8[0x6C8];                 // +0x39D8..+0x40A0
+
+    // ---- 0x40A0 : Frame counter + ring-sync producer/consumer indices ----
+    be<uint32_t> frameCounter;                  // +0x40A0
+    uint8_t padding40A4[0x04];
+    be<uint32_t> ringEnqueueCounter;            // +0x40A8
+    uint8_t padding40AC[0x80];                  // +0x40AC..+0x412C
+    be<uint32_t> ringSlotIndex;                 // +0x412C
+    be<uint32_t> ringSlotLimit;                 // +0x4130
+    uint8_t padding4134[0x1378];                // +0x4134..+0x54AC
+
+    // ---- 0x54AC : Submission timebase stamp (mftb) ----
+    be<uint32_t> submissionTimebase;            // +0x54AC
+    uint8_t padding54B0[0x2D0];                 // +0x54B0..+0x5780
 };
 
-static_assert(sizeof(GuestDevice) == 0x5000);
+static_assert(sizeof(GuestDevice) == 0x5780);
 
 enum class ResourceType
 {
@@ -111,6 +194,14 @@ struct GuestResource
 
     void AddRef()
     {
+#ifdef __ANDROID__
+        uint32_t originalValue, incrementedValue;
+        do
+        {
+            originalValue = __atomic_load_n(&refCount.value, __ATOMIC_RELAXED);
+            incrementedValue = ByteSwap(ByteSwap(originalValue) + 1);
+        } while (!__atomic_compare_exchange_n(&refCount.value, &originalValue, incrementedValue, true, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED));
+#else
         std::atomic_ref atomicRef(refCount.value);
 
         uint32_t originalValue, incrementedValue;
@@ -119,10 +210,19 @@ struct GuestResource
             originalValue = refCount.value;
             incrementedValue = ByteSwap(ByteSwap(originalValue) + 1);
         } while (!atomicRef.compare_exchange_weak(originalValue, incrementedValue));
+#endif
     }
 
     void Release()
     {
+#ifdef __ANDROID__
+        uint32_t originalValue, decrementedValue;
+        do
+        {
+            originalValue = __atomic_load_n(&refCount.value, __ATOMIC_RELAXED);
+            decrementedValue = ByteSwap(ByteSwap(originalValue) - 1);
+        } while (!__atomic_compare_exchange_n(&refCount.value, &originalValue, decrementedValue, true, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED));
+#else
         std::atomic_ref atomicRef(refCount.value);
 
         uint32_t originalValue, decrementedValue;
@@ -131,6 +231,7 @@ struct GuestResource
             originalValue = refCount.value;
             decrementedValue = ByteSwap(ByteSwap(originalValue) - 1);
         } while (!atomicRef.compare_exchange_weak(originalValue, decrementedValue));
+#endif
 
         // Normally we are supposed to release here, so only use this
         // function when you know you won't be the one destructing it.

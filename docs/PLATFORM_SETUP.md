@@ -83,41 +83,70 @@ without manual clicks in the Xcode UI.
 ### Requirements
 
 | Tool | Version | Notes |
-|------|---------|-------|
+|-|-|-|
 | Android SDK | ≥ 34 | Install via Android Studio or `sdkmanager` |
-| Android NDK | r25c+ (≥ 25.2.9519653) | `sdkmanager --install 'ndk;25.2.9519653'` |
-| CMake (SDK bundled) | ≥ 3.22 | Installed by the NDK bundle |
-| Java | ≥ 17 | Required by Gradle |
-| Gradle | ≥ 8.x | Wrapper committed in `android/` |
+| Android NDK | r27c (27.2.12479018) | `sdkmanager --install 'ndk;27.2.12479018'` |
+| CMake (SDK bundled) | ≥ 3.31 (3.31.4) | `sdkmanager --install 'cmake;3.31.4'` |
+| Java | ≥ 17 | Required by Gradle 8.x |
+| Gradle | 8.11.1 | Wrapper committed in `os/android/` |
 
 ### Environment Variables
 
 ```bash
 export ANDROID_HOME=/path/to/android-sdk        # or ANDROID_SDK_ROOT
-export ANDROID_NDK=$ANDROID_HOME/ndk/25.2.9519653
+export ANDROID_NDK=$ANDROID_HOME/ndk/27.2.12479018
 export JAVA_HOME=/path/to/jdk-17
 ```
 
 ### Quick Start
 
 ```bash
-# Option A — CMake directly (native library only)
+# Option A — Gradle (recommended, produces a full APK)
+cd os/android/
+./gradlew assembleDebug
+# APK: os/android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Option B — CMake directly (native library only, no APK)
 cmake --preset android-release
 cmake --build out/build/android-release
+```
 
-# Option B — Gradle (full APK, recommended)
-cd android/
-./gradlew assembleRelease
-# APK: android/app/build/outputs/apk/release/app-release.apk
+### Game Assets
+
+Game files are **not** embedded in the APK. On first launch the app shows a
+folder-picker that asks the user to select the directory containing
+`default.xex` and the RPF archives. The chosen path is persisted in
+`SharedPreferences` so subsequent launches skip the picker.
+
+Place your extracted game files on the device (e.g. via `adb push`) before
+launching:
+
+```bash
+adb push /path/to/game/ /sdcard/LibertyRecomp/
+```
+
+### Release Signing
+
+Debug builds are signed automatically with the shared Android debug key.
+For release APKs, supply a keystore via Gradle properties:
+
+```bash
+./gradlew assembleRelease \
+  -PlibertyRecompKeystore=/path/to/keystore.jks \
+  -PlibertyRecompKeystorePassword=changeit \
+  -PlibertyRecompKeyAlias=liberty \
+  -PlibertyRecompKeyPassword=changeit
 ```
 
 ### Key Details
 
 - Graphics backend: **Vulkan** (`LIBERTY_RECOMP_VULKAN=ON`, forced by toolchain)
-- ABI: `arm64-v8a` (default); set `ANDROID_ABI=x86_64` for emulator builds
-- Game assets: staged as an expansion OBB or extracted to internal storage on first boot
+- ABI: `arm64-v8a` (default); add `-PlibertyRecompEmulator=true` for x86_64 emulator builds
 - JNI glue (`os/android/jni_glue.cpp`) receives paths from `LibertySDLActivity.java`
   before SDL initialises
+- Vibration: `VibratorManager` (API 31+), single-`Vibrator` fallback (API 26+)
+- Achievements: Play Games v2, graceful no-op when SDK is absent
 - Logging: **logcat** — `adb logcat -s LibertyRecomp`
 
 ### Verify NDK

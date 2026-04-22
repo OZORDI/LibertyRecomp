@@ -26,6 +26,12 @@
 #include <cassert>
 #include <ucontext.h>
 
+// Defined in ucontext_ps4.c — fxsave/fxrstor wrappers that preserve the
+// callee-saved FPU control state (MXCSR + x87 CW) plus x87/XMM registers
+// across a fiber swap.  The base swapcontext only saves GPRs.
+extern "C" void rex_fpu_save(void* buf16);
+extern "C" void rex_fpu_restore(const void* buf16);
+
 namespace rex::thread {
 
 thread_local Fiber* Fiber::tls_current_ = nullptr;
@@ -67,7 +73,12 @@ Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
 void Fiber::SwitchTo(Fiber* target) {
   Fiber* from = tls_current_;
   tls_current_ = target;
+  // Save our FPU/SSE state, then swap.  When control eventually returns
+  // here (another fiber swaps back to us), restore what we saved so
+  // callee-saved MXCSR / x87 CW survive the swap.
+  rex_fpu_save(from->fxsave_);
   swapcontext(&from->context_, &target->context_);
+  rex_fpu_restore(from->fxsave_);
 }
 
 void Fiber::Destroy() {

@@ -9,6 +9,13 @@ extern JavaVM*  g_androidJavaVM;
 extern jobject  g_androidActivity;
 extern int      g_androidApiLevel;
 
+// Game-root directory supplied by LibertySDLActivity's folder-picker UI.
+// Takes precedence over the CMake-baked LIBERTY_RECOMP_EMBEDDED_GAME_PATH when
+// set; remains nullptr until the user commits a selection. Owning pointer —
+// allocated with malloc(), replaced at most once per process via
+// nativeSetGameRoot().
+extern "C" const char* g_androidGameRoot;
+
 // RAII helper: attaches the current thread to the VM if needed, and detaches
 // on destruction (only if this object performed the attach).
 class JniScopedAttach

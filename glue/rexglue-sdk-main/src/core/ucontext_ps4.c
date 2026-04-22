@@ -199,6 +199,40 @@ int swapcontext(ucontext_t *old_ucp, const ucontext_t *new_ucp) {
 }
 
 /* ========================================================================= */
+/* FPU/SSE save/restore helpers                                               */
+/* ========================================================================= */
+/*
+ * The AMD64 SysV ABI marks the x87 control word and MXCSR as callee-saved,
+ * so a correct context switch must preserve them.  The base getcontext /
+ * swapcontext above only save GPRs — callers that also want to preserve FPU
+ * state should call rex_fpu_save/rex_fpu_restore around swapcontext().
+ *
+ * We use fxsave/fxrstor rather than individual STMXCSR + FNSTCW pairs: the
+ * 512-byte fxsave buffer also captures x87 regs and XMM0-15, which covers
+ * any path where the guest recompiler temporarily uses SSE registers across
+ * a fiber yield.  The buffer must be 16-byte aligned.
+ */
+__attribute__((naked))
+void rex_fpu_save(void *buf16) {
+    /* rdi = buf16 (must be 16-byte aligned) */
+    __asm__ volatile (
+        "fxsave (%%rdi)\n"
+        "retq\n"
+        ::
+    );
+}
+
+__attribute__((naked))
+void rex_fpu_restore(const void *buf16) {
+    /* rdi = buf16 (must be 16-byte aligned) */
+    __asm__ volatile (
+        "fxrstor (%%rdi)\n"
+        "retq\n"
+        ::
+    );
+}
+
+/* ========================================================================= */
 /* makecontext                                                                */
 /* ========================================================================= */
 

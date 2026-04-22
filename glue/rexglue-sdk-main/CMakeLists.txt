@@ -29,6 +29,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(_REXGLUE_IS_MOBILE ON)
 endif()
 
+# Normalise console platform markers so CMake conditionals can test
+# LIBERTY_RECOMP_PS4 / LIBERTY_RECOMP_NX directly (matching the C preprocessor
+# defines). Downstream guards — e.g. the SDL3 skip in thirdparty/CMakeLists.txt —
+# rely on these variables.
+if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
+    set(LIBERTY_RECOMP_PS4 ON)
+endif()
+if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
+    set(LIBERTY_RECOMP_NX ON)
+endif()
+
 # Tracy is host-only: force OFF on consoles and mobile regardless of user/default.
 if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
    OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"
@@ -52,8 +63,13 @@ option(REXGLUE_ENABLE_GRAPHICS "Build graphics subsystem (backends + renderer)" 
 # Graphics backend selection
 # D3D12: Windows only, ON by default.
 # Vulkan: Cross-platform, ON by default on Linux/Switch, OFF by default on Windows.
-# PS4:   GNM-only — force all desktop backends OFF, disable graphics subtree.
-# Switch: Vulkan ON (deko3d/NVN wrapper path), D3D12/FidelityFX OFF.
+# PS4:   GNM-only — OpenOrbis exposes no Vulkan ICD and no dynamic loader, so
+#        the Vulkan UI backend is hard-disabled here. The `toolchains/ps4-openorbis.cmake`
+#        `LIBERTY_RECOMP_VULKAN=ON` flag now only enables the GNM-backed
+#        host-side video path inside the recomp's own `gpu/video.cpp`, not
+#        the SDK's Vulkan WSI code.
+# Switch: Vulkan ON — libnx exposes a native VK ICD via `nvn_wsi_vulkan.json`,
+#        and the loader is statically-linked at link time (no dlopen needed).
 if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
     set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
     set(REXGLUE_USE_VULKAN OFF CACHE BOOL "" FORCE)
@@ -315,12 +331,15 @@ include_directories(${REXGLUE_ROOT}/include)
 
 add_subdirectory(src/core)
 add_subdirectory(src/filesystem)
-add_subdirectory(src/ui)
-add_subdirectory(src/input)
-add_subdirectory(src/audio)
+# rexui is the ImGui/Vulkan/D3D12 UI layer — it depends on a graphics
+# backend (and on Linux pulls GTK3). When graphics are disabled (e.g. PS4
+# headless / GNM-only path), rexui has no backend to link against.
 if(REXGLUE_ENABLE_GRAPHICS)
+    add_subdirectory(src/ui)
     add_subdirectory(src/graphics)
 endif()
+add_subdirectory(src/input)
+add_subdirectory(src/audio)
 add_subdirectory(src/system)
 add_subdirectory(src/kernel)
 add_subdirectory(src/codegen)

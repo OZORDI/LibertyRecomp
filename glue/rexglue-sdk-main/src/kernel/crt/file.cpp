@@ -23,6 +23,7 @@
 #include <rex/string.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/thread_state.h>
+#include <rex/kernel/xboxkrnl/threading.h>
 #include <rex/system/xfile.h>
 #include <rex/system/xtypes.h>
 
@@ -111,7 +112,26 @@ u32 ReadFile_entry(u32 hFile, mapped_void lpBuffer, u32 nNumberOfBytesToRead,
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
     ov[0] = 0;
     ov[1] = bytes_read;
-  } else if (lpNumberOfBytesRead) {
+
+    // Signal OVERLAPPED.hEvent (Win32 layout: offset +16 = ov[4]).
+    // The kernel NtReadFile path does this via XEvent::Set(); the CRT wrapper
+    // was missing it, leaving callers that wait on hEvent permanently blocked.
+    uint32_t hEvent = static_cast<uint32_t>(ov[4]);
+    if (hEvent != 0) {
+      rex::kernel::xboxkrnl::xeNtSetEvent(hEvent, nullptr);
+    }
+  }
+
+  // Always write lpNumberOfBytesRead when provided, even if OVERLAPPED was
+  // supplied. rexcrt completes synchronously, so the byte count is known by
+  // the time we return. Per Microsoft Learn (ReadFile docs), synchronous
+  // handles MUST write lpNumberOfBytesRead even when OVERLAPPED is non-NULL.
+  // RAGE's fiDeviceLocal::Read (sub_8285F6E8) reads back from
+  // lpNumberOfBytesRead and never consults the OVERLAPPED struct — leaving
+  // it at 0 makes fiPackfile::Read report a size mismatch, the async worker
+  // bails out without releasing its completion semaphore, and the main
+  // thread hangs forever (e.g. F8000CD4 during font/texture load).
+  if (lpNumberOfBytesRead) {
     *lpNumberOfBytesRead = bytes_read;
   }
 
@@ -145,7 +165,16 @@ u32 WriteFile_entry(u32 hFile, mapped_void lpBuffer, u32 nNumberOfBytesToWrite,
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
     ov[0] = 0;
     ov[1] = bytes_written;
-  } else if (lpNumberOfBytesWritten) {
+
+    // Signal OVERLAPPED.hEvent — same fix as ReadFile above.
+    uint32_t hEvent = static_cast<uint32_t>(ov[4]);
+    if (hEvent != 0) {
+      rex::kernel::xboxkrnl::xeNtSetEvent(hEvent, nullptr);
+    }
+  }
+
+  // Always write lpNumberOfBytesWritten when provided — see ReadFile note.
+  if (lpNumberOfBytesWritten) {
     *lpNumberOfBytesWritten = bytes_written;
   }
 

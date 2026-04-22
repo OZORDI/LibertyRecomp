@@ -21,13 +21,13 @@
 // On PS4, the system firmware handles lightbar and basic haptics natively,
 // so these patches are disabled. On Switch (NX), SDL is available but the
 // controller lacks a lightbar/touchpad, so these features are also stubbed.
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 #include <SDL3/SDL.h>
 #endif
 
 namespace DS4Patches {
 
-#if defined(LIBERTY_RECOMP_PS4) || defined(LIBERTY_RECOMP_NX)
+#if REX_PLATFORM_CONSOLE
 // ============================================================================
 // Stub implementations for PS4 / Switch
 // ============================================================================
@@ -803,7 +803,7 @@ void Update()
 // PPC Function Hooks for Game State Tracking
 // ============================================================================
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
 
 // Hook for ALTER_WANTED_LEVEL (sub_82578B80)
 // Called when the game changes the player's wanted level

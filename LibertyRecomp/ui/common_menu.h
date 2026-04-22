@@ -1,6 +1,8 @@
 #pragma once
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#include <rex/platform.h>
+
+#if !REX_PLATFORM_CONSOLE
 #include <sdl_listener.h>
 #endif
 
@@ -23,7 +25,7 @@ class CommonMenu
     float m_descScrollTimer{};
     float m_descScrollDirection{ 1.0f };
 
-#if !defined(LIBERTY_RECOMP_PS4) && !defined(LIBERTY_RECOMP_NX)
+#if !REX_PLATFORM_CONSOLE
     class CommonMenuInputListener : public SDLEventListener
     {
     public:

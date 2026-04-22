@@ -15,7 +15,7 @@
 
 #include "adaptive_triggers_ios.h"
 
-#if TARGET_OS_IOS
+#if REX_PLATFORM_IOS
 
 #import <Foundation/Foundation.h>
 #import <GameController/GameController.h>
@@ -239,4 +239,4 @@ extern "C" void ios_adaptive_trigger_apply_vehicle_profile(void* controller,
     }
 }
 
-#endif // TARGET_OS_IOS
+#endif // REX_PLATFORM_IOS

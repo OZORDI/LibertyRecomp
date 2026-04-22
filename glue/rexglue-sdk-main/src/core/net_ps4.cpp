@@ -23,6 +23,13 @@
 #include <orbis/NetCtl.h>
 #include <orbis/Sysmodule.h>
 
+// OpenOrbis's sysmodule.h omits NET; the real PS4 module ID for libSceNet is
+// 0x0080000B. If we end up on an OpenOrbis build without that identifier,
+// provide it ourselves. sceSysmoduleLoadModule handles unknown ids gracefully.
+#ifndef ORBIS_SYSMODULE_NET
+#define ORBIS_SYSMODULE_NET 0x0080000B
+#endif
+
 namespace rex::net {
 
 static bool s_net_initialized = false;
@@ -35,7 +42,7 @@ bool ps4_net_initialize() {
 
   // Load the network sysmodule (required before any sceNet* call on PS4 apps
   // that aren't statically linked against libSceNet).
-  int32_t ret = sceSysmoduleLoadModule(ORBIS_SYSMODULE_NET);
+  int32_t ret = sceSysmoduleLoadModule(static_cast<OrbisSysModule>(ORBIS_SYSMODULE_NET));
   if (ret < 0) {
     REXKRNL_ERROR("sceSysmoduleLoadModule(NET) failed: 0x{:08X}", static_cast<uint32_t>(ret));
     return false;
@@ -85,7 +92,7 @@ void ps4_net_shutdown() {
   // Note: sceNetTerm() is not exposed in OpenOrbis headers.
   // The OS cleans up on process exit.
 
-  sceSysmoduleUnloadModule(ORBIS_SYSMODULE_NET);
+  sceSysmoduleUnloadModule(static_cast<OrbisSysModule>(ORBIS_SYSMODULE_NET));
 
   s_net_initialized = false;
 }

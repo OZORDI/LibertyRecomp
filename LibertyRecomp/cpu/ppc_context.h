@@ -1,8 +1,15 @@
 #pragma once
-// RexGlue's PPC types are authoritative. Previously Liberty had its own
-// ppc_config.h shim that forwarded to gta4-recomp's generated
-// gta4_config.h — consumers now include that directly.
-#include "../../glue/gta4-recomp/generated/gta4_config.h"
+// RexGlue's PPC types are authoritative. graine SDK 0.7.5 renamed the generated
+// project header from `gta4_config.h` → `gta4_init.h` and the image/code-size
+// defines from `PPC_*` → `REX_*`. Keep the old PPC_* aliases so Liberty's
+// kernel/memory.cpp + main.cpp don't need wholesale renames.
+#include "../../glue/gta4-recomp/generated/gta4_init.h"
+#ifndef PPC_IMAGE_BASE
+  #define PPC_IMAGE_BASE REX_IMAGE_BASE
+  #define PPC_IMAGE_SIZE REX_IMAGE_SIZE
+  #define PPC_CODE_BASE  REX_CODE_BASE
+  #define PPC_CODE_SIZE  REX_CODE_SIZE
+#endif
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
 
