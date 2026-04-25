@@ -102,12 +102,22 @@ memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory
 "0x82A77E28" = {}   # tail-call thunk: b sub_82812248
 "0x8219E410" = {}   # branch target from sub_821A2EDC
 
-# REVERTED (9 CRT ctor entries + 0x828764B8): these were mask-fixes for crashes
-# that were actually cascade symptoms of the wrong memset/memcpy addresses (see
-# [rexcrt] pass-3 fix above). Now that the real memset/memcpy are bound, the
-# original xinit dispatch and RPF parser crashes should no longer occur, since
-# memory isn't being silently corrupted on every call site. If any crash here
-# returns, the fix belongs at the caller — not here.
+# CRT global-constructor thunks (re-added 2026-04-25).
+# Prior analysis used PE-section offsets (VA - 0x82000000 - 0x4800) which was wrong.
+# Correct formula is flat-image offset (VA - 0x82000000). With correct offset every
+# one of these is a real function stub: preceded by unconditional "b 0x8286C878"
+# (tail-call end of prior stub) and starts with lis/mr — genuine function prologue.
+# All confirmed present in the CRT ctor pointer table [0x82A90010-0x82A916B0].
+"0x82A692C8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F58]
+"0x82A692E8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F5C]
+"0x82A69308" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F60]
+"0x82A69328" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F64]
+"0x82A69428" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F84]
+"0x82A69C68" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FE4]
+"0x82A69CA8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FEC]
+"0x82A69CC8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FF0]
+"0x82A6C218" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A912D8]
+"0x828764B8" = {}   # tail-call thunk: mr r3,r4 + b 0x82847338 (after b-boundary)
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
