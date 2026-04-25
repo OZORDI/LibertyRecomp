@@ -9861,6 +9861,17 @@ PPC_FUNC_HOOK(sub_82A3DAB0) {
     // PM4 is no-op'd so this memory is never consumed by a GPU — safe to reuse.
     uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
     uint32_t writePtr = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr);
+
+    // Mirror the original __imp__sub_82A3DAB0 epilogue: stw r11,13428(r31).
+    // The original saves the pre-vertex-staging cmdPtr to device[13428] so that
+    // sub_82A3DF50's epilogue (device[48] = device[13428]) restores it correctly.
+    // Without this, device[13428] stays 0 (memset from the 0x5780-byte allocation;
+    // sub_82A49D08 never touches offset 13428), and the DF50 epilogue zeros
+    // device[48] (CommandBufferPtr) on every UP commit call — causing the next
+    // stwu r11,4(r3=0) in any PM4 writer (e.g. sub_82A3E7A0 +0x524) to fault
+    // at guest addr 0x4.
+    GTAIV::SetDeviceU32(devicePtr, 13428, writePtr);
+
     // Advance past any PM4 header area (align to 32 bytes)
     uint32_t bufAddr = (writePtr + 32) & ~31u;
     s_pendingDrawUP.bufferAddr = bufAddr;
