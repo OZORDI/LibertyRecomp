@@ -9627,10 +9627,117 @@ PPC_FUNC_HOOK(sub_82A46578)
 //   sub_82A492A8  — PM4 packet builder (returns cmdPtr unchanged)
 //   sub_82A499B8  — PM4 flush (recycles ring buffer pointers)
 //   sub_82A49CB0  — PM4 resolve draw (no-op)
+//   sub_82A3DF60  — dirty-state PM4 flusher (no-op)
+//   sub_82A49458  — secondary-buffer allocator (scratch-buffer shim)
+//   sub_82A47E28  — secondary ring buffer PM4 state flusher (no-op)
 // =============================================================================
+
+static uint32_t AllocatePM4Scratch(uint32_t requestedBytes)
+{
+    constexpr uint32_t PM4ScratchSize = 0x10000;
+    constexpr uint32_t PM4ScratchAlignment = 0x20;
+    constexpr uint32_t PM4ScratchMinimumRequest = 0x20;
+
+    static Mutex s_pm4ScratchMutex;
+    static uint8_t* s_pm4ScratchHost = nullptr;
+    static uint32_t s_pm4ScratchGuest = 0;
+    static uint32_t s_pm4ScratchOffset = 0;
+
+    std::lock_guard lock(s_pm4ScratchMutex);
+
+    if (s_pm4ScratchHost == nullptr)
+    {
+        s_pm4ScratchHost = static_cast<uint8_t*>(g_userHeap.AllocPhysical(PM4ScratchSize, PM4ScratchAlignment));
+        if (s_pm4ScratchHost == nullptr)
+        {
+            LOGF_ERROR("[PM4Scratch] failed to allocate {} bytes", PM4ScratchSize);
+            return 0;
+        }
+
+        std::memset(s_pm4ScratchHost, 0, PM4ScratchSize);
+        s_pm4ScratchGuest = g_memory.MapVirtual(s_pm4ScratchHost);
+        LOGF_WARNING("[PM4Scratch] host={:p} guest=0x{:08X} size=0x{:X}",
+            (void*)s_pm4ScratchHost, s_pm4ScratchGuest, PM4ScratchSize);
+    }
+
+    requestedBytes = std::max(requestedBytes, PM4ScratchMinimumRequest);
+    requestedBytes = (requestedBytes + (PM4ScratchAlignment - 1)) & ~(PM4ScratchAlignment - 1);
+    requestedBytes = std::min(requestedBytes, PM4ScratchSize);
+
+    if (s_pm4ScratchOffset + requestedBytes > PM4ScratchSize)
+        s_pm4ScratchOffset = 0;
+
+    uint32_t result = s_pm4ScratchGuest + s_pm4ScratchOffset;
+    s_pm4ScratchOffset += requestedBytes;
+
+    return result;
+}
 
 // sub_82A49CB0 — PM4 resolve draw packet writer (no-op)
 PPC_FUNC_HOOK(sub_82A49CB0) { }
+
+// sub_82A3DF60 — dirty-state-to-PM4 flusher (no-op)
+//
+// Source proof: generated gta4_recomp.82.cpp starts the function at
+// sub_82A3DF60 and routes through device+13232 to sub_82A49458 when the
+// secondary write pointer is exhausted. That code writes Xenos PM4 packets,
+// which Liberty never consumes because host rendering is driven by the high
+// level DrawPrimitive/DrawPrimitiveUP hooks.
+PPC_FUNC_HOOK(sub_82A3DF60)
+{
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || (s_count % 5000) == 0)
+    {
+        LOGF_WARNING("[PM4StateFlush] #{} skipped device=0x{:08X} lr=0x{:08X}",
+            s_count, ctx.r3.u32, ctx.lr);
+    }
+}
+
+// sub_82A49458 — secondary command buffer allocator.
+//
+// The original function reads secondary_struct+16 as a parent D3D::CDevice
+// back-pointer, then calls sub_82A48B90. In the current build that field is
+// zero, so sub_82A48B90 dereferences NULL+0x2ABD. PM4 packets are not consumed
+// by Liberty's host renderer, so all remaining callers get a writable scratch
+// chunk and can complete without touching the fake Xenos ring.
+PPC_FUNC_HOOK(sub_82A49458)
+{
+    constexpr uint32_t PM4SecondaryChunkSize = 0x1080;
+
+    uint32_t secondaryStruct = ctx.r3.u32;
+    uint32_t scratch = AllocatePM4Scratch(PM4SecondaryChunkSize);
+
+    if (secondaryStruct != 0 && scratch != 0)
+    {
+        PPC_STORE_U32(secondaryStruct + 8, scratch);
+        PPC_STORE_U32(secondaryStruct + 12, scratch + PM4SecondaryChunkSize);
+    }
+
+    static int s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || (s_count % 5000) == 0)
+    {
+        LOGF_WARNING("[PM4SecondaryAlloc] #{} secondary=0x{:08X} scratch=0x{:08X} lr=0x{:08X}",
+            s_count, secondaryStruct, scratch, ctx.lr);
+    }
+
+    ctx.r3.u32 = scratch;
+}
+
+// sub_82A47E28 — secondary ring buffer PM4 state flusher (no-op)
+//
+// Writes PM4 packets to a secondary ring buffer tracked by device+13232.
+// When write_ptr (device[13240])+16 > end_boundary (device[13244]) — both 0
+// from memset, so always true on first call — it calls sub_82A49458, which
+// reads device[13248] (back-pointer to device, also 0) and passes it as r3
+// to sub_82A48B90. sub_82A48B90 then accesses r3+0x2ABD → crash at guest
+// addr 0x2ABD. device[13248] is never initialized by any path (confirmed:
+// no REX_STORE_U32 to offset 13248 in any generated file).
+//
+// No-op: PM4 is bypassed. The secondary ring buffer has no real GPU consumer.
+// Source: gta4_recomp.83.cpp:418 (addi r3,r31,13232), :3507 (lwz r3,16(r30))
+PPC_FUNC_HOOK(sub_82A47E28) { }
 
 // =============================================================================
 // Shader Binding Hooks — sub_82A42760 (SetVertexShader) / sub_82A424A8 (SetPixelShader)
