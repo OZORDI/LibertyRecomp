@@ -174,12 +174,29 @@ bool WindowSDL::OpenImpl() {
 
   if (IsFullscreen()) {
     // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
-    SDL_SetWindowFullscreen(sdl_window_, true);
+    if (!SDL_SetWindowFullscreen(sdl_window_, true)) {
+      REXLOG_ERROR("SDL_SetWindowFullscreen failed: {}", SDL_GetError());
+      DestroySDLWindow();
+      return false;
+    }
   }
   // SDL3 requires explicit opt-in for text input events.
   SDL_StartTextInput(sdl_window_);
   ApplyCursorVisibilityNow();
-  SDL_ShowWindow(sdl_window_);
+  if (!SDL_ShowWindow(sdl_window_)) {
+    REXLOG_ERROR("SDL_ShowWindow failed: {}", SDL_GetError());
+    DestroySDLWindow();
+    return false;
+  }
+
+  // Fullscreen transitions may be asynchronous. The presenter is attached
+  // immediately after OpenImpl returns, so its surface must not be created
+  // from intermediate native-window and Metal-layer geometry.
+  if (IsFullscreen() && !SDL_SyncWindow(sdl_window_)) {
+    REXLOG_ERROR("SDL_SyncWindow timed out while entering fullscreen: {}", SDL_GetError());
+    DestroySDLWindow();
+    return false;
+  }
 
   // Actualize state for the common Window code. Listener dispatch is handled
   // by Window::Open after OpenImpl returns; these only record initial state.
