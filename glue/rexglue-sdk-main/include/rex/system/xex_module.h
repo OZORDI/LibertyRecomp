@@ -104,6 +104,9 @@ class XexModule : public Module {
   uint32_t base_address() const override { return base_address_; }
   bool is_dev_kit() const { return is_dev_kit_; }
 
+  // PE FileHeader TimeDateStamp (Unix epoch seconds) recorded by the linker.
+  uint32_t pe_time_date_stamp() const { return pe_time_date_stamp_; }
+
   // Gets an optional header. Returns NULL if not found.
   // Special case: if key & 0xFF == 0x00, this function will return the value,
   // not a pointer! This assumes out_ptr points to uint32_t.
@@ -224,6 +227,9 @@ class XexModule : public Module {
   // Exception DataDirectory from PE Optional Header
   uint32_t exception_dir_rva_ = 0;
   uint32_t exception_dir_size_ = 0;
+
+  // PE FileHeader TimeDateStamp from the contained PE image.
+  uint32_t pe_time_date_stamp_ = 0;
 
   XexFormat xex_format_ = kFormatUnknown;
   SecurityInfoContext security_info_ = {};

@@ -66,7 +66,7 @@ class UserModule : public XModule {
   X_STATUS LoadFromMemory(const void* addr, const size_t length);
   X_STATUS Unload();
 
-  uint32_t GetProcAddressByOrdinal(uint16_t ordinal) override;
+  uint32_t GetProcAddressByOrdinal(uint16_t ordinal, uint32_t caller_address = 0) override;
   uint32_t GetProcAddressByName(const std::string_view name) override;
   X_STATUS GetSection(const std::string_view name, uint32_t* out_section_data,
                       uint32_t* out_section_size) override;

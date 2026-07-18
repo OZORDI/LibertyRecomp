@@ -114,6 +114,7 @@ void* Arena::CloneContents() {
 }
 
 void Arena::CloneContents(void* buffer, size_t buffer_length) {
+  assert_true(buffer_length >= CalculateSize(), "destination buffer is too small");
   uint8_t* p = reinterpret_cast<uint8_t*>(buffer);
   Chunk* chunk = head_chunk_;
   while (chunk) {

@@ -31,15 +31,22 @@ REXCVAR_DECLARE(int32_t, window_height);
 REXCVAR_DECLARE(bool, fullscreen);
 REXCVAR_DECLARE(int32_t, monitor);
 
-// D3D12
+// Display (guest video mode; defined in src/ui/window.cpp)
+REXCVAR_DECLARE(int32_t, video_mode_width);
+REXCVAR_DECLARE(int32_t, video_mode_height);
+REXCVAR_DECLARE(double, video_mode_refresh_rate);
+REXCVAR_DECLARE(std::string, resolution);
+
+#if REX_HAS_D3D12
 REXCVAR_DECLARE(bool, d3d12_debug);
 REXCVAR_DECLARE(bool, d3d12_break_on_error);
 REXCVAR_DECLARE(bool, d3d12_break_on_warning);
 REXCVAR_DECLARE(int32_t, d3d12_adapter);
 REXCVAR_DECLARE(int32_t, d3d12_queue_priority);
 REXCVAR_DECLARE(bool, d3d12_allow_variable_refresh_rate_and_tearing);
+#endif  // REX_HAS_D3D12
 
-// Vulkan
+#if REX_HAS_VULKAN
 REXCVAR_DECLARE(bool, vulkan_log_debug_messages);
 REXCVAR_DECLARE(bool, vulkan_allow_present_mode_immediate);
 REXCVAR_DECLARE(bool, vulkan_allow_present_mode_mailbox);
@@ -54,3 +61,4 @@ REXCVAR_DECLARE(bool, vulkan_require_geometry_shader);
 REXCVAR_DECLARE(bool, vulkan_require_fragment_stores_and_atomics);
 REXCVAR_DECLARE(bool, vulkan_require_vertex_pipeline_stores_and_atomics);
 REXCVAR_DECLARE(bool, vulkan_require_fill_mode_non_solid);
+#endif  // REX_HAS_VULKAN

@@ -33,9 +33,9 @@ class ShaderInterpreter {
   class ExportSink {
    public:
     virtual ~ExportSink() = default;
-    virtual void AllocExport(ucode::AllocType type, uint32_t size) {}
-    virtual void Export(ucode::ExportRegister export_register, const float* value,
-                        uint32_t value_mask) {}
+    virtual void AllocExport(ucode::AllocType /*type*/, uint32_t /*size*/) {}
+    virtual void Export(ucode::ExportRegister /*export_register*/, const float* /*value*/,
+                        uint32_t /*value_mask*/) {}
   };
 
   void SetTraceWriter(TraceWriter* new_trace_writer) { trace_writer_ = new_trace_writer; }

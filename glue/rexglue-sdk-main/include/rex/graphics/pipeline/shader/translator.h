@@ -29,13 +29,13 @@ class ShaderTranslator {
   virtual ~ShaderTranslator();
 
   virtual uint64_t GetDefaultVertexShaderModification(
-      uint32_t dynamic_addressable_register_count,
-      Shader::HostVertexShaderType host_vertex_shader_type =
+      uint32_t /*dynamic_addressable_register_count*/,
+      Shader::HostVertexShaderType /*host_vertex_shader_type*/ =
           Shader::HostVertexShaderType::kVertex) const {
     return 0;
   }
   virtual uint64_t GetDefaultPixelShaderModification(
-      uint32_t dynamic_addressable_register_count) const {
+      uint32_t /*dynamic_addressable_register_count*/) const {
     return 0;
   }
 
@@ -84,51 +84,52 @@ class ShaderTranslator {
 
   // Pre-process a control-flow instruction before anything else.
   virtual void PreProcessControlFlowInstructions(
-      std::vector<ucode::ControlFlowInstruction> instrs) {}
+      std::vector<ucode::ControlFlowInstruction> /*instrs*/) {}
 
   // Handles translation for control flow label addresses.
   // This is triggered once for each label required (due to control flow
   // operations) before any of the instructions within the target exec.
-  virtual void ProcessLabel(uint32_t cf_index) {}
+  virtual void ProcessLabel(uint32_t /*cf_index*/) {}
 
   // Handles translation for control flow nop instructions.
-  virtual void ProcessControlFlowNopInstruction(uint32_t cf_index) {}
+  virtual void ProcessControlFlowNopInstruction(uint32_t /*cf_index*/) {}
   // Handles the start of a control flow instruction at the given address.
-  virtual void ProcessControlFlowInstructionBegin(uint32_t cf_index) {}
+  virtual void ProcessControlFlowInstructionBegin(uint32_t /*cf_index*/) {}
   // Handles the end of a control flow instruction that began at the given
   // address.
-  virtual void ProcessControlFlowInstructionEnd(uint32_t cf_index) {}
+  virtual void ProcessControlFlowInstructionEnd(uint32_t /*cf_index*/) {}
   // Handles translation for control flow exec instructions prior to their
   // contained ALU/fetch instructions.
-  virtual void ProcessExecInstructionBegin(const ParsedExecInstruction& instr) {}
+  virtual void ProcessExecInstructionBegin(const ParsedExecInstruction& /*instr*/) {}
   // Handles translation for control flow exec instructions after their
   // contained ALU/fetch instructions.
-  virtual void ProcessExecInstructionEnd(const ParsedExecInstruction& instr) {}
+  virtual void ProcessExecInstructionEnd(const ParsedExecInstruction& /*instr*/) {}
   // Handles translation for loop start instructions.
-  virtual void ProcessLoopStartInstruction(const ParsedLoopStartInstruction& instr) {}
+  virtual void ProcessLoopStartInstruction(const ParsedLoopStartInstruction& /*instr*/) {}
   // Handles translation for loop end instructions.
-  virtual void ProcessLoopEndInstruction(const ParsedLoopEndInstruction& instr) {}
+  virtual void ProcessLoopEndInstruction(const ParsedLoopEndInstruction& /*instr*/) {}
   // Handles translation for function call instructions.
-  virtual void ProcessCallInstruction(const ParsedCallInstruction& instr) {}
+  virtual void ProcessCallInstruction(const ParsedCallInstruction& /*instr*/) {}
   // Handles translation for function return instructions.
-  virtual void ProcessReturnInstruction(const ParsedReturnInstruction& instr) {}
+  virtual void ProcessReturnInstruction(const ParsedReturnInstruction& /*instr*/) {}
   // Handles translation for jump instructions.
-  virtual void ProcessJumpInstruction(const ParsedJumpInstruction& instr) {}
+  virtual void ProcessJumpInstruction(const ParsedJumpInstruction& /*instr*/) {}
   // Handles translation for alloc instructions. Memory exports for eM#
   // indicated by export_eM must be performed, regardless of the alloc type.
-  virtual void ProcessAllocInstruction(const ParsedAllocInstruction& instr, uint8_t export_eM) {}
+  virtual void ProcessAllocInstruction(const ParsedAllocInstruction& /*instr*/,
+                                       uint8_t /*export_eM*/) {}
 
   // Handles translation for vertex fetch instructions.
-  virtual void ProcessVertexFetchInstruction(const ParsedVertexFetchInstruction& instr) {}
+  virtual void ProcessVertexFetchInstruction(const ParsedVertexFetchInstruction& /*instr*/) {}
   // Handles translation for texture fetch instructions.
-  virtual void ProcessTextureFetchInstruction(const ParsedTextureFetchInstruction& instr) {}
+  virtual void ProcessTextureFetchInstruction(const ParsedTextureFetchInstruction& /*instr*/) {}
   // Handles translation for ALU instructions.
   // memexport_eM_potentially_written_before needs to be handled by `kill`
   // instruction to make sure memory exports for the eM# writes earlier in
   // previous execs and the current exec are done before the invocation becomes
   // inactive.
-  virtual void ProcessAluInstruction(const ParsedAluInstruction& instr,
-                                     uint8_t memexport_eM_potentially_written_before) {}
+  virtual void ProcessAluInstruction(const ParsedAluInstruction& /*instr*/,
+                                     uint8_t /*memexport_eM_potentially_written_before*/) {}
 
  private:
   void TranslateControlFlowInstruction(const ucode::ControlFlowInstruction& cf);

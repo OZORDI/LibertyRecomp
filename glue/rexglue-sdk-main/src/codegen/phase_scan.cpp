@@ -82,7 +82,7 @@ std::vector<CodeRegion> segmentSection(const SectionView& section,
 }
 
 void scanBinary(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: scanning binary...");
+  REXCODEGEN_TRACE("Analyze: scanning binary...");
 
   auto& binary = ctx.binary();
   auto& config = ctx.Config();
@@ -116,7 +116,7 @@ void scanBinary(CodegenContext& ctx) {
     scan.codeRegions.insert(scan.codeRegions.end(), regions.begin(), regions.end());
   }
 
-  REXCODEGEN_INFO("Analyze: segmented into {} code regions", scan.codeRegions.size());
+  REXCODEGEN_TRACE("Analyze: segmented into {} code regions", scan.codeRegions.size());
 
   // Detect data regions
   for (const auto& section : binary.sections()) {
@@ -159,15 +159,16 @@ void scanBinary(CodegenContext& ctx) {
     }
   }
 
-  REXCODEGEN_INFO("Analyze: {} code regions, {} data regions", scan.codeRegions.size(),
-                  scan.dataRegions.size());
+  REXCODEGEN_TRACE("Analyze: {} code regions, {} data regions", scan.codeRegions.size(),
+                   scan.dataRegions.size());
 }
 
 }  // anonymous namespace
 
 namespace phases {
 
-VoidResult Scan(CodegenContext& ctx) {
+VoidResult Scan(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   scanBinary(ctx);
   return Ok();
 }

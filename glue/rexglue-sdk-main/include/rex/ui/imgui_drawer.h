@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <rex/ui/window_listener.h>
 
 struct ImDrawData;
+struct ImFontAtlas;
 struct ImGuiContext;
 struct ImGuiIO;
 enum ImGuiKey : int;
@@ -36,7 +38,8 @@ class Window;
 
 class ImGuiDrawer : public WindowInputListener, public UIDrawer {
  public:
-  ImGuiDrawer(Window* window, size_t z_order);
+  using FontSetupCallback = std::function<void(ImFontAtlas*)>;
+  ImGuiDrawer(Window* window, size_t z_order, FontSetupCallback font_setup = nullptr);
   ~ImGuiDrawer();
 
   ImGuiIO& GetIO();
@@ -85,6 +88,7 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
 
   Window* window_;
   size_t z_order_;
+  FontSetupCallback font_setup_;
 
   ImGuiContext* internal_state_ = nullptr;
 

@@ -52,7 +52,6 @@ namespace ui {
 
 class Presenter;
 class Window;
-class Win32Window;
 
 class UIDrawContext {
  public:
@@ -60,7 +59,9 @@ class UIDrawContext {
   UIDrawContext& operator=(const UIDrawContext& context) = delete;
   virtual ~UIDrawContext() = default;
 
-  Presenter& presenter() const { return presenter_; }
+  // The owning presenter, or null for app-driven (detached) contexts. Backend
+  // (presenter-driven) contexts always have one.
+  Presenter* presenter_or_null() const { return presenter_; }
 
   // It's assumed that the render target size will be either equal to the size
   // of the surface, or the render target will be stretched to cover the entire
@@ -69,16 +70,34 @@ class UIDrawContext {
   uint32_t render_target_height() const { return render_target_height_; }
 
  protected:
+  // Presenter-driven ctor for backend (D3D12/Vulkan) contexts.
   explicit UIDrawContext(Presenter& presenter, uint32_t render_target_width,
                          uint32_t render_target_height)
-      : presenter_(presenter),
+      : presenter_(&presenter),
+        render_target_width_(render_target_width),
+        render_target_height_(render_target_height) {}
+  // Presenter-less ctor for app-driven (detached) overlay contexts.
+  explicit UIDrawContext(uint32_t render_target_width, uint32_t render_target_height)
+      : presenter_(nullptr),
         render_target_width_(render_target_width),
         render_target_height_(render_target_height) {}
 
  private:
-  Presenter& presenter_;
+  Presenter* presenter_;  // null for app-driven (detached) contexts
   uint32_t render_target_width_;
   uint32_t render_target_height_;
+};
+
+// Renderer-agnostic base for app-driven overlay rendering when the SDK runs
+// detached (config.graphics == nullptr). The app derives from this, adds its
+// own per-frame payload (e.g. the live command target and frame/submission
+// indices), constructs it each frame, hands it to ImGuiDrawer::Draw, and its
+// ImmediateDrawer pulls the payload out in Begin via static_cast<MyCtx&>(ctx).
+// Carries no presenter.
+class AppUIDrawContext : public UIDrawContext {
+ public:
+  AppUIDrawContext(uint32_t render_target_width, uint32_t render_target_height)
+      : UIDrawContext(render_target_width, render_target_height) {}
 };
 
 struct RawImage {

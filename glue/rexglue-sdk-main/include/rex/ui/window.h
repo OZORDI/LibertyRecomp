@@ -541,6 +541,13 @@ class Window {
   void OnBeforeClose(WindowDestructionReceiver& destruction_receiver);
   void OnAfterClose();
 
+  // Asks all listeners whether a user-initiated close may proceed. Returns
+  // false if any listener vetoed or the window was destroyed from a callback.
+  bool SendCloseRequestToListeners(WindowDestructionReceiver& destruction_receiver);
+
+  void OnMinimized(WindowDestructionReceiver& destruction_receiver);
+  void OnRestored(WindowDestructionReceiver& destruction_receiver);
+
   // These functions may usually also be called as part of the opening process
   // from within OpenImpl (directly or through the platform event handler
   // invoked during it) to actualize the state for the newly createad window,

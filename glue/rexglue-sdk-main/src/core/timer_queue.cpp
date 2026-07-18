@@ -18,7 +18,6 @@
 #include <disruptorplus/spin_wait_strategy.hpp>
 
 #include <rex/assert.h>
-#include <rex/compat/jthread.h>
 #include <rex/thread.h>
 #include <rex/thread/timer_queue.h>
 
@@ -188,14 +187,14 @@ void TimerQueueWaitItem::Disarm() {
   }
 }
 
-std::weak_ptr<WaitItem> QueueTimerOnce(rex::move_only_function<void(void*)> callback,
-                                       void* userdata, WaitItem::clock::time_point due) {
+std::weak_ptr<WaitItem> QueueTimerOnce(std::function<void(void*)> callback, void* userdata,
+                                       WaitItem::clock::time_point due) {
   return timer_queue_.QueueTimer(std::make_shared<WaitItem>(
       std::move(callback), userdata, &timer_queue_, due, WaitItem::clock::duration::zero()));
 }
 
-std::weak_ptr<WaitItem> QueueTimerRecurring(rex::move_only_function<void(void*)> callback,
-                                            void* userdata, WaitItem::clock::time_point due,
+std::weak_ptr<WaitItem> QueueTimerRecurring(std::function<void(void*)> callback, void* userdata,
+                                            WaitItem::clock::time_point due,
                                             WaitItem::clock::duration interval) {
   return timer_queue_.QueueTimer(
       std::make_shared<WaitItem>(std::move(callback), userdata, &timer_queue_, due, interval));

@@ -32,14 +32,12 @@ static void WriteTempFile(const fs::path& path, const std::string& content) {
   f << content;
 }
 
-TEST_CASE("TemplateRegistry: registeredIds returns all 13 template IDs", "[TemplateRegistry]") {
+TEST_CASE("TemplateRegistry: registeredIds returns all template IDs", "[TemplateRegistry]") {
   rex::codegen::TemplateRegistry registry;
   auto ids = registry.registeredIds();
 
-  // Should have all 13 templates
-  REQUIRE(ids.size() == 13);
+  REQUIRE(ids.size() == 17);
 
-  // Check specific IDs exist
   auto has = [&](const std::string& id) {
     return std::find(ids.begin(), ids.end(), id) != ids.end();
   };
@@ -47,11 +45,15 @@ TEST_CASE("TemplateRegistry: registeredIds returns all 13 template IDs", "[Templ
   CHECK(has("init/cmake_presets"));
   CHECK(has("init/main_cpp"));
   CHECK(has("init/app_header"));
-  CHECK(has("init/config_toml"));
+  CHECK(has("init/manifest_toml"));
   CHECK(has("init/rexglue_cmake"));
   CHECK(has("codegen/init_h"));
   CHECK(has("codegen/init_cpp"));
   CHECK(has("codegen/sources_cmake"));
+  CHECK(has("codegen/_indirect_call"));
+  CHECK(has("codegen/dll_targets_cmake"));
+  CHECK(has("codegen/module_registry_cpp"));
+  CHECK(has("codegen/register_cpp"));
   CHECK(has("test/ppc_config_h"));
   CHECK(has("test/ppc_test_cases_cpp"));
   CHECK(has("test/ppc_test_decls_h"));
@@ -60,11 +62,18 @@ TEST_CASE("TemplateRegistry: registeredIds returns all 13 template IDs", "[Templ
 
 TEST_CASE("TemplateRegistry: render with simple CLI data", "[TemplateRegistry]") {
   rex::codegen::TemplateRegistry registry;
-  std::string json = R"({"names": {"snake_case": "test_app"}, "sdk_version": "1.0.0"})";
-  std::string result = registry.render("init/config_toml", json);
+  std::string json = R"({
+    "names": {"snake_case": "test_app"},
+    "sdk_version": "1.0.0",
+    "include_stamp": false,
+    "xex_path": "assets/default.xex",
+    "out_directory_path": "generated/default"
+  })";
+  std::string result = registry.render("init/manifest_toml", json);
 
-  CHECK(result.find("project_name = \"test_app\"") != std::string::npos);
-  CHECK(result.find("test_app") != std::string::npos);
+  CHECK(result.find("name = \"test_app\"") != std::string::npos);
+  CHECK(result.find("[entrypoint]") != std::string::npos);
+  CHECK(result.find("file_path = \"assets/default.xex\"") != std::string::npos);
 }
 
 TEST_CASE("TemplateRegistry: render with codegen data", "[TemplateRegistry]") {
@@ -91,6 +100,53 @@ TEST_CASE("TemplateRegistry: render unknown ID throws TemplateError", "[Template
   REQUIRE_THROWS_AS(registry.render("nonexistent/template_id", "{}"), rex::codegen::TemplateError);
 }
 
+TEST_CASE("TemplateRegistry: init_h includes shared indirect-call partial", "[TemplateRegistry]") {
+  rex::codegen::TemplateRegistry registry;
+  std::string json = R"({
+    "config_flags": {
+      "skip_lr": false,
+      "ctr_as_local": false,
+      "xer_as_local": false,
+      "reserved_as_local": false,
+      "skip_msr": false,
+      "cr_as_local": false,
+      "non_argument_as_local": false,
+      "non_volatile_as_local": false
+    },
+    "image_base": "0x82000000",
+    "image_size": "0x1000000",
+    "code_base": "0x82010000",
+    "code_size": "0x100000",
+    "thunk_reserve_size": "0x1000",
+    "rexcrt_heap": false,
+    "functions": [],
+    "imports": []
+  })";
+  std::string result = registry.render("codegen/init_h", json);
+  CHECK(result.find("REX_LOOKUP_FUNC") != std::string::npos);
+  CHECK(result.find("ResolveIndirectFunction") != std::string::npos);
+  CHECK(result.find("last_indirect_target") != std::string::npos);
+  CHECK(result.find("REX_THUNK_RESERVE_SIZE") != std::string::npos);
+  CHECK(result.find("[[likely]]") != std::string::npos);
+  CHECK(result.find("[[unlikely]]") != std::string::npos);
+}
+
+TEST_CASE("TemplateRegistry: ppc_config_h includes shared indirect-call partial",
+          "[TemplateRegistry]") {
+  rex::codegen::TemplateRegistry registry;
+  std::string json = R"({
+    "image_base": "0x82000000",
+    "image_size": "0x1000000",
+    "code_base": "0x82010000",
+    "code_size": "0x100000",
+    "thunk_reserve_size": "0x1000"
+  })";
+  std::string result = registry.render("test/ppc_config_h", json);
+  CHECK(result.find("ResolveIndirectFunction") != std::string::npos);
+  CHECK(result.find("last_indirect_target") != std::string::npos);
+  CHECK(result.find("[[likely]]") != std::string::npos);
+}
+
 TEST_CASE("TemplateRegistry: cmake_var callback works", "[TemplateRegistry]") {
   rex::codegen::TemplateRegistry registry;
   std::string result = registry.renderString("{{ cmake_var(\"FOO\") }}", "{}");
@@ -100,16 +156,16 @@ TEST_CASE("TemplateRegistry: cmake_var callback works", "[TemplateRegistry]") {
 TEST_CASE("TemplateRegistry: loadOverrides with valid override", "[TemplateRegistry]") {
   auto tmpDir = CreateTempDir();
 
-  // Write a custom init/config_toml.inja override
-  WriteTempFile(tmpDir / "init" / "config_toml.inja", "custom_override = true\n");
+  // Write a custom init/manifest_toml.inja override
+  WriteTempFile(tmpDir / "init" / "manifest_toml.inja", "custom_override = true\n");
 
   rex::codegen::TemplateRegistry registry;
   registry.loadOverrides(tmpDir);
 
-  std::string result = registry.render("init/config_toml", "{}");
+  std::string result = registry.render("init/manifest_toml", "{}");
   CHECK(result.find("custom_override = true") != std::string::npos);
   // Should NOT contain the default template content
-  CHECK(result.find("project_name") == std::string::npos);
+  CHECK(result.find("[entrypoint]") == std::string::npos);
 
   CleanupTempDir(tmpDir);
 }
@@ -128,4 +184,24 @@ TEST_CASE("TemplateRegistry: loadOverrides ignores unknown IDs", "[TemplateRegis
   REQUIRE_THROWS_AS(registry.render("unknown/template", "{}"), rex::codegen::TemplateError);
 
   CleanupTempDir(tmpDir);
+}
+
+TEST_CASE("Template: manifest_toml emits sdk_version when include_stamp is true",
+          "[TemplateRegistry][manifest]") {
+  rex::codegen::TemplateRegistry registry;
+  std::string json =
+      R"({"names": {"snake_case": "mygame", "pascal_case": "Mygame", "upper_case": "MYGAME"}, "sdk_version": "0.8.0", "include_stamp": true})";
+  std::string out = registry.render("init/manifest_toml", json);
+  CHECK(out.find("sdk_version = \"0.8.0\"") != std::string::npos);
+  CHECK(out.find("name = \"mygame\"") != std::string::npos);
+}
+
+TEST_CASE("Template: manifest_toml omits sdk_version when include_stamp is false",
+          "[TemplateRegistry][manifest]") {
+  rex::codegen::TemplateRegistry registry;
+  std::string json =
+      R"({"names": {"snake_case": "mygame", "pascal_case": "Mygame", "upper_case": "MYGAME"}, "sdk_version": "0.8.0", "include_stamp": false})";
+  std::string out = registry.render("init/manifest_toml", json);
+  CHECK(out.find("sdk_version") == std::string::npos);
+  CHECK(out.find("name = \"mygame\"") != std::string::npos);
 }

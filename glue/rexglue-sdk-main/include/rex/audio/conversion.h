@@ -16,13 +16,6 @@
 #include <rex/platform.h>
 #include <rex/types.h>
 
-// NEON intrinsics MUST be included at global scope so simde and any other
-// consumer can find them; otherwise namespace-scoped includes shadow the
-// builtin/intrinsic declarations.
-#if REX_ARCH_ARM64
-#include <arm_neon.h>
-#endif
-
 namespace rex::audio::conversion {
 
 #if REX_ARCH_AMD64
@@ -78,71 +71,6 @@ inline void sequential_6_BE_to_interleaved_2_LE(float* output, const float* inpu
     right = _mm_mul_ps(right, two_fifths);
     _mm_storeu_ps(&output[sample * 2], _mm_unpacklo_ps(left, right));
     _mm_storeu_ps(&output[(sample + 2) * 2], _mm_unpackhi_ps(left, right));
-  }
-}
-#elif REX_ARCH_ARM64
-// arm_neon.h is included at global scope above (outside this namespace) so
-// simde and other consumers can find the NEON intrinsics.
-
-// NEON byte-swap: reverse bytes within each 32-bit lane (BE float -> LE float)
-static inline float32x4_t neon_byte_swap_f32x4(float32x4_t v) {
-  uint8x16_t bytes = vreinterpretq_u8_f32(v);
-  return vreinterpretq_f32_u8(vrev32q_u8(bytes));
-}
-
-inline void sequential_6_BE_to_interleaved_6_LE(float* output, const float* input,
-                                                size_t ch_sample_count) {
-  const uint32_t* in = reinterpret_cast<const uint32_t*>(input);
-  uint32_t* out = reinterpret_cast<uint32_t*>(output);
-  for (size_t sample = 0; sample < ch_sample_count; sample++) {
-    // Gather one sample from each of the first 4 channels
-    uint32x4_t sample0 = {
-        in[0 * ch_sample_count + sample],
-        in[1 * ch_sample_count + sample],
-        in[2 * ch_sample_count + sample],
-        in[3 * ch_sample_count + sample]};
-    uint32_t sample1 = in[4 * ch_sample_count + sample];
-    uint32_t sample2 = in[5 * ch_sample_count + sample];
-    // Byte-swap all 4 lanes at once
-    sample0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(sample0)));
-    vst1q_u32(&out[sample * 6], sample0);
-    // Byte-swap remaining 2 channels scalar
-    out[sample * 6 + 4] = rex::byte_swap(sample1);
-    out[sample * 6 + 5] = rex::byte_swap(sample2);
-  }
-}
-
-inline void sequential_6_BE_to_interleaved_2_LE(float* output, const float* input,
-                                                size_t ch_sample_count) {
-  assert_true(ch_sample_count % 4 == 0);
-
-  const float32x4_t half = vdupq_n_f32(0.5f);
-  const float32x4_t two_fifths = vdupq_n_f32(1.0f / 2.5f);
-
-  // 5.1 downmix to stereo: center on left and right, discard low frequency
-  for (size_t sample = 0; sample < ch_sample_count; sample += 4) {
-    // Load 4 samples from each of the 5 relevant channels
-    float32x4_t fl = vld1q_f32(&input[0 * ch_sample_count + sample]);
-    float32x4_t fr = vld1q_f32(&input[1 * ch_sample_count + sample]);
-    float32x4_t fc = vld1q_f32(&input[2 * ch_sample_count + sample]);
-    float32x4_t bl = vld1q_f32(&input[4 * ch_sample_count + sample]);
-    float32x4_t br = vld1q_f32(&input[5 * ch_sample_count + sample]);
-    // Byte-swap BE -> LE
-    fl = neon_byte_swap_f32x4(fl);
-    fr = neon_byte_swap_f32x4(fr);
-    fc = neon_byte_swap_f32x4(fc);
-    bl = neon_byte_swap_f32x4(bl);
-    br = neon_byte_swap_f32x4(br);
-
-    // Downmix: L = (fl + bl + fc*0.5) * (1/2.5), R = (fr + br + fc*0.5) * (1/2.5)
-    float32x4_t center_halved = vmulq_f32(fc, half);
-    float32x4_t left = vmulq_f32(vaddq_f32(vaddq_f32(fl, bl), center_halved), two_fifths);
-    float32x4_t right = vmulq_f32(vaddq_f32(vaddq_f32(fr, br), center_halved), two_fifths);
-
-    // Interleave stereo pairs: [L0,R0,L1,R1] and [L2,R2,L3,R3]
-    float32x4x2_t interleaved = vzipq_f32(left, right);
-    vst1q_f32(&output[sample * 2], interleaved.val[0]);
-    vst1q_f32(&output[(sample + 2) * 2], interleaved.val[1]);
   }
 }
 #else

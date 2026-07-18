@@ -15,10 +15,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
+#include <rex/math.h>
 #include <rex/memory.h>
 #include <rex/string/key.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 #include <rex/system/xcontent.h>
 #include <rex/system/xtypes.h>
 #include <rex/thread/mutex.h>
@@ -78,14 +78,13 @@ struct XCONTENT_DATA {
     // read the string properly, blanking the array should take care of that
 
     std::fill_n(display_name_raw.chars, countof(display_name_raw.chars), 0);
-    rex::string::util_copy_and_swap_truncating(display_name_raw.chars, value,
-                                               countof(display_name_raw.chars));
+    rex::string::copy_and_swap_truncating(display_name_raw.chars, value,
+                                          countof(display_name_raw.chars));
   }
 
   void set_file_name(const std::string_view value) {
     std::fill_n(file_name_raw, countof(file_name_raw), 0);
-    rex::string::util_copy_maybe_truncating<rex::string::CopySafety::IKnowWhatIAmDoing>(
-        file_name_raw, value, rex::countof(file_name_raw));
+    rex::string::copy_unterminated(file_name_raw, value, rex::countof(file_name_raw));
 
     // Some games rely on padding field acting as a null-terminator...
     padding[0] = padding[1] = 0;

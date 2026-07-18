@@ -235,10 +235,10 @@ struct ControlFlowExecInstruction {
   uint32_t count_ : 3;
   uint32_t is_yield_ : 1;
   uint32_t sequence_ : 12;
-  uint32_t vc_hi_ : 4;  // Vertex cache?
+  [[maybe_unused]] uint32_t vc_hi_ : 4;  // Vertex cache?
 
   // Word 1: (16 bits)
-  uint32_t vc_lo_ : 2;
+  [[maybe_unused]] uint32_t vc_lo_ : 2;
   uint32_t : 7;
   // According to the description of Conditional_Execute_Predicates_No_Stall in
   // the IPR2015-00325 sequencer specification, the sequencer's control flow
@@ -280,10 +280,10 @@ struct ControlFlowCondExecInstruction {
   uint32_t count_ : 3;
   uint32_t is_yield_ : 1;
   uint32_t sequence_ : 12;
-  uint32_t vc_hi_ : 4;  // Vertex cache?
+  [[maybe_unused]] uint32_t vc_hi_ : 4;  // Vertex cache?
 
   // Word 1: (16 bits)
-  uint32_t vc_lo_ : 2;
+  [[maybe_unused]] uint32_t vc_lo_ : 2;
   uint32_t bool_address_ : 8;
   uint32_t condition_ : 1;
   AddressingMode address_mode_ : 1;
@@ -314,10 +314,10 @@ struct ControlFlowCondExecPredInstruction {
   uint32_t count_ : 3;
   uint32_t is_yield_ : 1;
   uint32_t sequence_ : 12;
-  uint32_t vc_hi_ : 4;  // Vertex cache?
+  [[maybe_unused]] uint32_t vc_hi_ : 4;  // Vertex cache?
 
   // Word 1: (16 bits)
-  uint32_t vc_lo_ : 2;
+  [[maybe_unused]] uint32_t vc_lo_ : 2;
   uint32_t : 7;
   uint32_t is_predicate_clean_ : 1;
   uint32_t condition_ : 1;
@@ -457,7 +457,7 @@ struct ControlFlowCondJmpInstruction {
 
   // Word 1: (16 bits)
   uint32_t : 1;
-  uint32_t direction_ : 1;
+  [[maybe_unused]] uint32_t direction_ : 1;
   uint32_t bool_address_ : 8;
   uint32_t condition_ : 1;
   AddressingMode address_mode_ : 1;
@@ -480,7 +480,7 @@ struct ControlFlowAllocInstruction {
 
   // Word 1: (16 bits)
   uint32_t : 8;
-  uint32_t is_unserialized_ : 1;
+  uint32_t : 1;  // is_unserialized_
   AllocType alloc_type_ : 2;
   uint32_t : 1;
   ControlFlowOpcode opcode_ : 4;

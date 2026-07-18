@@ -32,7 +32,7 @@ namespace rex::memory::detail {
 /// The backing file maps the 0xE0 heap at a 0x1000-byte offset, but MapViewOfFileEx
 /// rounds down to 64KB boundaries. Linux mmap handles 4KB offsets natively.
 constexpr u32 PhysicalHostOffset([[maybe_unused]] u32 guest_addr) noexcept {
-#if REX_PLATFORM_WIN32
+#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC
   return (guest_addr >= 0xE0000000u) ? 0x1000u : 0u;
 #else
   return 0u;
@@ -507,30 +507,20 @@ class Memory {
   //==========================================================================
   // Recompiled Code Function Table API
   //==========================================================================
-  // These methods support static recompilation by providing a function
-  // dispatch table stored in guest memory at IMAGE_BASE + IMAGE_SIZE.
-  // The table is indexed by (guest_addr - code_base) * 2, allowing 8-byte
-  // pointers for each 4-byte-aligned guest address.
-
-  // Initialize the function table region for recompiled code dispatch.
-  // Must be called before SetFunction/GetFunction.
-  // Returns false if memory allocation fails.
+  // Per-module function dispatch table at IMAGE_BASE + IMAGE_SIZE, indexed by
+  // (guest_addr - code_base) * 2. Internally locked: callers may invoke from
+  // any thread.
   bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,
                                uint32_t image_size);
-
-  // Register a host function for a guest address.
-  // The function will be called when recompiled code does an indirect call
-  // to this address via PPC_LOOKUP_FUNC/PPC_CALL_INDIRECT_FUNC.
-  void SetFunction(uint32_t guest_address, PPCFunc* host_function);
-
-  // Get the registered host function for a guest address.
-  // Returns nullptr if no function is registered.
-  PPCFunc* GetFunction(uint32_t guest_address) const;
-
-  // Check if the function table has been initialized.
-  bool HasFunctionTable() const { return function_table_base_ != 0; }
+  bool DestroyFunctionTable(uint32_t code_base);
+  // Returns false if guest_address is outside every registered module range.
+  bool SetFunction(uint32_t guest_address, PPCFunc* host_function);
+  bool HasAnyFunctionTable() const;
 
  private:
+#if REX_PLATFORM_MAC
+  int MapViewsMac();
+#endif
   int MapViews(uint8_t* mapping_base);
   void UnmapViews();
 
@@ -548,11 +538,14 @@ class Memory {
   uint8_t* virtual_membase_ = nullptr;
   uint8_t* physical_membase_ = nullptr;
 
-  // Recompiled code function table configuration
-  uint32_t function_table_base_ = 0;  // Guest address of function table (IMAGE_BASE + IMAGE_SIZE)
-  uint32_t function_code_base_ = 0;   // CODE_BASE for offset calculation
-  uint32_t function_code_size_ = 0;   // CODE_SIZE for bounds checking
-  uint32_t function_thunk_reserve_ = 0;  // Extra space reserved for runtime thunks
+  struct FunctionTableEntry {
+    uint32_t table_base;
+    uint32_t code_base;
+    uint32_t code_size;
+    uint32_t thunk_reserve;
+  };
+  std::vector<FunctionTableEntry> function_tables_;
+  mutable std::mutex function_tables_mutex_;
 
   rex::memory::FileMappingHandle mapping_ = rex::memory::kFileMappingHandleInvalid;
   uint8_t* mapping_base_ = nullptr;

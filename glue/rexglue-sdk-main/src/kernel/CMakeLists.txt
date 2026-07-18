@@ -1,7 +1,3 @@
-# rexkernel: Xbox 360 kernel/XAM export implementations (ported from Xenia)
-# Namespace: rex::kernel
-# System emulation layer has moved to rexsystem (rex::system)
-
 set(REXKERNEL_SOURCES
     kernel_init.cpp
 
@@ -22,6 +18,7 @@ set(REXKERNEL_SOURCES
     xam/xam_nui.cpp
     xam/xam_party.cpp
     xam/xam_task.cpp
+    xam/xam_ui.cpp
     xam/xam_user.cpp
     xam/xam_video.cpp
     xam/xam_voice.cpp
@@ -30,6 +27,10 @@ set(REXKERNEL_SOURCES
     xam/apps/xgi_app.cpp
     xam/apps/xlivebase_app.cpp
     xam/apps/xmp_app.cpp
+
+    # XBDM subsystem - provides __imp__Xbdm* symbols
+    xbdm/xbdm_module.cpp
+    xbdm/xbdm_misc.cpp
 
     # xboxkrnl exports - provides __imp__ symbols for generated code
     # xboxkrnl/cert_monitor.cpp    # TODO: Translate JIT methods for AOT
@@ -62,40 +63,7 @@ set(REXKERNEL_SOURCES
     crt/threading.cpp
 )
 
-add_library(rexkernel STATIC ${REXKERNEL_SOURCES})
-add_library(rex::kernel ALIAS rexkernel)
+list(TRANSFORM REXKERNEL_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+target_sources(rexruntime PRIVATE ${REXKERNEL_SOURCES})
 
-# xam_ui.cpp depends on ImGui. Skip it when graphics are disabled (console
-# cross-builds). The XamUi* exports remain satisfied because the calling
-# kernel code short-circuits on headless builds.
-if(REXGLUE_ENABLE_GRAPHICS)
-    target_sources(rexkernel PRIVATE xam/xam_ui.cpp)
-else()
-    target_sources(rexkernel PRIVATE xam/xam_ui_stub.cpp)
-endif()
-
-target_include_directories(rexkernel PUBLIC
-    $<BUILD_INTERFACE:${REXGLUE_ROOT}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-target_include_directories(rexkernel PRIVATE
-    ${REXGLUE_ROOT}/thirdparty
-)
-
-target_link_libraries(rexkernel
-    PUBLIC
-        rexsystem
-    PRIVATE
-        rexinput
-        rexaudio
-        # Use rexglue's own o1heap (v3 with O1HEAP_ALIGNMENT = 4*sizeof(void*)
-        # and o1heapReallocate). LibertyRecomp's top-level project may define
-        # an older 'o1heap' target (v2) for tooling; we always link the
-        # rexglue-owned target by its real name to avoid the conflict.
-        rexglue_o1heap
-)
-# rexgraphics only exists when REXGLUE_ENABLE_GRAPHICS is ON.
-if(TARGET rexgraphics)
-    target_link_libraries(rexkernel PRIVATE rexgraphics)
-endif()
-
+target_link_libraries(rexruntime PRIVATE o1heap rexcore rexfilesystem rexui rexaudio rexinput imgui)

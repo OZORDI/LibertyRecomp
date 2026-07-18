@@ -2680,12 +2680,12 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
   const PipelineDescription& description = runtime_description.description;
 
   if (runtime_description.pixel_shader != nullptr) {
-    REXGPU_INFO("Creating graphics pipeline with VS {:016X}, PS {:016X}",
-                runtime_description.vertex_shader->shader().ucode_data_hash(),
-                runtime_description.pixel_shader->shader().ucode_data_hash());
+    REXGPU_DEBUG("Creating graphics pipeline with VS {:016X}, PS {:016X}",
+                 runtime_description.vertex_shader->shader().ucode_data_hash(),
+                 runtime_description.pixel_shader->shader().ucode_data_hash());
   } else {
-    REXGPU_INFO("Creating graphics pipeline with VS {:016X}",
-                runtime_description.vertex_shader->shader().ucode_data_hash());
+    REXGPU_DEBUG("Creating graphics pipeline with VS {:016X}",
+                 runtime_description.vertex_shader->shader().ucode_data_hash());
   }
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC state_desc;

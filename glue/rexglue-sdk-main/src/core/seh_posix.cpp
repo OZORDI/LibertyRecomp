@@ -9,7 +9,7 @@
 #include <rex/platform.h>
 #include <rex/platform/seh.h>
 
-static_assert(REX_PLATFORM_POSIX, "This file is POSIX-only");
+static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
 
 #include <signal.h>
 #include <cstdlib>  // std::abort()
@@ -21,25 +21,6 @@ namespace rex::platform {
 static thread_local SehThreadState tls_seh_state;
 static thread_local bool tls_seh_active = false;
 
-// Saved previously-installed handlers — when a fault fires outside SEH code
-// we must chain to these (e.g. rex::arch::ExceptionHandler's SIGSEGV/SIGBUS
-// handler that services guest memory access violations) rather than
-// restoring SIG_DFL and terminating the process.
-static struct sigaction g_prev_sigsegv{};
-static struct sigaction g_prev_sigbus{};
-static struct sigaction g_prev_sigfpe{};
-static struct sigaction g_prev_sigill{};
-
-static const struct sigaction* previous_handler_for(int sig) {
-  switch (sig) {
-    case SIGSEGV: return &g_prev_sigsegv;
-    case SIGBUS:  return &g_prev_sigbus;
-    case SIGFPE:  return &g_prev_sigfpe;
-    case SIGILL:  return &g_prev_sigill;
-    default:      return nullptr;
-  }
-}
-
 SehThreadState& seh_thread_state() {
   return tls_seh_state;
 }
@@ -50,29 +31,10 @@ int seh_filter(uint32_t /*code*/, void* /*ep*/) {
 }
 
 /// Signal handler for SIGSEGV/SIGBUS/SIGFPE/SIGILL
-static void signal_handler(int sig, siginfo_t* info, void* ucontext) {
+static void signal_handler(int sig, siginfo_t* info, void* /*ucontext*/) {
   // Only handle if we're in SEH-protected code
   if (!tls_seh_active) {
-    // Not in SEH region — forward to whoever was registered before us
-    // (typically rex::arch::ExceptionHandler's guest-memory access-violation
-    // handler). If nobody was registered, restore SIG_DFL and re-raise so the
-    // process still dies on a real fault. Previously this code unconditionally
-    // restored SIG_DFL even when a real handler existed, which killed the
-    // process on any SIGBUS/SIGSEGV that originated outside a __try block.
-    const struct sigaction* prev = previous_handler_for(sig);
-    if (prev) {
-      if ((prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) {
-        prev->sa_sigaction(sig, info, ucontext);
-        return;
-      }
-      if (prev->sa_handler == SIG_IGN) {
-        return;
-      }
-      if (prev->sa_handler && prev->sa_handler != SIG_DFL) {
-        prev->sa_handler(sig);
-        return;
-      }
-    }
+    // Not in SEH region - restore default handler and re-raise
     signal(sig, SIG_DFL);
     raise(sig);
     return;
@@ -148,12 +110,10 @@ void seh_initialize() {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO | SA_NODEFER;  // SA_NODEFER allows re-entry for nested exceptions
 
-  // Save prior handlers so signal_handler() can chain to them when a fault
-  // fires outside of SEH-protected code.
-  sigaction(SIGSEGV, &sa, &g_prev_sigsegv);
-  sigaction(SIGBUS, &sa, &g_prev_sigbus);
-  sigaction(SIGFPE, &sa, &g_prev_sigfpe);
-  sigaction(SIGILL, &sa, &g_prev_sigill);
+  sigaction(SIGSEGV, &sa, nullptr);
+  sigaction(SIGBUS, &sa, nullptr);
+  sigaction(SIGFPE, &sa, nullptr);
+  sigaction(SIGILL, &sa, nullptr);
 }
 
 bool& seh_active() {

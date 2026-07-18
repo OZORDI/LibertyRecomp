@@ -22,7 +22,7 @@ class HostPathEntry;
 class HostPathDevice : public Device {
  public:
   HostPathDevice(const std::string_view mount_path, const std::filesystem::path& host_path,
-                 bool read_only);
+                 bool read_only, bool allow_share_delete = false);
   ~HostPathDevice() override;
 
   bool Initialize() override;
@@ -30,6 +30,11 @@ class HostPathDevice : public Device {
   Entry* ResolvePath(const std::string_view path) override;
 
   bool is_read_only() const override { return read_only_; }
+  // NOTE(tomc): When true, host file handles open with FILE_SHARE_DELETE so an open read
+  // handle (e.g. a save-slot preview) does not block an overwrite's
+  // delete+recreate. Opt-in per device: content/save devices set it; game-data
+  // and read-only devices leave it off (see a5c3a963 ghost-file fix).
+  bool allow_share_delete() const { return allow_share_delete_; }
   const std::filesystem::path& host_path() const { return host_path_; }
 
   const std::string& name() const override { return name_; }
@@ -48,6 +53,7 @@ class HostPathDevice : public Device {
   std::filesystem::path host_path_;
   std::unique_ptr<Entry> root_entry_;
   bool read_only_;
+  bool allow_share_delete_;
 };
 
 }  // namespace rex::filesystem

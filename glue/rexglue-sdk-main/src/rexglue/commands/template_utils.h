@@ -1,6 +1,6 @@
 /**
  * @file        rexglue/commands/template_utils.h
- * @brief       Shared utilities for init and migrate commands
+ * @brief       Shared utilities for init command
  *
  * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  * @license     BSD 3-Clause License
@@ -90,14 +90,39 @@ inline nlohmann::json names_to_json(const AppNameParts& names) {
           {"upper_case", names.upper_case}};
 }
 
-inline bool write_file(const std::filesystem::path& path, const std::string& content) {
-  std::ofstream file(path);
-  if (!file) {
-    REXLOG_ERROR("Failed to create file: {}", path.string());
+inline bool write_file_atomic(const std::filesystem::path& path, const std::string& content) {
+  std::filesystem::path tmp = path;
+  tmp += ".tmp";
+  {
+    std::ofstream out(tmp, std::ios::binary);
+    if (!out) {
+      REXLOG_ERROR("Failed to open tmp file for write: {}", tmp.string());
+      return false;
+    }
+    out << content;
+    if (!out.good()) {
+      std::error_code ignore;
+      std::filesystem::remove(tmp, ignore);
+      REXLOG_ERROR("Failed while writing tmp file: {}", tmp.string());
+      return false;
+    }
+  }
+  std::error_code ec;
+  std::filesystem::rename(tmp, path, ec);
+  if (ec) {
+    std::error_code ignore;
+    std::filesystem::remove(tmp, ignore);
+    REXLOG_ERROR("Failed to rename {} to {}: {}", tmp.string(), path.string(), ec.message());
     return false;
   }
-  file << content;
   return true;
+}
+
+inline std::string read_file(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    return {};
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 }  // namespace rexglue::cli

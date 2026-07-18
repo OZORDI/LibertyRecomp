@@ -12,10 +12,12 @@
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
 #include <rex/hook.h>
+#include <rex/thread/mutex.h>
 #include <rex/types.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xexception.h>
+#include <rex/system/xthread.h>
 #include <rex/system/xtypes.h>
 
 namespace rex::kernel::xboxkrnl {
@@ -86,27 +88,32 @@ u32 XexLoadImage_entry(mapped_string module_name, u32 module_flags, u32 min_vers
   X_STATUS result = X_STATUS_NO_SUCH_FILE;
 
   uint32_t hmodule = 0;
-  auto module = REX_KERNEL_STATE()->GetModule(module_name.value());
-  if (module) {
-    // Existing module found.
-    hmodule = module->hmodule_ptr();
-    result = X_STATUS_SUCCESS;
-  } else {
-    // Not found; attempt to load as a user module.
-    auto user_module = REX_KERNEL_STATE()->LoadUserModule(module_name.value());
-    if (user_module) {
-      // Give up object ownership, this reference will be released by the last
-      // XexUnloadImage call
-      auto user_module_raw = user_module.release();
-      hmodule = user_module_raw->hmodule_ptr();
+  {
+    // Lookup + load_count++ must be atomic vs XexUnloadImage to prevent
+    // resurrecting a module between the read of hmodule and the increment.
+    // The fresh-load path can't share this lock: LoadUserModule runs
+    // DllMain ATTACH outside the global lock by design.
+    auto lock = rex::thread::global_critical_region::AcquireDirect();
+    auto module = REX_KERNEL_STATE()->GetModule(module_name.value());
+    if (module) {
+      hmodule = module->hmodule_ptr();
+      auto ldr_data = REX_KERNEL_MEMORY()->TranslateVirtual<X_LDR_DATA_TABLE_ENTRY*>(hmodule);
+      ldr_data->load_count++;
       result = X_STATUS_SUCCESS;
     }
   }
 
-  // Increment the module's load count.
-  if (hmodule) {
-    auto ldr_data = REX_KERNEL_MEMORY()->TranslateVirtual<X_LDR_DATA_TABLE_ENTRY*>(hmodule);
-    ldr_data->load_count++;
+  if (!hmodule) {
+    auto user_module = REX_KERNEL_STATE()->LoadUserModule(module_name.value());
+    if (user_module) {
+      // Released by the last XexUnloadImage call.
+      auto user_module_raw = user_module.release();
+      hmodule = user_module_raw->hmodule_ptr();
+      auto lock = rex::thread::global_critical_region::AcquireDirect();
+      auto ldr_data = REX_KERNEL_MEMORY()->TranslateVirtual<X_LDR_DATA_TABLE_ENTRY*>(hmodule);
+      ldr_data->load_count++;
+      result = X_STATUS_SUCCESS;
+    }
   }
 
   *hmodule_ptr = hmodule;
@@ -119,16 +126,23 @@ u32 XexUnloadImage_entry(mapped_void hmodule) {
   if (!module) {
     return X_STATUS_INVALID_HANDLE;
   }
+  if (module->module_type() == XModule::ModuleType::kKernelModule) {
+    return X_STATUS_SUCCESS;
+  }
 
-  // Can't unload kernel modules from user code.
-  if (module->module_type() != XModule::ModuleType::kKernelModule) {
+  // Decrement-and-check under the global lock so concurrent unloads can't both
+  // observe zero and double-free.
+  bool last_ref;
+  {
+    auto lock = rex::thread::global_critical_region::AcquireDirect();
     auto ldr_data = hmodule.as<X_LDR_DATA_TABLE_ENTRY*>();
-    if (--ldr_data->load_count == 0) {
-      // No more references, free it.
-      module->Release();
-      REX_KERNEL_STATE()->UnloadUserModule(
-          object_ref<UserModule>(reinterpret_cast<UserModule*>(module.release())));
-    }
+    last_ref = (--ldr_data->load_count == 0);
+  }
+
+  if (last_ref) {
+    module->Release();
+    REX_KERNEL_STATE()->UnloadUserModule(
+        object_ref<UserModule>(reinterpret_cast<UserModule*>(module.release())));
   }
 
   return X_STATUS_SUCCESS;
@@ -137,6 +151,12 @@ u32 XexUnloadImage_entry(mapped_void hmodule) {
 u32 XexGetProcedureAddress_entry(mapped_void hmodule, u32 ordinal, mapped_u32 out_function_ptr) {
   // May be entry point?
   assert_not_zero(ordinal);
+
+  uint32_t caller_address = 0;
+  auto* thread = XThread::GetCurrentThread();
+  if (thread && thread->thread_state() && thread->thread_state()->context()) {
+    caller_address = static_cast<uint32_t>(thread->thread_state()->context()->lr);
+  }
 
   bool is_string_name = (ordinal & 0xFFFF0000) != 0;
   auto string_name = reinterpret_cast<const char*>(REX_KERNEL_MEMORY()->TranslateVirtual(ordinal));
@@ -154,7 +174,7 @@ u32 XexGetProcedureAddress_entry(mapped_void hmodule, u32 ordinal, mapped_u32 ou
     if (is_string_name) {
       ptr = module->GetProcAddressByName(string_name);
     } else {
-      ptr = module->GetProcAddressByOrdinal(ordinal);
+      ptr = module->GetProcAddressByOrdinal(ordinal, caller_address);
     }
     if (ptr) {
       *out_function_ptr = ptr;

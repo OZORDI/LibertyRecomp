@@ -24,7 +24,8 @@ DynamicLibrary& DynamicLibrary::operator=(DynamicLibrary&& other) noexcept {
   return *this;
 }
 
-bool DynamicLibrary::Load(const std::filesystem::path& path) {
+bool DynamicLibrary::Load(const std::filesystem::path& path, SymbolResolution /*mode*/) {
+  // Windows resolves all imports at load time; mode is informational only.
   Close();
   handle_ = static_cast<void*>(LoadLibraryW(path.c_str()));
   return handle_ != nullptr;

@@ -120,7 +120,7 @@ bool looksLikeExceptionData(const BinaryView& binary, const FunctionGraph& graph
 }
 
 void gapFillCodeRegions(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: checking for uncovered code regions...");
+  REXCODEGEN_TRACE("Analyze: checking for uncovered code regions...");
 
   auto& graph = ctx.graph;
   auto& binary = ctx.binary();
@@ -165,10 +165,10 @@ void gapFillCodeRegions(CodegenContext& ctx) {
   }
 
   if (segmentsCreated > 0) {
-    REXCODEGEN_INFO("Analyze: registered {} gap functions from {} regions", segmentsCreated,
-                    gapsFound);
+    REXCODEGEN_TRACE("Analyze: registered {} gap functions from {} regions", segmentsCreated,
+                     gapsFound);
   } else {
-    REXCODEGEN_INFO("Analyze: no uncovered regions found");
+    REXCODEGEN_TRACE("Analyze: no uncovered regions found");
   }
 }
 
@@ -208,7 +208,7 @@ void cleanupAbsorbedGapFills(CodegenContext& ctx) {
   }
 
   if (!toRemove.empty()) {
-    REXCODEGEN_INFO("Analyze: removed {} absorbed GAP_FILL functions", toRemove.size());
+    REXCODEGEN_TRACE("Analyze: removed {} absorbed GAP_FILL functions", toRemove.size());
   }
 }
 
@@ -216,13 +216,14 @@ void cleanupAbsorbedGapFills(CodegenContext& ctx) {
 
 namespace phases {
 
-VoidResult GapFill(CodegenContext& ctx) {
+VoidResult GapFill(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   gapFillCodeRegions(ctx);
 
   // Discover blocks for gap-filled functions
   auto known = buildKnownFunctions(ctx.graph, /*excludeGapFill=*/true);
   size_t discovered = discoverPendingFunctions(ctx, known);
-  REXCODEGEN_INFO("Analyze: discovered blocks for {} gap-filled functions", discovered);
+  REXCODEGEN_TRACE("Analyze: discovered blocks for {} gap-filled functions", discovered);
 
   cleanupAbsorbedGapFills(ctx);
 

@@ -10,6 +10,7 @@
  */
 
 #include <rex/chrono/clock.h>
+#include <rex/cvar.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/filesystem/devices/null_device.h>
 #include <rex/filesystem/vfs.h>
@@ -27,25 +28,79 @@
 #include <rex/system/xthread.h>
 #include <rex/thread.h>
 
+REXCVAR_DEFINE_STRING(game_data_root, "", "Runtime", "Override game data path");
+REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
+REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
+REXCVAR_DEFINE_STRING(cache_root, "", "Runtime", "Override shader cache path");
+REXCVAR_DEFINE_STRING(metadata_root, "", "Runtime", "Override metadata path");
+
 namespace rex {
 
 // Static instance for global access
 Runtime* Runtime::instance_ = nullptr;
 
+Runtime* Runtime::instance() {
+  return instance_;
+}
+
 Runtime::Runtime(const std::filesystem::path& game_data_root,
                  const std::filesystem::path& user_data_root,
                  const std::filesystem::path& update_data_root,
-                 const std::filesystem::path& cache_root)
+                 const std::filesystem::path& cache_root,
+                 const std::filesystem::path& metadata_root)
     : game_data_root_(game_data_root),
       user_data_root_(user_data_root.empty() ? game_data_root : user_data_root),
       update_data_root_(update_data_root),
-      cache_root_(cache_root) {}
+      cache_root_(cache_root),
+      metadata_root_(metadata_root) {}
 
 Runtime::~Runtime() {
   Shutdown();
 }
 
+std::optional<std::filesystem::path> Runtime::FindMetadataPath(
+    const std::filesystem::path& relative_path) const {
+  if (!metadata_root_.empty()) {
+    std::filesystem::path candidate = metadata_root_ / relative_path;
+    std::error_code ec;
+    if (std::filesystem::exists(candidate, ec)) {
+      return candidate;
+    }
+    return std::nullopt;
+  }
+
+  const std::filesystem::path candidates[] = {
+      game_data_root_ / "metadata" / relative_path,
+      game_data_root_.parent_path() / "metadata" / relative_path,
+      game_data_root_ / relative_path,
+  };
+  for (const auto& candidate : candidates) {
+    std::error_code ec;
+    if (std::filesystem::exists(candidate, ec)) {
+      return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<EmbeddedMetadataAsset> Runtime::FindEmbeddedMetadata(
+    const std::filesystem::path& relative_path) const {
+  return FindEmbeddedMetadataAsset(relative_path);
+}
+
 X_STATUS Runtime::Setup(RuntimeConfig config) {
+  if (instance_ != nullptr) {
+    REXSYS_ERROR("Runtime::Setup() called but global instance already exists");
+    return X_STATUS_UNSUCCESSFUL;
+  }
+  instance_ = this;
+
+  auto fail = [this](X_STATUS status, std::string_view reason) {
+    REXSYS_ERROR("Runtime::Setup failed: {}", reason);
+    Shutdown();
+    return status;
+  };
+
   // Start profiler (Tracy network threads, counter init)
   rex::perf::Profiler::Startup();
 
@@ -60,20 +115,12 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
   // Enable threading affinity configuration
   thread::EnableAffinityConfiguration();
 
-  // Guard against reinitialization
-  if (memory_) {
-    REXSYS_ERROR("Runtime::Setup() called but already initialized");
-    return X_STATUS_UNSUCCESSFUL;
-  }
-
   tool_mode_ = config.tool_mode;
 
   // Create memory system first
   memory_ = std::make_unique<memory::Memory>();
   if (!memory_->Initialize()) {
-    REXSYS_ERROR("Failed to initialize memory system");
-    memory_.reset();
-    return X_STATUS_UNSUCCESSFUL;
+    return fail(X_STATUS_UNSUCCESSFUL, "memory init failed");
   }
 
   export_resolver_ = std::make_unique<runtime::ExportResolver>();
@@ -125,13 +172,13 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
 
   // Set up VFS: game_data_root as game:/d:, update_data_root as update:
   if (!SetupVfs()) {
-    REXSYS_ERROR("Failed to set up VFS");
-    return X_STATUS_UNSUCCESSFUL;
+    return fail(X_STATUS_UNSUCCESSFUL, "VFS setup failed");
   }
 
   // Skip GPU initialization in tool mode (for analysis tools like codegen)
   if (tool_mode_) {
     REXSYS_INFO("Runtime initialized in tool mode (no GPU)");
+    setup_complete_ = true;
     return X_STATUS_SUCCESS;
   }
 
@@ -142,9 +189,7 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
     X_STATUS gpu_status = graphics_system_->Setup(function_dispatcher_.get(), kernel_state_.get(),
                                                   app_context_, with_presentation);
     if (XFAILED(gpu_status)) {
-      REXSYS_ERROR("Failed to initialize GPU - required for runtime");
-      graphics_system_.reset();
-      return gpu_status;
+      return fail(gpu_status, "GPU setup failed");
     }
     REXSYS_INFO("GPU system initialized (presentation={})", with_presentation);
   } else {
@@ -152,59 +197,68 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
   }
 
   REXSYS_INFO("Runtime initialized successfully");
+  setup_complete_ = true;
   return X_STATUS_SUCCESS;
 }
 
-X_STATUS Runtime::Setup(uint32_t code_base, uint32_t code_size, uint32_t image_base,
-                        uint32_t image_size, const PPCFuncMapping* func_mappings,
-                        RuntimeConfig config) {
-  // Guard against multiple singleton instances
-  if (instance_ != nullptr) {
-    REXSYS_ERROR("Runtime::Setup() called but global instance already exists");
-    return X_STATUS_UNSUCCESSFUL;
-  }
-
-  // First perform the basic setup with injected config
+X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig config) {
   X_STATUS status = Setup(std::move(config));
   if (status != X_STATUS_SUCCESS) {
     return status;
   }
 
-  // Initialize function table in FunctionDispatcher for recompiled code dispatch
-  if (!function_dispatcher_->InitializeFunctionTable(code_base, code_size, image_base,
-                                                     image_size)) {
+  if (!function_dispatcher_->InitializeFunctionTable(image_info.code_base, image_info.code_size,
+                                                     image_info.image_base, image_info.image_size,
+                                                     /*is_entrypoint=*/true)) {
     REXSYS_ERROR("Failed to initialize function table");
+    Shutdown();
     return X_STATUS_UNSUCCESSFUL;
   }
 
-  // Register all recompiled functions from the mapping table
-  if (func_mappings) {
+  if (image_info.func_mappings) {
     int count = 0;
-    for (int i = 0; func_mappings[i].guest != 0; ++i) {
-      if (func_mappings[i].host != nullptr) {
-        function_dispatcher_->SetFunction(static_cast<uint32_t>(func_mappings[i].guest),
-                                          func_mappings[i].host);
+    int duplicates = 0;
+    int rejected = 0;
+    for (int i = 0; image_info.func_mappings[i].guest != 0; ++i) {
+      uint32_t guest = static_cast<uint32_t>(image_info.func_mappings[i].guest);
+      auto* host = image_info.func_mappings[i].host;
+      if (!host) {
+        continue;
+      }
+      if (function_dispatcher_->GetFunction(guest)) {
+        REXSYS_WARN("func_mappings: duplicate guest address {:08X}", guest);
+        ++duplicates;
+      }
+      if (!function_dispatcher_->SetFunction(guest, host)) {
+        ++rejected;
+      } else {
         ++count;
       }
     }
-    REXSYS_DEBUG("Registered {} recompiled functions", count);
+    REXSYS_DEBUG("Registered {} recompiled functions ({} duplicates, {} rejected)", count,
+                 duplicates, rejected);
+    if (rejected > 0) {
+      REXSYS_ERROR("PPCImageInfo registration: {} func_mappings entries rejected", rejected);
+      Shutdown();
+      return X_STATUS_UNSUCCESSFUL;
+    }
   }
 
-  // Set the global instance for recompiled code access
-  instance_ = this;
-
-  REXSYS_DEBUG("Runtime setup for recompiled code complete (code: {:08X}-{:08X})", code_base,
-               code_base + code_size);
+  REXSYS_DEBUG("Runtime setup complete (code: {:08X}-{:08X}, image: {:08X}-{:08X})",
+               image_info.code_base, image_info.code_base + image_info.code_size,
+               image_info.image_base, image_info.image_base + image_info.image_size);
   return X_STATUS_SUCCESS;
 }
 
 void Runtime::Shutdown() {
-  // Clear global instance
+  if (!instance_ && !setup_complete_ && !memory_) {
+    return;
+  }
+
   if (instance_ == this) {
     instance_ = nullptr;
   }
 
-  // Destroy in reverse order
   if (graphics_system_) {
     graphics_system_->Shutdown();
     graphics_system_.reset();
@@ -224,6 +278,7 @@ void Runtime::Shutdown() {
   memory_.reset();
 
   rex::perf::Profiler::Shutdown();
+  setup_complete_ = false;
 }
 
 uint8_t* Runtime::virtual_membase() const {

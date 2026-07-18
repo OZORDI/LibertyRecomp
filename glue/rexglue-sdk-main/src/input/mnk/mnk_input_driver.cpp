@@ -22,7 +22,6 @@
 #include <cstring>
 
 #if REX_PLATFORM_WIN32
-#include <rex/ui/window_win.h>
 #include <Windows.h>
 #endif
 
@@ -265,10 +264,10 @@ void MnkInputDriver::CenterCursor() {
   prev_mouse_x_ = cx;
   prev_mouse_y_ = cy;
 #if REX_PLATFORM_WIN32
-  auto* win32_window = dynamic_cast<rex::ui::Win32Window*>(attached_window_);
-  if (win32_window && win32_window->hwnd()) {
+  HWND hwnd = static_cast<HWND>(attached_window_->GetNativeWindowHandle());
+  if (hwnd) {
     POINT pt = {static_cast<LONG>(cx), static_cast<LONG>(cy)};
-    ClientToScreen(win32_window->hwnd(), &pt);
+    ClientToScreen(hwnd, &pt);
     SetCursorPos(pt.x, pt.y);
   }
 #endif

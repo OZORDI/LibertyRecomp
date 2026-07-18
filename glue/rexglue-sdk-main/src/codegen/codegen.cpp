@@ -36,17 +36,7 @@ Result<CodegenPipeline> CodegenPipeline::Create(const std::filesystem::path& con
 
   auto configDir = configPath.parent_path();
 
-  // Determine XEX path
-  std::filesystem::path xexPath;
-  if (!tempConfig.patchedFilePath.empty()) {
-    xexPath = configDir / tempConfig.patchedFilePath;
-    if (!std::filesystem::exists(xexPath)) {
-      xexPath.clear();
-    }
-  }
-  if (xexPath.empty()) {
-    xexPath = configDir / tempConfig.filePath;
-  }
+  std::filesystem::path xexPath = configDir / tempConfig.filePath;
 
   if (!std::filesystem::exists(xexPath)) {
     return Err<CodegenPipeline>(ErrorCategory::IO,
@@ -77,14 +67,22 @@ Result<CodegenPipeline> CodegenPipeline::Create(const std::filesystem::path& con
 }
 
 Result<void> CodegenPipeline::Run(bool force) {
-  // Phase 1: Analyze (builds and validates function graph)
+  auto result = RunAnalyze();
+  if (!result)
+    return result;
+  return RunWrite(force);
+}
+
+Result<void> CodegenPipeline::RunAnalyze() {
   auto analyzeResult = Analyze(*ctx_);
   if (!analyzeResult) {
     REXLOG_ERROR("Analysis failed: {}", analyzeResult.error().message);
     return analyzeResult;
   }
+  return Ok();
+}
 
-  // Phase 2: Generate C++ output
+Result<void> CodegenPipeline::RunWrite(bool force) {
   CodegenWriter writer(*ctx_, runtime_.get());
   if (!writer.write(force))
     return Err(ErrorCategory::Validation, "Code generation failed.");

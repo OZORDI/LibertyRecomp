@@ -25,8 +25,12 @@ namespace rex {
 #define static_assert_size(type, size) \
   static_assert(sizeof(type) == size, "bad definition for " #type ": must be " #size " bytes")
 
-// We rely on assert being compiled out in NDEBUG.
-#define rex_assert assert
+#ifdef NDEBUG
+// References expr in an unevaluated short-circuit so -Wunused doesn't fire.
+#define rex_assert(expr) ((void)(false && (expr)))
+#else
+#define rex_assert(expr) assert(expr)
+#endif
 
 #define __REX_EXPAND(x) x
 #define __REX_ARGC(...) \

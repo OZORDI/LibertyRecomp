@@ -3,17 +3,23 @@
 
 #include "{{ project }}_init.h"
 
+{% if has_dll_modules and not is_dll %}
+void RegisterRecompiledModules(rex::system::KernelState*);
+{% endif %}
+
 const rex::PPCImageInfo PPCImageConfig = {
-    REX_CODE_BASE,      // code_base
-    REX_CODE_SIZE,      // code_size
-    REX_IMAGE_BASE,     // image_base
-    REX_IMAGE_SIZE,     // image_size
-    PPCFuncMappings,    // func_mappings
-    REXCRT_HEAP,        // rexcrt_heap
+    .code_base = REX_CODE_BASE,
+    .code_size = REX_CODE_SIZE,
+    .image_base = REX_IMAGE_BASE,
+    .image_size = REX_IMAGE_SIZE,
+    .func_mappings = PPCFuncMappings,
+    .rexcrt_heap = REXCRT_HEAP,
+{% if has_dll_modules and not is_dll %}
+    .register_modules = RegisterRecompiledModules,
+{% endif %}
 };
 
 PPCFuncMapping PPCFuncMappings[] = {
-{% for fn in functions %}{% if not fn.below_code_base %}	{ {{ fn.address }}, {{ fn.name }} },
-{% endif %}{% endfor %}{% for imp in imports %}	{ {{ imp.address }}, {{ imp.name }} },
-{% endfor %}	{ 0, nullptr }
+{% for fn in functions %}{% if not fn.below_code_base or fn.is_import %}	{ {{ fn.address }}, {{ fn.name }} },
+{% endif %}{% endfor %}	{ 0, nullptr }
 };

@@ -12,34 +12,10 @@
 // Disable warnings about unused parameters for kernel functions
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-#include <cstdint>
 #include <cstring>
 
-#if !REX_PLATFORM_WIN32
-#include <cerrno>
-
-// Map POSIX errno values to Winsock error codes for the guest.
-static uint32_t ErrnoToWsaError(int err) {
-  switch (err) {
-    case EWOULDBLOCK:   return 0x2733;  // WSAEWOULDBLOCK
-    case EINPROGRESS:   return 0x2734;  // WSAEINPROGRESS
-    case EALREADY:      return 0x2735;  // WSAEALREADY
-    case ENOTSOCK:      return 0x2736;  // WSAENOTSOCK
-    case EMSGSIZE:      return 0x2738;  // WSAEMSGSIZE
-    case ECONNRESET:    return 0x2746;  // WSAECONNRESET
-    case ECONNREFUSED:  return 0x274D;  // WSAECONNREFUSED
-    case ETIMEDOUT:     return 0x274C;  // WSAETIMEDOUT
-    case ENETUNREACH:   return 0x2743;  // WSAENETUNREACH
-    case EHOSTUNREACH:  return 0x2751;  // WSAEHOSTUNREACH
-    case EADDRINUSE:    return 0x2740;  // WSAEADDRINUSE
-    case EADDRNOTAVAIL: return 0x2741;  // WSAEADDRNOTAVAIL
-    case ECONNABORTED:  return 0x2745;  // WSAECONNABORTED
-    case EISCONN:       return 0x2748;  // WSAEISCONN
-    case ENOTCONN:      return 0x2749;  // WSAENOTCONN
-    case EACCES:        return 0x271D;  // WSAEACCES
-    default:            return 0x2726;  // WSAEFAULT (generic)
-  }
-}
+#if REX_PLATFORM_MAC
+#include <sys/select.h>
 #endif
 
 #include <rex/chrono/clock.h>
@@ -57,19 +33,14 @@ static uint32_t ErrnoToWsaError(int err) {
 #include <rex/system/xthread.h>
 #include <rex/system/xtypes.h>
 
-#include <rex/net/platform_net.h>
-
 #if REX_PLATFORM_WIN32
 // NOTE: must be included last as it expects windows.h to already be included.
 #define _WINSOCK_DEPRECATED_NO_WARNINGS  // inet_addr
 #include <winsock2.h>                    // NOLINT(build/include_order)
-#elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS4 || REX_PLATFORM_NX
+#elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#if !REX_PLATFORM_NX
 #include <netinet/ip.h>
-#endif
-#include <sys/select.h>
 #include <sys/socket.h>
 #endif
 
@@ -209,19 +180,12 @@ struct XNetStartupParams {
   uint8_t cfgQosPairWaitTimeInSeconds;
 };
 
-XNetStartupParams xnet_startup_params = {0};
+XNetStartupParams xnet_startup_params = {};
 
 u32 NetDll_XNetStartup_entry(u32 caller, ppc_ptr_t<XNetStartupParams> params) {
   if (params) {
     assert_true(params->cfgSizeOfStruct == sizeof(XNetStartupParams));
     std::memcpy(&xnet_startup_params, params, sizeof(XNetStartupParams));
-  }
-
-  // Bring up the platform's network stack. No-op on desktop; real work on
-  // PS4 (sceSysmodule/sceNet/sceNetCtl) and Switch (nifm + BSD socket).
-  if (!rex::net::PlatformInit()) {
-    REXKRNL_ERROR("NetDll_XNetStartup: platform network init failed");
-    return 1;  // non-zero = error
   }
 
   auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
@@ -239,8 +203,6 @@ u32 NetDll_XNetStartup_entry(u32 caller, ppc_ptr_t<XNetStartupParams> params) {
 }
 
 u32 NetDll_XNetCleanup_entry(u32 caller, mapped_void params) {
-  rex::net::PlatformShutdown();
-
   auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
   // auto xnet = xam->xnet();
   // xam->set_xnet(nullptr);
@@ -511,7 +473,7 @@ u32 NetDll_XNetXnAddrToMachineId_entry(u32 caller, ppc_ptr_t<XNADDR> addr_ptr, m
 
 void NetDll_XNetInAddrToString_entry(u32 caller, u32 in_addr, mapped_string string_out,
                                      u32 string_size) {
-  rex::string::rex_strcpy(string_out, string_size, "666.666.666.666");
+  rex::string::copy_truncating(string_out, "666.666.666.666", string_size);
 }
 
 // This converts a XNet address to an IN_ADDR. The IN_ADDR is used for
@@ -836,20 +798,20 @@ struct host_set {
 i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
                         ppc_ptr_t<x_fd_set> writefds, ppc_ptr_t<x_fd_set> exceptfds,
                         mapped_void timeout_ptr) {
-  host_set host_readfds = {0};
-  fd_set native_readfds = {0};
+  host_set host_readfds = {};
+  fd_set native_readfds = {};
   if (readfds) {
     host_readfds.Load(readfds);
     host_readfds.Store(&native_readfds);
   }
-  host_set host_writefds = {0};
-  fd_set native_writefds = {0};
+  host_set host_writefds = {};
+  fd_set native_writefds = {};
   if (writefds) {
     host_writefds.Load(writefds);
     host_writefds.Store(&native_writefds);
   }
-  host_set host_exceptfds = {0};
-  fd_set native_exceptfds = {0};
+  host_set host_exceptfds = {};
+  fd_set native_exceptfds = {};
   if (exceptfds) {
     host_exceptfds.Load(exceptfds);
     host_exceptfds.Store(&native_exceptfds);

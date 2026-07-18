@@ -14,7 +14,7 @@
 #include <rex/logging.h>
 #include <rex/hook.h>
 #include <rex/types.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xenumerator.h>
@@ -81,7 +81,7 @@ void XamFormatDateString_entry(u32 unk, u64 filetime, mapped_void output_buffer,
   auto st = xeGetLocalSystemTime(filetime);
   // TODO: format this depending on users locale?
   auto str = fmt::format(u"{:02d}/{:02d}/{}", st.wMonth, st.wDay, st.wYear);
-  rex::string::util_copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
+  rex::string::copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
 #else
   assert_always();
 #endif
@@ -95,7 +95,7 @@ void XamFormatTimeString_entry(u32 unk, u64 filetime, mapped_void output_buffer,
   auto st = xeGetLocalSystemTime(filetime);
   // TODO: format this depending on users locale?
   auto str = fmt::format(u"{:02d}:{:02d}", st.wHour, st.wMinute);
-  rex::string::util_copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
+  rex::string::copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
 #else
   assert_always();
 #endif
@@ -112,7 +112,7 @@ u32 keXamBuildResourceLocator(uint64_t module, std::u16string_view container,
   } else {
     path = fmt::format(u"section://{:X},{}#{}", (uint32_t)module, container, resource);
   }
-  rex::string::util_copy_and_swap_truncating(buffer_ptr.as<char16_t*>(), path, buffer_count);
+  rex::string::copy_and_swap_truncating(buffer_ptr.as<char16_t*>(), path, buffer_count);
   return 0;
 }
 

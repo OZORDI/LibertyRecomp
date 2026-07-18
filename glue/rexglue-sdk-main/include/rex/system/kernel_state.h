@@ -12,18 +12,21 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
-#include <rex/move_only_function.h>
+#include <rex/system/achievement_manager.h>
 #include <rex/system/thread_state.h>
 #include <rex/thread/fiber.h>
 #include <rex/system/util/native_list.h>
@@ -32,6 +35,8 @@
 #include <rex/system/xam/app_manager.h>
 #include <rex/system/xam/content_manager.h>
 #include <rex/system/xam/user_profile.h>
+#include <rex/platform/dynlib.h>
+#include <rex/system/function_dispatcher.h>
 #include <rex/system/xcontent.h>
 #include <rex/system/xmemory.h>
 #include <rex/system/xobject.h>
@@ -242,6 +247,17 @@ class KernelState {
   object_ref<UserModule> LoadUserModule(const std::string_view name, bool call_entry = true);
   void UnloadUserModule(const object_ref<UserModule>& module, bool call_entry = true);
 
+  // Recompiled module registry (populated by generated RegisterRecompiledModules)
+  struct RecompiledModuleInfo {
+    std::string pe_name;
+    std::string guest_path;
+    std::string shared_lib_name;
+  };
+
+  void RegisterRecompiledModule(const char* pe_name, const char* guest_path,
+                                const char* shared_lib_name);
+  std::optional<RecompiledModuleInfo> FindRecompiledModule(std::string_view guest_path);
+
   object_ref<KernelModule> GetKernelModule(const std::string_view name);
   template <typename T>
   object_ref<KernelModule> LoadKernelModule() {
@@ -258,6 +274,7 @@ class KernelState {
   // Terminates a title: Unloads all modules, and kills all guest threads.
   // This DOES NOT RETURN if called from a guest thread!
   void TerminateTitle();
+  bool is_terminating_title() const { return terminating_title_.load(std::memory_order_acquire); }
 
   void RegisterThread(XThread* thread);
   void UnregisterThread(XThread* thread);
@@ -286,34 +303,48 @@ class KernelState {
   void CompleteOverlappedImmediateEx(uint32_t overlapped_ptr, X_RESULT result,
                                      uint32_t extended_error, uint32_t length);
 
-  void CompleteOverlappedDeferred(rex::move_only_function<void()> completion_callback,
+  void CompleteOverlappedDeferred(std::function<void()> completion_callback,
                                   uint32_t overlapped_ptr, X_RESULT result,
-                                  rex::move_only_function<void()> pre_callback = nullptr,
-                                  rex::move_only_function<void()> post_callback = nullptr);
-  void CompleteOverlappedDeferredEx(rex::move_only_function<void()> completion_callback,
+                                  std::function<void()> pre_callback = nullptr,
+                                  std::function<void()> post_callback = nullptr);
+  void CompleteOverlappedDeferredEx(std::function<void()> completion_callback,
                                     uint32_t overlapped_ptr, X_RESULT result,
                                     uint32_t extended_error, uint32_t length,
-                                    rex::move_only_function<void()> pre_callback = nullptr,
-                                    rex::move_only_function<void()> post_callback = nullptr);
+                                    std::function<void()> pre_callback = nullptr,
+                                    std::function<void()> post_callback = nullptr);
 
-  void CompleteOverlappedDeferred(rex::move_only_function<X_RESULT()> completion_callback,
+  void CompleteOverlappedDeferred(std::function<X_RESULT()> completion_callback,
                                   uint32_t overlapped_ptr,
-                                  rex::move_only_function<void()> pre_callback = nullptr,
-                                  rex::move_only_function<void()> post_callback = nullptr);
+                                  std::function<void()> pre_callback = nullptr,
+                                  std::function<void()> post_callback = nullptr);
   void CompleteOverlappedDeferredEx(
-      rex::move_only_function<X_RESULT(uint32_t&, uint32_t&)> completion_callback,
-      uint32_t overlapped_ptr, rex::move_only_function<void()> pre_callback = nullptr,
-      rex::move_only_function<void()> post_callback = nullptr);
+      std::function<X_RESULT(uint32_t&, uint32_t&)> completion_callback, uint32_t overlapped_ptr,
+      std::function<void()> pre_callback = nullptr, std::function<void()> post_callback = nullptr);
 
   bool Save(stream::ByteStream* stream);
   bool Restore(stream::ByteStream* stream);
 
+  void SetLoadedAchievements(std::vector<AchievementInfo> achievements);
+  void UnlockAchievement(uint32_t id);
+  bool IsAchievementUnlocked(uint32_t id) const;
+  // Returns the unlock FILETIME (100-ns intervals since 1601-01-01), or 0 if locked.
+  uint64_t GetAchievementUnlockTime(uint32_t id) const;
+  std::vector<AchievementInfo> loaded_achievements() const;
+  AchievementManager& achievements() { return achievement_manager_; }
+  const AchievementManager& achievements() const { return achievement_manager_; }
+
+  using AchievementUnlockCallback = std::function<void(const AchievementInfo&)>;
+  AchievementListenerHandle RegisterAchievementUnlockCallback(AchievementUnlockCallback cb);
+
  private:
+  void SignalAllWaitableObjects();
+  void WaitForThreadsToExit(const std::vector<object_ref<XThread>>& threads, uint32_t timeout_ms);
   void LoadKernelModule(object_ref<KernelModule> kernel_module);
   void InitializeProcess(X_KPROCESS* process, uint32_t process_type, uint8_t unk_18, uint8_t unk_19,
                          uint8_t unk_1A);
   void SetProcessTLSVars(X_KPROCESS* process, uint32_t num_slots, uint32_t tls_data_size,
                          uint32_t tls_raw_data_address);
+  void LoadAchievementsData();
 
   Runtime* emulator_;
   memory::Memory* memory_;
@@ -344,16 +375,26 @@ class KernelState {
   object_ref<UserModule> executable_module_;
   std::vector<object_ref<KernelModule>> kernel_modules_;
   std::vector<object_ref<UserModule>> user_modules_;
+  // Paths in-flight in LoadUserModule. Guarded by the global critical region.
+  std::unordered_set<std::string> loading_paths_;
   std::vector<TerminateNotification> terminate_notifications_;
+  std::vector<RecompiledModuleInfo> recompiled_modules_;
+  std::unordered_map<std::string, rex::platform::DynamicLibrary> module_libraries_;
+  // FreeLibrary deferred to teardown so guest threads still in unloaded code
+  // don't return into freed pages. Drained at the end of ~KernelState.
+  std::vector<rex::platform::DynamicLibrary> deferred_unload_libraries_;
 
   uint32_t kernel_guest_globals_ = 0;
 
+  AchievementManager achievement_manager_;
+
   std::atomic<bool> dispatch_thread_running_;
+  std::atomic<bool> terminating_title_{false};
   object_ref<XHostThread> dispatch_thread_;
   // Must be guarded by the global critical region.
   util::NativeList dpc_list_;
   std::condition_variable_any dispatch_cond_;
-  std::list<rex::move_only_function<void()>> dispatch_queue_;
+  std::list<std::function<void()>> dispatch_queue_;
 
   friend class XObject;
 };

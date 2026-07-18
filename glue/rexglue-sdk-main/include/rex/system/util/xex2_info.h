@@ -15,13 +15,17 @@
 
 #include <rex/types.h>
 
+// XEX version word is packed MSB-first on disk. After be<> byte-swap to native
+// LE the layout in `value` is: bits 28-31 major, 24-27 minor, 8-23 build, 0-7
+// qfe. x86 LE compilers allocate bitfields LSB-first, so list LSB fields first
+// to match the on-disk packing.
 union xe_xex2_version_t {
   uint32_t value;
   struct {
-    uint32_t major : 4;
-    uint32_t minor : 4;
-    uint32_t build : 16;
     uint32_t qfe : 8;
+    uint32_t build : 16;
+    uint32_t minor : 4;
+    uint32_t major : 4;
   };
 };
 
@@ -372,13 +376,14 @@ struct xex2_opt_file_format_info {
   } compression_info;
 };
 
+// See xe_xex2_version_t for layout rationale.
 union xex2_version {
   uint32_t value;
   struct {
-    uint32_t major : 4;
-    uint32_t minor : 4;
-    uint32_t build : 16;
     uint32_t qfe : 8;
+    uint32_t build : 16;
+    uint32_t minor : 4;
+    uint32_t major : 4;
   };
 };
 

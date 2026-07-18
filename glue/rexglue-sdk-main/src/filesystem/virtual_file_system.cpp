@@ -134,12 +134,20 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
   auto* entry = device->ResolvePath(relative_path);
 
   if (entry) {
-    REXFS_INFO("VFS: '{}' -> '{}' -> device '{}' -> host '{}'", path,
-               had_symlink ? normalized_path : "(no symlink)", device->mount_path(),
-               entry->absolute_path());
+    if (had_symlink) {
+      REXFS_TRACE("VFS resolved '{}' via symlink '{}' on device '{}' -> '{}'", path,
+                  normalized_path, device->mount_path(), entry->absolute_path());
+    } else {
+      REXFS_TRACE("VFS resolved '{}' on device '{}' -> '{}'", path, device->mount_path(),
+                  entry->absolute_path());
+    }
   } else {
-    REXFS_WARN("VFS: '{}' -> '{}' -> device '{}' -> [entry not found]", path,
-               had_symlink ? normalized_path : "(no symlink)", device->mount_path());
+    if (had_symlink) {
+      REXFS_DEBUG("VFS: entry not found for '{}' (via symlink '{}') on device '{}'", path,
+                  normalized_path, device->mount_path());
+    } else {
+      REXFS_DEBUG("VFS: entry not found for '{}' on device '{}'", path, device->mount_path());
+    }
   }
 
   return entry;

@@ -1,7 +1,7 @@
 #include <rex/net/socket.h>
 #include <rex/platform.h>
 
-static_assert(REX_PLATFORM_POSIX, "This file is POSIX-only");
+static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
 
 #include <sys/ioctl.h>
 #include <unistd.h>

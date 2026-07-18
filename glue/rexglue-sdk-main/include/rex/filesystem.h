@@ -79,7 +79,8 @@ class FileHandle {
   // Opens the file, failing if it doesn't exist.
   // The desired_access bitmask denotes the permissions on the file.
   static std::unique_ptr<FileHandle> OpenExisting(const std::filesystem::path& path,
-                                                  uint32_t desired_access);
+                                                  uint32_t desired_access,
+                                                  bool allow_share_delete = false);
 
   virtual ~FileHandle() = default;
 
@@ -124,12 +125,6 @@ struct FileInfo {
 };
 bool GetInfo(const std::filesystem::path& path, FileInfo* out_info);
 std::vector<FileInfo> ListFiles(const std::filesystem::path& path);
-
-// Commits any pending writes for a libnx save-data mount to flash so they
-// persist across reboots. On non-Switch platforms this is a no-op. The
-// |mount_name| should be the libnx fsdev device name (the part before ':',
-// e.g. "save" for "save:/foo").
-void CommitSaveMount(const std::string& mount_name);
 
 #if REX_PLATFORM_ANDROID
 void AndroidInitialize();

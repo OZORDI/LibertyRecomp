@@ -22,9 +22,11 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/xtypes.h>
 
-#include <cstdint>
-#include <cstring>
-#include <vector>
+#if REX_PLATFORM_WIN32
+#include <windows.h>
+
+#include <bcrypt.h>
+#endif
 
 #include "crypto/TinySHA1.hpp"
 #include "crypto/des/des.cpp"
@@ -219,230 +221,105 @@ typedef struct {
 } XECRYPT_RSA;
 static_assert_size(XECRYPT_RSA, 0x10);
 
-// -----------------------------------------------------------------------------
-// Portable BigNum modexp for XeCryptBnQwNeRsaPubCrypt.
-//
-// The XECRYPT RSA blob stores the modulus as an array of qwords in "little-
-// endian qword" order: least-significant qword first, with each qword stored
-// in the platform's native endianness (host). qw_a (ciphertext) is in the same
-// layout, and qw_b (plaintext output) is produced in that same layout.
-//
-// Internally we convert to a uint32_t limb array (least-significant limb at
-// index 0, little-endian) so we can do 32x32->64 multiplies portably without
-// needing __uint128_t.
-// -----------------------------------------------------------------------------
-namespace {
-
-// Copy N qwords (host-endian in memory) into 2N uint32 limbs, little-endian
-// limb order. qwords are stored LS-qword-first in the source buffer.
-static void qw_le_to_limbs(const uint64_t* qw, uint32_t num_qw, uint32_t* limbs) {
-  for (uint32_t i = 0; i < num_qw; ++i) {
-    uint64_t v = qw[i];
-    limbs[2 * i + 0] = static_cast<uint32_t>(v & 0xFFFFFFFFu);
-    limbs[2 * i + 1] = static_cast<uint32_t>(v >> 32);
-  }
-}
-
-static void limbs_to_qw_le(const uint32_t* limbs, uint32_t num_qw, uint64_t* qw) {
-  for (uint32_t i = 0; i < num_qw; ++i) {
-    uint64_t lo = limbs[2 * i + 0];
-    uint64_t hi = limbs[2 * i + 1];
-    qw[i] = lo | (hi << 32);
-  }
-}
-
-// Compare a (n limbs) vs b (n limbs). Returns -1, 0, 1.
-static int bn_cmp(const uint32_t* a, const uint32_t* b, uint32_t n) {
-  for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
-    if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
-  }
-  return 0;
-}
-
-// r = a - b  (a,b,r each n limbs).  Returns final borrow.
-static uint32_t bn_sub(uint32_t* r, const uint32_t* a, const uint32_t* b, uint32_t n) {
-  uint64_t borrow = 0;
-  for (uint32_t i = 0; i < n; ++i) {
-    uint64_t t = static_cast<uint64_t>(a[i]) - b[i] - borrow;
-    r[i] = static_cast<uint32_t>(t);
-    borrow = (t >> 32) & 1;
-  }
-  return static_cast<uint32_t>(borrow);
-}
-
-// r = a * b mod m.  a,b,m are n limbs.  r is n limbs.
-// Uses schoolbook multiply into 2n buffer then shift-subtract reduce.
-static void bn_mulmod(uint32_t* r, const uint32_t* a, const uint32_t* b, const uint32_t* m,
-                      uint32_t n) {
-  std::vector<uint32_t> prod(2 * n, 0);
-  // schoolbook mul
-  for (uint32_t i = 0; i < n; ++i) {
-    uint64_t carry = 0;
-    uint64_t ai = a[i];
-    for (uint32_t j = 0; j < n; ++j) {
-      uint64_t cur = prod[i + j] + ai * b[j] + carry;
-      prod[i + j] = static_cast<uint32_t>(cur);
-      carry = cur >> 32;
-    }
-    prod[i + n] = static_cast<uint32_t>(carry);
-  }
-
-  // Shift-subtract mod reduction.
-  // We reduce prod (2n limbs) modulo m (n limbs) by aligning m shifted left
-  // to the top of prod and conditionally subtracting, then shifting right by
-  // one bit per iteration. Total iterations = n*32 bits.
-  std::vector<uint32_t> mshift(2 * n, 0);
-  // Start with m shifted so its MSB aligns with bit (2n*32 - 1).
-  // Find MSB of m.
-  int msb = -1;
-  for (int i = static_cast<int>(n) - 1; i >= 0 && msb < 0; --i) {
-    if (m[i]) {
-      uint32_t v = m[i];
-      int bit = 31;
-      while (((v >> bit) & 1u) == 0) --bit;
-      msb = i * 32 + bit;
-    }
-  }
-  if (msb < 0) {
-    // modulus is zero — undefined; zero result
-    std::memset(r, 0, n * sizeof(uint32_t));
-    return;
-  }
-
-  // Shift m left by (2n*32 - 1 - msb) into mshift.
-  const int total_bits = static_cast<int>(2 * n * 32);
-  int shift_amt = total_bits - 1 - msb;
-  // Place m into low part of mshift then shift left by shift_amt.
-  for (uint32_t i = 0; i < n; ++i) mshift[i] = m[i];
-  // shift left by shift_amt bits in-place
-  {
-    int word_shift = shift_amt / 32;
-    int bit_shift = shift_amt % 32;
-    if (word_shift > 0) {
-      for (int i = static_cast<int>(2 * n) - 1; i >= 0; --i) {
-        mshift[i] = (i - word_shift >= 0) ? mshift[i - word_shift] : 0;
-      }
-    }
-    if (bit_shift > 0) {
-      uint32_t carry = 0;
-      for (uint32_t i = 0; i < 2 * n; ++i) {
-        uint32_t v = mshift[i];
-        mshift[i] = (v << bit_shift) | carry;
-        carry = v >> (32 - bit_shift);
-      }
-    }
-  }
-
-  // Iterate: at each step, if prod >= mshift, subtract; then shift mshift right 1.
-  // We do this shift_amt + 1 times so that the final mshift equals m.
-  int iterations = shift_amt + 1;
-  for (int it = 0; it < iterations; ++it) {
-    // compare prod vs mshift (2n limbs)
-    int cmp = 0;
-    for (int i = static_cast<int>(2 * n) - 1; i >= 0; --i) {
-      if (prod[i] != mshift[i]) {
-        cmp = prod[i] < mshift[i] ? -1 : 1;
-        break;
-      }
-    }
-    if (cmp >= 0) {
-      // prod -= mshift
-      uint64_t borrow = 0;
-      for (uint32_t i = 0; i < 2 * n; ++i) {
-        uint64_t t = static_cast<uint64_t>(prod[i]) - mshift[i] - borrow;
-        prod[i] = static_cast<uint32_t>(t);
-        borrow = (t >> 32) & 1;
-      }
-    }
-    // shift mshift right 1 bit
-    uint32_t carry = 0;
-    for (int i = static_cast<int>(2 * n) - 1; i >= 0; --i) {
-      uint32_t v = mshift[i];
-      mshift[i] = (v >> 1) | (carry << 31);
-      carry = v & 1u;
-    }
-  }
-
-  // prod[0..n-1] now holds r; ensure high half is zero (it should be).
-  std::memcpy(r, prod.data(), n * sizeof(uint32_t));
-}
-
-// r = base^exp mod m. base, m, r: n limbs. exp is up to 32 bits (matches
-// XECRYPT_RSA public_exponent field, which is a u32).
-static void bn_modexp_u32(uint32_t* r, const uint32_t* base, uint32_t exp, const uint32_t* m,
-                          uint32_t n) {
-  // result = 1
-  std::vector<uint32_t> result(n, 0);
-  result[0] = 1;
-  std::vector<uint32_t> cur(base, base + n);
-  std::vector<uint32_t> tmp(n, 0);
-
-  // If modulus is 1, result is 0.
-  bool mod_is_one = (m[0] == 1);
-  if (mod_is_one) {
-    for (uint32_t i = 1; i < n; ++i)
-      if (m[i]) {
-        mod_is_one = false;
-        break;
-      }
-  }
-  if (mod_is_one) {
-    std::memset(r, 0, n * sizeof(uint32_t));
-    return;
-  }
-
-  // Reduce initial base mod m in case it's >= m.
-  while (bn_cmp(cur.data(), m, n) >= 0) {
-    bn_sub(cur.data(), cur.data(), m, n);
-  }
-
-  while (exp) {
-    if (exp & 1u) {
-      bn_mulmod(tmp.data(), result.data(), cur.data(), m, n);
-      result.swap(tmp);
-    }
-    exp >>= 1;
-    if (exp) {
-      bn_mulmod(tmp.data(), cur.data(), cur.data(), m, n);
-      cur.swap(tmp);
-    }
-  }
-
-  std::memcpy(r, result.data(), n * sizeof(uint32_t));
-}
-
-}  // namespace
-
 u32 XeCryptBnQwNeRsaPubCrypt_entry(ppc_ptr_t<uint64_t> qw_a, ppc_ptr_t<uint64_t> qw_b,
                                    ppc_ptr_t<XECRYPT_RSA> rsa) {
   // 0 indicates failure (but not a BOOL return value)
-  const uint32_t num_qw = rsa->size;
-  if (num_qw == 0 || num_qw > 64) {  // sanity: up to 4096-bit
-    REXKRNL_ERROR("XeCryptBnQwNeRsaPubCrypt: invalid modulus size {}", num_qw);
+#if !REX_PLATFORM_WIN32
+  REXKRNL_ERROR(
+      "XeCryptBnQwNeRsaPubCrypt called but no implementation available for "
+      "this platform!");
+  assert_always();
+  return 1;
+#else
+  uint32_t modulus_size = rsa->size * 8;
+
+  // Convert XECRYPT blob into BCrypt format
+  ULONG key_size = sizeof(BCRYPT_RSAKEY_BLOB) + sizeof(uint32_t) + modulus_size;
+  auto key_buf = std::make_unique<uint8_t[]>(key_size);
+  auto* key_header = reinterpret_cast<BCRYPT_RSAKEY_BLOB*>(key_buf.get());
+
+  key_header->Magic = BCRYPT_RSAPUBLIC_MAGIC;
+  key_header->BitLength = modulus_size * 8;
+  key_header->cbPublicExp = sizeof(uint32_t);
+  key_header->cbModulus = modulus_size;
+  key_header->cbPrime1 = key_header->cbPrime2 = 0;
+
+  // Copy in exponent/modulus, luckily these are BE inside BCrypt blob
+  uint32_t* key_exponent = reinterpret_cast<uint32_t*>(&key_header[1]);
+  *key_exponent = rsa->public_exponent.value;
+
+  // ...except modulus needs to be reversed in 64-bit chunks for BCrypt to make
+  // use of it properly for some reason
+  uint64_t* key_modulus = reinterpret_cast<uint64_t*>(&key_exponent[1]);
+  uint64_t* xecrypt_modulus = reinterpret_cast<uint64_t*>(&rsa[1]);
+  std::reverse_copy(xecrypt_modulus, xecrypt_modulus + rsa->size, key_modulus);
+
+  BCRYPT_ALG_HANDLE hAlgorithm = NULL;
+  NTSTATUS status =
+      BCryptOpenAlgorithmProvider(&hAlgorithm, BCRYPT_RSA_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
+
+  if (!BCRYPT_SUCCESS(status)) {
+    REXKRNL_ERROR(
+        "XeCryptBnQwNeRsaPubCrypt: BCryptOpenAlgorithmProvider failed with "
+        "status {:#X}!",
+        status);
     return 0;
   }
 
-  const uint32_t num_limbs = num_qw * 2;  // uint32 limbs
+  BCRYPT_KEY_HANDLE hKey = NULL;
+  status = BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_RSAPUBLIC_BLOB, &hKey, key_buf.get(),
+                               key_size, 0);
 
-  // XECRYPT_RSA stores modulus immediately after the header, as num_qw qwords
-  // in LS-qword-first order (host-endian per qword).
-  uint64_t* modulus_qw = reinterpret_cast<uint64_t*>(&rsa[1]);
+  if (!BCRYPT_SUCCESS(status)) {
+    REXKRNL_ERROR(
+        "XeCryptBnQwNeRsaPubCrypt: BCryptImportKeyPair failed with status "
+        "{:#X}!",
+        status);
 
-  std::vector<uint32_t> mod_limbs(num_limbs, 0);
-  std::vector<uint32_t> a_limbs(num_limbs, 0);
-  std::vector<uint32_t> r_limbs(num_limbs, 0);
+    if (hAlgorithm) {
+      BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+    }
 
-  qw_le_to_limbs(modulus_qw, num_qw, mod_limbs.data());
-  qw_le_to_limbs(static_cast<uint64_t*>(qw_a), num_qw, a_limbs.data());
+    return 0;
+  }
 
-  uint32_t exponent = rsa->public_exponent.value;
-  if (exponent == 0) exponent = 65537;  // safety default
+  // Byteswap & reverse the input into output, as BCrypt wants MSB first
+  uint64_t* output = qw_b;
+  uint8_t* output_bytes = reinterpret_cast<uint8_t*>(output);
+  memory::copy_and_swap<uint64_t>(output, qw_a, rsa->size);
+  std::reverse(output_bytes, output_bytes + modulus_size);
 
-  bn_modexp_u32(r_limbs.data(), a_limbs.data(), exponent, mod_limbs.data(), num_limbs);
+  // BCryptDecrypt only works with private keys, fortunately BCryptEncrypt
+  // performs the right actions needed for us to decrypt the input
+  ULONG result_size = 0;
+  status = BCryptEncrypt(hKey, output_bytes, modulus_size, nullptr, nullptr, 0, output_bytes,
+                         modulus_size, &result_size, BCRYPT_PAD_NONE);
 
-  limbs_to_qw_le(r_limbs.data(), num_qw, static_cast<uint64_t*>(qw_b));
-  return 1;
+  assert(result_size == modulus_size);
+
+  if (!BCRYPT_SUCCESS(status)) {
+    REXKRNL_ERROR("XeCryptBnQwNeRsaPubCrypt: BCryptEncrypt failed with status {:#X}!", status);
+  } else {
+    // Reverse data & byteswap again so data is as game expects
+    std::reverse(output_bytes, output_bytes + modulus_size);
+    memory::copy_and_swap(output, output, rsa->size);
+  }
+
+  if (hKey) {
+    BCryptDestroyKey(hKey);
+  }
+  if (hAlgorithm) {
+    BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+  }
+
+  return BCRYPT_SUCCESS(status) ? 1 : 0;
+#endif
 }
+#if REX_PLATFORM_WIN32
+
+#else
+
+#endif
 
 u32 XeCryptBnDwLePkcs1Verify_entry(mapped_void hash, mapped_void sig, u32 size) {
   // BOOL return value

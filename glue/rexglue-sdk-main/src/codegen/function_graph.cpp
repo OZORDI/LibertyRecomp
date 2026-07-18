@@ -25,7 +25,6 @@
 #include <rex/codegen/function_scanner.h>
 #include <rex/logging.h>
 #include <rex/memory/utils.h>
-#include <rex/platform.h>
 
 #include "codegen_logging.h"
 
@@ -345,17 +344,6 @@ void emit_print(std::string& out, fmt::format_string<Args...> fmt, Args&&... arg
   fmt::vformat_to(std::back_inserter(out), fmt.get(), fmt::make_format_args(args...));
 }
 
-void emit_weak_function_forwarder(std::string& out, const std::string& name) {
-#if REX_PLATFORM_MAC
-  emit_println(out, "PPC_EXTERN_FUNC(__imp__{});", name);
-  emit_println(out, "PPC_WEAK_FUNC({}) {{", name);
-  emit_println(out, "\t__imp__{}(ctx, base);", name);
-  emit_println(out, "}}");
-#else
-  emit_println(out, "__attribute__((alias(\"__imp__{}\"))) PPC_WEAK_FUNC({});", name, name);
-#endif
-}
-
 }  // namespace
 
 std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
@@ -379,9 +367,8 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
     }
 
     emit_println(out, "// STUB: Function at 0x{:08X} has no discovered code blocks", base());
-    emit_weak_function_forwarder(out, name);
-    emit_println(out, "PPC_FUNC_IMPL(__imp__{}) {{", name);
-    emit_println(out, "\tPPC_FUNC_PROLOGUE();");
+    emit_println(out, "DEFINE_REX_FUNC({}) {{", name);
+    emit_println(out, "\tREX_FUNC_PROLOGUE();");
     emit_println(out, "}}\n");
     return out;
   }
@@ -492,9 +479,8 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
   }
 
   // Function signature with weak/alias pattern
-  emit_weak_function_forwarder(out, name);
-  emit_println(out, "PPC_FUNC_IMPL(__imp__{}) {{", name);
-  emit_println(out, "\tPPC_FUNC_PROLOGUE();");
+  emit_println(out, "DEFINE_REX_FUNC({}) {{", name);
+  emit_println(out, "\tREX_FUNC_PROLOGUE();");
 
   // --- Second pass: emit instruction code ---
   const JumpTable* activeJt = nullptr;
@@ -578,8 +564,8 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
               for (auto label : activeJt->targets) {
                 labels.emplace(label);
               }
-              REXCODEGEN_INFO("Late-detected jump table at 0x{:08X} with {} entries", blockBase,
-                              activeJt->targets.size());
+              REXCODEGEN_TRACE("Late-detected jump table at 0x{:08X} with {} entries", blockBase,
+                               activeJt->targets.size());
             }
           }
         }
@@ -1070,10 +1056,10 @@ size_t FunctionGraph::sealAllReady() {
         sealed++;
       } else {
         couldNotSeal++;
-        REXCODEGEN_WARN("FunctionGraph::sealAllReady: 0x{:08X} ({}) cannot seal ({} unresolved)",
-                        base, node->name(), node->unresolvedJumps().size());
+        REXCODEGEN_DEBUG("FunctionGraph::sealAllReady: 0x{:08X} ({}) cannot seal ({} unresolved)",
+                         base, node->name(), node->unresolvedJumps().size());
         for (const auto& jump : node->unresolvedJumps()) {
-          REXCODEGEN_WARN("  0x{:08X} -> 0x{:08X}", jump.site, jump.target);
+          REXCODEGEN_DEBUG("  0x{:08X} -> 0x{:08X}", jump.site, jump.target);
         }
       }
     }
@@ -1116,7 +1102,7 @@ void FunctionGraph::sealAll() {
     throw std::runtime_error(msg);
   }
 
-  REXCODEGEN_INFO("FunctionGraph::sealAll: all {} functions sealed", functions_.size());
+  REXCODEGEN_TRACE("FunctionGraph::sealAll: all {} functions sealed", functions_.size());
 }
 
 //=============================================================================

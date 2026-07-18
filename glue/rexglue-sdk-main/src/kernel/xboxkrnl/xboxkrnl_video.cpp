@@ -13,12 +13,12 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 
 #include <rex/cvar.h>
-#include <rex/graphics/flags.h>
-#include <rex/graphics/graphics_system.h>
 #include <rex/graphics/pipeline/texture/info.h>
+#include <rex/graphics/register_file.h>
 #include <rex/graphics/video_mode_util.h>
 #include <rex/graphics/xenos.h>
 #include <rex/kernel/xboxkrnl/private.h>
@@ -32,23 +32,6 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/xtypes.h>
 #include <rex/ui/flags.h>
-
-REXCVAR_DEFINE_INT32(video_mode_width, 1280, "GPU", "Guest video mode width in pixels")
-    .range(640, 0x0FFF)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-REXCVAR_DEFINE_INT32(video_mode_height, 720, "GPU", "Guest video mode height in pixels")
-    .range(480, 0x0FFF)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-REXCVAR_DEFINE_STRING(resolution, "", "GPU",
-                      "Common resolution preset for both guest video mode and startup window (for "
-                      "example: 720p, 1080p, 1440p, 4k, 1280x720)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-REXCVAR_DEFINE_DOUBLE(video_mode_refresh_rate, 60.0, "GPU", "Guest video mode refresh rate in Hz")
-    .range(24.0, 240.0)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
 // Display gamma type: 0 - linear, 1 - sRGB (CRT), 2 - BT.709 (HDTV), 3 - power
@@ -93,6 +76,12 @@ uint32_t GetConfiguredVideoModeHeight() {
 float GetConfiguredVideoModeRefreshRate() {
   double refresh_rate_hz = std::clamp(REXCVAR_GET(video_mode_refresh_rate), 24.0, 240.0);
   return float(refresh_rate_hz);
+}
+
+void WarnNoGpuEmulation(const char* export_name, std::atomic<bool>& warned) {
+  if (!warned.exchange(true)) {
+    REXKRNL_WARN("{}: no GPU emulation loaded (gpu_plugin not set); call ignored", export_name);
+  }
 }
 }  // namespace
 
@@ -327,10 +316,12 @@ void VdSetGraphicsInterruptCallback_entry(u32 callback, mapped_void user_data) {
   // callback takes 2 params
   // r3 = bool 0/1 - 0 is normal interrupt, 1 is some acquire/lock mumble
   // r4 = user_data (r4 of VdSetGraphicsInterruptCallback)
-  auto* graphics_system =
-      static_cast<graphics::GraphicsSystem*>(REX_KERNEL_STATE()->emulator()->graphics_system());
-  if (!graphics_system)
+  auto* graphics_system = REX_KERNEL_STATE()->emulator()->graphics_system();
+  if (!graphics_system) {
+    static std::atomic<bool> warned{false};
+    WarnNoGpuEmulation("VdSetGraphicsInterruptCallback", warned);
     return;
+  }
   graphics_system->SetInterruptCallback(callback, user_data.guest_address());
 }
 
@@ -338,19 +329,23 @@ void VdInitializeRingBuffer_entry(mapped_void ptr, i32 size_log2) {
   // r3 = result of MmGetPhysicalAddress
   // r4 = log2(size)
   // Buffer pointers are from MmAllocatePhysicalMemory with WRITE_COMBINE.
-  auto* graphics_system =
-      static_cast<graphics::GraphicsSystem*>(REX_KERNEL_STATE()->emulator()->graphics_system());
-  if (!graphics_system)
+  auto* graphics_system = REX_KERNEL_STATE()->emulator()->graphics_system();
+  if (!graphics_system) {
+    static std::atomic<bool> warned{false};
+    WarnNoGpuEmulation("VdInitializeRingBuffer", warned);
     return;
+  }
   graphics_system->InitializeRingBuffer(ptr.guest_address(), size_log2);
 }
 
 void VdEnableRingBufferRPtrWriteBack_entry(mapped_void ptr, i32 block_size_log2) {
   // r4 = log2(block size), 6, usually --- <=19
-  auto* graphics_system =
-      static_cast<graphics::GraphicsSystem*>(REX_KERNEL_STATE()->emulator()->graphics_system());
-  if (!graphics_system)
+  auto* graphics_system = REX_KERNEL_STATE()->emulator()->graphics_system();
+  if (!graphics_system) {
+    static std::atomic<bool> warned{false};
+    WarnNoGpuEmulation("VdEnableRingBufferRPtrWriteBack", warned);
     return;
+  }
   graphics_system->EnableReadPointerWriteBack(ptr.guest_address(), block_size_log2);
 }
 

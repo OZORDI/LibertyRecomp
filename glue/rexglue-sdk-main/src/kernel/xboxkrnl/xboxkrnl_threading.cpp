@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -107,12 +108,10 @@ object_ref<T> LookupNamedObject(KernelState* kernel_state, uint32_t obj_attribut
 u32 ExCreateThread_entry(mapped_u32 handle_ptr, u32 stack_size, mapped_u32 thread_id_ptr,
                          u32 xapi_thread_startup, mapped_void start_address,
                          mapped_void start_context, u32 creation_flags) {
-  auto* ppc_ctx_ct = current_ppc_context();
-  REXKRNL_INFO(
-      "ExCreateThread stack={:#x} xapi_startup={:#x} start={:#x} context={:#x} flags={:#x} guest_lr={:08X}",
+  REXKRNL_IMPORT_TRACE(
+      "ExCreateThread", "stack={:#x} xapi_startup={:#x} start={:#x} context={:#x} flags={:#x}",
       (uint32_t)stack_size, (uint32_t)xapi_thread_startup, start_address.guest_address(),
-      start_context.guest_address(), (uint32_t)creation_flags,
-      ppc_ctx_ct ? static_cast<uint32_t>(ppc_ctx_ct->lr) : 0u);
+      start_context.guest_address(), (uint32_t)creation_flags);
   // http://jafile.com/uploads/scoop/main.cpp.txt
   // DWORD
   // LPHANDLE Handle,
@@ -182,7 +181,7 @@ u32 NtResumeThread_entry(u32 handle, mapped_u32 suspend_count_ptr) {
 
   auto thread = REX_KERNEL_OBJECTS()->LookupObject<XThread>(handle);
   if (thread) {
-    REXKRNL_INFO("[NtResumeThread] handle={:08X} thread='{}'", uint32_t(handle), thread->name());
+    REXKRNL_TRACE("[NtResumeThread] handle={:08X} thread={}", uint32_t(handle), thread->name());
     result = thread->Resume(&suspend_count);
   } else {
     REXKRNL_WARN("[NtResumeThread] handle={:08X} NOT FOUND", uint32_t(handle));
@@ -227,7 +226,7 @@ u32 NtSuspendThread_entry(u32 handle, mapped_u32 suspend_count_ptr) {
     }
 
     REXKRNL_TRACE("[NtSuspendThread] handle={:08X} thread={}", uint32_t(handle), thread->name());
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
     auto* current_thread = XThread::GetCurrentThread();
     bool is_self_suspend = current_thread && current_thread == thread.get();
     if (is_self_suspend) {
@@ -470,10 +469,7 @@ uint32_t xeKeSetEvent(X_KEVENT* event_ptr, uint32_t increment, uint32_t wait) {
     return 0;
   }
 
-  uint32_t result = ev->Set(increment, !!wait);
-  REXKRNL_INFO("KeSetEvent event_guest={:08X} prev_state={} increment={}",
-               event_ptr ? static_cast<uint32_t>(ev->guest_object()) : 0u, result, increment);
-  return result;
+  return ev->Set(increment, !!wait);
 }
 
 u32 KeSetEvent_entry(ppc_ptr_t<X_KEVENT> event_ptr, u32 increment, u32 wait) {
@@ -528,11 +524,6 @@ u32 NtCreateEvent_entry(mapped_u32 handle_ptr, ppc_ptr_t<X_OBJECT_ATTRIBUTES> ob
   if (handle_ptr) {
     *handle_ptr = ev->handle();
   }
-  auto* ppc_ctx_ev = current_ppc_context();
-  REXKRNL_INFO(
-      "NtCreateEvent handle={:08X} event_type={} initial_state={} guest_lr={:08X}",
-      handle_ptr ? static_cast<uint32_t>(*handle_ptr) : 0u, event_type, initial_state,
-      ppc_ctx_ev ? static_cast<uint32_t>(ppc_ctx_ev->lr) : 0u);
   return X_STATUS_SUCCESS;
 }
 
@@ -542,12 +533,10 @@ uint32_t xeNtSetEvent(uint32_t handle, rex::be<uint32_t>* previous_state_ptr) {
   auto ev = REX_KERNEL_OBJECTS()->LookupObject<XEvent>(handle);
   if (ev) {
     int32_t was_signalled = ev->Set(0, false);
-    REXKRNL_INFO("NtSetEvent handle={:08X} prev_state={}", handle, was_signalled);
     if (previous_state_ptr) {
       *previous_state_ptr = static_cast<uint32_t>(was_signalled);
     }
   } else {
-    REXKRNL_WARN("NtSetEvent INVALID_HANDLE handle={:08X}", handle);
     result = X_STATUS_INVALID_HANDLE;
   }
 
@@ -662,12 +651,6 @@ u32 NtCreateSemaphore_entry(mapped_u32 handle_ptr, mapped_void obj_attributes_pt
     *handle_ptr = sem->handle();
   }
 
-  auto* ppc_ctx_sem = current_ppc_context();
-  REXKRNL_INFO(
-      "NtCreateSemaphore handle={:08X} initial_count={} max_count={} guest_lr={:08X}",
-      handle_ptr ? static_cast<uint32_t>(*handle_ptr) : 0u, count, limit,
-      ppc_ctx_sem ? static_cast<uint32_t>(ppc_ctx_sem->lr) : 0u);
-
   return X_STATUS_SUCCESS;
 }
 
@@ -678,13 +661,10 @@ u32 NtReleaseSemaphore_entry(u32 sem_handle, u32 release_count, mapped_u32 previ
   auto sem = REX_KERNEL_OBJECTS()->LookupObject<XSemaphore>(sem_handle);
   if (sem) {
     bool success = sem->ReleaseSemaphore(static_cast<int32_t>(release_count), &previous_count);
-    REXKRNL_INFO("NtReleaseSemaphore handle={:08X} release_count={} prev_count={} ok={}",
-                 sem_handle, release_count, previous_count, success);
     if (!success) {
       result = X_STATUS_SEMAPHORE_LIMIT_EXCEEDED;
     }
   } else {
-    REXKRNL_WARN("NtReleaseSemaphore INVALID_HANDLE handle={:08X}", sem_handle);
     result = X_STATUS_INVALID_HANDLE;
   }
   if (previous_count_ptr) {
@@ -877,23 +857,11 @@ u32 NtWaitForSingleObjectEx_entry(u32 object_handle, u32 wait_mode, u32 alertabl
   auto object = REX_KERNEL_OBJECTS()->LookupObject<XObject>(object_handle);
   if (object) {
     uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
-    int64_t signed_timeout = timeout_ptr ? static_cast<int64_t>(timeout) : -1;
-    // Trace the wait so we can correlate handle lifecycles with what the
-    // guest is actually blocked on. Also capture guest LR to identify which
-    // PPC function called into the wait (helps trace missing signalers).
-    auto* ppc_ctx = current_ppc_context();
-    uint32_t guest_lr = ppc_ctx ? static_cast<uint32_t>(ppc_ctx->lr) : 0;
-    REXKRNL_INFO(
-        "NtWaitForSingleObjectEx enter handle={:08X} obj={} alertable={} timeout={} guest_lr={:08X}",
-        object_handle, typeid(*object).name(), alertable, signed_timeout, guest_lr);
     result = object->Wait(3, wait_mode, alertable, timeout_ptr ? &timeout : nullptr);
-    REXKRNL_INFO("NtWaitForSingleObjectEx exit  handle={:08X} status={:08X}",
-                 object_handle, (uint32_t)result);
     if (alertable && result == X_STATUS_USER_APC) {
       XThread::GetCurrentThread()->DeliverAPCs();
     }
   } else {
-    REXKRNL_WARN("NtWaitForSingleObjectEx INVALID_HANDLE handle={:08X}", object_handle);
     result = X_STATUS_INVALID_HANDLE;
   }
 
@@ -999,8 +967,9 @@ static void xeKfLowerIrql(PPCContext* ctx, unsigned char new_irql) {
 uint32_t xeKeKfAcquireSpinLock(PPCContext* ctx, X_KSPINLOCK* lock, bool change_irql) {
   uint32_t old_irql = change_irql ? xeKfRaiseIrql(ctx, IRQL_DISPATCH) : 0;
   uint32_t pcr_addr = static_cast<uint32_t>(ctx->r13.u64);
-  assert_true(lock->prcb_of_owner != rex::byte_swap(pcr_addr));  // deadlock detection
-  while (!rex::thread::atomic_cas(0u, rex::byte_swap(pcr_addr), &lock->prcb_of_owner.value)) {
+  const uint32_t self = rex::byte_swap(pcr_addr);
+  assert_true(lock->prcb_of_owner.value != self);  // self-deadlock detection
+  while (!rex::thread::atomic_cas(0u, self, &lock->prcb_of_owner.value)) {
     rex::thread::MaybeYield();
   }
   return old_irql;
@@ -1379,7 +1348,7 @@ u32 InterlockedPushEntrySList_entry(ppc_ptr_t<X_SLIST_HEADER> plist_ptr,
   assert_not_null(entry);
 
   alignas(8) X_SLIST_HEADER old_hdr = *plist_ptr;
-  alignas(8) X_SLIST_HEADER new_hdr = {0};
+  alignas(8) X_SLIST_HEADER new_hdr = {};
   uint32_t old_head = 0;
   do {
     old_hdr = *plist_ptr;

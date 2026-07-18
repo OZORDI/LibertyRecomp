@@ -50,15 +50,10 @@ class CodegenPipeline {
    */
   static Result<CodegenPipeline> Create(const std::filesystem::path& configPath);
 
-  /**
-   * Run the full pipeline: Analyze -> Recompile.
-   *
-   * @param force If true, generate output even with validation errors
-   * @return Success or error with description
-   */
   Result<void> Run(bool force = false);
+  Result<void> RunAnalyze();
+  Result<void> RunWrite(bool force = false);
 
-  /// Access context for CLI needs (output path, project name, etc.)
   CodegenContext& context() { return *ctx_; }
   const CodegenContext& context() const { return *ctx_; }
 

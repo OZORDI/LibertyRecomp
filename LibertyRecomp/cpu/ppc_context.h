@@ -3,7 +3,7 @@
 // project header from `gta4_config.h` → `gta4_init.h` and the image/code-size
 // defines from `PPC_*` → `REX_*`. Keep the old PPC_* aliases so Liberty's
 // kernel/memory.cpp + main.cpp don't need wholesale renames.
-#include "../../glue/gta4-recomp/generated/gta4_init.h"
+#include "../../glue/rexglue-sdk-main/gta4-recomp/generated/gta4_init.h"
 #ifndef PPC_IMAGE_BASE
   #define PPC_IMAGE_BASE REX_IMAGE_BASE
   #define PPC_IMAGE_SIZE REX_IMAGE_SIZE

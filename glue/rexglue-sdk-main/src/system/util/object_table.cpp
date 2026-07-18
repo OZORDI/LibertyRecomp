@@ -117,11 +117,7 @@ X_STATUS ObjectTable::AddHandle(XObject* object, X_HANDLE* out_handle) {
       // Retain so long as the object is in the table.
       object->Retain();
 
-      // Promoted from NOISY_DEBUG → INFO so every NT handle allocation is
-      // visible in release logs. Used to trace deadlocks where a guest wait on
-      // an F8xxxxxx handle never resolves because the creator/signaler chain
-      // is misbehaving. If this becomes too noisy, re-gate behind a CVAR.
-      REXSYS_INFO("Added handle:{:08X} for {}", handle, typeid(*object).name());
+      REXSYS_NOISY_DEBUG("Added handle:{:08X} for {}", handle, typeid(*object).name());
     }
   }
 

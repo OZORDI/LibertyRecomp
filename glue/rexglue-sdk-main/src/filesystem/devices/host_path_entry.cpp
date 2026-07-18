@@ -56,7 +56,8 @@ X_STATUS HostPathEntry::Open(uint32_t desired_access, File** out_file) {
     REXFS_ERROR("Attempting to open file for write access on read-only device");
     return X_STATUS_ACCESS_DENIED;
   }
-  auto file_handle = rex::filesystem::FileHandle::OpenExisting(host_path_, desired_access);
+  auto file_handle = rex::filesystem::FileHandle::OpenExisting(
+      host_path_, desired_access, static_cast<HostPathDevice*>(device_)->allow_share_delete());
   if (!file_handle) {
     // TODO(benvanik): pick correct response.
     return X_STATUS_NO_SUCH_FILE;
@@ -118,7 +119,7 @@ bool HostPathEntry::DeleteEntryInternal(Entry* entry) {
   }
 }
 
-void HostPathEntry::RenameEntryInternal(const std::vector<std::string_view>& path_parts) {
+X_STATUS HostPathEntry::RenameEntryInternal(const std::vector<std::string_view>& path_parts) {
   auto new_host_path = static_cast<HostPathDevice*>(device_)->host_path();
   for (const auto& path_part : path_parts) {
     new_host_path /= rex::to_path(path_part);
@@ -129,10 +130,11 @@ void HostPathEntry::RenameEntryInternal(const std::vector<std::string_view>& pat
   if (ec) {
     REXFS_ERROR("RenameEntryInternal: failed to rename '{}' to '{}': {}",
                 rex::path_to_utf8(host_path_), rex::path_to_utf8(new_host_path), ec.message());
-    return;
+    return X_STATUS_ACCESS_DENIED;
   }
 
   host_path_ = new_host_path;
+  return X_STATUS_SUCCESS;
 }
 
 void HostPathEntry::update() {

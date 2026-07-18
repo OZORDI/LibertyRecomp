@@ -27,6 +27,15 @@ REXCVAR_DEFINE_STRING(test_init_only_flag, "initial", "Test", "Init-only flag")
 REXCVAR_DEFINE_BOOL(test_restart_flag, false, "Test", "Requires restart")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// Command dispatch test fixtures.
+static int g_noarg_cmd_calls = 0;
+static std::string g_args_cmd_received;
+REXCVAR_DEFINE_COMMAND(
+    test_noarg_cmd, []() { ++g_noarg_cmd_calls; }, "Test", "No-arg test command");
+REXCVAR_DEFINE_COMMAND_ARGS(
+    test_args_cmd, [](std::string_view a) { g_args_cmd_received = std::string(a); }, "Test",
+    "Arg test command");
+
 TEST_CASE("cvar registry stores flag metadata", "[cvar]") {
   auto flags = rex::cvar::ListFlags();
 
@@ -180,6 +189,42 @@ TEST_CASE("cvar TOML config loading", "[cvar]") {
     auto missing = temp_dir / "nonexistent.toml";
     rex::cvar::LoadConfig(missing);
   }
+}
+
+TEST_CASE("cvar config replays values for flags registered after loading", "[cvar]") {
+  rex::cvar::testing::ResetAllForTesting();
+
+  auto config_path = std::filesystem::temp_directory_path() / "test_deferred_cvar.toml";
+  {
+    std::ofstream file(config_path);
+    file << "test_deferred_flag = \"F10\"\n";
+  }
+
+  rex::cvar::LoadConfig(config_path);
+  char argv0[] = "cvar_test";
+  char* argv[] = {argv0};
+  rex::cvar::Init(1, argv);
+  std::string value = "F7";
+  {
+    rex::cvar::FlagRegistrar registrar({
+        .name = "test_deferred_flag",
+        .type = rex::cvar::FlagType::String,
+        .category = "Test",
+        .description = "Late registered test flag",
+        .setter =
+            [&value](std::string_view new_value) {
+              value = new_value;
+              return true;
+            },
+        .getter = [&value]() { return value; },
+        .default_value = "F7",
+    });
+
+    CHECK(value == "F10");
+  }
+
+  std::filesystem::remove(config_path);
+  rex::cvar::testing::ResetAllForTesting();
 }
 
 TEST_CASE("cvar range validation", "[cvar]") {
@@ -544,5 +589,24 @@ TEST_CASE("cvar ApplyEnvironment", "[cvar]") {
 #else
     unsetenv("REX_TEST_INT32_FLAG");
 #endif
+  }
+}
+
+TEST_CASE("cvar InvokeCommand dispatches commands", "[cvar]") {
+  SECTION("no-arg command is invoked") {
+    g_noarg_cmd_calls = 0;
+    REQUIRE(rex::cvar::InvokeCommand("test_noarg_cmd", ""));
+    CHECK(g_noarg_cmd_calls == 1);
+  }
+  SECTION("arg command receives its arguments") {
+    g_args_cmd_received.clear();
+    REQUIRE(rex::cvar::InvokeCommand("test_args_cmd", "hello world"));
+    CHECK(g_args_cmd_received == "hello world");
+  }
+  SECTION("non-command name returns false") {
+    CHECK_FALSE(rex::cvar::InvokeCommand("test_bool_flag", "x"));
+  }
+  SECTION("missing name returns false") {
+    CHECK_FALSE(rex::cvar::InvokeCommand("does_not_exist", ""));
   }
 }

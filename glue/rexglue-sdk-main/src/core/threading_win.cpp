@@ -284,7 +284,7 @@ class Win32Timer : public Win32Handle<Timer> {
     return SetOnceAt(WClock_::now() + rel_time, std::move(opt_callback));
   }
   bool SetOnceAt(GClock_::time_point due_time, std::function<void()> opt_callback) override {
-    return SetOnceAt(rex::chrono::clock_cast<WClock_>(due_time), std::move(opt_callback));
+    return SetOnceAt(std::chrono::clock_cast<WClock_>(due_time), std::move(opt_callback));
   }
   bool SetOnceAt(WClock_::time_point due_time, std::function<void()> opt_callback) override {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -302,8 +302,8 @@ class Win32Timer : public Win32Handle<Timer> {
     return SetRepeatingAt(WClock_::now() + rel_time, period, std::move(opt_callback));
   }
   bool SetRepeatingAt(GClock_::time_point due_time, std::chrono::milliseconds period,
-                      std::function<void()> opt_callback = nullptr) override {
-    return SetRepeatingAt(rex::chrono::clock_cast<WClock_>(due_time), period,
+                      std::function<void()> opt_callback = nullptr) {
+    return SetRepeatingAt(std::chrono::clock_cast<WClock_>(due_time), period,
                           std::move(opt_callback));
   }
   bool SetRepeatingAt(WClock_::time_point due_time, std::chrono::milliseconds period,

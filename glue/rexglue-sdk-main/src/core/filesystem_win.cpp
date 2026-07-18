@@ -76,7 +76,11 @@ bool CreateEmptyFile(const std::filesystem::path& path) {
 FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
   // Dumb, but OK.
   const auto wmode = rex::string::to_utf16(mode);
-  return _wfopen(path.c_str(), reinterpret_cast<const wchar_t*>(wmode.c_str()));
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, path.c_str(), reinterpret_cast<const wchar_t*>(wmode.c_str())) != 0) {
+    return nullptr;
+  }
+  return file;
 }
 
 bool Seek(FILE* file, int64_t offset, int origin) {
@@ -169,7 +173,8 @@ class Win32FileHandle : public FileHandle {
 };
 
 std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path& path,
-                                                     uint32_t desired_access) {
+                                                     uint32_t desired_access,
+                                                     bool allow_share_delete) {
   DWORD open_access = 0;
   if (desired_access & FileAccess::kGenericRead) {
     open_access |= GENERIC_READ;
@@ -192,7 +197,10 @@ std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path
   if (desired_access & FileAccess::kFileAppendData) {
     open_access |= FILE_APPEND_DATA;
   }
-  DWORD share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+  DWORD share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+  if (allow_share_delete) {
+    share_mode |= FILE_SHARE_DELETE;
+  }
   // We assume we've already created the file in the caller.
   DWORD creation_disposition = OPEN_EXISTING;
   HANDLE handle = CreateFileW(path.c_str(), open_access, share_mode, nullptr, creation_disposition,
@@ -208,7 +216,7 @@ std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path
 
 bool GetInfo(const std::filesystem::path& path, FileInfo* out_info) {
   *out_info = FileInfo{};
-  WIN32_FILE_ATTRIBUTE_DATA data = {0};
+  WIN32_FILE_ATTRIBUTE_DATA data = {};
   if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
     return false;
   }

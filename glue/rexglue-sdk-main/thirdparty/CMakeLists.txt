@@ -5,10 +5,20 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 #=============================================================================
 # Architecture detection
 #=============================================================================
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    # On Apple, CMAKE_OSX_ARCHITECTURES is the target arch; CMAKE_SYSTEM_PROCESSOR
+    # reflects the host (e.g. arm64 on Apple Silicon even when cross-building x86_64).
+    if("arm64" IN_LIST CMAKE_OSX_ARCHITECTURES)
+        set(IS_ARM64 TRUE)
+        set(IS_X86_64 FALSE)
+    else()
+        set(IS_ARM64 FALSE)
+        set(IS_X86_64 TRUE)
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     set(IS_ARM64 FALSE)
     set(IS_X86_64 TRUE)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|ARM64|arm64)$")
     set(IS_ARM64 TRUE)
     set(IS_X86_64 FALSE)
 else()
@@ -78,7 +88,7 @@ target_include_directories(renderdoc INTERFACE
 
 # tomlplusplus - TOML config file parser (header-only)
 add_library(tomlplusplus INTERFACE)
-target_include_directories(tomlplusplus INTERFACE
+target_include_directories(tomlplusplus SYSTEM INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tomlplusplus/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
@@ -127,84 +137,56 @@ target_compile_options(mspack PRIVATE -w)
 # NOTE: o1heap.c auto-detects CLZ via __builtin_clzl when __clang__/__GNUC__
 # are defined, but on Windows unsigned long is 32-bit even on x64.  We inject
 # a config header that provides a correct 64-bit CLZ
-#
-# IMPORTANT: rexglue requires o1heap v3 (alignment = 4*sizeof(void*) = 32B,
-# o1heapReallocate API). LibertyRecomp's top-level project may define an
-# older 'o1heap' target (v2, alignment = 2*sizeof(void*)) for tooling. To
-# avoid the version conflict, always create a private 'rexglue_o1heap'
-# target from this submodule and have rexkernel link against it directly.
-if(NOT TARGET rexglue_o1heap)
-    add_library(rexglue_o1heap STATIC
-        o1heap/o1heap/o1heap.c
-    )
-    target_include_directories(rexglue_o1heap PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    target_compile_definitions(rexglue_o1heap PRIVATE
-        "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
-    target_compile_options(rexglue_o1heap PRIVATE -w)
-    # Provide an alias 'o1heap' only if no other target owns the name yet.
-    # Anything inside graine that still says 'o1heap' goes through the alias.
-    if(NOT TARGET o1heap)
-        add_library(o1heap ALIAS rexglue_o1heap)
-    endif()
-endif()
+add_library(o1heap STATIC
+    o1heap/o1heap/o1heap.c
+)
+target_include_directories(o1heap PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_definitions(o1heap PRIVATE
+    "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
+target_compile_options(o1heap PRIVATE -w)
 
 # xxHash - extremely fast non-cryptographic hash (git submodule)
-if(NOT TARGET xxhash)
-    set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
-    add_subdirectory(xxHash/cmake_unofficial)
-    target_compile_options(xxhash PRIVATE -w)
-endif()
+set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
+add_subdirectory(xxHash/cmake_unofficial)
+target_compile_options(xxhash PRIVATE -w)
 
 # disasm - PowerPC disassembler (existing local library)
-if(NOT TARGET disasm)
-    add_subdirectory(disasm)
-    # Suppress warnings in disasm
-    target_compile_options(disasm PRIVATE -w)
-endif()
+add_subdirectory(disasm)
+# Suppress warnings in disasm
+target_compile_options(disasm PRIVATE -w)
 
 #=============================================================================
 # fmt - Formatting library (must come before spdlog)
 #=============================================================================
-if(NOT TARGET fmt)
-    set(FMT_DOC OFF CACHE BOOL "" FORCE)
-    set(FMT_TEST OFF CACHE BOOL "" FORCE)
-    set(FMT_INSTALL ON CACHE BOOL "" FORCE)
-    add_subdirectory(fmt)
-    target_compile_options(fmt PRIVATE -w)
-endif()
+set(FMT_DOC OFF CACHE BOOL "" FORCE)
+set(FMT_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory(fmt)
+target_compile_options(fmt PRIVATE -w)
 
 #=============================================================================
 # spdlog - Logging library
 #=============================================================================
-if(NOT TARGET spdlog)
-    set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
-    set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_INSTALL ON CACHE BOOL "" FORCE)
-    add_subdirectory(spdlog)
-    target_compile_options(spdlog PRIVATE -w)
-endif()
+set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory(spdlog)
+target_compile_options(spdlog PRIVATE -w)
 
 #=============================================================================
 # snappy - Fast compression/decompression (GPU traces)
 #=============================================================================
-if(NOT TARGET snappy)
-    set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-    set(SNAPPY_INSTALL ON CACHE BOOL "" FORCE)
-    add_subdirectory(snappy)
-    target_compile_options(snappy PRIVATE -w)
-    # Apple Silicon (and any modern ARM64) has CRC32 instructions; snappy uses
-    # __crc32cw intrinsics gated on the 'crc' target feature. The default
-    # Clang ARM64 baseline doesn't enable it, so opt in explicitly.
-    if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-        target_compile_options(snappy PRIVATE -march=armv8-a+crc)
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-        target_compile_options(snappy PRIVATE -march=armv8-a+crc)
-    endif()
+set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(SNAPPY_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory(snappy)
+target_compile_options(snappy PRIVATE -w)
+if(APPLE AND IS_ARM64)
+    target_compile_options(snappy PRIVATE -march=armv8-a+crc)
 endif()
 
 #=============================================================================
@@ -244,7 +226,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/rexglue_fidelityfx.cmake)
 # imgui - Immediate mode GUI (no CMakeLists.txt, manual target)
 #=============================================================================
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imgui")
-add_library(imgui STATIC
+add_library(imgui OBJECT
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -261,89 +243,54 @@ target_compile_options(imgui PRIVATE -w)
 # SDL3 - Cross-platform media layer
 #=============================================================================
 set(SDL_INSTALL ON CACHE BOOL "" FORCE)
-set(SDL_SHARED  OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC  ON  CACHE BOOL "" FORCE)
-set(SDL_TEST    OFF CACHE BOOL "" FORCE)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
 
-# LibertyRecomp uses SDL3 as a windowing + input backend on desktop; only the
-# PS4/Switch consoles use rexglue headlessly. The SDK previously forced
-# SDL_UNIX_CONSOLE_BUILD and disabled every video driver, which baked
-# SDL_VIDEO_DISABLED=1 into libSDL3.a and made SDL_CreateWindow fail at runtime
-# on macOS/Windows/Linux. Gate the headless flags on the console target flags
-# so desktop builds get a real Cocoa/Win32/X11 video driver with Metal/Vulkan.
-set(_REXGLUE_SDL_CONSOLE OFF)
-if(LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX)
-    set(_REXGLUE_SDL_CONSOLE ON)
-endif()
-
-if(_REXGLUE_SDL_CONSOLE)
-    # Headless console build: no windowing, no graphics drivers.
-    # SDL3 has no PS4/Switch port, so we won't actually add_subdirectory(sdl3)
-    # below — these cache values are harmless but kept for clarity.
-    set(SDL_UNIX_CONSOLE_BUILD ON  CACHE BOOL "" FORCE)
-    set(SDL_VIDEO      OFF CACHE BOOL "" FORCE)
-    set(SDL_RENDER     OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGL     OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGLES   OFF CACHE BOOL "" FORCE)
-    set(SDL_VULKAN     OFF CACHE BOOL "" FORCE)
-    set(SDL_METAL      OFF CACHE BOOL "" FORCE)
-    set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # iOS: UIKit + Metal, no Cocoa, keep SDL_VIDEO on.
-    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
-    set(SDL_VIDEO  ON  CACHE BOOL "" FORCE)
-    set(SDL_RENDER ON  CACHE BOOL "" FORCE)
-    set(SDL_UIKIT  ON  CACHE BOOL "" FORCE)
-    set(SDL_COCOA  OFF CACHE BOOL "" FORCE)
-    set(SDL_METAL  ON  CACHE BOOL "" FORCE)
-    set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
-    # Android: native Android window system + Vulkan.
-    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
-    set(SDL_VIDEO   ON  CACHE BOOL "" FORCE)
-    set(SDL_RENDER  ON  CACHE BOOL "" FORCE)
-    set(SDL_ANDROID ON  CACHE BOOL "" FORCE)
-    set(SDL_VULKAN  ON  CACHE BOOL "" FORCE)
-    set(SDL_COCOA   OFF CACHE BOOL "" FORCE)
-    set(SDL_METAL   OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+# Video provides the windowing/event layer; presenters create their own
+# D3D12/Vulkan surfaces from native handles, so SDL_RENDER stays off.
+set(SDL_VIDEO ON CACHE BOOL "" FORCE)
+if(APPLE)
+    # macOS uses SDL for windowing + Metal/Vulkan surface creation.
+    set(SDL_METAL ON CACHE BOOL "" FORCE)
+    set(SDL_VULKAN ON CACHE BOOL "" FORCE)
 else()
-    # Desktop (Windows / macOS / Linux): need real windows + GPU drivers.
-    set(SDL_UNIX_CONSOLE_BUILD OFF CACHE BOOL "" FORCE)
-    set(SDL_VIDEO  ON CACHE BOOL "" FORCE)
-    set(SDL_RENDER ON CACHE BOOL "" FORCE)
-    if(APPLE)
-        set(SDL_COCOA ON CACHE BOOL "" FORCE)
-        set(SDL_METAL ON CACHE BOOL "" FORCE)
-    endif()
-    set(SDL_VULKAN ON  CACHE BOOL "" FORCE)
-    # Still keep the legacy GL paths off — rendering goes through Vulkan/Metal.
-    set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
-    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+    set(SDL_METAL OFF CACHE BOOL "" FORCE)
+    set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
 endif()
-
-# Subsystems that are genuinely unused on every target.
-set(SDL_HAPTIC     OFF CACHE BOOL "" FORCE)
-set(SDL_SENSOR     OFF CACHE BOOL "" FORCE)
-set(SDL_POWER      OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+set(SDL_POWER OFF CACHE BOOL "" FORCE)
 set(SDL_FILESYSTEM OFF CACHE BOOL "" FORCE)
-set(SDL_LOCALE     OFF CACHE BOOL "" FORCE)
-set(SDL_FILE       OFF CACHE BOOL "" FORCE)
-set(SDL_MISC       OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG     OFF CACHE BOOL "" FORCE)
-set(SDL_TRAY       OFF CACHE BOOL "" FORCE)
-set(SDL_CAMERA     OFF CACHE BOOL "" FORCE)
-set(SDL_DISKAUDIO  OFF CACHE BOOL "" FORCE)
-set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_LOCALE OFF CACHE BOOL "" FORCE)
+set(SDL_FILE OFF CACHE BOOL "" FORCE)
+set(SDL_MISC OFF CACHE BOOL "" FORCE)
+set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+set(SDL_TRAY OFF CACHE BOOL "" FORCE)
+set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 
-# SDL3 has no PS4 or Switch backend — skip adding it on those consoles to
-# avoid compile/link failures. Desktop, iOS, and Android all include it.
-if(NOT _REXGLUE_SDL_CONSOLE)
-    add_subdirectory(sdl3)
+# Disable graphics APIs (unused without video) — only on non-Apple
+set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
+set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+
+# Disable dummy drivers
+set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
+
+# Linux audio backends
+if(UNIX AND NOT APPLE)
+    set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
+    set(SDL_ALSA_SHARED       ON  CACHE BOOL "" FORCE)
+    set(SDL_PULSEAUDIO        ON  CACHE BOOL "" FORCE)
+    set(SDL_PULSEAUDIO_SHARED ON  CACHE BOOL "" FORCE)
+    set(SDL_PIPEWIRE          ON  CACHE BOOL "" FORCE)
+    set(SDL_PIPEWIRE_SHARED   ON  CACHE BOOL "" FORCE)
 endif()
+
+add_subdirectory(sdl3)
 
 #=============================================================================
 # DXC API headers (vendored from DirectXShaderCompiler, runtime-loaded)
@@ -389,15 +336,6 @@ if(REXGLUE_USE_VULKAN)
     if(NOT TARGET glslang::SPIRV)
         add_library(glslang::SPIRV ALIAS SPIRV)
     endif()
-    # Android NDK (and some other console toolchains) default to -fno-rtti.
-    # spv::Builder uses dynamic_cast in SpirvBuilder, so force RTTI back on
-    # for the glslang/SPIRV targets regardless of parent toolchain flags.
-    foreach(_glslang_target glslang SPIRV MachineIndependent GenericCodeGen OSDependent OGLCompiler)
-        if(TARGET ${_glslang_target})
-            target_compile_options(${_glslang_target} PRIVATE
-                $<$<COMPILE_LANGUAGE:CXX>:-frtti>)
-        endif()
-    endforeach()
 endif()
 
 #=============================================================================
@@ -411,13 +349,50 @@ endif()
 # Tracy Profiler (optional)
 #=============================================================================
 if(REXGLUE_ENABLE_TRACY)
-    set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
-    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
-    set(TRACY_DELAYED_INIT ON CACHE BOOL "" FORCE)
-    set(TRACY_MANUAL_LIFETIME ON CACHE BOOL "" FORCE)
-    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
-    add_subdirectory(tracy)
+    set(TRACY_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/tracy)
+    set(TRACY_PUBLIC_DIR ${TRACY_ROOT}/public)
+
+    find_package(Threads REQUIRED)
+
+    add_library(TracyClient SHARED ${TRACY_PUBLIC_DIR}/TracyClient.cpp)
+    add_library(Tracy::TracyClient ALIAS TracyClient)
+
+    target_compile_features(TracyClient PUBLIC cxx_std_11)
+
+    target_include_directories(TracyClient SYSTEM PUBLIC
+        $<BUILD_INTERFACE:${TRACY_PUBLIC_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/tracy>
+    )
+
+    target_link_libraries(TracyClient PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_libraries(TracyClient PUBLIC ws2_32 dbghelp)
+    endif()
+
+    target_compile_definitions(TracyClient
+        PRIVATE
+            TRACY_EXPORTS
+        PUBLIC
+            TRACY_IMPORTS
+            TRACY_ENABLE
+            TRACY_ON_DEMAND
+            TRACY_DELAYED_INIT
+            TRACY_MANUAL_LIFETIME
+            TRACY_FIBERS
+    )
+
     target_compile_options(TracyClient PRIVATE -w)
+
+    install(DIRECTORY ${TRACY_PUBLIC_DIR}/tracy
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tracy
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.hmm")
+    install(DIRECTORY ${TRACY_PUBLIC_DIR}/client
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tracy
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+    install(DIRECTORY ${TRACY_PUBLIC_DIR}/common
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tracy
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
 
 #=============================================================================
@@ -462,23 +437,7 @@ endif()
 #=============================================================================
 if(IS_ARM64)
   enable_language(ASM)
-  # NOTE: FFmpeg NEON .S sources need -march=armv8-a, but we must NOT propagate
-  # this globally because sibling targets (snappy, etc.) have their own
-  # -march requirements (e.g. +crc). Apply per-target on libavcodec/libavutil
-  # after their creation. For Switch (devkitA64) keep hard-float +fp+simd.
-  if(LIBERTY_RECOMP_NX)
-      set(_FFMPEG_ARM64_ASM_FLAGS "-march=armv8-a+fp+simd")
-  else()
-      set(_FFMPEG_ARM64_ASM_FLAGS "-march=armv8-a")
-  endif()
-endif()
-
-# PS4 is x86_64 — ensure FFmpeg uses the x86 code path (IS_X86_64 already set
-# by architecture detection if host/target triplet resolves correctly, but be
-# explicit when the Liberty PS4 flag is active).
-if(LIBERTY_RECOMP_PS4)
-    set(IS_X86_64 TRUE)
-    set(IS_ARM64 FALSE)
+  set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -march=armv8-a")
 endif()
 
 # libavutil - FFmpeg utility library (must build first)
@@ -728,12 +687,10 @@ if(WIN32)
     target_link_libraries(libavcodec PRIVATE bcrypt)
 endif()
 
-# Apply ARM64 assembler flags privately to FFmpeg targets only — do NOT let
-# them leak into sibling libraries that have their own -march requirements.
-if(IS_ARM64 AND DEFINED _FFMPEG_ARM64_ASM_FLAGS)
-    target_compile_options(libavutil  PRIVATE $<$<COMPILE_LANGUAGE:ASM>:${_FFMPEG_ARM64_ASM_FLAGS}>)
-    target_compile_options(libavcodec PRIVATE $<$<COMPILE_LANGUAGE:ASM>:${_FFMPEG_ARM64_ASM_FLAGS}>)
-endif()
-
-# IDE folder organization
-set_target_properties(libavutil libavcodec PROPERTIES FOLDER "FFmpeg")
+# Hidden visibility is required on aarch64. The NEON .S files use ADRP/ADD
+# PC-relative addressing (movrel) for symbols like ff_cos_*, which the linker
+# only accepts against locally bound symbols when emitting a shared object.
+set_target_properties(libavutil libavcodec PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    FOLDER "FFmpeg")

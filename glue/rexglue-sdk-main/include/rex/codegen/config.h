@@ -13,10 +13,13 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <toml++/toml.hpp>
 
 #include <rex/codegen/function_graph.h>  // For JumpTable
 
@@ -75,10 +78,6 @@ struct RecompilerConfig {
   std::string outDirectoryPath;     ///< Output directory for generated code
   std::string templateDir;          ///< Optional custom template directory for overrides
 
-  // Patch file paths (TODO: implement patching workflow)
-  std::string patchFilePath;
-  std::string patchedFilePath;
-
   // === Code generation options (optional) ===
   bool skipLr = false;
   bool ctrAsLocalVariable = false;
@@ -94,6 +93,10 @@ struct RecompilerConfig {
   uint32_t maxJumpExtension = 65536;  ///< Max bytes to extend function for jump table targets
   uint32_t dataRegionThreshold = 16;  ///< Consecutive invalid instructions to mark as data region
   uint32_t largeFunctionThreshold = 1048576;  ///< 1MB - warn if function exceeds this size
+
+  // Optional override for DLL module flag. If unset, the orchestrator infers
+  // from the module's position in the manifest (entrypoint = false, modules = true).
+  std::optional<bool> isDll;
 
   // === Manual overrides ===
   std::unordered_map<uint32_t, FunctionConfig> functions;  ///< Function/chunk configuration
@@ -126,6 +129,13 @@ struct RecompilerConfig {
    *         include, depth exceeded)
    */
   bool Load(const std::string_view& configFilePath);
+
+  /**
+   * Load configuration from an in-memory TOML table (e.g. an inline binary
+   * entry inside a manifest). Includes referenced from the table resolve
+   * relative to `base_dir`. Same merge semantics as Load().
+   */
+  bool LoadFromTable(const toml::table& tbl, const std::filesystem::path& base_dir);
 
   /// Validation result containing warnings and errors.
   struct ValidationResult {

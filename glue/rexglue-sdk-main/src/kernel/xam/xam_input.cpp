@@ -9,8 +9,6 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
-#include <cstring>
-
 #include <rex/input/input.h>
 #include <rex/input/input_system.h>
 #include <rex/kernel/xam/private.h>
@@ -68,19 +66,7 @@ u32 XamInputGetCapabilities_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_C
   }
 
   auto* is = input_system();
-  u32 result = is->GetCapabilities(actual_user_index, flags, caps);
-
-  // User 0 is always reported as a connected gamepad — matches UnleashedRecomp /
-  // MarathonRecomp. When no physical pad is attached, fabricate a minimal
-  // wired-gamepad caps block so titles that gate on controller presence
-  // (e.g. GTA IV frontend FSM → sub_828CC9D0) can progress.
-  if (actual_user_index == 0 && XFAILED(result)) {
-    std::memset(static_cast<X_INPUT_CAPABILITIES*>(caps), 0, sizeof(X_INPUT_CAPABILITIES));
-    caps->type = rex::input::XINPUT_DEVTYPE_GAMEPAD;
-    caps->sub_type = 0x01;  // XINPUT_DEVSUBTYPE_GAMEPAD
-    result = X_ERROR_SUCCESS;
-  }
-  return result;
+  return is->GetCapabilities(actual_user_index, flags, caps);
 }
 
 u32 XamInputGetCapabilitiesEx_entry(u32 unk, u32 user_index, u32 flags,
@@ -126,20 +112,7 @@ u32 XamInputGetState_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_STATE> i
   }
 
   auto* is = input_system();
-  u32 result = is->GetState(actual_user_index, input_state);
-
-  // User 0 is always reported as a connected gamepad — matches UnleashedRecomp /
-  // MarathonRecomp behavior. When no physical pad is attached the state struct
-  // is zeroed (neutral input) and we return success anyway, so titles that gate
-  // on controller presence (GTA IV frontend FSM polling sub_821B4108 via
-  // sub_828CC9D0) can progress without requiring a bound gamepad.
-  if (actual_user_index == 0 && XFAILED(result)) {
-    if (input_state) {
-      std::memset(static_cast<X_INPUT_STATE*>(input_state), 0, sizeof(X_INPUT_STATE));
-    }
-    result = X_ERROR_SUCCESS;
-  }
-  return result;
+  return is->GetState(actual_user_index, input_state);
 }
 
 // https://msdn.microsoft.com/en-us/library/windows/desktop/microsoft.directx_sdk.reference.xinputsetstate(v=vs.85).aspx

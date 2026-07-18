@@ -97,12 +97,6 @@ void ApplyToml(const toml::table& toml, RecompilerConfig& cfg, const std::string
   if (auto v = toml["template_dir"].value<std::string>()) {
     MergeScalar(cfg.templateDir, *v, "template_dir");
   }
-  if (auto v = toml["patch_file_path"].value<std::string>()) {
-    MergeScalar(cfg.patchFilePath, *v, "patch_file_path");
-  }
-  if (auto v = toml["patched_file_path"].value<std::string>()) {
-    MergeScalar(cfg.patchedFilePath, *v, "patched_file_path");
-  }
 
   // Bool scalars
   auto hasBool = [&](const char* key) -> bool { return toml[key].is_boolean(); };
@@ -122,6 +116,9 @@ void ApplyToml(const toml::table& toml, RecompilerConfig& cfg, const std::string
             hasBool("non_volatile_as_local"), "non_volatile_as_local");
   MergeBool(cfg.generateExceptionHandlers, toml["generate_exception_handlers"].value_or(false),
             hasBool("generate_exception_handlers"), "generate_exception_handlers");
+  if (hasBool("is_dll")) {
+    cfg.isDll = toml["is_dll"].value_or(false);
+  }
 
   // Integer scalars (only override if present)
   if (auto v = toml["longjmp_address"].value<int64_t>()) {
@@ -385,20 +382,18 @@ void ApplyToml(const toml::table& toml, RecompilerConfig& cfg, const std::string
   }
 }
 
-// ---------------------------------------------------------------------------
-// Recursive include loader
-// ---------------------------------------------------------------------------
+bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path& base_dir,
+                            RecompilerConfig& cfg, std::set<std::string>& visited, uint32_t depth,
+                            const std::string& description);
 
 bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
                    std::set<std::string>& visited, uint32_t depth) {
-  // Depth check
   if (depth > kMaxIncludeDepth) {
     REXCODEGEN_ERROR("[config] include depth exceeds maximum ({}) at: {}", kMaxIncludeDepth,
                      filePath.string());
     return false;
   }
 
-  // Canonical path for cycle detection
   std::error_code ec;
   auto canonical = std::filesystem::canonical(filePath, ec);
   if (ec) {
@@ -406,15 +401,12 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
     return false;
   }
   std::string canonicalStr = canonical.string();
-
-  // Circular include detection
   if (visited.contains(canonicalStr)) {
     REXCODEGEN_ERROR("[config] circular include detected: {}", canonicalStr);
     return false;
   }
   visited.insert(canonicalStr);
 
-  // Parse this file
   toml::table toml;
   try {
     toml = toml::parse_file(canonicalStr);
@@ -422,20 +414,22 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
     REXCODEGEN_ERROR("Failed to parse config file '{}': {}", canonicalStr, e.what());
     return false;
   }
-
   REXCODEGEN_DEBUG("[config] loaded: {}", filePath.filename().string());
+  return ApplyTableWithIncludes(toml, canonical.parent_path(), cfg, visited, depth,
+                                filePath.filename().string());
+}
 
-  // Process includes first (depth-first), before applying this file's values.
-  // This means this file's values override anything set by included files.
-  auto parentDir = canonical.parent_path();
-
-  if (auto* includesArray = toml["includes"].as_array()) {
+bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path& base_dir,
+                            RecompilerConfig& cfg, std::set<std::string>& visited, uint32_t depth,
+                            const std::string& description) {
+  // Process includes first (depth-first), so this table's own values win.
+  if (auto* includesArray = tbl["includes"].as_array()) {
     for (const auto& elem : *includesArray) {
       if (auto includePath = elem.value<std::string>()) {
-        auto resolved = parentDir / *includePath;
+        auto resolved = base_dir / *includePath;
         if (!std::filesystem::exists(resolved)) {
           REXCODEGEN_ERROR("[config] included file not found: {} (resolved from {})", *includePath,
-                           canonicalStr);
+                           description);
           return false;
         }
         if (!LoadRecursive(resolved, cfg, visited, depth + 1)) {
@@ -444,10 +438,7 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
       }
     }
   }
-
-  // Apply this file's config (after includes, so this file wins)
-  ApplyToml(toml, cfg, filePath.filename().string());
-
+  ApplyToml(tbl, cfg, description);
   return true;
 }
 
@@ -457,48 +448,62 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
 // Public API
 // ---------------------------------------------------------------------------
 
-bool RecompilerConfig::Load(const std::string_view& configFilePath) {
-  std::set<std::string> visited;
-  std::filesystem::path path(configFilePath);
+namespace {
 
-  if (!LoadRecursive(path, *this, visited, 0)) {
-    return false;
-  }
-
-  // Post-load summary logging
-  if (!functions.empty()) {
+bool FinalizeConfig(RecompilerConfig& cfg) {
+  if (!cfg.functions.empty()) {
     size_t chunks_count = 0;
-    for (const auto& [addr, cfg] : functions) {
-      if (cfg.isChunk())
+    for (const auto& [addr, fc] : cfg.functions) {
+      if (fc.isChunk())
         chunks_count++;
     }
-    REXCODEGEN_INFO("Loaded {} function configs ({} standalone, {} chunks)", functions.size(),
-                    functions.size() - chunks_count, chunks_count);
+    REXCODEGEN_TRACE("Loaded {} function configs ({} standalone, {} chunks)", cfg.functions.size(),
+                     cfg.functions.size() - chunks_count, chunks_count);
+  }
+  if (!cfg.exceptionHandlerFuncHints.empty()) {
+    std::sort(cfg.exceptionHandlerFuncHints.begin(), cfg.exceptionHandlerFuncHints.end());
+    cfg.exceptionHandlerFuncHints.erase(
+        std::unique(cfg.exceptionHandlerFuncHints.begin(), cfg.exceptionHandlerFuncHints.end()),
+        cfg.exceptionHandlerFuncHints.end());
   }
 
-  // Deduplicate exceptionHandlerFuncHints (push_back from multiple files)
-  if (!exceptionHandlerFuncHints.empty()) {
-    std::sort(exceptionHandlerFuncHints.begin(), exceptionHandlerFuncHints.end());
-    exceptionHandlerFuncHints.erase(
-        std::unique(exceptionHandlerFuncHints.begin(), exceptionHandlerFuncHints.end()),
-        exceptionHandlerFuncHints.end());
-  }
-
-  // Required field check
-  if (filePath.empty()) {
+  bool ok = true;
+  if (cfg.filePath.empty()) {
     REXCODEGEN_ERROR("Missing required field: file_path");
+    ok = false;
   }
 
-  // Validate assembled config
-  auto result = Validate();
+  auto result = cfg.Validate();
   for (const auto& warning : result.warnings) {
     REXCODEGEN_WARN("[config] {}", warning);
   }
   for (const auto& error : result.errors) {
     REXCODEGEN_ERROR("[config] {}", error);
   }
+  if (!result.valid) {
+    ok = false;
+  }
+  return ok;
+}
 
-  return true;
+}  // namespace
+
+bool RecompilerConfig::Load(const std::string_view& configFilePath) {
+  std::set<std::string> visited;
+  std::filesystem::path path(configFilePath);
+  if (!LoadRecursive(path, *this, visited, 0)) {
+    return false;
+  }
+  return FinalizeConfig(*this);
+}
+
+bool RecompilerConfig::LoadFromTable(const toml::table& tbl,
+                                     const std::filesystem::path& base_dir) {
+  std::set<std::string> visited;
+  if (!ApplyTableWithIncludes(tbl, base_dir, *this, visited, 0, "<inline>")) {
+    return false;
+  }
+  return FinalizeConfig(*this);
 }
 
 RecompilerConfig::ValidationResult RecompilerConfig::Validate() const {

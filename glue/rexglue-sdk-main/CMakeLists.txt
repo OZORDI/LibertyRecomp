@@ -2,16 +2,19 @@
 # Modern C++23 cross-platform SDK for recompiling Xbox 360 executables
 cmake_minimum_required(VERSION 3.25)
 
-set(REXGLUE_PROJECT_LANGUAGES C CXX)
 if(APPLE)
-    list(APPEND REXGLUE_PROJECT_LANGUAGES OBJC OBJCXX)
+    set(REXGLUE_LANGUAGES C CXX OBJC OBJCXX)
+else()
+    set(REXGLUE_LANGUAGES C CXX)
 endif()
 
 project(ReXGlue
-    VERSION 0.7.5
-    LANGUAGES ${REXGLUE_PROJECT_LANGUAGES}
+    VERSION 0.8.0
+    LANGUAGES ${REXGLUE_LANGUAGES}
     DESCRIPTION "Xbox 360 Recompilation SDK"
 )
+# Floor only: bump MAJOR.MINOR for API changes. Patch is derived from git tags
+# in cmake/rex_version.cmake. See docs/RELEASING.md.
 
 #==========================================================
 # Build Options
@@ -21,32 +24,6 @@ option(REXGLUE_ENABLE_SANITIZERS "Enable UndefinedBehaviorSanitizer" OFF)
 option(REXGLUE_ENABLE_FIDELITYFX "Enable optional AMD FidelityFX integration (experimental)" OFF)
 option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" ON)
 option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" ON)
-
-# Detect iOS / Android for downstream gating. Consoles + mobile are _REXGLUE_IS_MOBILE-ish
-# for the purposes of disabling host-only debug features (Tracy, etc).
-set(_REXGLUE_IS_MOBILE OFF)
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
-    set(_REXGLUE_IS_MOBILE ON)
-endif()
-
-# Normalise console platform markers so CMake conditionals can test
-# LIBERTY_RECOMP_PS4 / LIBERTY_RECOMP_NX directly (matching the C preprocessor
-# defines). Downstream guards — e.g. the SDL3 skip in thirdparty/CMakeLists.txt —
-# rely on these variables.
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    set(LIBERTY_RECOMP_PS4 ON)
-endif()
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    set(LIBERTY_RECOMP_NX ON)
-endif()
-
-# Tracy is host-only: force OFF on consoles and mobile regardless of user/default.
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
-   OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"
-   OR _REXGLUE_IS_MOBILE)
-    set(REXGLUE_ENABLE_TRACY OFF CACHE BOOL "" FORCE)
-endif()
-
 # Propagate profiling defines globally (compiled out in Release)
 if(REXGLUE_ENABLE_TRACY)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
@@ -55,41 +32,10 @@ if(REXGLUE_ENABLE_PERF_COUNTERS)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
 endif()
 
-# Master graphics toggle. When OFF, the graphics subtree is skipped entirely
-# and the "at least one backend" fatal_error is bypassed. Default ON; forced
-# OFF on PS4 (GNM-only, no Vulkan/D3D12 impl yet).
-option(REXGLUE_ENABLE_GRAPHICS "Build graphics subsystem (backends + renderer)" ON)
-
 # Graphics backend selection
 # D3D12: Windows only, ON by default.
-# Vulkan: Cross-platform, ON by default on Linux/Switch, OFF by default on Windows.
-# PS4:   GNM-only — OpenOrbis exposes no Vulkan ICD and no dynamic loader, so
-#        the Vulkan UI backend is hard-disabled here. The `toolchains/ps4-openorbis.cmake`
-#        `LIBERTY_RECOMP_VULKAN=ON` flag now only enables the GNM-backed
-#        host-side video path inside the recomp's own `gpu/video.cpp`, not
-#        the SDK's Vulkan WSI code.
-# Switch: Vulkan ON — libnx exposes a native VK ICD via `nvn_wsi_vulkan.json`,
-#        and the loader is statically-linked at link time (no dlopen needed).
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
-    set(REXGLUE_USE_VULKAN OFF CACHE BOOL "" FORCE)
-    set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "" FORCE)
-    set(REXGLUE_ENABLE_GRAPHICS OFF CACHE BOOL "" FORCE)
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
-    set(REXGLUE_USE_VULKAN ON CACHE BOOL "" FORCE)
-    set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "" FORCE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # iOS: no D3D12; Vulkan via MoltenVK is possible but off by default.
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
-    option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" OFF)
-    set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "" FORCE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # Android: Vulkan is the native backend.
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
-    option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
-    set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "" FORCE)
-elseif(WIN32)
+# Vulkan: Cross-platform, ON by default on Linux, OFF by default on Windows.
+if(WIN32)
     option(REXGLUE_USE_D3D12  "Enable D3D12 graphics backend" ON)
     option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" OFF)
 else()
@@ -97,9 +43,8 @@ else()
     option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
 endif()
 
-# Only enforce "at least one backend" when the graphics subsystem is actually being built.
-if(REXGLUE_ENABLE_GRAPHICS AND NOT REXGLUE_USE_D3D12 AND NOT REXGLUE_USE_VULKAN)
-    message(FATAL_ERROR "At least one graphics backend must be enabled (REXGLUE_USE_D3D12 or REXGLUE_USE_VULKAN), or set REXGLUE_ENABLE_GRAPHICS=OFF")
+if(NOT REXGLUE_USE_D3D12 AND NOT REXGLUE_USE_VULKAN)
+    message(FATAL_ERROR "At least one graphics backend must be enabled (REXGLUE_USE_D3D12 or REXGLUE_USE_VULKAN)")
 endif()
 
 if (REXGLUE_ENABLE_FIDELITYFX AND
@@ -111,20 +56,9 @@ endif()
 # Root of the SDK source tree
 set(REXGLUE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# Resolve the effective target architecture. On macOS, CMAKE_SYSTEM_PROCESSOR
-# may reflect the host CMake process rather than CMAKE_OSX_ARCHITECTURES.
-set(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
-if(APPLE AND CMAKE_OSX_ARCHITECTURES)
-    list(GET CMAKE_OSX_ARCHITECTURES 0 REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR)
-endif()
-string(TOLOWER "${REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR}" REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER)
-
 # SDK install support
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
-
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-find_package(Threads REQUIRED)
 
 if(UNIX AND NOT APPLE)
     # Keep installed binaries self-contained by resolving shared libs relative
@@ -136,43 +70,22 @@ if(UNIX AND NOT APPLE)
     )
     set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 elseif(APPLE)
+    # Use loader-relative install names on macOS so installed binaries remain
+    # self-contained within the install prefix.
     list(APPEND CMAKE_INSTALL_RPATH
         "@loader_path"
         "@loader_path/../${CMAKE_INSTALL_LIBDIR}"
     )
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 endif()
 
-# Enforce the default Clang toolchain, with AppleClang accepted for native
-# macOS builds. Consoles (PS4 uses OpenOrbis Clang fork; Switch uses devkitPro
-# GCC) are exempt from this enforcement.
-if(NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
-    if(APPLE)
-        if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
-                CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang"))
-            message(FATAL_ERROR
-                "ReXGlue requires Clang or AppleClang on macOS. Please select a supported compiler.")
-        endif()
+# Enforce Clang18 compiler
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "ReXGlue requires Clang compiler. Please set CMAKE_CXX_COMPILER to clang++")
+endif()
 
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-            if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
-                message(FATAL_ERROR
-                    "ReXGlue requires AppleClang 17 or newer (found ${CMAKE_CXX_COMPILER_VERSION})")
-            endif()
-        elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "18.0")
-            message(FATAL_ERROR
-                "ReXGlue requires Clang 18 or newer on macOS (found ${CMAKE_CXX_COMPILER_VERSION})")
-        endif()
-    else()
-        if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            message(FATAL_ERROR
-                "ReXGlue requires Clang. Please set CMAKE_CXX_COMPILER to clang++")
-        endif()
-
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "18.0")
-            message(FATAL_ERROR
-                "ReXGlue requires Clang 18 or newer (found ${CMAKE_CXX_COMPILER_VERSION})")
-        endif()
-    endif()
+if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "18.0")
+    message(FATAL_ERROR "ReXGlue requires Clang 18 or newer (found ${CMAKE_CXX_COMPILER_VERSION})")
 endif()
 
 # Enforce x64 architecture
@@ -187,23 +100,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_DEBUG_POSTFIX d)
 set(CMAKE_RELWITHDEBINFO_POSTFIX rd)
 
-if(UNIX)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-endif()
-
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    # PS4 OpenOrbis toolchain requires small code model.
-    add_compile_options(-mcmodel=small)
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    # Switch is AArch64 — no -mcmodel tuning needed.
-elseif(UNIX AND NOT APPLE)
-    # Use appropriate code model based on architecture on Linux. macOS doesn't
-    # support the same code-model tuning.
-    if(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(amd64|x86_64)$")
+if(NOT WIN32)
+    # Use appropriate code model based on architecture
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64" AND NOT APPLE)
+        # Large code model on Linux x86_64 for linking with very large recompiled executables (35MB+).
+        # macOS uses small: the ld64 linker on macOS 15+ rejects text relocations produced
+        # by -mcmodel=large, and macOS maps binaries in the low address space so ±2GB is sufficient.
         add_compile_options(-mcmodel=large)
     else()
         add_compile_options(-mcmodel=small)
     endif()
+    # Position-independent code for all targets
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # Global compile options
@@ -218,79 +126,74 @@ add_compile_options(
 )
 
 # Platform detection (supports AMD64 and ARM64)
-# NOTE: iOS must be checked BEFORE the generic APPLE branch — CMAKE_SYSTEM_NAME==iOS
-# still has APPLE=1 and would otherwise silently be treated as desktop macOS.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    set(REX_PLATFORM "ios-arm64")
-    add_compile_definitions(REX_PLATFORM_IOS=1 REX_PLATFORM_MAC=1 _DARWIN_C_SOURCE=1 REX_ARCH_ARM64=1)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    if(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(aarch64|arm64)$")
-        set(REX_PLATFORM "android-arm64")
-        add_compile_definitions(REX_ARCH_ARM64=1)
-    else()
-        set(REX_PLATFORM "android-${REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER}")
+set(REX_TARGET_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    list(LENGTH CMAKE_OSX_ARCHITECTURES REX_OSX_ARCH_COUNT)
+    if(REX_OSX_ARCH_COUNT GREATER 1)
+        message(FATAL_ERROR "ReXGlue macOS presets expect a single CMAKE_OSX_ARCHITECTURES value")
     endif()
-    add_compile_definitions(REX_PLATFORM_ANDROID=1 REX_PLATFORM_LINUX=1)
-elseif(WIN32)
-    if(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(amd64|x86_64)$")
+    list(GET CMAKE_OSX_ARCHITECTURES 0 REX_TARGET_PROCESSOR)
+endif()
+
+if(WIN32)
+    if(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
         set(REX_PLATFORM "win-amd64")
-    elseif(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(aarch64|arm64)$")
+    elseif(REX_TARGET_PROCESSOR MATCHES "aarch64|ARM64|arm64")
         set(REX_PLATFORM "win-arm64")
     else()
-        message(FATAL_ERROR
-            "Unsupported Windows architecture: ${REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR}")
+        message(FATAL_ERROR "Unsupported Windows architecture: ${REX_TARGET_PROCESSOR}")
     endif()
     add_compile_definitions(REX_PLATFORM_WINDOWS=1)
-elseif(APPLE)
-    if(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(aarch64|arm64)$")
-        set(REX_PLATFORM "mac-arm64")
-        add_compile_definitions(REX_ARCH_ARM64=1)
-        add_compile_options(-march=armv8-a)
-    elseif(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(amd64|x86_64)$")
-        set(REX_PLATFORM "mac-amd64")
-    else()
-        message(FATAL_ERROR
-            "Unsupported macOS architecture: ${REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR}")
-    endif()
-
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "" FORCE)
-    set(REXGLUE_USE_VULKAN ON CACHE BOOL "" FORCE)
-    set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "" FORCE)
-    add_compile_definitions(REX_PLATFORM_MAC=1 _DARWIN_C_SOURCE=1)
 elseif(UNIX AND NOT APPLE)
-    if(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(amd64|x86_64)$")
+    if(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
         set(REX_PLATFORM "linux-amd64")
-    elseif(REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR_LOWER MATCHES "^(aarch64|arm64)$")
+    elseif(REX_TARGET_PROCESSOR MATCHES "aarch64|ARM64|arm64")
         set(REX_PLATFORM "linux-arm64")
     else()
-        set(REX_PLATFORM "linux-${REXGLUE_EFFECTIVE_SYSTEM_PROCESSOR}")
+        set(REX_PLATFORM "linux-${REX_TARGET_PROCESSOR}")
     endif()
     add_compile_definitions(REX_PLATFORM_LINUX=1)
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4" OR CMAKE_SYSTEM_NAME STREQUAL "PS4")
-    set(REX_PLATFORM "ps4-amd64")
-    add_compile_definitions(REX_PLATFORM_PS4=1)
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch" OR CMAKE_SYSTEM_NAME STREQUAL "Switch")
-    set(REX_PLATFORM "switch-arm64")
-    add_compile_definitions(REX_PLATFORM_SWITCH=1 REX_PLATFORM_NX=1)
+elseif(APPLE)
+    if(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
+        set(REX_PLATFORM "mac-amd64")
+    elseif(REX_TARGET_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+        set(REX_PLATFORM "mac-arm64")
+    else()
+        set(REX_PLATFORM "mac-${REX_TARGET_PROCESSOR}")
+    endif()
+    add_compile_definitions(REX_PLATFORM_MAC=1)
 else()
-    message(FATAL_ERROR "Unsupported platform.")
+    message(FATAL_ERROR "Unsupported platform. ReXGlue supports Windows, Linux, and macOS only.")
 endif()
 
 # Build config as compile definition (multi-config generators don't know config at configure time)
 add_compile_definitions(REXGLUE_BUILD_CONFIG="$<CONFIG>")
 
-# Detect dev builds -- append "-dev" suffix when HEAD is not on a version tag
-execute_process(
-    COMMAND git describe --tags --exact-match
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_QUIET ERROR_QUIET
-    RESULT_VARIABLE REXGLUE_TAG_RESULT
-)
-if(REXGLUE_TAG_RESULT EQUAL 0)
-    set(REXGLUE_VERSION_SUFFIX "")
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_version.cmake)
+rex_resolve_version(REXGLUE_FULL_VERSION
+    FLOOR_MAJOR ${PROJECT_VERSION_MAJOR}
+    FLOOR_MINOR ${PROJECT_VERSION_MINOR})
+
+# Strip the -id trailer (if any) for the numeric-only version.
+string(REGEX REPLACE "-.*$" "" REXGLUE_NUMERIC_VERSION "${REXGLUE_FULL_VERSION}")
+
+# Parse up to 4 numeric components for consumers that want integer access.
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)(\\.([0-9]+))?(\\.([0-9]+))?" _ "${REXGLUE_NUMERIC_VERSION}")
+set(REXGLUE_DERIVED_MAJOR "${CMAKE_MATCH_1}")
+set(REXGLUE_DERIVED_MINOR "${CMAKE_MATCH_2}")
+if(CMAKE_MATCH_4)
+    set(REXGLUE_DERIVED_PATCH "${CMAKE_MATCH_4}")
 else()
-    set(REXGLUE_VERSION_SUFFIX "-dev")
+    set(REXGLUE_DERIVED_PATCH "0")
 endif()
+if(CMAKE_MATCH_6)
+    set(REXGLUE_DERIVED_TWEAK "${CMAKE_MATCH_6}")
+else()
+    set(REXGLUE_DERIVED_TWEAK "0")
+endif()
+
+set(REXGLUE_FLOOR_VERSION
+    "${REXGLUE_DERIVED_MAJOR}.${REXGLUE_DERIVED_MINOR}.${REXGLUE_DERIVED_PATCH}")
 
 # Generate version header -- must run after REX_PLATFORM is set
 # Timestamp is set at configure time -- intentionally not updated on every rebuild
@@ -327,19 +230,15 @@ add_compile_options(
     -Wall
     -Wextra
 )
+
 include_directories(${REXGLUE_ROOT}/include)
 
 add_subdirectory(src/core)
 add_subdirectory(src/filesystem)
-# rexui is the ImGui/Vulkan/D3D12 UI layer — it depends on a graphics
-# backend (and on Linux pulls GTK3). When graphics are disabled (e.g. PS4
-# headless / GNM-only path), rexui has no backend to link against.
-if(REXGLUE_ENABLE_GRAPHICS)
-    add_subdirectory(src/ui)
-    add_subdirectory(src/graphics)
-endif()
+add_subdirectory(src/ui)
 add_subdirectory(src/input)
 add_subdirectory(src/audio)
+add_subdirectory(src/graphics)
 add_subdirectory(src/system)
 add_subdirectory(src/kernel)
 add_subdirectory(src/codegen)
@@ -354,13 +253,13 @@ endif()
 # Print configuration summary
 message(STATUS "===========================================")
 message(STATUS "ReXGlue Configuration Summary:")
-message(STATUS "  Version: ${PROJECT_VERSION}${REXGLUE_VERSION_SUFFIX}")
+message(STATUS "  Version: ${REXGLUE_FULL_VERSION}")
 message(STATUS "  Platform: ${REX_PLATFORM}")
 message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  Configurations: ${CMAKE_CONFIGURATION_TYPES}")
 message(STATUS "  Output Dir: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "  C++ Standard: C++${CMAKE_CXX_STANDARD}")
-message(STATUS "  Graphics: enabled=${REXGLUE_ENABLE_GRAPHICS} D3D12=${REXGLUE_USE_D3D12} Vulkan=${REXGLUE_USE_VULKAN}")
+message(STATUS "  Graphics: D3D12=${REXGLUE_USE_D3D12} Vulkan=${REXGLUE_USE_VULKAN}")
 message(STATUS "  FidelityFX: ${REXGLUE_ENABLE_FIDELITYFX}")
 message(STATUS "  Tracy: ${REXGLUE_ENABLE_TRACY}")
 message(STATUS "  Perf Counters: ${REXGLUE_ENABLE_PERF_COUNTERS}")

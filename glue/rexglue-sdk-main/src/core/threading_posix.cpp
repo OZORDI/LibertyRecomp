@@ -41,7 +41,7 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
 #include <dlfcn.h>
 
 #include <rex/main_android.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 #endif
 
 #if REX_PLATFORM_LINUX
@@ -216,9 +216,8 @@ bool SetTlsValue(TlsHandle handle, uintptr_t value) {
 class PosixConditionBase {
  public:
   PosixConditionBase() {
-#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#if REX_PLATFORM_LINUX
     // Use robust mutexes so waits can recover if owner thread terminates.
-    // Not available on Android Bionic.
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr) == 0) {
       if (pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST) == 0) {
@@ -237,7 +236,7 @@ class PosixConditionBase {
   WaitResult Wait(std::chrono::milliseconds timeout) {
     bool executed;
     auto predicate = [this] { return this->signaled(); };
-#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#if REX_PLATFORM_LINUX
     auto native_mutex = static_cast<pthread_mutex_t*>(mutex_.native_handle());
     int lock_result = pthread_mutex_lock(native_mutex);
     if (lock_result == EOWNERDEAD) {
@@ -291,7 +290,7 @@ class PosixConditionBase {
       locks.reserve(handles.size());
 
       for (size_t i = 0; i < handles.size(); ++i) {
-#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#if REX_PLATFORM_LINUX
         auto native_mutex = static_cast<pthread_mutex_t*>(handles[i]->mutex_.native_handle());
         int result = pthread_mutex_trylock(native_mutex);
         if (result == 0 || result == EOWNERDEAD) {
@@ -655,7 +654,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
         }
       } else {
         std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
-        std::strcpy(result.data(), android_pre_api_26_name_);
+        rex::string::copy_truncating(result.data(), android_pre_api_26_name_, result.size());
       }
 #else
       if (pthread_getname_np(thread_, result.data(), result.size() - 1) != 0) {
@@ -683,8 +682,8 @@ class PosixCondition<Thread> : public PosixConditionBase {
       return;
     }
     std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
-    rex::string::util_copy_truncating(android_pre_api_26_name_, name,
-                                      rex::countof(android_pre_api_26_name_));
+    rex::string::copy_truncating(android_pre_api_26_name_, name,
+                                 rex::countof(android_pre_api_26_name_));
   }
 #endif
 
@@ -1208,13 +1207,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetOnceAt(WClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
-    // Convert wall-clock time_point to steady_clock by computing the delta
-    // from "now" on the wall clock, then adding it to steady_clock::now().
-    // This avoids std::chrono::clock_cast which is missing in some libc++.
-    auto wall_now = WClock_::now();
-    auto delta = due_time - wall_now;
-    auto steady_due = GClock_::now() + std::chrono::duration_cast<GClock_::duration>(delta);
-    return SetOnceAt(steady_due, std::move(opt_callback));
+    return SetOnceAt(std::chrono::clock_cast<GClock_>(due_time), std::move(opt_callback));
   };
   bool SetOnceAt(GClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
@@ -1228,10 +1221,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetRepeatingAt(WClock_::time_point due_time, std::chrono::milliseconds period,
                       std::function<void()> opt_callback = nullptr) override {
-    auto wall_now = WClock_::now();
-    auto delta = due_time - wall_now;
-    auto steady_due = GClock_::now() + std::chrono::duration_cast<GClock_::duration>(delta);
-    return SetRepeatingAt(steady_due, period,
+    return SetRepeatingAt(std::chrono::clock_cast<GClock_>(due_time), period,
                           std::move(opt_callback));
   }
   bool SetRepeatingAt(GClock_::time_point due_time, std::chrono::milliseconds period,

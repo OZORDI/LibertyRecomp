@@ -18,10 +18,6 @@ REXCVAR_DECLARE(bool, vsync);
 REXCVAR_DECLARE(bool, clear_memory_page_state);
 REXCVAR_DECLARE(bool, half_pixel_offset);
 REXCVAR_DECLARE(bool, async_shader_compilation);
-REXCVAR_DECLARE(int32_t, video_mode_width);
-REXCVAR_DECLARE(int32_t, video_mode_height);
-REXCVAR_DECLARE(double, video_mode_refresh_rate);
-REXCVAR_DECLARE(std::string, resolution);
 
 // GPU Resolution / Readback / Queries
 REXCVAR_DECLARE(int32_t, resolution_scale);
@@ -76,13 +72,11 @@ REXCVAR_DECLARE(bool, use_fuzzy_alpha_epsilon);
 
 // GPU Shader Translation / Tracing
 REXCVAR_DECLARE(std::string, dump_shaders);
-REXCVAR_DECLARE(bool, dxbc_switch);
-REXCVAR_DECLARE(bool, dxbc_source_map);
 REXCVAR_DECLARE(std::string, trace_gpu_prefix);
 REXCVAR_DECLARE(bool, trace_gpu_stream);
 REXCVAR_DECLARE(std::string, swap_post_effect);
 
-// Vulkan
+#if REX_HAS_VULKAN
 REXCVAR_DECLARE(bool, vulkan_sparse_shared_memory);
 REXCVAR_DECLARE(bool, vulkan_submit_on_primary_buffer_end);
 REXCVAR_DECLARE(bool, vulkan_dynamic_rendering);
@@ -96,8 +90,11 @@ REXCVAR_DECLARE(std::string, render_target_path_vulkan);
 // Legacy backend compatibility aliases for shared readback controls.
 REXCVAR_DECLARE(bool, vulkan_readback_resolve);
 REXCVAR_DECLARE(bool, vulkan_readback_memexport);
+#endif  // REX_HAS_VULKAN
 
-// D3D12
+#if REX_HAS_D3D12
+REXCVAR_DECLARE(bool, dxbc_switch);
+REXCVAR_DECLARE(bool, dxbc_source_map);
 REXCVAR_DECLARE(bool, d3d12_bindless);
 REXCVAR_DECLARE(bool, d3d12_submit_on_primary_buffer_end);
 REXCVAR_DECLARE(bool, d3d12_dxbc_disasm);
@@ -109,5 +106,6 @@ REXCVAR_DECLARE(std::string, render_target_path_d3d12);
 // Legacy backend compatibility aliases for shared readback controls.
 REXCVAR_DECLARE(bool, d3d12_readback_memexport);
 REXCVAR_DECLARE(bool, d3d12_readback_resolve);
+#endif  // REX_HAS_D3D12
 
 #define XE_GPU_FINE_GRAINED_DRAW_SCOPES 1

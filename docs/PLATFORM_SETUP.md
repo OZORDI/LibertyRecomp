@@ -62,11 +62,20 @@ open out/build/ios-debug/LibertyRecomp.xcodeproj
 |`LIBERTY_IOS_DEVELOPMENT_TEAM`|(empty)|10-char Apple Team ID. Required for on-device builds. Simulator works without it.|
 |`LIBERTY_IOS_BUNDLE_IDENTIFIER`|`com.libertyrecomp`|Bundle ID. Must match your provisioning profile.|
 |`LIBERTY_IOS_PROVISIONING_PROFILE`|(empty)|Optional profile UUID. Leave blank for automatic signing.|
+|`LIBERTY_MACOS_BUNDLE_IDENTIFIER`|`OZORDI.LibertyRecomp`|Bundle ID for macOS builds. Must match the Game Center app record when shipping macOS achievements.|
 
 These feed the Xcode target attributes `DEVELOPMENT_TEAM`,
 `PRODUCT_BUNDLE_IDENTIFIER`, `CODE_SIGN_IDENTITY` (`iPhone Developer`), and
 `CODE_SIGN_STYLE` (`Automatic`), so the generated project signs itself
 without manual clicks in the Xcode UI.
+
+### Game Center
+
+iOS and macOS builds include the Game Center entitlement. Enable Game Center for
+the app's bundle ID in App Store Connect and create achievements named
+`ach_001` through `ach_065`, plus `ach_platinum`. IDs `ach_051` through
+`ach_055` are TLAD achievements, and `ach_056` through `ach_065` are TBoGT
+achievements.
 
 ### Key Details
 

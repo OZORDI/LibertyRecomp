@@ -20,6 +20,7 @@
 #include <rex/graphics/flags.h>
 #include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/graphics/primitive_processor.h>
+#include <rex/graphics/primitive_restart.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/registers.h>
 #include <rex/graphics/trace_writer.h>
@@ -125,7 +126,8 @@ bool PrimitiveProcessor::InitializeCommon(bool full_32bit_vertex_indices_support
                                           bool triangle_fans_supported, bool line_loops_supported,
                                           bool quad_lists_supported,
                                           bool point_sprites_supported_without_vs_expansion,
-                                          bool rectangle_lists_supported_without_vs_expansion) {
+                                          bool rectangle_lists_supported_without_vs_expansion,
+                                          bool primitive_restart_cannot_be_disabled) {
   full_32bit_vertex_indices_used_ = full_32bit_vertex_indices_supported;
   convert_triangle_fans_to_lists_ =
       !triangle_fans_supported || REXCVAR_GET(force_convert_triangle_fans_to_lists);
@@ -138,6 +140,7 @@ bool PrimitiveProcessor::InitializeCommon(bool full_32bit_vertex_indices_support
   // HostVertexShaderTypes).
   expand_point_sprites_in_vs_ = !point_sprites_supported_without_vs_expansion;
   expand_rectangle_lists_in_vs_ = !rectangle_lists_supported_without_vs_expansion;
+  primitive_restart_cannot_be_disabled_ = primitive_restart_cannot_be_disabled;
 
   // Initialize the index buffer for conversion of auto-indexed primitive types.
   size_t builtin_index_buffer_size = 0;
@@ -770,7 +773,59 @@ bool PrimitiveProcessor::Process(ProcessingResult& result_out) {
       // needed) indirectly.
       cacheable.host_draw_vertex_count = guest_draw_vertex_count;
       cacheable.index_buffer_type = ProcessedIndexBufferType::kGuestDMA;
-      cacheable.host_primitive_reset_enabled = guest_primitive_reset_enabled;
+      const bool host_strip_restart_always_enabled =
+          primitive_restart_cannot_be_disabled_ &&
+          (host_primitive_type == xenos::PrimitiveType::kLineStrip ||
+           host_primitive_type == xenos::PrimitiveType::kTriangleStrip);
+      cacheable.host_primitive_reset_enabled =
+          guest_primitive_reset_enabled || host_strip_restart_always_enabled;
+      if (host_strip_restart_always_enabled && !guest_primitive_reset_enabled) {
+        trace_writer_.WriteMemoryRead(guest_index_base, guest_index_buffer_needed_bytes);
+        CacheTransaction cache_transaction(
+            *this, CacheKey(guest_index_base, guest_draw_vertex_count, guest_index_format,
+                            guest_index_endian, guest_primitive_reset_enabled,
+                            xenos::PrimitiveType::kNone, false, true));
+        if (cache_transaction.GetFoundResult()) {
+          cacheable = *cache_transaction.GetFoundResult();
+        } else {
+          if (guest_index_format == xenos::IndexFormat::kInt16) {
+            auto guest_indices = memory_.TranslatePhysical<const uint16_t*>(guest_index_base);
+            if (primitive_restart::IsDisabledRestartSentinelUsed(guest_indices,
+                                                                 guest_draw_vertex_count)) {
+              cacheable.index_buffer_type = ProcessedIndexBufferType::kHostConverted;
+              cacheable.host_index_format = xenos::IndexFormat::kInt32;
+              cacheable.host_shader_index_endian = xenos::Endian::kNone;
+              auto host_indices =
+                  reinterpret_cast<uint32_t*>(RequestHostConvertedIndexBufferForCurrentFrame(
+                      cacheable.host_index_format, guest_draw_vertex_count, false, guest_index_base,
+                      cacheable.host_index_buffer_handle));
+              if (!host_indices) {
+                return false;
+              }
+              primitive_restart::ConvertDisabledRestartIndices(
+                  host_indices, guest_indices, guest_draw_vertex_count, guest_index_endian);
+            }
+          } else {
+            auto guest_indices = memory_.TranslatePhysical<const uint32_t*>(guest_index_base);
+            if (primitive_restart::IsDisabledRestartSentinelUsed(guest_indices,
+                                                                 guest_draw_vertex_count)) {
+              cacheable.index_buffer_type = ProcessedIndexBufferType::kHostConverted;
+              cacheable.host_index_format = xenos::IndexFormat::kInt32;
+              cacheable.host_shader_index_endian = xenos::Endian::kNone;
+              auto host_indices =
+                  reinterpret_cast<uint32_t*>(RequestHostConvertedIndexBufferForCurrentFrame(
+                      cacheable.host_index_format, guest_draw_vertex_count, false, guest_index_base,
+                      cacheable.host_index_buffer_handle));
+              if (!host_indices) {
+                return false;
+              }
+              primitive_restart::ConvertDisabledRestartIndices(
+                  host_indices, guest_indices, guest_draw_vertex_count, guest_index_endian);
+            }
+          }
+          cache_transaction.SetNewResult(cacheable);
+        }
+      }
       if (guest_primitive_reset_enabled) {
         if (guest_index_format == xenos::IndexFormat::kInt16) {
           // The whole 16-bit index is compared to the primitive reset index.

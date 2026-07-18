@@ -33,6 +33,10 @@ endif()
 
 if (APPLE)
     option(LIBERTY_RECOMP_METAL "Add Metal support for rendering" ON)
+    set(LIBERTY_IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple development team ID for iOS signing.")
+    set(LIBERTY_IOS_BUNDLE_IDENTIFIER "com.libertyrecomp" CACHE STRING "Bundle identifier for iOS builds.")
+    set(LIBERTY_IOS_PROVISIONING_PROFILE "" CACHE STRING "Optional iOS provisioning profile specifier.")
+    set(LIBERTY_MACOS_BUNDLE_IDENTIFIER "OZORDI.LibertyRecomp" CACHE STRING "Bundle identifier for macOS builds.")
 endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
@@ -184,6 +188,14 @@ elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ios" OR CMAKE_SYSTEM_NAME STREQ
         "os/ios/adaptive_triggers_ios.mm"
         "os/ios/adaptive_triggers_ios.h"
         "os/gamecenter/achievement_bridge_gc.mm"
+    )
+    set_source_files_properties(
+        "os/ios/logger_ios.cpp"
+        "os/ios/media_ios.cpp"
+        "os/ios/process_ios.cpp"
+        "os/ios/user_ios.cpp"
+        "os/ios/version_ios.cpp"
+        PROPERTIES LANGUAGE OBJCXX
     )
 elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "android" OR ANDROID)
     set(LIBERTY_RECOMP_OS_CXX_SOURCES
@@ -560,6 +572,7 @@ elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ios" OR CMAKE_SYSTEM_NAME STREQ
             ${LIBERTY_RECOMP_CXX_SOURCES}
             "res/ios/Assets.xcassets"
             "res/ios/LaunchScreen.storyboard"
+            "res/ios/LibertyRecomp.entitlements"
     )
     set_target_properties(LibertyRecomp PROPERTIES
             OUTPUT_NAME "Liberty Recompiled"
@@ -573,6 +586,7 @@ elseif (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ios" OR CMAKE_SYSTEM_NAME STREQ
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${LIBERTY_IOS_DEVELOPMENT_TEAM}"
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "iPhone Developer"
             XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/res/ios/LibertyRecomp.entitlements"
             XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
             XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchStoryboardName "LaunchScreen"
             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
@@ -614,17 +628,20 @@ elseif (APPLE)
     add_executable(LibertyRecomp MACOSX_BUNDLE
             ${LIBERTY_RECOMP_CXX_SOURCES}
             res/macos/game_icon.icns
+            res/macos/LibertyRecomp.entitlements
     )
     set_source_files_properties(res/macos/game_icon.icns PROPERTIES
             MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(LibertyRecomp PROPERTIES
             OUTPUT_NAME "Liberty Recompiled"
             MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/macos/MacOSXBundleInfo.plist.in
-            MACOSX_BUNDLE_GUI_IDENTIFIER OZORDI.LibertyRecomp
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${LIBERTY_MACOS_BUNDLE_IDENTIFIER}"
             MACOSX_BUNDLE_BUNDLE_NAME "Liberty Recompiled"
             MACOSX_BUNDLE_BUNDLE_VERSION ${MACOS_BUNDLE_VERSION}
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${MACOS_BUNDLE_VERSION}
             MACOSX_BUNDLE_ICON_FILE "game_icon.icns"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${LIBERTY_MACOS_BUNDLE_IDENTIFIER}"
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/res/macos/LibertyRecomp.entitlements"
     )
 
     # Linking with MoltenVK directly would prevent using the system Vulkan loader to load with debug layers.

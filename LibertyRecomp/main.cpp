@@ -71,6 +71,7 @@
 #include <rex/system/xthread.h>
 #include <rex/system/xobject.h>
 #include <rex/system/user_module.h>
+#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/crt/heap.h>
@@ -82,6 +83,15 @@
 #include <rex/audio/switch/switch_audio_system.h>
 #else
 #include <rex/audio/sdl/sdl_audio_system.h>
+#endif
+#if defined(LIBERTY_RECOMP_PS4)
+#include <os/ps4/achievement_bridge_ps4.h>
+#endif
+#ifdef LIBERTY_RECOMP_GAMECENTER
+#include <os/gamecenter/achievement_bridge_gc.h>
+#endif
+#if REX_PLATFORM_ANDROID
+#include <os/android/achievement_bridge_android.h>
 #endif
 
 #ifdef _WIN32
@@ -442,6 +452,19 @@ void init()
 }
 #endif
 
+static void LibertyOnXboxAchievementUnlocked(uint32_t xbox_id)
+{
+#if defined(LIBERTY_RECOMP_PS4)
+    LibertyPS4OnXboxAchievementUnlocked(xbox_id);
+#endif
+#ifdef LIBERTY_RECOMP_GAMECENTER
+    LibertyGCOnXboxAchievementUnlocked(xbox_id);
+#endif
+#if REX_PLATFORM_ANDROID
+    LibertyAndroidOnXboxAchievementUnlocked(xbox_id);
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     // Install RexGlue's signal handlers + fallback crash handler early.
@@ -687,6 +710,11 @@ int main(int argc, char *argv[])
             printf("[EXIT-TRACE] main.cpp:478 calling _Exit\n"); fflush(stdout);
             std::_Exit(1);
         }
+
+        rex::kernel::xam::apps::SetAchievementUnlockCallback(&LibertyOnXboxAchievementUnlocked);
+#ifdef LIBERTY_RECOMP_GAMECENTER
+        LibertyGCInit();
+#endif
 
         // rexcrt heap init. Same reason as above — rex_app.cpp normally handles
         // this for ReXApp-derived apps, but Liberty owns its own main() so we

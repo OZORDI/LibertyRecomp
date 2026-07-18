@@ -1,15 +1,15 @@
 /**
  * @file        core/threading_mac.cpp
- * @brief       macOS threading implementation derived from the POSIX backend
+ * @brief       macOS platform threading implementations
  *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  * @license     BSD 3-Clause License
  */
 
 #include <rex/platform.h>
 #include <rex/thread.h>
 
-static_assert(REX_PLATFORM_MAC || REX_PLATFORM_IOS,
-              "This file is for Apple platforms (macOS / iOS) only");
+static_assert(REX_PLATFORM_MAC, "This file is macOS-only");
 
 #include <signal.h>
 
@@ -23,14 +23,7 @@ static_assert(REX_PLATFORM_MAC || REX_PLATFORM_IOS,
 #include <memory>
 
 #include <pthread.h>
-#include <pthread/qos.h>
-#include <dispatch/dispatch.h>
-#include <mach/mach_init.h>
-#include <mach/thread_act.h>
-#include <mach/thread_policy.h>
-#if REX_PLATFORM_LINUX
-#include <sys/eventfd.h>
-#endif
+#include <semaphore.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -47,7 +40,7 @@ static_assert(REX_PLATFORM_MAC || REX_PLATFORM_IOS,
 #include <dlfcn.h>
 
 #include <rex/main_android.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 #endif
 
 #if REX_PLATFORM_LINUX
@@ -116,12 +109,15 @@ enum class SignalType {
 };
 
 int GetSystemSignal(SignalType num) {
-  // macOS doesn't provide Linux-style real-time signals, so reserve fixed
-  // user signals for suspend and APC-style wakeups.
-  static constexpr int kSignals[] = {SIGUSR1, SIGUSR2};
-  auto index = static_cast<size_t>(num);
-  assert_true(index < std::size(kSignals));
-  return kSignals[index];
+  switch (num) {
+    case SignalType::kThreadSuspend:
+      return SIGUSR1;
+    case SignalType::kThreadUserCallback:
+      return SIGUSR2;
+    default:
+      assert_unhandled_case(num);
+      return SIGUSR1;
+  }
 }
 
 SignalType GetSystemSignalType(int num) {
@@ -131,7 +127,7 @@ SignalType GetSystemSignalType(int num) {
     case SIGUSR2:
       return SignalType::kThreadUserCallback;
     default:
-      assert_always();
+      assert_unhandled_case(num);
       return SignalType::kThreadSuspend;
   }
 }
@@ -162,10 +158,7 @@ void EnableAffinityConfiguration() {}
 // uint64_t ticks() { return mach_absolute_time(); }
 
 uint32_t current_thread_system_id() {
-  // pthread_t is opaque on Darwin. Use the numeric Mach/Darwin thread ID for
-  // logs and for the exported system_id() contract.
-  uint64_t thread_id = 0;
-  return pthread_threadid_np(nullptr, &thread_id) == 0 ? static_cast<uint32_t>(thread_id) : 0;
+  return static_cast<uint32_t>(pthread_mach_thread_np(pthread_self()));
 }
 
 void MaybeYield() {
@@ -603,7 +596,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
         exit_code_(0),
         state_(State::kUninitialized),
         suspend_count_(0) {
-    suspend_sem_ = dispatch_semaphore_create(0);
+    sem_init(&suspend_sem_, 0, 0);
 #if REX_PLATFORM_ANDROID
     android_pre_api_26_name_[0] = '\0';
 #endif
@@ -613,24 +606,14 @@ class PosixCondition<Thread> : public PosixConditionBase {
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0)
       return false;
-    if (params.stack_size < 0x800000) params.stack_size = 0x800000;  // 8 MiB minimum on macOS
     if (pthread_attr_setstacksize(&attr, params.stack_size) != 0) {
       pthread_attr_destroy(&attr);
       return false;
     }
-    // Boost macOS thread QoS to avoid scheduler starvation of guest threads.
-    pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
-    // Apple denies SCHED_FIFO with EPERM; SDL3 notes "Apple requires SCHED_RR
-    // for high priority threads". RPCS3 applies SCHED_RR + priority 99
-    // unconditionally on every guest thread. Matching that behavior here
-    // prevents low-priority guest threads from being starved on contested
-    // cores.
-    {
+    if (params.initial_priority != 0) {
       sched_param sched{};
-      sched.sched_priority = params.initial_priority != 0
-                                 ? params.initial_priority + 1
-                                 : 99;
-      if (pthread_attr_setschedpolicy(&attr, SCHED_RR) != 0) {
+      sched.sched_priority = params.initial_priority + 1;
+      if (pthread_attr_setschedpolicy(&attr, SCHED_FIFO) != 0) {
         pthread_attr_destroy(&attr);
         return false;
       }
@@ -654,9 +637,8 @@ class PosixCondition<Thread> : public PosixConditionBase {
         signaled_(false),
         exit_code_(0),
         state_(State::kRunning),
-        suspend_count_(0),
-        system_id_(current_thread_system_id()) {
-    suspend_sem_ = dispatch_semaphore_create(0);
+        suspend_count_(0) {
+    sem_init(&suspend_sem_, 0, 0);
 #if REX_PLATFORM_ANDROID
     android_pre_api_26_name_[0] = '\0';
 #endif
@@ -685,7 +667,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
         }
       } else {
         std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
-        std::strcpy(result.data(), android_pre_api_26_name_);
+        rex::string::copy_truncating(result.data(), android_pre_api_26_name_, result.size());
       }
 #else
       if (pthread_getname_np(thread_, result.data(), result.size() - 1) != 0) {
@@ -700,7 +682,6 @@ class PosixCondition<Thread> : public PosixConditionBase {
     WaitStarted();
     std::unique_lock<std::mutex> lock(state_mutex_);
     if (state_ != State::kUninitialized && state_ != State::kFinished) {
-      // Darwin only exposes the current-thread variant of pthread_setname_np.
       if (pthread_equal(thread_, pthread_self())) {
         pthread_setname_np(std::string(name).c_str());
       }
@@ -716,38 +697,27 @@ class PosixCondition<Thread> : public PosixConditionBase {
       return;
     }
     std::lock_guard<std::mutex> lock(android_pre_api_26_name_mutex_);
-    rex::string::util_copy_truncating(android_pre_api_26_name_, name,
-                                      rex::countof(android_pre_api_26_name_));
+    rex::string::copy_truncating(android_pre_api_26_name_, name,
+                                 rex::countof(android_pre_api_26_name_));
   }
 #endif
 
-  uint32_t system_id() const {
-    WaitStarted();
-    return system_id_;
-  }
+  uint32_t system_id() const { return static_cast<uint32_t>(pthread_mach_thread_np(thread_)); }
 
   uint64_t affinity_mask() {
     WaitStarted();
-    // Darwin thread affinity tags don't map to a CPU bitmask query, so report
-    // the process-visible logical CPU set.
-    auto processor_count = std::min<uint32_t>(logical_processor_count(), 64);
-    return processor_count == 64 ? ~UINT64_C(0) : ((UINT64_C(1) << processor_count) - 1);
+    auto cpu_count = std::min<uint32_t>(logical_processor_count(), 64);
+    if (cpu_count == 64) {
+      return std::numeric_limits<uint64_t>::max();
+    }
+    return (uint64_t(1) << cpu_count) - 1;
   }
 
   void set_affinity_mask(uint64_t mask) {
     WaitStarted();
-    // Darwin's THREAD_AFFINITY_POLICY is a tag-based hint used by the Mach
-    // scheduler to co-locate threads that share an L2 cache. It is ignored on
-    // Apple Silicon (M-series) and merely advisory on Intel, but submitting
-    // it costs nothing and matches RPCS3's behavior. Use the lowest set bit
-    // of the mask as the affinity tag (RPCS3: Utilities/Thread.cpp:3326-3330).
-    thread_affinity_policy_data_t policy;
-    policy.affinity_tag =
-        mask ? static_cast<integer_t>(__builtin_ctzll(mask)) : 0;
-    thread_port_t mach_thread = pthread_mach_thread_np(thread_);
-    thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY,
-                      reinterpret_cast<thread_policy_t>(&policy),
-                      mask ? THREAD_AFFINITY_POLICY_COUNT : 0);
+    (void)mask;
+    // macOS doesn't expose Linux-style pthread affinity masks.
+    // Keep this as a no-op so higher layers can build and run.
   }
 
   int priority() {
@@ -764,17 +734,9 @@ class PosixCondition<Thread> : public PosixConditionBase {
 
   void set_priority(int new_priority) {
     WaitStarted();
-    // Apple denies SCHED_FIFO; SCHED_RR is the supported high-priority policy.
-    // Read the current policy first so we don't downgrade a thread that was
-    // created with a different scheduler (per SDL3's pattern).
-    int policy = SCHED_RR;
     sched_param param{};
-    if (pthread_getschedparam(thread_, &policy, &param) != 0 ||
-        policy == SCHED_FIFO) {
-      policy = SCHED_RR;
-    }
     param.sched_priority = new_priority;
-    int result = pthread_setschedparam(thread_, policy, &param);
+    int result = pthread_setschedparam(thread_, SCHED_FIFO, &param);
     if (result != 0) {
       switch (result) {
         case EPERM:
@@ -792,33 +754,47 @@ class PosixCondition<Thread> : public PosixConditionBase {
 
   void QueueUserCallback(std::function<void()> callback) {
     WaitStarted();
+    bool dispatch_on_current_thread = false;
     {
-      std::unique_lock<std::mutex> lock(callback_mutex_);
+      // Keep the target alive between the state check and signal delivery. The
+      // normal exit and Terminate paths both publish kFinished under this mutex.
+      std::unique_lock<std::mutex> state_lock(state_mutex_);
+      if (state_ == State::kFinished) {
+        return;
+      }
+      bool is_current_thread = pthread_equal(thread_, pthread_self());
+
+      std::unique_lock<std::mutex> callback_lock(callback_mutex_);
       user_callbacks_.push_back(std::move(callback));
       has_pending_user_callbacks_.store(true, std::memory_order_release);
-    }
 
-    // If the callback is queued on the current thread, don't self-signal.
-    // Alertable waits drain this queue in normal thread context.
-    if (pthread_equal(thread_, pthread_self())) {
-      if (alertable_state_) {
-        DispatchQueuedUserCallbacks();
-      }
-      return;
-    }
-
+      // If the callback is queued on the current thread, don't self-signal.
+      // Alertable waits drain this queue in normal thread context.
+      if (is_current_thread) {
+        dispatch_on_current_thread = alertable_state_;
+      } else {
+        sigval value{};
+        value.sival_ptr = this;
 #if REX_PLATFORM_ANDROID
-    sigval value{};
-    value.sival_ptr = this;
-    int result = sigqueue(pthread_gettid_np(thread_),
-                          GetSystemSignal(SignalType::kThreadUserCallback), value);
+        int result = sigqueue(pthread_gettid_np(thread_),
+                              GetSystemSignal(SignalType::kThreadUserCallback), value);
 #else
-    // pthread_sigqueue is unavailable on macOS. The signal is only a wakeup
-    // hint because the queued callback lives in user_callbacks_.
-    int result = pthread_kill(thread_, GetSystemSignal(SignalType::kThreadUserCallback));
+        int result = pthread_kill(thread_, GetSystemSignal(SignalType::kThreadUserCallback));
 #endif
-    if (result != 0) {
-      REXSYS_WARN("QueueUserCallback: signal delivery failed ({})", result);
+        if (result != 0) {
+          // The callback has not become observable because callback_mutex_ is
+          // still held. Remove it rather than retaining work for a dead target.
+          user_callbacks_.pop_back();
+          has_pending_user_callbacks_.store(!user_callbacks_.empty(), std::memory_order_release);
+          if (result != ESRCH) {
+            REXSYS_WARN("QueueUserCallback: signal delivery failed ({})", result);
+          }
+        }
+      }
+    }
+
+    if (dispatch_on_current_thread) {
+      DispatchQueuedUserCallbacks();
     }
   }
 
@@ -860,7 +836,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
     if (suspend_count_ == 0 && state_ == State::kSuspended) {
       state_ = State::kRunning;
       // Async-signal-safe wakeup for WaitSuspended() from signal handler path.
-      dispatch_semaphore_signal(suspend_sem_);
+      sem_post(&suspend_sem_);
     }
     state_signal_.notify_all();
     return true;
@@ -935,8 +911,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
     state_signal_.wait(lock, [this] { return state_ != State::kUninitialized; });
   }
 
+  /// Uses sem_wait because it may be called from signal handler context.
   void WaitSuspended() {
-    dispatch_semaphore_wait(suspend_sem_, DISPATCH_TIME_FOREVER);
+    int ret;
+    do {
+      ret = sem_wait(&suspend_sem_);
+    } while (ret == -1 && errno == EINTR);
   }
 
   void* native_handle() const override { return reinterpret_cast<void*>(thread_); }
@@ -948,15 +928,14 @@ class PosixCondition<Thread> : public PosixConditionBase {
     if (thread_) {
       pthread_join(thread_, nullptr);
     }
-    dispatch_release(suspend_sem_);
+    sem_destroy(&suspend_sem_);
   }
   pthread_t thread_;
   bool signaled_;
   int exit_code_;
   State state_;             // Protected by state_mutex_
   uint32_t suspend_count_;  // Protected by state_mutex_
-  uint32_t system_id_ = 0;  // Set once the thread starts.
-  dispatch_semaphore_t suspend_sem_;
+  sem_t suspend_sem_;
   mutable std::mutex state_mutex_;
   mutable std::mutex callback_mutex_;
   mutable std::condition_variable state_signal_;
@@ -1234,7 +1213,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetOnceAt(WClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
-    return SetOnceAt(rex::chrono::clock_cast<GClock_>(due_time), std::move(opt_callback));
+    return SetOnceAt(std::chrono::clock_cast<GClock_>(due_time), std::move(opt_callback));
   };
   bool SetOnceAt(GClock_::time_point due_time,
                  std::function<void()> opt_callback = nullptr) override {
@@ -1248,7 +1227,7 @@ class PosixTimer : public PosixConditionHandle<Timer> {
   }
   bool SetRepeatingAt(WClock_::time_point due_time, std::chrono::milliseconds period,
                       std::function<void()> opt_callback = nullptr) override {
-    return SetRepeatingAt(rex::chrono::clock_cast<GClock_>(due_time), period,
+    return SetRepeatingAt(std::chrono::clock_cast<GClock_>(due_time), period,
                           std::move(opt_callback));
   }
   bool SetRepeatingAt(GClock_::time_point due_time, std::chrono::milliseconds period,
@@ -1336,7 +1315,6 @@ void* PosixCondition<Thread>::ThreadStartRoutine(void* parameter) {
 
   current_thread_ = thread;
   current_thread_condition_ = &thread->handle_;
-  thread->handle_.system_id_ = current_thread_system_id();
   {
     std::unique_lock<std::mutex> lock(thread->handle_.state_mutex_);
     thread->handle_.state_ = create_suspended ? State::kSuspended : State::kRunning;
@@ -1422,7 +1400,6 @@ void Thread::Exit(int exit_code) {
 }
 
 void set_current_thread_name(const std::string_view name) {
-  // Darwin uses the current-thread-only pthread_setname_np signature.
   pthread_setname_np(std::string(name).c_str());
 #if REX_PLATFORM_ANDROID
   if (!android_pthread_getname_np_ && current_thread_) {

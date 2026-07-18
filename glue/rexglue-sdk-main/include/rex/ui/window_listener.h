@@ -27,6 +27,15 @@ class WindowListener {
   virtual void OnOpened(UISetupEvent&) {}
   virtual void OnClosing(UIEvent&) {}
 
+  // Called when the user asks to close the window (close button, Alt+F4).
+  // Return false to veto: the window stays open and the vetoing party is
+  // expected to close it explicitly later (Window::RequestClose) once it is
+  // safe (renderers drained, guest threads stopped). Default accepts.
+  virtual bool OnCloseRequested(UIEvent&) { return true; }
+
+  virtual void OnMinimized(UIEvent&) {}
+  virtual void OnRestored(UIEvent&) {}
+
   virtual void OnDpiChanged(UISetupEvent&) {}
   virtual void OnResize(UISetupEvent&) {}
 

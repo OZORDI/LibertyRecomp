@@ -12,7 +12,7 @@
     <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
 
     <key>CFBundleIdentifier</key>
-    <string>OZORDI.LibertyRecomp.iOS</string>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
 
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>

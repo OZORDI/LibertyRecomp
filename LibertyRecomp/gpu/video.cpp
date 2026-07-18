@@ -285,6 +285,9 @@ static GuestSurface* g_depthStencil;
 static RenderFramebuffer* g_framebuffer;
 static RenderViewport g_viewport(0.0f, 0.0f, 1280.0f, 720.0f);
 static PipelineState g_pipelineState;
+static GuestShader* g_mainThreadVertexShader = nullptr;
+static GuestShader* g_mainThreadPixelShader = nullptr;
+static GuestVertexDeclaration* g_mainThreadVertexDeclaration = nullptr;
 static int32_t g_depthBias;
 static float g_slopeScaledDepthBias;
 static uint32_t g_vertexShaderConstants[0x400];
@@ -402,6 +405,8 @@ static bool g_triangleStripWorkaround = false;
 // Default shaders used as fallback when NULL is passed to SetVertexShader/SetPixelShader
 static GuestShader* g_defaultVertexShader = nullptr;
 static GuestShader* g_defaultPixelShader = nullptr;
+static std::vector<std::unique_ptr<GuestShader>> g_hostOnlyShaders;
+static std::vector<std::unique_ptr<GuestVertexDeclaration>> g_hostOnlyVertexDeclarations;
 
 // Forward declaration for vertex declaration creation
 static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexElement* vertexElements);
@@ -1219,6 +1224,9 @@ struct RenderCommand
             uint32_t primitiveType; 
             uint32_t startVertex; 
             uint32_t primitiveCount;
+            GuestShader* vertexShader;
+            GuestShader* pixelShader;
+            GuestVertexDeclaration* vertexDeclaration;
         } drawPrimitive;
 
         struct 
@@ -1227,6 +1235,9 @@ struct RenderCommand
             int32_t baseVertexIndex; 
             uint32_t startIndex;
             uint32_t primCount;
+            GuestShader* vertexShader;
+            GuestShader* pixelShader;
+            GuestVertexDeclaration* vertexDeclaration;
         } drawIndexedPrimitive;
 
         struct 
@@ -1237,6 +1248,9 @@ struct RenderCommand
             uint32_t vertexStreamZeroSize;
             uint32_t vertexStreamZeroStride;
             CsdFilterState csdFilterState;
+            GuestShader* vertexShader;
+            GuestShader* pixelShader;
+            GuestVertexDeclaration* vertexDeclaration;
         } drawPrimitiveUP;
 
         struct 
@@ -5215,6 +5229,50 @@ static std::unique_ptr<RenderPipeline> CreateGraphicsPipeline(const PipelineStat
     
     desc.inputSlots = inputSlots;
     desc.inputSlotsCount = inputSlotCount;
+
+    static uint32_t s_graphicsPipelineDescLogs = 0;
+    ++s_graphicsPipelineDescLogs;
+    if (s_graphicsPipelineDescLogs <= 16 || (s_graphicsPipelineDescLogs % 5000) == 0)
+    {
+        LOGF_WARNING("[GPLDesc] #{} vs={} ps={} inputElems={} inputSlots={} topo={} rtFmt={} dsFmt={}",
+            s_graphicsPipelineDescLogs,
+            pipelineState.vertexShader != nullptr && pipelineState.vertexShader->shaderCacheEntry != nullptr
+                ? pipelineState.vertexShader->shaderCacheEntry->filename
+                : "<null>",
+            pipelineState.pixelShader != nullptr && pipelineState.pixelShader->shaderCacheEntry != nullptr
+                ? pipelineState.pixelShader->shaderCacheEntry->filename
+                : "<null>",
+            desc.inputElementsCount,
+            desc.inputSlotsCount,
+            static_cast<int>(desc.primitiveTopology),
+            static_cast<int>(desc.renderTargetFormat[0]),
+            static_cast<int>(desc.depthTargetFormat));
+
+        for (uint32_t i = 0; i < desc.inputElementsCount && i < 24; ++i)
+        {
+            const auto& inputElement = desc.inputElements[i];
+            LOGF_WARNING("[GPLDesc] #{} input[{}] sem={}{} loc={} fmt={} slot={} off={}",
+                s_graphicsPipelineDescLogs,
+                i,
+                inputElement.semanticName != nullptr ? inputElement.semanticName : "<null>",
+                inputElement.semanticIndex,
+                inputElement.location,
+                static_cast<int>(inputElement.format),
+                inputElement.slotIndex,
+                inputElement.alignedByteOffset);
+        }
+
+        for (uint32_t i = 0; i < desc.inputSlotsCount && i < 16; ++i)
+        {
+            const auto& inputSlot = desc.inputSlots[i];
+            LOGF_WARNING("[GPLDesc] #{} slot[{}] index={} stride={} class={}",
+                s_graphicsPipelineDescLogs,
+                i,
+                inputSlot.index,
+                inputSlot.stride,
+                static_cast<int>(inputSlot.classification));
+        }
+    }
     
     auto pipeline = g_device->createGraphicsPipeline(desc);
 
@@ -5830,6 +5888,9 @@ static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t 
     cmd.drawPrimitive.primitiveType = primitiveType;
     cmd.drawPrimitive.startVertex = startVertex;
     cmd.drawPrimitive.primitiveCount = primitiveCount;
+    cmd.drawPrimitive.vertexShader = g_mainThreadVertexShader;
+    cmd.drawPrimitive.pixelShader = g_mainThreadPixelShader;
+    cmd.drawPrimitive.vertexDeclaration = g_mainThreadVertexDeclaration;
 
     queue.submit();
 }
@@ -5864,11 +5925,96 @@ static void UnsetInstancingStream()
     }
 }
 
+static bool HasRenderablePipeline(const char* source)
+{
+    if (g_pipelineState.vertexShader != nullptr &&
+        g_pipelineState.pixelShader != nullptr &&
+        g_pipelineState.vertexDeclaration != nullptr)
+    {
+        return true;
+    }
+
+    static uint32_t s_missingPipelineLogs = 0;
+    ++s_missingPipelineLogs;
+    if (s_missingPipelineLogs <= 32 || (s_missingPipelineLogs % 5000) == 0)
+    {
+        LOGF_WARNING("[DrawSkip:{}] #{} missing pipeline state VS={} PS={} VDecl={}",
+            source,
+            s_missingPipelineLogs,
+            g_pipelineState.vertexShader != nullptr ? "yes" : "no",
+            g_pipelineState.pixelShader != nullptr ? "yes" : "no",
+            g_pipelineState.vertexDeclaration != nullptr ? "yes" : "no");
+    }
+
+    return false;
+}
+
+static bool HasRenderableTargets(const char* source)
+{
+    GuestSurface* renderTarget = g_pipelineState.colorWriteEnable ? g_renderTarget : nullptr;
+    GuestSurface* depthStencil = (g_pipelineState.zEnable || g_pipelineState.stencilEnable) ? g_depthStencil : nullptr;
+
+    const bool hasRenderTarget = renderTarget != nullptr && renderTarget->texture != nullptr;
+    const bool hasDepthStencil = depthStencil != nullptr && depthStencil->texture != nullptr;
+    if (hasRenderTarget || hasDepthStencil)
+        return true;
+
+    static uint32_t s_missingTargetLogs = 0;
+    ++s_missingTargetLogs;
+    if (s_missingTargetLogs <= 32 || (s_missingTargetLogs % 5000) == 0)
+    {
+        LOGF_WARNING("[DrawSkip:{}] #{} missing framebuffer rt={} rtTex={} ds={} dsTex={} colorWrite={} z={} stencil={}",
+            source,
+            s_missingTargetLogs,
+            (void*)renderTarget,
+            renderTarget != nullptr ? (void*)renderTarget->texture : nullptr,
+            (void*)depthStencil,
+            depthStencil != nullptr ? (void*)depthStencil->texture : nullptr,
+            g_pipelineState.colorWriteEnable ? "yes" : "no",
+            g_pipelineState.zEnable ? "yes" : "no",
+            g_pipelineState.stencilEnable ? "yes" : "no");
+    }
+
+    return false;
+}
+
+static void ApplyDrawVertexDeclarationSnapshot(GuestVertexDeclaration* vertexDeclaration)
+{
+    if (vertexDeclaration != nullptr)
+    {
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTexcoords, vertexDeclaration->swappedTexcoords);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedNormals, vertexDeclaration->swappedNormals);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBinormals, vertexDeclaration->swappedBinormals);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTangents, vertexDeclaration->swappedTangents);
+        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBlendWeights, vertexDeclaration->swappedBlendWeights);
+
+        uint32_t specConstants = g_pipelineState.specConstants;
+        if (vertexDeclaration->hasR11G11B10Normal)
+            specConstants |= SPEC_CONSTANT_R11G11B10_NORMAL;
+        else
+            specConstants &= ~SPEC_CONSTANT_R11G11B10_NORMAL;
+
+        SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.specConstants, specConstants);
+    }
+
+    SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexDeclaration, vertexDeclaration);
+}
+
+static void ApplyDrawPipelineSnapshot(GuestShader* vertexShader, GuestShader* pixelShader, GuestVertexDeclaration* vertexDeclaration)
+{
+    SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexShader, vertexShader);
+    SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.pixelShader, pixelShader);
+    ApplyDrawVertexDeclarationSnapshot(vertexDeclaration);
+}
+
 static void ProcDrawPrimitive(const RenderCommand& cmd)
 {
     const auto& args = cmd.drawPrimitive;
 
-    if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
+    ApplyDrawPipelineSnapshot(args.vertexShader, args.pixelShader, args.vertexDeclaration);
+
+    if (!HasRenderablePipeline("DrawPrimitive")) return;
+    if (!HasRenderableTargets("DrawPrimitive")) return;
 
     SetPrimitiveType(args.primitiveType);
 
@@ -5916,6 +6062,9 @@ static void DrawIndexedPrimitive(GuestDevice* device, uint32_t primitiveType, in
     cmd.drawIndexedPrimitive.baseVertexIndex = baseVertexIndex;
     cmd.drawIndexedPrimitive.startIndex = startIndex;
     cmd.drawIndexedPrimitive.primCount = primitiveCount;
+    cmd.drawIndexedPrimitive.vertexShader = g_mainThreadVertexShader;
+    cmd.drawIndexedPrimitive.pixelShader = g_mainThreadPixelShader;
+    cmd.drawIndexedPrimitive.vertexDeclaration = g_mainThreadVertexDeclaration;
 
     queue.submit();
 }
@@ -5924,7 +6073,10 @@ static void ProcDrawIndexedPrimitive(const RenderCommand& cmd)
 {
     const auto& args = cmd.drawIndexedPrimitive;
 
-    if (!g_pipelineState.vertexShader || !g_pipelineState.pixelShader) return;
+    ApplyDrawPipelineSnapshot(args.vertexShader, args.pixelShader, args.vertexDeclaration);
+
+    if (!HasRenderablePipeline("DrawIndexedPrimitive")) return;
+    if (!HasRenderableTargets("DrawIndexedPrimitive")) return;
 
     uint32_t indexCount = CheckInstancing();
     if (indexCount > 0)
@@ -5949,6 +6101,9 @@ static void DrawPrimitiveUP(GuestDevice* device, uint32_t primitiveType, uint32_
     cmd.drawPrimitiveUP.vertexStreamZeroSize = primitiveCount * vertexStreamZeroStride;
     cmd.drawPrimitiveUP.vertexStreamZeroStride = vertexStreamZeroStride;
     cmd.drawPrimitiveUP.csdFilterState = g_csdFilterState;
+    cmd.drawPrimitiveUP.vertexShader = g_mainThreadVertexShader;
+    cmd.drawPrimitiveUP.pixelShader = g_mainThreadPixelShader;
+    cmd.drawPrimitiveUP.vertexDeclaration = g_mainThreadVertexDeclaration;
     
     queue.submit();
 }
@@ -5956,6 +6111,11 @@ static void DrawPrimitiveUP(GuestDevice* device, uint32_t primitiveType, uint32_
 static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 {
     const auto& args = cmd.drawPrimitiveUP;
+
+    ApplyDrawPipelineSnapshot(args.vertexShader, args.pixelShader, args.vertexDeclaration);
+
+    if (!HasRenderablePipeline("DrawPrimitiveUP")) return;
+    if (!HasRenderableTargets("DrawPrimitiveUP")) return;
 
     uint32_t instIndexCount = CheckInstancing();
     if (instIndexCount > 0)
@@ -6067,6 +6227,8 @@ static RenderFormat ConvertDeclType(uint32_t type)
     case D3DDECLTYPE_USHORT4N:
         return RenderFormat::R16G16B16A16_UNORM;
     case D3DDECLTYPE_UINT1:
+    case D3DDECLTYPE_UDEC3:
+    case D3DDECLTYPE_DEC3N:
         return RenderFormat::R32_UINT;
     case D3DDECLTYPE_DEC3N_2:
     case D3DDECLTYPE_DEC3N_3:
@@ -6081,8 +6243,68 @@ static RenderFormat ConvertDeclType(uint32_t type)
     }
 }
 
+static bool IsSupportedGuestDeclType(uint32_t type)
+{
+    switch (type)
+    {
+    case D3DDECLTYPE_FLOAT1:
+    case D3DDECLTYPE_FLOAT2:
+    case D3DDECLTYPE_FLOAT3:
+    case D3DDECLTYPE_FLOAT4:
+    case D3DDECLTYPE_D3DCOLOR:
+    case D3DDECLTYPE_UBYTE4:
+    case D3DDECLTYPE_UBYTE4_2:
+    case D3DDECLTYPE_SHORT2:
+    case D3DDECLTYPE_SHORT4:
+    case D3DDECLTYPE_UBYTE4N:
+    case D3DDECLTYPE_UBYTE4N_2:
+    case D3DDECLTYPE_SHORT2N:
+    case D3DDECLTYPE_SHORT4N:
+    case D3DDECLTYPE_USHORT2N:
+    case D3DDECLTYPE_USHORT4N:
+    case D3DDECLTYPE_UINT1:
+    case D3DDECLTYPE_UDEC3:
+    case D3DDECLTYPE_DEC3N:
+    case D3DDECLTYPE_DEC3N_2:
+    case D3DDECLTYPE_DEC3N_3:
+    case D3DDECLTYPE_FLOAT16_2:
+    case D3DDECLTYPE_FLOAT16_4:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool LooksLikeGuestVertexElements(GuestVertexElement* elements)
+{
+    if (elements == nullptr)
+        return false;
+
+    for (uint32_t i = 0; i < 64; ++i)
+    {
+        uint32_t stream = elements[i].stream;
+        uint32_t type = elements[i].type;
+
+        if (stream == 0xFF && type == D3DDECLTYPE_UNUSED)
+            return i != 0;
+
+        if (stream >= 16 || !IsSupportedGuestDeclType(type))
+            return false;
+
+        if (elements[i].usage > D3DDECLUSAGE_SAMPLE)
+            return false;
+    }
+
+    return false;
+}
+
 static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexElement* vertexElements) 
 {
+    static uint32_t s_vertexDeclarationBuildLogs = 0;
+    const bool logVertexDeclarationBuild = s_vertexDeclarationBuildLogs < 8;
+    if (logVertexDeclarationBuild)
+        ++s_vertexDeclarationBuildLogs;
+
     size_t vertexElementCount = 0;
     auto vertexElement = vertexElements;
 
@@ -6102,7 +6324,9 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
 
     if (vertexDeclaration == nullptr)
     {
-        vertexDeclaration = g_userHeap.AllocPhysical<GuestVertexDeclaration>(ResourceType::VertexDeclaration);
+        auto hostVertexDeclaration = std::make_unique<GuestVertexDeclaration>(ResourceType::VertexDeclaration);
+        vertexDeclaration = hostVertexDeclaration.get();
+        g_hostOnlyVertexDeclarations.emplace_back(std::move(hostVertexDeclaration));
         vertexDeclaration->hash = hash;
 
         static std::vector<RenderInputElement> inputElements;
@@ -6119,6 +6343,7 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
         constexpr Location locations[] =
         {
             { D3DDECLUSAGE_POSITION, 0, 0 },
+            { D3DDECLUSAGE_POSITIONT, 0, 0 },
             { D3DDECLUSAGE_POSITION, 1, 1 },
             { D3DDECLUSAGE_POSITION, 2, 2 },
             { D3DDECLUSAGE_POSITION, 3, 3 },
@@ -6161,8 +6386,12 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
             }
 
             auto& inputElement = inputElements.emplace_back();
-            inputElement.semanticName = ConvertDeclUsage(vertexElement->usage);
-            inputElement.semanticIndex = vertexElement->usageIndex;
+            inputElement.semanticName = vertexElement->usage == D3DDECLUSAGE_POSITIONT
+                ? "POSITION"
+                : ConvertDeclUsage(vertexElement->usage);
+            inputElement.semanticIndex = vertexElement->usage == D3DDECLUSAGE_POSITIONT
+                ? 0
+                : vertexElement->usageIndex;
             inputElement.location = resolvedLocation;
             inputElement.format = ConvertDeclType(vertexElement->type);
             inputElement.slotIndex = vertexElement->stream;
@@ -6311,6 +6540,43 @@ static GuestVertexDeclaration* CreateVertexDeclarationWithoutAddRef(GuestVertexE
 
         vertexDeclaration->inputElementCount = uint32_t(inputElements.size());
         vertexDeclaration->vertexElementCount = vertexElementCount + 1;
+
+        if (logVertexDeclarationBuild)
+        {
+            LOGF_WARNING("[VDeclBuild] #{} hash=0x{:016X} guestElems={} inputElems={}",
+                s_vertexDeclarationBuildLogs,
+                hash,
+                vertexDeclaration->vertexElementCount,
+                vertexDeclaration->inputElementCount);
+
+            for (uint32_t i = 0; i < vertexDeclaration->vertexElementCount && i < 8; ++i)
+            {
+                const auto& e = vertexDeclaration->vertexElements[i];
+                LOGF_WARNING("[VDeclBuild] #{} guest[{}] stream={} off={} type=0x{:08X} method={} usage={} usageIdx={}",
+                    s_vertexDeclarationBuildLogs,
+                    i,
+                    uint32_t(e.stream),
+                    uint32_t(e.offset),
+                    uint32_t(e.type),
+                    uint32_t(e.method),
+                    uint32_t(e.usage),
+                    uint32_t(e.usageIndex));
+            }
+
+            for (uint32_t i = 0; i < vertexDeclaration->inputElementCount && i < 16; ++i)
+            {
+                const auto& e = vertexDeclaration->inputElements[i];
+                LOGF_WARNING("[VDeclBuild] #{} input[{}] sem={}{} loc={} fmt={} slot={} off={}",
+                    s_vertexDeclarationBuildLogs,
+                    i,
+                    e.semanticName != nullptr ? e.semanticName : "<null>",
+                    e.semanticIndex,
+                    e.location,
+                    static_cast<int>(e.format),
+                    e.slotIndex,
+                    e.alignedByteOffset);
+            }
+        }
     }
 
     vertexDeclaration->AddRef();
@@ -6324,12 +6590,19 @@ static GuestVertexDeclaration* CreateVertexDeclaration(GuestVertexElement* verte
     return vertexDeclaration;
 }
 
-static void SetVertexDeclaration(GuestDevice* device, GuestVertexDeclaration* vertexDeclaration) 
+static void QueueSetVertexDeclaration(GuestVertexDeclaration* vertexDeclaration)
 {
+    g_mainThreadVertexDeclaration = vertexDeclaration;
+
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetVertexDeclaration;
     cmd.setVertexDeclaration.vertexDeclaration = vertexDeclaration;
     g_renderQueue.enqueue(cmd);
+}
+
+static void SetVertexDeclaration(GuestDevice* device, GuestVertexDeclaration* vertexDeclaration)
+{
+    QueueSetVertexDeclaration(vertexDeclaration);
 
     device->vertexDeclaration = g_memory.MapVirtual(vertexDeclaration);
 }
@@ -6338,23 +6611,7 @@ static void ProcSetVertexDeclaration(const RenderCommand& cmd)
 {
     auto& args = cmd.setVertexDeclaration;
 
-    if (args.vertexDeclaration != nullptr)
-    {
-        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTexcoords, args.vertexDeclaration->swappedTexcoords);
-        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedNormals, args.vertexDeclaration->swappedNormals);
-        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBinormals, args.vertexDeclaration->swappedBinormals);
-        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedTangents, args.vertexDeclaration->swappedTangents);
-        SetDirtyValue(g_dirtyStates.sharedConstants, g_sharedConstants.swappedBlendWeights, args.vertexDeclaration->swappedBlendWeights);
-
-        uint32_t specConstants = g_pipelineState.specConstants;
-        if (args.vertexDeclaration->hasR11G11B10Normal)
-            specConstants |= SPEC_CONSTANT_R11G11B10_NORMAL;
-        else
-            specConstants &= ~SPEC_CONSTANT_R11G11B10_NORMAL;
-
-        SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.specConstants, specConstants);
-    }
-    SetDirtyValue(g_dirtyStates.pipelineState, g_pipelineState.vertexDeclaration, args.vertexDeclaration);
+    ApplyDrawVertexDeclarationSnapshot(args.vertexDeclaration);
 }
 
 // NOTE: g_defaultVertexShader and g_defaultPixelShader are declared near top of file
@@ -6368,6 +6625,39 @@ static ShaderCacheEntry* FindShaderCacheEntry(XXH64_hash_t hash)
         });
 
     return findResult != end && findResult->hash == hash ? findResult : nullptr;
+}
+
+static GuestShader* CreateHostOnlyShader(ResourceType resourceType)
+{
+    auto shader = std::make_unique<GuestShader>(resourceType);
+    auto* shaderPtr = shader.get();
+    g_hostOnlyShaders.emplace_back(std::move(shader));
+    return shaderPtr;
+}
+
+static GuestShader* GetOrCreateCachedShader(ShaderCacheEntry* entry, ResourceType resourceType)
+{
+    if (entry->guestShader == nullptr || entry->guestShader->type != resourceType)
+    {
+        entry->guestShader = CreateHostOnlyShader(resourceType);
+        entry->guestShader->shaderCacheEntry = entry;
+    }
+
+    return entry->guestShader;
+}
+
+static uint32_t CreateGuestShaderToken(GuestShader* shader)
+{
+    constexpr size_t TokenSize = 0x1000;
+    constexpr size_t TokenAlignment = 0x1000;
+
+    void* token = g_userHeap.AllocPhysical(TokenSize, TokenAlignment);
+    std::memset(token, 0, TokenSize);
+    new (token) GuestResource(shader->type);
+
+    uint32_t tokenAddr = g_memory.MapVirtual(token);
+    GTAIV::RegisterShader(tokenAddr, shader);
+    return tokenAddr;
 }
 
 static GuestShader* CreateShader(const be<uint32_t>* function, ResourceType resourceType)
@@ -6480,6 +6770,8 @@ static void SetVertexShader(GuestDevice* device, GuestShader* shader)
     } else if (s_count <= 20 || s_count % 100 == 0) {
         LOGF_WARNING("[GTA4] SetVertexShader #{} shader={}", s_count, shader ? "OK" : "NULL");
     }
+
+    g_mainThreadVertexShader = shader;
     
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetVertexShader;
@@ -6570,6 +6862,8 @@ static void SetPixelShader(GuestDevice* device, GuestShader* shader)
     } else if (s_count <= 20 || s_count % 100 == 0) {
         LOGF_WARNING("[GTA4] SetPixelShader #{} shader={}", s_count, shader ? "OK" : "NULL");
     }
+
+    g_mainThreadPixelShader = shader;
     
     RenderCommand cmd;
     cmd.type = RenderCommandType::SetPixelShader;
@@ -8777,14 +9071,11 @@ PPC_FUNC_HOOK(sub_82A42BA8)
                 if (entry != nullptr) {
                     ++s_createShaderHits;
                     
-                    // Determine shader type from flags
-                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
+                    ResourceType type = ResourceType::PixelShader;
                     
-                    // Create GuestShader if not already created
-                    if (entry->guestShader == nullptr) {
-                        entry->guestShader = g_userHeap.AllocPhysical<GuestShader>(type);
-                        entry->guestShader->shaderCacheEntry = entry;
-                    }
+                    GetOrCreateCachedShader(entry, type);
+                    if (g_defaultPixelShader == nullptr)
+                        g_defaultPixelShader = entry->guestShader;
                     
                     if (s_createShaderFromBytecodeCount <= 50 || s_createShaderFromBytecodeCount % 200 == 0) {
                         LOGF_WARNING("CreateShaderFromBytecode #{}: CACHE HIT hash=0x{:X} -> {} type={}",
@@ -8794,7 +9085,7 @@ PPC_FUNC_HOOK(sub_82A42BA8)
                     
                     // Return the GuestShader address as the shader handle
                     // The game expects a valid pointer - we return our GuestShader
-                    ctx.r3.u32 = g_memory.MapVirtual(entry->guestShader);
+                    ctx.r3.u32 = CreateGuestShaderToken(entry->guestShader);
                     return;
                 } else {
                     ++s_createShaderMisses;
@@ -8804,9 +9095,8 @@ PPC_FUNC_HOOK(sub_82A42BA8)
                     }
                     // Return a dummy shader — do NOT fall through to original
                     // GPU code which contains td assertions that trap.
-                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
-                    GuestShader* dummy = g_userHeap.AllocPhysical<GuestShader>(type);
-                    ctx.r3.u32 = g_memory.MapVirtual(dummy);
+                    GuestShader* dummy = CreateHostOnlyShader(ResourceType::PixelShader);
+                    ctx.r3.u32 = CreateGuestShaderToken(dummy);
                     return;
                 }
             } else if (s_createShaderFromBytecodeCount <= 20) {
@@ -8824,8 +9114,10 @@ PPC_FUNC_HOOK(sub_82A42BA8)
     
     // Return dummy shader for any uncategorized case — never fall through
     // to original GPU code which contains td assertions that trap.
-    GuestShader* fallback = g_userHeap.AllocPhysical<GuestShader>(ResourceType::VertexShader);
-    ctx.r3.u32 = g_memory.MapVirtual(fallback);
+    GuestShader* fallback = CreateHostOnlyShader(ResourceType::PixelShader);
+    if (g_defaultPixelShader == nullptr)
+        g_defaultPixelShader = fallback;
+    ctx.r3.u32 = CreateGuestShaderToken(fallback);
 }
 
 // =============================================================================
@@ -8877,14 +9169,11 @@ PPC_FUNC_HOOK(sub_82A42CB8)
                 if (entry != nullptr) {
                     ++s_createPSHits;
 
-                    // Determine shader type from flags
-                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
+                    ResourceType type = ResourceType::VertexShader;
 
-                    // Create GuestShader if not already created
-                    if (entry->guestShader == nullptr) {
-                        entry->guestShader = g_userHeap.AllocPhysical<GuestShader>(type);
-                        entry->guestShader->shaderCacheEntry = entry;
-                    }
+                    GetOrCreateCachedShader(entry, type);
+                    if (g_defaultVertexShader == nullptr)
+                        g_defaultVertexShader = entry->guestShader;
 
                     if (s_createPSFromBytecodeCount <= 50 || s_createPSFromBytecodeCount % 200 == 0) {
                         LOGF_WARNING("CreatePSFromBytecode #{}: CACHE HIT hash=0x{:X} -> {} type={}",
@@ -8893,7 +9182,7 @@ PPC_FUNC_HOOK(sub_82A42CB8)
                     }
 
                     // Return the GuestShader address as the shader handle
-                    ctx.r3.u32 = g_memory.MapVirtual(entry->guestShader);
+                    ctx.r3.u32 = CreateGuestShaderToken(entry->guestShader);
                     return;
                 } else {
                     ++s_createPSMisses;
@@ -8903,9 +9192,8 @@ PPC_FUNC_HOOK(sub_82A42CB8)
                     }
                     // Return a dummy shader -- do NOT fall through to original
                     // GPU code which contains td assertions that trap.
-                    ResourceType type = (flags & 0x10) ? ResourceType::PixelShader : ResourceType::VertexShader;
-                    GuestShader* dummy = g_userHeap.AllocPhysical<GuestShader>(type);
-                    ctx.r3.u32 = g_memory.MapVirtual(dummy);
+                    GuestShader* dummy = CreateHostOnlyShader(ResourceType::VertexShader);
+                    ctx.r3.u32 = CreateGuestShaderToken(dummy);
                     return;
                 }
             } else if (s_createPSFromBytecodeCount <= 20) {
@@ -8923,8 +9211,10 @@ PPC_FUNC_HOOK(sub_82A42CB8)
 
     // Return dummy shader for any uncategorized case -- never fall through
     // to original GPU code which contains td assertions that trap.
-    GuestShader* fallback = g_userHeap.AllocPhysical<GuestShader>(ResourceType::PixelShader);
-    ctx.r3.u32 = g_memory.MapVirtual(fallback);
+    GuestShader* fallback = CreateHostOnlyShader(ResourceType::VertexShader);
+    if (g_defaultVertexShader == nullptr)
+        g_defaultVertexShader = fallback;
+    ctx.r3.u32 = CreateGuestShaderToken(fallback);
 }
 
 // =============================================================================
@@ -9611,10 +9901,11 @@ PPC_FUNC_HOOK(sub_82A46578)
 // PM4 state setters UNHOOKED (recompiled code runs freely):
 //   sub_82A3E7A0  — VS PM4 builder (updates device+12700, emits PM4 -> no-op'd)
 //   sub_82A47AE0  — VS+PS PM4 builder (updates device+12700/12704)
-//   sub_82A3A890  — VDecl writer (updates device+10456)
 //   sub_82A3BF50  — SetShader (updates device+12432+type*4)
 //
 // PM4 state setters HOOKED (require host-side state translation):
+//   sub_82A3A890  — VDecl writer (updates device+10456)
+//   sub_82A42930  — VDecl writer (updates device+11812)
 //   sub_82A44B78  — Texture fetch const (updates device+12536+slot*4)
 //   sub_82A3B690  — RT register writer (updates device+12452+idx*4)
 //   sub_82A3B7B0  — DS register writer (updates device+12428)
@@ -9739,6 +10030,305 @@ PPC_FUNC_HOOK(sub_82A49458)
 // Source: gta4_recomp.83.cpp:418 (addi r3,r31,13232), :3507 (lwz r3,16(r30))
 PPC_FUNC_HOOK(sub_82A47E28) { }
 
+PPC_FUNC_HOOK(sub_82A488B8)
+{
+    const uint32_t streamState = ctx.r3.u32;
+    const uint32_t commandStart = ctx.r4.u32;
+    const uint32_t commandEnd = ctx.r5.u32;
+
+    const auto storeGuestU32 = [base](uint32_t guestAddr, uint32_t value) -> bool
+    {
+        if (guestAddr <= 0xFFFFu || g_memory.Translate(guestAddr) == nullptr)
+            return false;
+
+        PPC_STORE_U32(guestAddr, value);
+        return true;
+    };
+
+    const auto ppcSubmitAddr = [](uint32_t guestAddr) -> uint32_t
+    {
+        const uint32_t pageBits = ((guestAddr << 12) | (guestAddr >> 20)) & 0xFFFu;
+        const uint32_t pageSelect = (pageBits + 512u) & 0x1000u;
+        return (guestAddr & 0x1FFFFFFFu) + pageSelect - 0x40000000u;
+    };
+
+    const uint32_t commandStartToken = ppcSubmitAddr(commandStart);
+    const uint32_t commandEndMinusFour = commandEnd - 4u;
+
+    const bool wroteCommandStart = storeGuestU32(commandStart, commandStartToken);
+    const bool wroteStreamStart = storeGuestU32(streamState + 4u, commandStart);
+    const bool wroteStreamEnd = storeGuestU32(streamState + 8u, commandEndMinusFour);
+
+    static uint32_t s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || (s_count % 5000) == 0)
+    {
+        LOGF_WARNING("[PM4SubmitNoMMIO] #{} stream=0x{:08X} cmd=0x{:08X} end=0x{:08X} wrote={}/{}/{} lr=0x{:08X}",
+            s_count,
+            streamState,
+            commandStart,
+            commandEnd,
+            wroteCommandStart ? "yes" : "no",
+            wroteStreamStart ? "yes" : "no",
+            wroteStreamEnd ? "yes" : "no",
+            ctx.lr);
+    }
+}
+
+PPC_FUNC_HOOK(sub_82A48C78)
+{
+    static uint32_t s_count = 0;
+    ++s_count;
+    if (s_count <= 20 || (s_count % 5000) == 0)
+    {
+        LOGF_WARNING("[PM4SubmitCallback] #{} skipped device=0x{:08X} cmd=0x{:08X} count=0x{:08X} lr=0x{:08X}",
+            s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
+    }
+}
+
+static GuestVertexDeclaration* TryResolveHostVertexDeclaration(uint32_t declarationAddr)
+{
+    if (declarationAddr == 0 || declarationAddr == 0xFFFFFFFFu || declarationAddr <= 0xFFFFu)
+        return nullptr;
+
+    void* translated = g_memory.Translate(declarationAddr);
+    if (translated == nullptr)
+        return nullptr;
+
+    auto* resource = static_cast<GuestResource*>(translated);
+    if (resource->type != ResourceType::VertexDeclaration)
+        return nullptr;
+
+    auto* vertexDeclaration = static_cast<GuestVertexDeclaration*>(translated);
+    if (vertexDeclaration->inputElements == nullptr ||
+        vertexDeclaration->vertexElements == nullptr ||
+        vertexDeclaration->inputElementCount == 0 ||
+        vertexDeclaration->inputElementCount > 64 ||
+        vertexDeclaration->vertexElementCount == 0 ||
+        vertexDeclaration->vertexElementCount > 65)
+    {
+        return nullptr;
+    }
+
+    return vertexDeclaration;
+}
+
+static GuestVertexDeclaration* TryResolveRawVertexElements(uint32_t declarationAddr)
+{
+    if (declarationAddr == 0 || declarationAddr == 0xFFFFFFFFu || declarationAddr <= 0xFFFFu)
+        return nullptr;
+
+    void* translated = g_memory.Translate(declarationAddr);
+    if (translated == nullptr)
+        return nullptr;
+
+    auto* elements = static_cast<GuestVertexElement*>(translated);
+    if (!LooksLikeGuestVertexElements(elements))
+        return nullptr;
+
+    return CreateVertexDeclarationWithoutAddRef(elements);
+}
+
+static bool TryReadGuestU32(uint32_t guestAddr, uint32_t& value)
+{
+    void* translated = g_memory.Translate(guestAddr);
+    if (translated == nullptr)
+        return false;
+
+    value = __builtin_bswap32(*static_cast<volatile uint32_t*>(translated));
+    return true;
+}
+
+static GuestVertexDeclaration* TryResolveGTAIVVertexDeclarationObject(uint32_t declarationAddr)
+{
+    constexpr uint32_t GTAIVVDeclMagic = 0x00100005u;
+    constexpr uint32_t GTAIVVDeclElementCountOffset = 0x18u;
+    constexpr uint32_t GTAIVVDeclMaxStreamOffset = 0x1Cu;
+    constexpr uint32_t GTAIVVDeclElementsOffset = 0x34u;
+    constexpr uint32_t MaxGuestVertexElements = 64u;
+    constexpr uint32_t MaxGuestVertexElementsWithTerminator = 65u;
+
+    uint32_t magic = 0;
+    if (!TryReadGuestU32(declarationAddr, magic) || magic != GTAIVVDeclMagic)
+        return nullptr;
+
+    uint32_t elementCount = 0;
+    if (!TryReadGuestU32(declarationAddr + GTAIVVDeclElementCountOffset, elementCount) ||
+        elementCount == 0 ||
+        elementCount > MaxGuestVertexElements)
+    {
+        return nullptr;
+    }
+
+    uint32_t maxStream = 0;
+    if (!TryReadGuestU32(declarationAddr + GTAIVVDeclMaxStreamOffset, maxStream) ||
+        maxStream >= 16)
+    {
+        return nullptr;
+    }
+
+    auto* sourceElements = static_cast<GuestVertexElement*>(
+        g_memory.Translate(declarationAddr + GTAIVVDeclElementsOffset));
+    if (sourceElements == nullptr)
+        return nullptr;
+
+    std::array<GuestVertexElement, MaxGuestVertexElementsWithTerminator> elements{};
+    for (uint32_t i = 0; i < elementCount; ++i)
+    {
+        elements[i] = sourceElements[i];
+
+        const uint32_t stream = elements[i].stream;
+        const uint32_t type = elements[i].type;
+        if (stream >= 16 || stream > maxStream || !IsSupportedGuestDeclType(type) ||
+            elements[i].usage > D3DDECLUSAGE_SAMPLE)
+        {
+            return nullptr;
+        }
+    }
+
+    elements[elementCount].stream = 0xFF;
+    elements[elementCount].offset = 0;
+    elements[elementCount].type = D3DDECLTYPE_UNUSED;
+    elements[elementCount].method = 0;
+    elements[elementCount].usage = 0;
+    elements[elementCount].usageIndex = 0;
+    elements[elementCount].padding = 0;
+
+    GuestVertexDeclaration* vertexDeclaration = CreateVertexDeclarationWithoutAddRef(elements.data());
+
+    static uint32_t s_objectResolveLogs = 0;
+    ++s_objectResolveLogs;
+    if (s_objectResolveLogs <= 32 || (s_objectResolveLogs % 5000) == 0)
+    {
+        LOGF_WARNING("[SetVDeclResolve] #{} object=0x{:08X} count={} maxStream={} -> decl={}",
+            s_objectResolveLogs,
+            declarationAddr,
+            elementCount,
+            maxStream,
+            vertexDeclaration != nullptr ? "OK" : "NULL");
+    }
+
+    return vertexDeclaration;
+}
+
+static GuestVertexDeclaration* ResolveVertexDeclarationHandle(uint32_t declarationAddr)
+{
+    if (declarationAddr == 0 || declarationAddr == 0xFFFFFFFFu || declarationAddr <= 0xFFFFu)
+        return nullptr;
+
+    static Mutex s_vertexDeclarationHandleMutex;
+    static ankerl::unordered_dense::map<uint32_t, GuestVertexDeclaration*> s_vertexDeclarationHandles;
+
+    {
+        std::lock_guard lock(s_vertexDeclarationHandleMutex);
+        auto it = s_vertexDeclarationHandles.find(declarationAddr);
+        if (it != s_vertexDeclarationHandles.end())
+            return it->second;
+    }
+
+    GuestVertexDeclaration* resolved = TryResolveHostVertexDeclaration(declarationAddr);
+    if (resolved == nullptr)
+        resolved = TryResolveRawVertexElements(declarationAddr);
+    if (resolved == nullptr)
+        resolved = TryResolveGTAIVVertexDeclarationObject(declarationAddr);
+
+    if (resolved == nullptr && g_memory.Translate(declarationAddr) != nullptr)
+    {
+        constexpr uint32_t MaxWrapperScanBytes = 0x40;
+        for (uint32_t offset = 0; offset <= MaxWrapperScanBytes; offset += sizeof(uint32_t))
+        {
+            uint32_t candidate = 0;
+            if (!TryReadGuestU32(declarationAddr + offset, candidate))
+                continue;
+
+            if (candidate == 0 || candidate == declarationAddr)
+                continue;
+
+            resolved = TryResolveHostVertexDeclaration(candidate);
+            if (resolved == nullptr)
+                resolved = TryResolveRawVertexElements(candidate);
+            if (resolved == nullptr)
+                resolved = TryResolveGTAIVVertexDeclarationObject(candidate);
+
+            if (resolved != nullptr)
+            {
+                static uint32_t s_wrapperResolveLogs = 0;
+                ++s_wrapperResolveLogs;
+                if (s_wrapperResolveLogs <= 32 || (s_wrapperResolveLogs % 5000) == 0)
+                {
+                    LOGF_WARNING("[SetVDeclResolve] #{} wrapper=0x{:08X} offset=0x{:X} candidate=0x{:08X}",
+                        s_wrapperResolveLogs, declarationAddr, offset, candidate);
+                }
+                break;
+            }
+        }
+    }
+
+    if (resolved != nullptr)
+    {
+        std::lock_guard lock(s_vertexDeclarationHandleMutex);
+        s_vertexDeclarationHandles[declarationAddr] = resolved;
+    }
+
+    return resolved;
+}
+
+static void BindGTAIVVertexDeclaration(const char* source, uint32_t deviceAddr, uint32_t declarationHandle)
+{
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
+
+    if (device != nullptr)
+    {
+        GTAIV::SetDeviceU32(reinterpret_cast<uint8_t*>(device), GTAIV::DeviceOffset::VertexDeclaration, declarationHandle);
+        device->vertexDeclaration = declarationHandle;
+    }
+
+    GuestVertexDeclaration* vertexDeclaration = ResolveVertexDeclarationHandle(declarationHandle);
+    QueueSetVertexDeclaration(vertexDeclaration);
+
+    static uint32_t s_count = 0;
+    ++s_count;
+    if (s_count <= 64 || (s_count % 5000) == 0)
+    {
+        LOGF_WARNING("[SetVDecl] #{} {} handle=0x{:08X} -> decl={} device=0x{:08X}",
+            s_count,
+            source,
+            declarationHandle,
+            vertexDeclaration != nullptr ? "OK" : "NULL",
+            deviceAddr);
+    }
+}
+
+// sub_82A3A890 — GTA IV render-state vertex declaration setter.
+// Generated source proof: gta4_recomp.82.cpp stores r4 to device+10456 and
+// sets dirty qword device+16. Run it first, then bridge the resolved handle to
+// the host render queue.
+PPC_FUNC_IMPL(__imp__sub_82A3A890);
+PPC_FUNC_HOOK(sub_82A3A890)
+{
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t declarationHandle = ctx.r4.u32;
+
+    __imp__sub_82A3A890(ctx, base);
+
+    BindGTAIVVertexDeclaration("sub_82A3A890", deviceAddr, declarationHandle);
+}
+
+// sub_82A42930 — GTA IV device vertex declaration setter used by render
+// wrapper callers such as sub_828C0688/sub_828C0848. Generated source proof:
+// gta4_recomp.82.cpp stores r4 to device+11812 and sets dirty qword device+16.
+PPC_FUNC_IMPL(__imp__sub_82A42930);
+PPC_FUNC_HOOK(sub_82A42930)
+{
+    uint32_t deviceAddr = ctx.r3.u32;
+    uint32_t declarationHandle = ctx.r4.u32;
+
+    __imp__sub_82A42930(ctx, base);
+
+    BindGTAIVVertexDeclaration("sub_82A42930", deviceAddr, declarationHandle);
+}
+
 // =============================================================================
 // Shader Binding Hooks — sub_82A42760 (SetVertexShader) / sub_82A424A8 (SetPixelShader)
 //
@@ -9748,13 +10338,183 @@ PPC_FUNC_HOOK(sub_82A47E28) { }
 //   3. Parse the shader's embedded state block and apply it to device registers
 //   4. Emit PM4 SET_SHADER commands to the GPU ring buffer
 //
-// We let the recompiled code run to update all device state fields, then
-// intercept the shader handle to translate it to a host GuestShader* and
-// enqueue the SetVertexShader/SetPixelShader render command.
+// Do not run the generated bodies here: after storing the shader handle they
+// walk Xbox D3D shader internals and emit PM4. Our handles are host
+// GuestShader resources, so that path can corrupt C++ object fields such as
+// GuestShader::mutex before the render thread links the pipeline.
 //
 // sub_82A42760: r3=device, r4=shaderHandle (guest addr of VS object, 0=unbind)
 // sub_82A424A8: r3=device, r4=shaderHandle (guest addr of PS object, 0=unbind)
 // =============================================================================
+
+static bool IsUsableGuestShader(GuestShader* shader, ResourceType expectedType)
+{
+    return shader != nullptr &&
+        shader->type == expectedType &&
+        (shader->shaderCacheEntry != nullptr || shader->shader != nullptr);
+}
+
+static GuestShader* TryResolveRawGTAIVShaderObject(uint32_t shaderHandle, ResourceType expectedType)
+{
+    constexpr uint32_t RawShaderPhysicalPointerOffsets[] = { 0x18u, 0x20u };
+    constexpr uint32_t RawShaderHeaderOffsets[] = { 0x28u, 0x368u };
+    constexpr uint32_t MaxShaderPartSize = 0x400000u;
+
+    for (uint32_t headerOffset : RawShaderHeaderOffsets)
+    {
+        uint32_t flags = 0;
+        uint32_t virtualSize = 0;
+        uint32_t physicalSize = 0;
+
+        if (!TryReadGuestU32(shaderHandle + headerOffset, flags) ||
+            !TryReadGuestU32(shaderHandle + headerOffset + 4u, virtualSize) ||
+            !TryReadGuestU32(shaderHandle + headerOffset + 8u, physicalSize))
+        {
+            continue;
+        }
+
+        if (virtualSize == 0 || physicalSize == 0 ||
+            virtualSize > MaxShaderPartSize || physicalSize > MaxShaderPartSize)
+        {
+            continue;
+        }
+
+        auto* virtualData = static_cast<uint8_t*>(g_memory.Translate(shaderHandle + headerOffset));
+        if (virtualData == nullptr)
+            continue;
+
+        for (uint32_t physicalPointerOffset : RawShaderPhysicalPointerOffsets)
+        {
+            uint32_t physicalAddr = 0;
+            if (!TryReadGuestU32(shaderHandle + physicalPointerOffset, physicalAddr))
+                continue;
+
+            auto* physicalData = static_cast<uint8_t*>(g_memory.Translate(physicalAddr));
+            if (physicalData == nullptr)
+                continue;
+
+            std::vector<uint8_t> shaderBytes;
+            shaderBytes.resize(static_cast<size_t>(virtualSize) + static_cast<size_t>(physicalSize));
+            std::memcpy(shaderBytes.data(), virtualData, virtualSize);
+            std::memcpy(shaderBytes.data() + virtualSize, physicalData, physicalSize);
+
+            const XXH64_hash_t hash = XXH3_64bits(shaderBytes.data(), shaderBytes.size());
+            ShaderCacheEntry* entry = FindShaderCacheEntry(hash);
+            if (entry == nullptr)
+                continue;
+
+            GetOrCreateCachedShader(entry, expectedType);
+
+            GTAIV::RegisterShader(shaderHandle, entry->guestShader);
+
+            static uint32_t s_rawShaderResolveLogs = 0;
+            ++s_rawShaderResolveLogs;
+            if (s_rawShaderResolveLogs <= 64 || (s_rawShaderResolveLogs % 5000) == 0)
+            {
+                LOGF_WARNING("[SetShaderResolve] #{} raw=0x{:08X} header=0x{:X} physOff=0x{:X} flags=0x{:08X} hash=0x{:X} -> {}",
+                    s_rawShaderResolveLogs,
+                    shaderHandle,
+                    headerOffset,
+                    physicalPointerOffset,
+                    flags,
+                    hash,
+                    entry->filename);
+            }
+
+            return entry->guestShader;
+        }
+    }
+
+    static uint32_t s_rawShaderMissLogs = 0;
+    ++s_rawShaderMissLogs;
+    if (s_rawShaderMissLogs <= 32 || (s_rawShaderMissLogs % 5000) == 0)
+    {
+        uint32_t objectWord0 = 0;
+        uint32_t phys18 = 0;
+        uint32_t phys20 = 0;
+        TryReadGuestU32(shaderHandle, objectWord0);
+        TryReadGuestU32(shaderHandle + 0x18u, phys18);
+        TryReadGuestU32(shaderHandle + 0x20u, phys20);
+
+        LOGF_WARNING("[SetShaderResolveMiss] #{} raw=0x{:08X} expected={} obj0=0x{:08X} phys18=0x{:08X} phys20=0x{:08X}",
+            s_rawShaderMissLogs,
+            shaderHandle,
+            expectedType == ResourceType::VertexShader ? "VS" : "PS",
+            objectWord0,
+            phys18,
+            phys20);
+
+        for (uint32_t headerOffset : RawShaderHeaderOffsets)
+        {
+            uint32_t flags = 0;
+            uint32_t virtualSize = 0;
+            uint32_t physicalSize = 0;
+            TryReadGuestU32(shaderHandle + headerOffset, flags);
+            TryReadGuestU32(shaderHandle + headerOffset + 4u, virtualSize);
+            TryReadGuestU32(shaderHandle + headerOffset + 8u, physicalSize);
+
+            LOGF_WARNING("[SetShaderResolveMiss]    header=0x{:X} flags=0x{:08X} vsize=0x{:08X} psize=0x{:08X}",
+                headerOffset,
+                flags,
+                virtualSize,
+                physicalSize);
+        }
+    }
+
+    return nullptr;
+}
+
+static GuestShader* ResolveBoundShaderHandle(uint32_t shaderHandle, ResourceType expectedType)
+{
+    if (shaderHandle == 0 || shaderHandle == 0xFFFFFFFFu)
+        return nullptr;
+
+    GuestShader* shader = GTAIV::LookupShader(shaderHandle);
+    if (IsUsableGuestShader(shader, expectedType))
+        return shader;
+
+    shader = TryResolveRawGTAIVShaderObject(shaderHandle, expectedType);
+    if (IsUsableGuestShader(shader, expectedType))
+        return shader;
+
+    void* translated = g_memory.Translate(shaderHandle);
+    if (translated == nullptr)
+        return nullptr;
+
+    auto* resource = static_cast<GuestResource*>(translated);
+    if (resource->type != expectedType)
+        return nullptr;
+
+    shader = static_cast<GuestShader*>(translated);
+    return IsUsableGuestShader(shader, expectedType) ? shader : nullptr;
+}
+
+static void StoreGuestShaderHandle(uint8_t* base, uint32_t deviceAddr, uint32_t shaderHandle, uint32_t handleOffset)
+{
+    if (deviceAddr == 0 || g_memory.Translate(deviceAddr) == nullptr)
+        return;
+
+    PPC_STORE_U32(deviceAddr + handleOffset, shaderHandle);
+}
+
+static void OrGuestDeviceDirtyBits(uint8_t* base, uint32_t deviceAddr, uint64_t bits)
+{
+    if (deviceAddr == 0 || g_memory.Translate(deviceAddr) == nullptr)
+        return;
+
+    const uint32_t dirtyFlagsOffset = 16;
+    const uint64_t dirtyFlags = PPC_LOAD_U64(deviceAddr + dirtyFlagsOffset);
+    PPC_STORE_U64(deviceAddr + dirtyFlagsOffset, dirtyFlags | bits);
+}
+
+static void ClearGuestDeviceByteBits(uint8_t* base, uint32_t deviceAddr, uint32_t byteOffset, uint8_t clearMask)
+{
+    if (deviceAddr == 0 || g_memory.Translate(deviceAddr) == nullptr)
+        return;
+
+    const uint8_t value = PPC_LOAD_U8(deviceAddr + byteOffset);
+    PPC_STORE_U8(deviceAddr + byteOffset, value & clearMask);
+}
 
 PPC_FUNC_IMPL(__imp__sub_82A42760);
 PPC_FUNC_HOOK(sub_82A42760)
@@ -9763,23 +10523,12 @@ PPC_FUNC_HOOK(sub_82A42760)
     uint32_t deviceAddr   = ctx.r3.u32;
     uint32_t shaderHandle = ctx.r4.u32;
 
-    // Let recompiled code run: updates device state fields, dirty flags,
-    // and shader parameter blocks. PM4 emission is no-op'd by sub_82A46FB0 stub.
-    __imp__sub_82A42760(ctx, base);
+    StoreGuestShaderHandle(base, deviceAddr, shaderHandle, 12688);
+    if (shaderHandle != 0)
+        OrGuestDeviceDirtyBits(base, deviceAddr, 0x80000);
+    ClearGuestDeviceByteBits(base, deviceAddr, 10942, 0x7F);
 
-    // Translate guest shader handle -> host GuestShader*
-    GuestShader* shader = nullptr;
-    if (shaderHandle != 0) {
-        shader = GTAIV::LookupShader(shaderHandle);
-        if (shader == nullptr) {
-            // The handle may be a direct guest address of a GuestShader
-            // allocated by our PPC_FUNC_HOOK(sub_82A42BA8)
-            void* translated = g_memory.Translate(shaderHandle);
-            if (translated != nullptr) {
-                shader = static_cast<GuestShader*>(translated);
-            }
-        }
-    }
+    GuestShader* shader = ResolveBoundShaderHandle(shaderHandle, ResourceType::VertexShader);
 
     static int s_count = 0;
     ++s_count;
@@ -9800,21 +10549,10 @@ PPC_FUNC_HOOK(sub_82A424A8)
     uint32_t deviceAddr   = ctx.r3.u32;
     uint32_t shaderHandle = ctx.r4.u32;
 
-    // Let recompiled code run: updates device state fields, dirty flags,
-    // and shader parameter blocks. PM4 emission is no-op'd by sub_82A46FB0 stub.
-    __imp__sub_82A424A8(ctx, base);
+    StoreGuestShaderHandle(base, deviceAddr, shaderHandle, 12684);
+    OrGuestDeviceDirtyBits(base, deviceAddr, 0x120000);
 
-    // Translate guest shader handle -> host GuestShader*
-    GuestShader* shader = nullptr;
-    if (shaderHandle != 0) {
-        shader = GTAIV::LookupShader(shaderHandle);
-        if (shader == nullptr) {
-            void* translated = g_memory.Translate(shaderHandle);
-            if (translated != nullptr) {
-                shader = static_cast<GuestShader*>(translated);
-            }
-        }
-    }
+    GuestShader* shader = ResolveBoundShaderHandle(shaderHandle, ResourceType::PixelShader);
 
     static int s_count = 0;
     ++s_count;

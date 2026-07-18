@@ -23,7 +23,6 @@ REXCVAR_DECLARE(std::string, log_level);
 REXCVAR_DECLARE(std::string, log_file);
 REXCVAR_DECLARE(bool, log_verbose);
 REXCVAR_DECLARE(bool, log_noisy);
-REXCVAR_DECLARE(bool, enable_console);
 REXCVAR_DECLARE(int32_t, log_flush_interval);
 REXCVAR_DECLARE(int32_t, log_max_file_size_mb);
 REXCVAR_DECLARE(int32_t, log_max_files);
@@ -54,7 +53,7 @@ void InitLogging(const LogConfig& config);
 /**
  * Initialize logging with simple parameters (convenience overload).
  *
- * @param log_file  Path to log file, or nullptr for console-only.
+ * @param log_file  Path to log file, or nullptr for no file logging.
  * @param level     Default log level for all categories.
  */
 void InitLogging(const char* log_file = nullptr,
@@ -62,7 +61,8 @@ void InitLogging(const char* log_file = nullptr,
 
 /**
  * Early-phase logging initialization (before config is loaded).
- * Creates a plain stdout sink as fallback for VS debug output.
+ * Creates a platform debug sink (OutputDebugString on Windows, stdout elsewhere)
+ * so log lines emitted before InitLogging() is called are captured.
  */
 void InitLoggingEarly();
 
@@ -70,6 +70,15 @@ void InitLoggingEarly();
  * Flush all loggers and shut down the logging system.
  */
 void ShutdownLogging();
+
+/**
+ * Flush all loggers without tearing down the logging system.
+ *
+ * Use before a hard process exit (std::_Exit) when other threads may still be
+ * logging: unlike ShutdownLogging it leaves the registry and sinks intact, so a
+ * concurrent logger cannot hit freed state.
+ */
+void FlushLogging();
 
 /**
  * Register a new log category at runtime.
@@ -185,7 +194,15 @@ void RemoveSink(spdlog::sink_ptr sink);
 void RemoveSink(LogCategoryId category, spdlog::sink_ptr sink);
 
 /**
- * Update the format pattern on the console sink.
+ * Replace the global console sink on every registered logger with `sink`.
+ * Pass nullptr to remove the console sink without replacement.
+ *
+ * @param sink  New console sink, or nullptr to remove.
+ */
+void ReplaceConsoleSink(spdlog::sink_ptr sink);
+
+/**
+ * Update the format pattern on the stdout console sink.
  *
  * @param pattern  spdlog pattern string.
  */

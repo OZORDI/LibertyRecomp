@@ -23,6 +23,7 @@
 #include <rex/assert.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
+#include <rex/platform/env.h>
 #include <rex/string.h>
 
 #include <dirent.h>
@@ -63,25 +64,22 @@ std::filesystem::path GetExecutableFolder() {
 
 std::filesystem::path GetUserFolder() {
   // get preferred data home
-  char* home = std::getenv("XDG_DATA_HOME");
-  if (home) {
-    return std::string(home);
+  if (auto xdg = rex::platform::env::get("XDG_DATA_HOME")) {
+    return std::filesystem::path(*xdg);
   }
 
   // if XDG_DATA_HOME not set, fallback to HOME directory
-  home = std::getenv("HOME");
-
-  // if HOME not set, fall back to this
-  if (home == NULL) {
-    struct passwd pw1;
-    struct passwd* pw;
-    char buf[4096];  // could potentionally lower this
-    getpwuid_r(getuid(), &pw1, buf, sizeof(buf), &pw);
-    assert(&pw1 == pw);  // sanity check
-    home = pw->pw_dir;
+  if (auto home = rex::platform::env::get("HOME")) {
+    return std::filesystem::path(*home) / ".local" / "share";
   }
 
-  return std::filesystem::path(home) / ".local" / "share";
+  // if HOME not set, fall back to passwd entry
+  struct passwd pw1;
+  struct passwd* pw;
+  char buf[4096];  // could potentionally lower this
+  getpwuid_r(getuid(), &pw1, buf, sizeof(buf), &pw);
+  assert(&pw1 == pw);  // sanity check
+  return std::filesystem::path(pw->pw_dir) / ".local" / "share";
 }
 
 FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
@@ -89,11 +87,11 @@ FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
 }
 
 bool Seek(FILE* file, int64_t offset, int origin) {
-  return fseeko(file, static_cast<off_t>(offset), origin) == 0;
+  return fseeko64(file, off64_t(offset), origin) == 0;
 }
 
 int64_t Tell(FILE* file) {
-  return static_cast<int64_t>(ftello(file));
+  return int64_t(ftello64(file));
 }
 
 bool TruncateStdioFile(FILE* file, uint64_t length) {
@@ -104,7 +102,7 @@ bool TruncateStdioFile(FILE* file, uint64_t length) {
   if (position < 0) {
     return false;
   }
-  if (ftruncate(fileno(file), static_cast<off_t>(length))) {
+  if (ftruncate64(fileno(file), off64_t(length))) {
     return false;
   }
   if (uint64_t(position) > length) {
@@ -168,7 +166,10 @@ class PosixFileHandle : public FileHandle {
 };
 
 std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path& path,
-                                                     uint32_t desired_access) {
+                                                     uint32_t desired_access,
+                                                     bool /*allow_share_delete*/) {
+  // POSIX allows unlinking/replacing an open file, so there is no share-delete
+  // analog to thread through here.
   int open_access = 0;
   if (desired_access & FileAccess::kGenericRead) {
     open_access |= O_RDONLY;

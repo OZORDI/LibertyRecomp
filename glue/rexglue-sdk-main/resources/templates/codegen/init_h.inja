@@ -21,6 +21,7 @@
 #define REX_IMAGE_SIZE {{ image_size }}ull
 #define REX_CODE_BASE {{ code_base }}ull
 #define REX_CODE_SIZE {{ code_size }}ull
+#define REX_THUNK_RESERVE_SIZE {{ thunk_reserve_size }}ull
 
 #define REXCRT_HEAP {% if rexcrt_heap %}1{% else %}0{% endif %}
 
@@ -59,9 +60,19 @@ extern PPCFuncMapping PPCFuncMappings[];
   REX_EXTERN(name);            \
   REX_EXTERN(__imp__##name)
 
+#if defined(__APPLE__)
+#define DEFINE_REX_FUNC(name)                                                       \
+  extern "C" void __imp__##name(PPCContext& __restrict, uint8_t*);                  \
+  __attribute__((weak, noinline)) extern "C" void name(                             \
+      [[maybe_unused]] PPCContext& __restrict ctx, uint8_t* base) {                 \
+    __imp__##name(ctx, base);                                                       \
+  }                                                                                 \
+  extern "C" void __imp__##name([[maybe_unused]] PPCContext& __restrict ctx, uint8_t* base)
+#else
 #define DEFINE_REX_FUNC(name)                                  \
   __attribute__((alias("__imp__" #name))) REX_WEAK_FUNC(name); \
   REX_EXTERN(__imp__##name)
+#endif
 
 //=============================================================================
 // Function Prologue
@@ -101,7 +112,7 @@ extern PPCFuncMapping PPCFuncMappings[];
 // Memory Access
 //=============================================================================
 
-#if REX_PLATFORM_WIN32
+#if REX_PLATFORM_WIN32 || REX_PLATFORM_MAC
 #define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)
 #else
 #define REX_PHYS_HOST_OFFSET(addr) 0u
@@ -221,17 +232,7 @@ extern PPCFuncMapping PPCFuncMappings[];
 
 #define REX_CALL_FUNC(x) x(ctx, base)
 
-#define REX_LOOKUP_FUNC(x, y) \
-  (*(PPCFunc**)(x + REX_IMAGE_BASE + REX_IMAGE_SIZE + (u64(u32(y) - REX_CODE_BASE) * 2)))
-
-#ifdef REXGLUE_ENABLE_PROFILING
-#define REX_CALL_INDIRECT_FUNC(x) \
-  PROFILE_FUNCTION_DISPATCHED();  \
-  REX_LOOKUP_FUNC(base, x)(ctx, base);
-#else
-#define REX_CALL_INDIRECT_FUNC(x) \
-  REX_LOOKUP_FUNC(base, x)(ctx, base);
-#endif
+{% include "codegen/_indirect_call.inja" %}
 
 //=============================================================================
 // Flush Mode
@@ -270,56 +271,60 @@ inline std::unordered_map<u32, jmp_buf>& get_jmp_buf_map() {
 }
 
 //=============================================================================
-// Trap Handling / Interrupt Locks
-//=============================================================================
-// `ppc_trap`, `ppc_global_lock_count_`, and PPC_{CHECK,ENTER,LEAVE}_GLOBAL_LOCK
-// are provided by <rex/ppc/context.h> as inline defs. Emitting them here too
-// causes ODR redefinition in every TU that includes gta4_init.h. Map the
-// REX_*_GLOBAL_LOCK aliases to the PPC_* forms context.h provides.
-
-#define REX_CHECK_GLOBAL_LOCK() PPC_CHECK_GLOBAL_LOCK()
-#define REX_ENTER_GLOBAL_LOCK() PPC_ENTER_GLOBAL_LOCK()
-#define REX_LEAVE_GLOBAL_LOCK() PPC_LEAVE_GLOBAL_LOCK()
-
-//=============================================================================
-// PPC_ Compat Aliases
+// Trap Handling
 //=============================================================================
 
-#define PPC_FUNC_PROLOGUE REX_FUNC_PROLOGUE
-#define PPC_CALL_FUNC(x) REX_CALL_FUNC(x)
-#define PPC_LOOKUP_FUNC(x, y) REX_LOOKUP_FUNC(x, y)
-#define PPC_CALL_INDIRECT_FUNC(x) REX_CALL_INDIRECT_FUNC(x)
-#define PPC_SET_FLUSH_MODE(x) REX_SET_FLUSH_MODE(x)
-#define PPC_UNIMPLEMENTED(addr, opcode) REX_UNIMPLEMENTED(addr, opcode)
-#define PPC_QUERY_TIMEBASE() REX_QUERY_TIMEBASE()
-// PPC_{CHECK,ENTER,LEAVE}_GLOBAL_LOCK provided by <rex/ppc/context.h>
-#define PPC_PHYS_HOST_OFFSET(addr) REX_PHYS_HOST_OFFSET(addr)
-#define PPC_RAW_ADDR(x) REX_RAW_ADDR(x)
-#define PPC_LOAD_U8(x) REX_LOAD_U8(x)
-#define PPC_LOAD_U16(x) REX_LOAD_U16(x)
-#define PPC_LOAD_U32(x) REX_LOAD_U32(x)
-#define PPC_LOAD_U64(x) REX_LOAD_U64(x)
-#define PPC_LOAD_STRING(...) REX_LOAD_STRING(__VA_ARGS__)
-#define PPC_STORE_U8(x, y) REX_STORE_U8(x, y)
-#define PPC_STORE_U16(x, y) REX_STORE_U16(x, y)
-#define PPC_STORE_U32(x, y) REX_STORE_U32(x, y)
-#define PPC_STORE_U64(x, y) REX_STORE_U64(x, y)
-#define PPC_MEMORY_SIZE REX_MEMORY_SIZE
-#define PPC_IS_MMIO_ADDR(addr) REX_IS_MMIO_ADDR(addr)
-#define PPC_MM_STORE_U8(addr, val) REX_MM_STORE_U8(addr, val)
-#define PPC_MM_STORE_U16(addr, val) REX_MM_STORE_U16(addr, val)
-#define PPC_MM_STORE_U32(addr, val) REX_MM_STORE_U32(addr, val)
-#define PPC_MM_STORE_U64(addr, val) REX_MM_STORE_U64(addr, val)
-#define PPC_MM_LOAD_U8(addr) REX_MM_LOAD_U8(addr)
-#define PPC_MM_LOAD_U16(addr) REX_MM_LOAD_U16(addr)
-#define PPC_MM_LOAD_U32(addr) REX_MM_LOAD_U32(addr)
-#define PPC_MM_LOAD_U64(addr) REX_MM_LOAD_U64(addr)
+inline void ppc_trap(PPCContext& ctx, u8* base, u16 trap_type) {
+  switch (trap_type) {
+    case 20:
+    case 26: {
+      auto str = REX_LOAD_STRING(ctx.r3.u32, ctx.r4.u16);
+      REXCPU_DEBUG("(service trap) {}", str);
+      break;
+    }
+    case 0:
+    case 22:
+      REXCPU_WARN("tw/td trap hit (type {})", trap_type);
+      break;
+    case 25:
+      break;
+    default:
+      REXCPU_WARN("Unknown trap type {}", trap_type);
+      break;
+  }
+}
+
+//=============================================================================
+// Interrupt Locks
+//=============================================================================
+
+inline std::atomic<i32>& ppc_global_lock_count_() {
+  static std::atomic<i32> count{0};
+  return count;
+}
+
+#define REX_CHECK_GLOBAL_LOCK()                                        \
+  ([&]() -> u64 {                                                      \
+    auto lock_ = rex::thread::global_critical_region::AcquireDirect(); \
+    return ppc_global_lock_count_().load() ? 0 : 0x8000;               \
+  }())
+
+#define REX_ENTER_GLOBAL_LOCK()                          \
+  do {                                                   \
+    rex::thread::global_critical_region::mutex().lock(); \
+    ppc_global_lock_count_().fetch_add(1);               \
+  } while (0)
+
+#define REX_LEAVE_GLOBAL_LOCK()                                                           \
+  do {                                                                                    \
+    auto old_count_ = ppc_global_lock_count_().fetch_sub(1);                              \
+    assert(old_count_ >= 1 && "LeaveGlobalLock called without matching EnterGlobalLock"); \
+    rex::thread::global_critical_region::mutex().unlock();                                \
+  } while (0)
 
 //=============================================================================
 // Function Declarations
 //=============================================================================
 
 {% for fn in functions %}DECLARE_REX_FUNC({{ fn.name }});
-{% endfor %}
-{% for imp in imports %}DECLARE_REX_FUNC({{ imp.name }});
 {% endfor %}

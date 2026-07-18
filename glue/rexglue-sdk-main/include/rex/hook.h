@@ -50,19 +50,19 @@
 
 // Stub: logs a warning when called.
 #define REX_STUB(subroutine)              \
-  extern "C" REX_WEAK_FUNC(subroutine) {  \
+  extern "C" REX_FUNC(subroutine) {       \
     (void)base;                           \
     REXKRNL_WARN("{} STUB", #subroutine); \
   }
 
 #define REX_STUB_LOG(subroutine, msg)               \
-  extern "C" REX_WEAK_FUNC(subroutine) {            \
+  extern "C" REX_FUNC(subroutine) {                 \
     (void)base;                                     \
     REXKRNL_WARN("{} STUB - {}", #subroutine, msg); \
   }
 
 #define REX_STUB_RETURN(subroutine, value)                                                \
-  extern "C" REX_WEAK_FUNC(subroutine) {                                                  \
+  extern "C" REX_FUNC(subroutine) {                                                       \
     (void)base;                                                                           \
     REXKRNL_WARN("{} STUB - returning {:#x}", #subroutine, static_cast<uint32_t>(value)); \
     ctx.r3.u64 = (value);                                                                 \
@@ -75,6 +75,10 @@
 
 #define REX_EXPORT_STUB(name) \
   REX_STUB(name)              \
+  static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
+
+#define REX_EXPORT_STUB_RETURN(name, retval) \
+  REX_STUB_RETURN(name, retval)              \
   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
 
 namespace rex {
@@ -227,10 +231,6 @@ class [[deprecated("Use rex::ppc::stack_push / stack_guard instead")]] StackFram
 // Legacy Compat Aliases
 //=============================================================================
 
-#define PPC_HOOK(s, f) REX_HOOK(s, f)
-#define PPC_STUB(s) REX_STUB(s)
-#define PPC_STUB_LOG(s, m) REX_STUB_LOG(s, m)
-#define PPC_STUB_RETURN(s, v) REX_STUB_RETURN(s, v)
 #define XBOXKRNL_EXPORT(n, f) REX_EXPORT(n, f)
 #define XBOXKRNL_EXPORT_STUB(n) REX_EXPORT_STUB(n)
 #define XAM_EXPORT(n, f) REX_EXPORT(n, f)

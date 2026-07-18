@@ -36,9 +36,6 @@ class HostPathFile : public File {
 
  private:
   std::unique_ptr<rex::filesystem::FileHandle> file_handle_;
-  // Set when a successful Write/SetLength has occurred. Used at Close time to
-  // decide whether to commit the underlying save mount on Switch.
-  bool dirty_ = false;
 };
 
 }  // namespace rex::filesystem

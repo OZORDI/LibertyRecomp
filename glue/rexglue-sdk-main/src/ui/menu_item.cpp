@@ -27,6 +27,14 @@ std::unique_ptr<MenuItem> MenuItem::Create(Type type, const std::string& text,
   return MenuItem::Create(type, text, "", std::move(callback));
 }
 
+std::unique_ptr<MenuItem> MenuItem::Create(Type type, const std::string& text,
+                                           const std::string& hotkey,
+                                           std::function<void()> callback) {
+  // No native menu backend with SDL windowing; the plain item still carries
+  // text/hotkey/callback state for callers that walk the tree themselves.
+  return std::unique_ptr<MenuItem>(new MenuItem(type, text, hotkey, std::move(callback)));
+}
+
 MenuItem::MenuItem(Type type, const std::string& text, const std::string& hotkey,
                    std::function<void()> callback)
     : type_(type),

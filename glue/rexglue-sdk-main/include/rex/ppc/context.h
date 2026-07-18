@@ -36,6 +36,10 @@ struct PPCContext;
 // Function signature for recompiled PPC functions
 using PPCFunc = void(PPCContext& ctx, uint8_t* base);
 
+namespace rex::runtime {
+PPCFunc* ResolveIndirectFunction(uint32_t guest_address);
+}  // namespace rex::runtime
+
 //=============================================================================
 // PPC Function Macros
 //=============================================================================
@@ -240,25 +244,15 @@ using PPCCRRegister = rex::ppc::CRRegister;
 using PPCVRegister = rex::ppc::VRegister;
 using PPCFPSCRRegister = rex::ppc::FPSCRRegister;
 
-#define PPC_ROUND_NEAREST rex::ppc::kRoundNearest
-#define PPC_ROUND_TOWARD_ZERO rex::ppc::kRoundTowardZero
-#define PPC_ROUND_UP rex::ppc::kRoundUp
-#define PPC_ROUND_DOWN rex::ppc::kRoundDown
-#define PPC_ROUND_MASK rex::ppc::kRoundMask
-
 //=============================================================================
 // PPCContext Structure
 //=============================================================================
 
 struct alignas(0x40) PPCContext {
   PPCRegister r3;
-#if !defined(PPC_CONFIG_NON_ARGUMENT_AS_LOCAL) && !defined(REX_CONFIG_NON_ARGUMENT_AS_LOCAL)
   PPCRegister r0;
-#endif
   PPCRegister r1;
-#if !defined(PPC_CONFIG_NON_ARGUMENT_AS_LOCAL) && !defined(REX_CONFIG_NON_ARGUMENT_AS_LOCAL)
   PPCRegister r2;
-#endif
   PPCRegister r4;
   PPCRegister r5;
   PPCRegister r6;
@@ -266,12 +260,9 @@ struct alignas(0x40) PPCContext {
   PPCRegister r8;
   PPCRegister r9;
   PPCRegister r10;
-#if !defined(PPC_CONFIG_NON_ARGUMENT_AS_LOCAL) && !defined(REX_CONFIG_NON_ARGUMENT_AS_LOCAL)
   PPCRegister r11;
   PPCRegister r12;
-#endif
   PPCRegister r13;
-#if !defined(PPC_CONFIG_NON_VOLATILE_AS_LOCAL) && !defined(REX_CONFIG_NON_VOLATILE_AS_LOCAL)
   PPCRegister r14;
   PPCRegister r15;
   PPCRegister r16;
@@ -290,24 +281,12 @@ struct alignas(0x40) PPCContext {
   PPCRegister r29;
   PPCRegister r30;
   PPCRegister r31;
-#endif
 
-#if !defined(PPC_CONFIG_SKIP_LR) && !defined(REX_CONFIG_SKIP_LR)
   uint64_t lr;
-#endif
-#if !defined(PPC_CONFIG_CTR_AS_LOCAL) && !defined(REX_CONFIG_CTR_AS_LOCAL)
   PPCRegister ctr;
-#endif
-#if !defined(PPC_CONFIG_XER_AS_LOCAL) && !defined(REX_CONFIG_XER_AS_LOCAL)
   PPCXERRegister xer;
-#endif
-#if !defined(PPC_CONFIG_RESERVED_AS_LOCAL) && !defined(REX_CONFIG_RESERVED_AS_LOCAL)
   PPCRegister reserved;
-#endif
-#if !defined(PPC_CONFIG_SKIP_MSR) && !defined(REX_CONFIG_SKIP_MSR)
   uint32_t msr = 0x200A000;
-#endif
-#if !defined(PPC_CONFIG_CR_AS_LOCAL) && !defined(REX_CONFIG_CR_AS_LOCAL)
   PPCCRRegister cr0;
   PPCCRRegister cr1;
   PPCCRRegister cr2;
@@ -316,13 +295,18 @@ struct alignas(0x40) PPCContext {
   PPCCRRegister cr5;
   PPCCRRegister cr6;
   PPCCRRegister cr7;
-#endif
   PPCFPSCRRegister fpscr;
   uint8_t vscr_sat = 0;  // VSCR saturation flag (for vector ops)
 
-#if !defined(PPC_CONFIG_NON_ARGUMENT_AS_LOCAL) && !defined(REX_CONFIG_NON_ARGUMENT_AS_LOCAL)
+  /**
+   * Last indirect call target address. Set by REX_CALL_INDIRECT_FUNC before
+   * dispatch. Used by the invalid-function trap to report the faulting address.
+   * Unconditional (not guarded by config flags) because ctr may be optimized
+   * to a local variable via REX_CONFIG_CTR_AS_LOCAL.
+   */
+  uint32_t last_indirect_target = 0;
+
   PPCRegister f0;
-#endif
   PPCRegister f1;
   PPCRegister f2;
   PPCRegister f3;
@@ -336,7 +320,6 @@ struct alignas(0x40) PPCContext {
   PPCRegister f11;
   PPCRegister f12;
   PPCRegister f13;
-#if !defined(PPC_CONFIG_NON_VOLATILE_AS_LOCAL) && !defined(REX_CONFIG_NON_VOLATILE_AS_LOCAL)
   PPCRegister f14;
   PPCRegister f15;
   PPCRegister f16;
@@ -355,7 +338,6 @@ struct alignas(0x40) PPCContext {
   PPCRegister f29;
   PPCRegister f30;
   PPCRegister f31;
-#endif
 
   PPCVRegister v0;
   PPCVRegister v1;
@@ -371,7 +353,6 @@ struct alignas(0x40) PPCContext {
   PPCVRegister v11;
   PPCVRegister v12;
   PPCVRegister v13;
-#if !defined(PPC_CONFIG_NON_VOLATILE_AS_LOCAL) && !defined(REX_CONFIG_NON_VOLATILE_AS_LOCAL)
   PPCVRegister v14;
   PPCVRegister v15;
   PPCVRegister v16;
@@ -390,8 +371,6 @@ struct alignas(0x40) PPCContext {
   PPCVRegister v29;
   PPCVRegister v30;
   PPCVRegister v31;
-#endif
-#if !defined(PPC_CONFIG_NON_ARGUMENT_AS_LOCAL) && !defined(REX_CONFIG_NON_ARGUMENT_AS_LOCAL)
   PPCVRegister v32;
   PPCVRegister v33;
   PPCVRegister v34;
@@ -424,8 +403,6 @@ struct alignas(0x40) PPCContext {
   PPCVRegister v61;
   PPCVRegister v62;
   PPCVRegister v63;
-#endif
-#if !defined(PPC_CONFIG_NON_VOLATILE_AS_LOCAL) && !defined(REX_CONFIG_NON_VOLATILE_AS_LOCAL)
   PPCVRegister v64;
   PPCVRegister v65;
   PPCVRegister v66;
@@ -490,9 +467,7 @@ struct alignas(0x40) PPCContext {
   PPCVRegister v125;
   PPCVRegister v126;
   PPCVRegister v127;
-#endif
 
-#if !defined(PPC_CONFIG_NON_VOLATILE_AS_LOCAL) && !defined(REX_CONFIG_NON_VOLATILE_AS_LOCAL)
   //--- Non-volatile register save/restore --------
   // Layout: r14-r31 (144) | f14-f31 (144) | v14-v31 (288) | v64-v127 (1024)
   // Total: 1600 bytes.  Buffer must be at least this large.
@@ -519,135 +494,4 @@ struct alignas(0x40) PPCContext {
     src += 18 * sizeof(PPCVRegister);
     std::memcpy(&v64, src, 64 * sizeof(PPCVRegister));
   }
-#else
-  static constexpr size_t kNonVolatileSaveSize = 0;
-  inline void SaveNonVolatiles(uint8_t*) const {}
-  inline void RestoreNonVolatiles(const uint8_t*) {}
-#endif
 };
-
-//=============================================================================
-// Legacy Compat Aliases
-//=============================================================================
-
-#define PPC_FUNC(x) REX_FUNC(x)
-#define PPC_FUNC_IMPL(x) REX_EXTERN(x)
-#define PPC_EXTERN_FUNC(x) REX_EXTERN(x)
-#define PPC_EXTERN_IMPORT(x) REX_EXTERN(x)
-#define PPC_WEAK_FUNC(x) REX_WEAK_FUNC(x)
-#define PPC_JOIN(x, y) REX_JOIN(x, y)
-#define PPC_XSTRINGIFY(x) REX_XSTRINGIFY(x)
-#define PPC_STRINGIFY(x) REX_STRINGIFY(x)
-
-// Legacy compat for codegen output that uses old PPC_FUNC_PROLOGUE / call
-// macros. Codegen targeting graine v0.7.5+ uses the REX_* equivalents
-// directly; these aliases keep older generated code (e.g. gta4-recomp/)
-// compiling unchanged.
-#ifndef PPC_FUNC_PROLOGUE
-  #define PPC_FUNC_PROLOGUE() ((void)0)
-#endif
-#ifndef PPC_CALL_FUNC
-  #define PPC_CALL_FUNC(x) x(ctx, base)
-#endif
-#ifndef PPC_CALL_INDIRECT_FUNC
-  #define PPC_CALL_INDIRECT_FUNC(x) __builtin_debugtrap()
-#endif
-#ifndef PPC_LOOKUP_FUNC
-  #define PPC_LOOKUP_FUNC(x, y) ((void*)nullptr)
-#endif
-
-// Real function-table lookup used when the recompiled game's ppc_config.h
-// has been included (sets PPC_CONFIG_H_INCLUDED + PPC_IMAGE_BASE/SIZE,
-// PPC_CODE_BASE/SIZE). The table is stored in guest memory immediately
-// after the image, indexed by (addr - CODE_BASE) * 2 (8-byte entries).
-#ifdef PPC_CONFIG_H_INCLUDED
-  #undef PPC_LOOKUP_FUNC
-  #define PPC_LOOKUP_FUNC(x, y)                                               \
-    (*(PPCFunc**)((x) + PPC_IMAGE_BASE + PPC_IMAGE_SIZE +                     \
-                  (uint64_t(uint32_t(y) - PPC_CODE_BASE) * 2)))
-
-  #undef PPC_CALL_INDIRECT_FUNC
-  #define PPC_CALL_INDIRECT_FUNC(x)                                             \
-    do {                                                                        \
-      uint32_t _icf_addr = uint32_t(x);                                         \
-      bool _icf_in_range = (_icf_addr >= uint32_t(PPC_CODE_BASE) &&             \
-                            _icf_addr <  uint32_t(PPC_CODE_BASE) + uint32_t(PPC_CODE_SIZE)); \
-      PPCFunc* _icf_fn = _icf_in_range ? PPC_LOOKUP_FUNC(base, _icf_addr) : nullptr; \
-      if (_icf_fn) { _icf_fn(ctx, base); }                                      \
-    } while (0)
-#endif
-
-// Pull in PPC_MEMORY_SIZE + load/store macros for LibertyRecomp consumers
-// that include rex/ppc/context.h without the full umbrella.
-#include <rex/ppc/memory.h>
-
-// Time base query for `mftb` instruction. Old SDK used
-// rex::chrono::Clock::QueryGuestTickCount(); on the new SDK we provide
-// a direct fallback via the steady clock when the chrono helper isn't
-// otherwise pulled in.
-#ifndef PPC_QUERY_TIMEBASE
-  #include <chrono>
-  #define PPC_QUERY_TIMEBASE() \
-    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>( \
-        std::chrono::steady_clock::now().time_since_epoch()).count())
-#endif
-
-// PPC physical-host offset: only meaningful on Win32 where the 0xE0 physical
-// heap mapping is offset by 0x1000 due to file-mapping granularity. Other
-// hosts use a flat zero offset.
-#ifndef PPC_PHYS_HOST_OFFSET
-  #if defined(_WIN32)
-    #define PPC_PHYS_HOST_OFFSET(addr) (((uint32_t)(addr) >= 0xE0000000u) ? 0x1000u : 0u)
-  #else
-    #define PPC_PHYS_HOST_OFFSET(addr) 0u
-  #endif
-#endif
-
-// MSR / global-lock primitives. Old SDK threaded these through
-// rex::thread::global_critical_region; graine's thread layer doesn't
-// expose the same symbol. The mfmsr/mtmsrd codegen paths only matter for
-// interrupt-disable emulation, which the recompiled game uses for short
-// critical sections. A simple atomic counter + std::mutex is sufficient
-// to preserve nesting + serialization without depending on rex internals.
-#ifndef PPC_CHECK_GLOBAL_LOCK
-  #include <atomic>
-  #include <mutex>
-  inline std::atomic<int32_t>& ppc_global_lock_count_() {
-    static std::atomic<int32_t> count{0};
-    return count;
-  }
-  inline std::mutex& ppc_global_lock_mutex_() {
-    static std::mutex m;
-    return m;
-  }
-  #define PPC_CHECK_GLOBAL_LOCK() \
-    (ppc_global_lock_count_().load() ? 0ull : 0x8000ull)
-  #define PPC_ENTER_GLOBAL_LOCK() \
-    do { ppc_global_lock_mutex_().lock(); ppc_global_lock_count_().fetch_add(1); } while (0)
-  #define PPC_LEAVE_GLOBAL_LOCK() \
-    do { ppc_global_lock_count_().fetch_sub(1); ppc_global_lock_mutex_().unlock(); } while (0)
-#endif
-
-// Trap instruction handler used by PPC `tw`/`td` codegen output.
-// Trap types (from Xenia kernel debug protocol):
-//   20, 26 = Debug print (r3 = string ptr, r4 = length)
-//   0, 22  = Debug break
-//   25     = No-op
-inline void ppc_trap([[maybe_unused]] PPCContext& ctx,
-                     [[maybe_unused]] uint8_t* base,
-                     [[maybe_unused]] uint16_t trap_type) {
-  // Service traps from guest code: these are non-fatal in production.
-  // The full Xenia/old-graine implementation logged via REXCPU_DEBUG/WARN
-  // and read the debug print payload from r3/r4. We omit the logging here
-  // to keep the legacy shim header self-contained; trap_type=25 is no-op,
-  // others fall through silently.
-  switch (trap_type) {
-    case 0:
-    case 20:
-    case 22:
-    case 25:
-    case 26:
-    default:
-      break;
-  }
-}

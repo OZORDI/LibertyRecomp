@@ -26,7 +26,7 @@ namespace ui {
 
 class ImGuiDialog {
  public:
-  ~ImGuiDialog();
+  virtual ~ImGuiDialog();
 
   // Shows a simple message box containing a text message.
   // Callers can want for the dialog to close with Wait().

@@ -19,26 +19,19 @@
 
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/stdout_sinks.h>
 
 #include <toml++/toml.hpp>
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+#include <rex/platform/env.h>
 
-// Platform-native log sink factory. A real implementation is provided by
-// exactly one of logging_{ps4,switch,ios,android}.cpp/.mm when its platform
-// macro is active; on every other platform the weak stub below returns null
-// and InitLogging skips attaching it.
-namespace rex::logging {
-#if REX_PLATFORM_PS4 || REX_PLATFORM_NX || REX_PLATFORM_SWITCH || REX_PLATFORM_IOS || \
-    REX_PLATFORM_ANDROID
-std::shared_ptr<spdlog::sinks::sink> CreateNativeLogSink();
+#if REX_PLATFORM_WIN32
+#include <spdlog/sinks/msvc_sink.h>
 #else
-inline std::shared_ptr<spdlog::sinks::sink> CreateNativeLogSink() { return nullptr; }
+#include <spdlog/sinks/stdout_sinks.h>
 #endif
-}  // namespace rex::logging
 
 REXCVAR_DEFINE_STRING(log_level, "info", "Log",
                       "Global log level: trace, debug, info, warn, error, critical, off")
@@ -50,9 +43,6 @@ REXCVAR_DEFINE_BOOL(log_verbose, false, "Log", "Enable verbose logging (sets lev
     .debug_only();
 
 REXCVAR_DEFINE_BOOL(log_noisy, false, "Log", "Enable noisy/high-frequency log macros");
-
-REXCVAR_DEFINE_BOOL(enable_console, false, "Log", "Enable console/stdout log sink")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 REXCVAR_DEFINE_INT32(log_flush_interval, 0, "Log", "Periodic flush interval in seconds (0 = off)")
     .range(0, 60)
@@ -158,7 +148,11 @@ void InitLoggingEarly() {
   if (g_early_initialized || g_initialized)
     return;
 
+#if REX_PLATFORM_WIN32
+  auto sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+#else
   auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
+#endif
   sink->set_level(spdlog::level::trace);
   sink->set_pattern("[%l] [%n] %v");
   g_early_sink = sink;
@@ -199,7 +193,12 @@ void InitLogging(const LogConfig& config) {
 
   g_config = config;
 
-  // Remove early stdout sink
+  // Early sink handling:
+  //   Windows: the early msvc_sink is the persistent debug channel for GUI
+  //     apps and does not conflict with the stdout console sink, so keep it.
+  //   Non-Windows: drop the early stdout sink unconditionally so file-only
+  //     configs don't leak to stdout and console configs don't duplicate.
+#if !REX_PLATFORM_WIN32
   if (g_early_sink) {
     for (auto& entry : g_registry) {
       if (entry.logger)
@@ -207,8 +206,9 @@ void InitLogging(const LogConfig& config) {
     }
     g_early_sink.reset();
   }
+#endif
 
-  // Console sink
+  // Console sink (stdout, colored). Intended for console-subsystem processes.
   if (config.log_to_console) {
     auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     sink->set_level(spdlog::level::trace);
@@ -235,15 +235,6 @@ void InitLogging(const LogConfig& config) {
   }
 
   g_extra_sinks = config.extra_sinks;
-
-  // Platform-native log sink (os_log / logcat / svcOutputDebugString /
-  // sceKernelDebugOutText). Added alongside stdout + rotating-file sinks —
-  // never replaces them. Returns nullptr on platforms without a native sink.
-  if (auto native_sink = rex::logging::CreateNativeLogSink()) {
-    native_sink->set_level(spdlog::level::trace);
-    native_sink->set_pattern(config.file_pattern);
-    g_extra_sinks.push_back(native_sink);
-  }
 
   // Rebuild all loggers with new sinks
   for (auto& entry : g_registry) {
@@ -295,6 +286,13 @@ void ShutdownLogging() {
   g_extra_sinks.clear();
   g_initialized = false;
   g_early_initialized = false;
+}
+
+void FlushLogging() {
+  std::lock_guard lock(g_mutex);
+  for (auto& entry : g_registry)
+    if (entry.logger)
+      entry.logger->flush();
 }
 
 LogCategoryId RegisterLogCategory(const char* name) {
@@ -452,6 +450,20 @@ void RemoveSink(LogCategoryId category, spdlog::sink_ptr sink) {
   }
 }
 
+void ReplaceConsoleSink(spdlog::sink_ptr sink) {
+  std::lock_guard lock(g_mutex);
+  for (auto& entry : g_registry) {
+    if (!entry.logger)
+      continue;
+    auto& sinks = entry.logger->sinks();
+    if (g_console_sink)
+      std::erase(sinks, g_console_sink);
+    if (sink)
+      sinks.push_back(sink);
+  }
+  g_console_sink = sink;
+}
+
 void SetConsolePattern(const std::string& pattern) {
   if (g_console_sink)
     g_console_sink->set_pattern(pattern);
@@ -499,11 +511,11 @@ LogConfig BuildLogConfig(const char* log_file, const std::string& cli_level,
   config.default_level = kDefaultLogLevel;
 
   // Environment variable
-  if (const char* env_level = std::getenv("REX_LOG_LEVEL")) {
-    if (auto level = ParseLogLevel(env_level))
+  if (auto env_level = rex::platform::env::get("REX_LOG_LEVEL")) {
+    if (auto level = ParseLogLevel(*env_level))
       config.default_level = *level;
-  } else if (const char* env_level2 = std::getenv("SPDLOG_LEVEL")) {
-    if (auto level = ParseLogLevel(env_level2))
+  } else if (auto env_level2 = rex::platform::env::get("SPDLOG_LEVEL")) {
+    if (auto level = ParseLogLevel(*env_level2))
       config.default_level = *level;
   }
 

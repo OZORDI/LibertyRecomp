@@ -15,7 +15,12 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 
+#include <rex/cvar.h>
+#include <rex/embedded_metadata.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/memory.h>
 #include <rex/system/export_resolver.h>
@@ -27,6 +32,14 @@
 
 // Forward declaration for function mapping (defined in rex/ppc/context.h)
 struct PPCFuncMapping;
+
+#include <rex/image_info.h>
+
+REXCVAR_DECLARE(std::string, game_data_root);
+REXCVAR_DECLARE(std::string, user_data_root);
+REXCVAR_DECLARE(std::string, update_data_root);
+REXCVAR_DECLARE(std::string, cache_root);
+REXCVAR_DECLARE(std::string, metadata_root);
 
 namespace rex {
 
@@ -52,6 +65,9 @@ class ImGuiDrawer;
 /// construction time, which is only available during Setup().
 struct RuntimeConfig {
   std::unique_ptr<system::IGraphicsSystem> graphics;
+  // GPU emulation plugin loaded by ReXApp when `graphics` is empty
+  // (e.g. "xenos"); empty means no GPU emulation.
+  std::string gpu_plugin;
   std::function<std::unique_ptr<system::IAudioSystem>(runtime::FunctionDispatcher*)> audio_factory;
   std::function<std::unique_ptr<system::IInputSystem>(bool tool_mode)> input_factory;
   std::function<void(Runtime*, system::KernelState*)> kernel_init;
@@ -61,7 +77,7 @@ struct RuntimeConfig {
 /// Helper macros for populating RuntimeConfig with concrete backends.
 /// Usage:
 ///   rex::RuntimeConfig config;
-///   config.graphics      = REX_GRAPHICS_BACKEND(rex::graphics::vulkan::VulkanGraphicsSystem);
+///   config.graphics      = REX_GRAPHICS_BACKEND(MyCustomGraphicsSystem);
 ///   config.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
 #define REX_GRAPHICS_BACKEND(Type) std::make_unique<Type>()
 #define REX_AUDIO_BACKEND(Type)                                                                 \
@@ -86,7 +102,8 @@ class Runtime {
   explicit Runtime(const std::filesystem::path& game_data_root,
                    const std::filesystem::path& user_data_root = {},
                    const std::filesystem::path& update_data_root = {},
-                   const std::filesystem::path& cache_root = {});
+                   const std::filesystem::path& cache_root = {},
+                   const std::filesystem::path& metadata_root = {});
   ~Runtime();
 
   // Non-copyable
@@ -94,7 +111,7 @@ class Runtime {
   Runtime& operator=(const Runtime&) = delete;
 
   // Global instance accessor - set after Setup() is called
-  static Runtime* instance() { return instance_; }
+  static Runtime* instance();
 
   // Subsystem accessors
   memory::Memory* memory() const { return memory_.get(); }
@@ -114,6 +131,14 @@ class Runtime {
   const std::filesystem::path& user_data_root() const { return user_data_root_; }
   const std::filesystem::path& update_data_root() const { return update_data_root_; }
   const std::filesystem::path& cache_root() const { return cache_root_; }
+  const std::filesystem::path& metadata_root() const { return metadata_root_; }
+
+  // Finds a metadata file or directory. An explicit metadata_root disables
+  // legacy discovery; otherwise existing project layouts remain supported.
+  std::optional<std::filesystem::path> FindMetadataPath(
+      const std::filesystem::path& relative_path) const;
+  std::optional<EmbeddedMetadataAsset> FindEmbeddedMetadata(
+      const std::filesystem::path& relative_path) const;
 
   // Set the app context for presentation (call before Setup)
   void set_app_context(ui::WindowedAppContext* context) { app_context_ = context; }
@@ -129,10 +154,8 @@ class Runtime {
   // config.tool_mode: If true, skips GPU initialization (for analysis tools)
   X_STATUS Setup(RuntimeConfig config = {});
 
-  // rexglue - initializes function dispatch table
-  // func_mappings: null-terminated array of {guest_addr, host_func} pairs
-  X_STATUS Setup(uint32_t code_base, uint32_t code_size, uint32_t image_base, uint32_t image_size,
-                 const PPCFuncMapping* func_mappings, RuntimeConfig config = {});
+  // rexglue - initializes per-module function dispatch table
+  X_STATUS Setup(const PPCImageInfo& image_info, RuntimeConfig config = {});
 
   // Check if running in tool mode (no GPU)
   bool is_tool_mode() const { return tool_mode_; }
@@ -161,11 +184,13 @@ class Runtime {
   std::filesystem::path user_data_root_;
   std::filesystem::path update_data_root_;
   std::filesystem::path cache_root_;
+  std::filesystem::path metadata_root_;
 
   ui::WindowedAppContext* app_context_ = nullptr;
   ui::Window* display_window_ = nullptr;
   ui::ImGuiDrawer* imgui_drawer_ = nullptr;
   bool tool_mode_ = false;
+  bool setup_complete_ = false;
 
   std::unique_ptr<memory::Memory> memory_;
   std::unique_ptr<runtime::FunctionDispatcher> function_dispatcher_;

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <rex/codegen/codegen_context.h>
+#include <rex/codegen/progress_reporter.h>
 #include <rex/result.h>
 
 namespace rex::codegen {
@@ -31,6 +32,6 @@ namespace rex::codegen {
  * @param ctx CodegenContext with binary and config loaded
  * @return Success if graph is valid, error otherwise
  */
-Result<void> Analyze(CodegenContext& ctx);
+Result<void> Analyze(CodegenContext& ctx, ProgressReporter* reporter = nullptr);
 
 }  // namespace rex::codegen

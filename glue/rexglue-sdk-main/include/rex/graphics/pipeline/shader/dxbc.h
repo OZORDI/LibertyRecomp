@@ -50,7 +50,7 @@ class DxbcShader : public Shader {
   const std::vector<TextureBinding>& GetTextureBindingsAfterTranslation() const {
     return texture_bindings_;
   }
-  const uint32_t GetUsedTextureMaskAfterTranslation() const { return used_texture_mask_; }
+  uint32_t GetUsedTextureMaskAfterTranslation() const { return used_texture_mask_; }
 
   static constexpr uint32_t kMaxSamplerBindingIndexBits =
       DxbcShaderTranslator::kMaxSamplerBindingIndexBits;

@@ -27,6 +27,7 @@
 #define REX_IMAGE_SIZE 0x{{ image_size }}ull
 #define REX_CODE_BASE 0x{{ code_base }}ull
 #define REX_CODE_SIZE 0x{{ code_size }}ull
+#define REX_THUNK_RESERVE_SIZE 0x10000ull
 
 #endif // REX_CONFIG_H_INCLUDED
 
@@ -87,17 +88,7 @@
 
 #define REX_CALL_FUNC(x) x(ctx, base)
 
-#define REX_LOOKUP_FUNC(x, y) \
-  (*(PPCFunc**)(x + REX_IMAGE_BASE + REX_IMAGE_SIZE + (u64(u32(y) - REX_CODE_BASE) * 2)))
-
-#ifdef REXGLUE_ENABLE_PROFILING
-#define REX_CALL_INDIRECT_FUNC(x) \
-  PROFILE_FUNCTION_DISPATCHED();  \
-  REX_LOOKUP_FUNC(base, x)(ctx, base);
-#else
-#define REX_CALL_INDIRECT_FUNC(x) \
-  REX_LOOKUP_FUNC(base, x)(ctx, base);
-#endif
+{% include "codegen/_indirect_call.inja" %}
 
 //=============================================================================
 // Flush Mode
@@ -187,38 +178,3 @@ inline std::atomic<i32>& ppc_global_lock_count_() {
     rex::thread::global_critical_region::mutex().unlock();                                \
   } while (0)
 
-//=============================================================================
-// PPC_ Compat Aliases
-//=============================================================================
-
-#define PPC_FUNC_PROLOGUE REX_FUNC_PROLOGUE
-#define PPC_CALL_FUNC(x) REX_CALL_FUNC(x)
-#define PPC_LOOKUP_FUNC(x, y) REX_LOOKUP_FUNC(x, y)
-#define PPC_CALL_INDIRECT_FUNC(x) REX_CALL_INDIRECT_FUNC(x)
-#define PPC_SET_FLUSH_MODE(x) REX_SET_FLUSH_MODE(x)
-#define PPC_UNIMPLEMENTED(addr, opcode) REX_UNIMPLEMENTED(addr, opcode)
-#define PPC_QUERY_TIMEBASE() REX_QUERY_TIMEBASE()
-#define PPC_CHECK_GLOBAL_LOCK() REX_CHECK_GLOBAL_LOCK()
-#define PPC_ENTER_GLOBAL_LOCK() REX_ENTER_GLOBAL_LOCK()
-#define PPC_LEAVE_GLOBAL_LOCK() REX_LEAVE_GLOBAL_LOCK()
-#define PPC_PHYS_HOST_OFFSET(addr) REX_PHYS_HOST_OFFSET(addr)
-#define PPC_RAW_ADDR(x) REX_RAW_ADDR(x)
-#define PPC_LOAD_U8(x) REX_LOAD_U8(x)
-#define PPC_LOAD_U16(x) REX_LOAD_U16(x)
-#define PPC_LOAD_U32(x) REX_LOAD_U32(x)
-#define PPC_LOAD_U64(x) REX_LOAD_U64(x)
-#define PPC_LOAD_STRING(...) REX_LOAD_STRING(__VA_ARGS__)
-#define PPC_STORE_U8(x, y) REX_STORE_U8(x, y)
-#define PPC_STORE_U16(x, y) REX_STORE_U16(x, y)
-#define PPC_STORE_U32(x, y) REX_STORE_U32(x, y)
-#define PPC_STORE_U64(x, y) REX_STORE_U64(x, y)
-#define PPC_MEMORY_SIZE REX_MEMORY_SIZE
-#define PPC_IS_MMIO_ADDR(addr) REX_IS_MMIO_ADDR(addr)
-#define PPC_MM_STORE_U8(addr, val) REX_MM_STORE_U8(addr, val)
-#define PPC_MM_STORE_U16(addr, val) REX_MM_STORE_U16(addr, val)
-#define PPC_MM_STORE_U32(addr, val) REX_MM_STORE_U32(addr, val)
-#define PPC_MM_STORE_U64(addr, val) REX_MM_STORE_U64(addr, val)
-#define PPC_MM_LOAD_U8(addr) REX_MM_LOAD_U8(addr)
-#define PPC_MM_LOAD_U16(addr) REX_MM_LOAD_U16(addr)
-#define PPC_MM_LOAD_U32(addr) REX_MM_LOAD_U32(addr)
-#define PPC_MM_LOAD_U64(addr) REX_MM_LOAD_U64(addr)

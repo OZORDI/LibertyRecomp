@@ -32,6 +32,18 @@ class CodegenWriter {
   /// Run the full output pipeline: validate, clean old files, generate, flush.
   bool write(bool force);
 
+  /**
+   * Basenames of files removed by the pre-emit cleanup sweep during write().
+   * Populated only after write() completes. Empty otherwise.
+   */
+  const std::vector<std::string>& deletedFiles() const { return deletedFiles_; }
+
+  /**
+   * Basenames of files written to disk during write() (via FlushPendingWrites).
+   * Populated only after write() completes. Empty otherwise.
+   */
+  const std::vector<std::string>& writtenFiles() const { return writtenFiles_; }
+
  private:
   CodegenContext& ctx_;
   Runtime* runtime_;
@@ -39,6 +51,8 @@ class CodegenWriter {
   std::string out;
   size_t cppFileIndex = 0;
   std::vector<std::pair<std::string, std::string>> pendingWrites;
+  std::vector<std::string> deletedFiles_;
+  std::vector<std::string> writtenFiles_;
 
   template <class... Args>
   void print(fmt::format_string<Args...> fmt, Args&&... args) {

@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-14",
+  "scope": {
+    "task": "Research GTA IV startup state-3 soft lock and black output after the first legal screen.",
+    "constraints": [
+      "Research only; do not edit product code.",
+      "Use generated recompiled code and liberty-decomp metadata; do not use pseudocode.",
+      "Use Python for every arithmetic calculation."
+    ]
+  },
+  "runtime": {
+    "process_id_last_observed": 60206,
+    "app_log": "/tmp/liberty_input_black_probe.log",
+    "native_sample": "/tmp/liberty_live_sample_60206.txt",
+    "lldb_fault_capture": "/tmp/liberty_sub_8285E500_lldb.log",
+    "guest_virtual_base": "0x300000000",
+    "guest_physical_alias_base": "0x400000000"
+  },
+  "proven_facts": [
+    {
+      "id": "F01",
+      "statement": "The host GPU presentation pipeline continues publishing successfully refreshed guest-output images.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/ui/vulkan/vulkan_presenter.cpp:1033",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/ui/presenter.cpp:549",
+        "Live presenter state: all three GuestOutputImageInstance.ever_successfully_refreshed fields were true.",
+        "/tmp/liberty_submission_rate.py measured 316 completed submissions over 5 seconds, reported as 63.20 per second."
+      ]
+    },
+    {
+      "id": "F02",
+      "statement": "The Xenos swap source changes during loading, but the user-visible image becomes black after the first legal screen.",
+      "evidence": [
+        "Live IssueSwap breakpoint observed frontbuffer 0x07538000; an earlier stage observed 0x07C68000.",
+        "Live IssueSwap packet dimensions were 0x500 by 0x2D0.",
+        "User visual observation: only the first legal screen is visible; later loading screens are black."
+      ]
+    },
+    {
+      "id": "F03",
+      "statement": "The active gamma table is nonzero and monotonic, so an all-zero gamma ramp is not the black-output cause.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/graphics/command_processor.cpp:115",
+        "Live gamma samples decoded to grayscale channel values 0, 193, 462, 741, and 1023."
+      ]
+    },
+    {
+      "id": "F04",
+      "statement": "The game remains in startup state 3 while its frame/render threads and Xenos swap/present path continue running.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.0.cpp:5220",
+        "/tmp/liberty_sample.txt",
+        "Live main-state register r29 was 3."
+      ]
+    },
+    {
+      "id": "F05",
+      "statement": "sub_828BF420 is a frame-throttle loop serviced by the emulated vblank interrupt path, not an unserviced physical-GPU wait.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.65.cpp:27837",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.81.cpp:19346",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/graphics/graphics_system.cpp:122",
+        "/tmp/liberty_visual_probe_app.log:124"
+      ]
+    },
+    {
+      "id": "F06",
+      "statement": "Within startup state 3, the decisive record gate advances only when active field +56 is nonzero and mirrored field +136 is zero; the observed zero/zero pair stays on the polling path.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.0.cpp:5540",
+        "sub_82142230 initializes r24 to 1 and r25 to 0 before its state loop.",
+        "The branch at loc_8214248C selects r24 only for (+56 != 0 && +136 == 0), then reaches the state-4 transition; every other pair reaches loc_82142504."
+      ]
+    },
+    {
+      "id": "F07",
+      "statement": "The +56/+136 pair is the current/previous edge state of the Xbox 360 A button, so startup state 3 is waiting for a new A-button press rather than a background load-completion callback.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.6.cpp:54864",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.6.cpp:55245",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/include/rex/input/input.h:47",
+        "sub_82208F50 maps source button mask 0x1000 into record field +56.",
+        "sub_821B4768 copies current bytes +4..+83 into mirrored previous bytes +84..+163 before installing the next current snapshot."
+      ]
+    },
+    {
+      "id": "F08",
+      "statement": "The live macOS guest virtual mapping begins at host 0x300000000; 0x400000000 is the physical alias, not the correct base for XEX virtual addresses.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/system/xmemory.cpp:145",
+        "Live vmmap output for process 60206.",
+        "Successful LLDB reads of guest globals through host base 0x300000000."
+      ]
+    },
+    {
+      "id": "F09",
+      "statement": "The DualSense is controller slot 0, SDL maps Cross/South to Xbox A, and repeated Cross presses reached GTA IV input state.",
+      "evidence": [
+        "/tmp/liberty_input_black_probe.log:175",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/input/sdl/sdl_input_driver.cpp:568",
+        "/tmp/liberty_input_records_after_press.bin: slot 0 current A=0xFF and previous A=0xFF.",
+        "/tmp/liberty_raw_input_after_press.bin: slot 0 raw button word=0x40.",
+        "User heard GTA IV main-menu sound effects immediately after repeatedly pressing Cross."
+      ]
+    },
+    {
+      "id": "F10",
+      "statement": "The startup state-3 wait was an input gate, but the persistent black display is a separate rendering/output problem because game frontend audio advanced after the A input while the image remained black.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.0.cpp:5540",
+        "Live post-press GTA IV A records were nonzero.",
+        "User heard main-menu sounds but continued to see black output."
+      ]
+    },
+    {
+      "id": "F11",
+      "statement": "Vulkan intentionally skips presentation for any frame that used an asynchronous placeholder pipeline; the placeholder pixel shader discards fragments.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/graphics/vulkan/command_processor.cpp:2305",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/graphics/vulkan/pipeline_cache.cpp:65",
+        "/tmp/liberty_input_black_probe.log:129"
+      ]
+    },
+    {
+      "id": "F12",
+      "statement": "MoltenVK primitive-restart warnings dominate the execution log, while RexGlue already contains a MoltenVK-specific primitive-restart workaround.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/graphics/vulkan/primitive_processor.cpp:64",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/include/rex/graphics/primitive_processor.h:244",
+        "/tmp/liberty_input_black_probe.log contained 117121 total lines but only 151 after filtering that warning."
+      ]
+    },
+    {
+      "id": "F13",
+      "statement": "After the input transition, the Main XThread repeatedly faults in generated sub_8285E500 while loading a 32-bit value from guest address 0x00000008.",
+      "evidence": [
+        "/tmp/liberty_sub_8285E500_lldb.log",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.61.cpp:53793",
+        "LLDB mapped host +400 to generated REX_LOAD_U32(ctx.r28 + 8), with guest r28=0."
+      ]
+    },
+    {
+      "id": "F14",
+      "statement": "The faulting object is a rage::fiPackfile asked to find setup2.xml; its vtable is valid but its file-index root at object offset +8 is null.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/gta_iv/xex_excavation_retail/vtables_with_addrs_fixed.txt:39519",
+        "/tmp/liberty_zip_object.bin: vtable=0x82086034, root=0, index/count field=0xFFFFFFFF.",
+        "Live guest r4 string at 0x7018F547 was setup2.xml.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.61.cpp:53793"
+      ]
+    },
+    {
+      "id": "F15",
+      "statement": "The game tries to mount DLC1/DLC.rpf before opening setup2.xml, but that archive is absent; extracted setup2.xml files exist on disk instead.",
+      "evidence": [
+        "/tmp/liberty_input_black_probe.log records NtCreateFile failure for game:\\\\DLC1\\\\DLC.rpf.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.7.cpp:27184",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.7.cpp:27208",
+        "/Users/Ozordi/Downloads/LibertyRecomp/gta_iv/xex_excavation_retail/all_strings_with_addrs.txt:486",
+        "/Users/Ozordi/Library/Application Support/LibertyRecomp/game/DLC1/setup2.xml exists; no DLC.rpf was found in the install or repository trees."
+      ]
+    },
+    {
+      "id": "F16",
+      "statement": "Both GTA IV episodes are installed as complete extracted content trees, not as DLC.rpf archives.",
+      "evidence": [
+        "/Users/Ozordi/Library/Application Support/LibertyRecomp/dlc/TLAD/setup2.xml exists alongside content.dat and extracted common/xbox360 assets.",
+        "/Users/Ozordi/Library/Application Support/LibertyRecomp/dlc/TBOGT/setup2.xml exists alongside extracted common/xbox360 assets.",
+        "A filesystem search found no DLC.rpf under the LibertyRecomp install or repository trees.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/docs/INSTALLATION_ARCHITECTURE.md documents DLC installation under dlc/TLAD and dlc/TBOGT."
+      ]
+    },
+    {
+      "id": "F17",
+      "statement": "Liberty's current ContentManager bridge copies DLC into a path that omits RexGlue's required zero-XUID directory, so marketplace enumeration cannot discover those copies.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/LibertyRecomp/main.cpp copies DLC to game/545407F2/00000002/TLAD and TBOGT.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/system/xam/content_manager.cpp ResolvePackageRoot constructs content_root/xuid/title_id/content_type.",
+        "ContentManager forces marketplace package paths to XUID 0000000000000000.",
+        "The installed game tree contains game/545407F2/00000002 but no game/0000000000000000/545407F2/00000002."
+      ]
+    },
+    {
+      "id": "F18",
+      "statement": "Liberty's direct game/DLC1 bridge falsely activates GTA IV's disc/archive DLC branch: the copied setup2.xml passes discovery, but the selected fiPackfile later requires the absent DLC1/DLC.rpf.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/LibertyRecomp/main.cpp copies extracted TLAD and TBOGT trees to game/DLC1 and game/DLC2.",
+        "liberty-decomp identifies sub_82219490 as the sole function referencing DLC1/, setup2.xml, DLC, rpf, DLC1/DLC, and DLC2/DLC.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.7.cpp shows sub_82219490 probing DLC1/setup2.xml before constructing the DLC1/DLC and DLC2/DLC records.",
+        "/tmp/liberty_input_black_probe.log records the resulting game:\\\\DLC1\\\\DLC.rpf open failure."
+      ]
+    },
+    {
+      "id": "F19",
+      "statement": "GTA IV contains a separate marketplace-content path that enumerates XAM content and mounts an extracted package directory as extra:, which matches the installed DLC representation without requiring DLC.rpf.",
+      "evidence": [
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.41.cpp calls sub_82A12710, the generated wrapper for XamContentCreateEnumerator, with marketplace content type 2.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/gta4-recomp/generated/gta4_recomp.41.cpp calls sub_82A127A0, the generated wrapper for XamContentCreateEx.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/glue/rexglue-sdk-main/src/system/xam/content_manager.cpp ListContent accepts package directories without header files and ResolvePackage mounts the selected directory.",
+        "/Users/Ozordi/Downloads/LibertyRecomp/gta_iv/xex_excavation_retail/all_strings_with_addrs.txt contains extra:/ adjacent to setup2.xml and DLC path strings."
+      ]
+    },
+    {
+      "id": "F20",
+      "statement": "The shader-loader reference to sub_8284F310 is only a generated-function declaration and call, not a behavior-replacing hook, so it does not cause the incorrect DLC branch selection.",
+      "evidence": [
+        "Repository search finds PPC_FUNC_IMPL(__imp__sub_8284F310) but no PPC_FUNC_HOOK(sub_8284F310).",
+        "liberty-decomp reports sub_82219490 directly calling sub_8284F310 and sub_8284F538 in the unmodified generated path."
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "H01",
+      "status": "confirmed",
+      "confidence": "high",
+      "statement": "Startup state 3 waits for a fresh Xbox A edge; the DualSense Cross input reaches that path and advances audible frontend behavior.",
+      "supporting_evidence": [
+        "Generated state-3 code tests paired fields at offsets +4/+84, +56/+136, +68/+148, and +72/+152.",
+        "The +56/+136 pair is the decisive edge gate: only nonzero/zero reaches the state-4 transition.",
+        "sub_82208F50 maps X_INPUT_GAMEPAD_A (0x1000) into +56.",
+        "The selected live record fields were all zero.",
+        "Post-press slot-0 GTA records contained current A=0xFF and previous A=0xFF.",
+        "Main-menu sound effects became audible after repeated Cross presses."
+      ],
+      "counter_evidence": [],
+      "next_tests": []
+    },
+    {
+      "id": "H02",
+      "status": "active",
+      "confidence": "medium",
+      "statement": "The black image is created before or during the guest-output conversion, because presentation, mailbox publication, swapchain submission, and gamma are functioning.",
+      "supporting_evidence": [
+        "Presenter image refreshes succeed continuously.",
+        "IssueSwap source texture view is non-null and its frontbuffer address changes.",
+        "Gamma is nonzero and monotonic."
+      ],
+      "counter_evidence": [
+        "No direct pixel capture yet distinguishes a black source texture from a conversion/sampling defect."
+      ],
+      "next_tests": [
+        "Use the existing CaptureGuestOutput or GPU trace machinery in a controlled diagnostic run.",
+        "Compare source texture contents with converted guest-output contents at the same swap."
+      ]
+    },
+    {
+      "id": "H03",
+      "status": "rejected",
+      "confidence": "high",
+      "statement": "The apparent soft lock is only very slow progress.",
+      "rejection_evidence": [
+        "The process remained in startup state 3 for hours while measured guest-output refreshes continued at 63.20 per second."
+      ]
+    },
+    {
+      "id": "H04",
+      "status": "rejected",
+      "confidence": "high",
+      "statement": "The black screen is caused by a dead swapchain or stopped presenter.",
+      "rejection_evidence": [
+        "All three presenter images report successful refresh and submissions continue advancing."
+      ]
+    },
+    {
+      "id": "H05",
+      "status": "rejected",
+      "confidence": "high",
+      "statement": "The black screen is caused by an all-zero gamma ramp.",
+      "rejection_evidence": [
+        "Live gamma entries are nonzero and monotonic above index zero."
+      ]
+    },
+    {
+      "id": "H06",
+      "status": "active",
+      "confidence": "medium",
+      "statement": "Frames remain black because asynchronous placeholder pipeline use continues suppressing swap output or discarding fragments after startup.",
+      "supporting_evidence": [
+        "Source explicitly returns before presentation when frame_used_async_placeholder_pipeline_ is true.",
+        "The placeholder pixel shader discards fragments.",
+        "The log confirms this path occurred at least once."
+      ],
+      "counter_evidence": [
+        "The warning is one-shot, so the log does not prove the condition persisted on later frames.",
+        "Pipeline creation threads appeared idle in a later sample."
+      ],
+      "next_tests": [
+        "Capture frame_used_async_placeholder_pipeline_ and completed pipeline state at later IssueSwap calls without modifying product code."
+      ]
+    },
+    {
+      "id": "H07",
+      "status": "active",
+      "confidence": "low",
+      "statement": "MoltenVK primitive-restart incompatibility corrupts strip rendering enough to produce the black frontend image.",
+      "supporting_evidence": [
+        "MoltenVK emits the feature warning on nearly every affected draw."
+      ],
+      "counter_evidence": [
+        "RexGlue already enables primitive_restart_cannot_be_disabled for MoltenVK.",
+        "No source-pixel capture yet connects the warning to black output."
+      ],
+      "next_tests": [
+        "Compare source/frontbuffer pixels for draws with and without primitive restart conversion."
+      ]
+    },
+    {
+      "id": "H08",
+      "status": "confirmed",
+      "confidence": "high",
+      "statement": "The post-input main-thread fault is caused by Liberty's two incorrect DLC bridges: the marketplace copy omits the zero-XUID directory, while the direct game/DLC1 copy activates the archive branch without providing DLC1/DLC.rpf.",
+      "supporting_evidence": [
+        "The exact DLC.rpf open fails in the log.",
+        "The next live failing lookup is setup2.xml on a fiPackfile with a null index root.",
+        "Extracted setup2.xml exists under game/DLC1 and is the condition that admits the disc/archive DLC records.",
+        "ContentManager requires content_root/0000000000000000/545407F2/00000002, but Liberty copies to content_root/545407F2/00000002.",
+        "The generated marketplace path can mount extracted packages through XamContentCreateEx as extra:."
+      ],
+      "counter_evidence": [],
+      "next_tests": [
+        "Capture the selected episode's extra: mount if later DLC-specific behavior fails."
+      ]
+    },
+    {
+      "id": "H09",
+      "status": "active",
+      "confidence": "high",
+      "statement": "The original black display and the later post-input content fault are distinct failures.",
+      "supporting_evidence": [
+        "The display was already black while startup state 3 was polling normally.",
+        "Cross reached game input and menu audio advanced while output stayed black.",
+        "The fiPackfile fault occurs afterward on the Main XThread, not the GPU command thread."
+      ],
+      "counter_evidence": [
+        "The later fault can prevent further frontend progress and therefore compounds the visible symptom."
+      ],
+      "next_tests": [
+        "Continue black-source capture independently from DLC/content-path tracing."
+      ]
+    },
+    {
+      "id": "H10",
+      "status": "confirmed",
+      "confidence": "high",
+      "statement": "The correct runtime contract for the installed DLC is marketplace enumeration of extracted TLAD/TBOGT directories through RexGlue ContentManager, not synthesis of a fake DLC.rpf or a null guard in fiPackfile lookup.",
+      "supporting_evidence": [
+        "The installer produces extracted episode directories.",
+        "RexGlue ContentManager natively enumerates and mounts directory packages.",
+        "GTA IV's generated code calls XamContentCreateEnumerator and XamContentCreateEx for marketplace content.",
+        "The older Liberty runtime also registered extracted DLC directories with XAM content services.",
+        "The implemented layout publishes TLAD and TBOGT only under game/0000000000000000/545407F2/00000002 and removes obsolete extracted DLC1/DLC2 bridges only after publication succeeds.",
+        "/tmp/liberty_dlc_final_smoke.log ran for the full timeout with no DLC.rpf access and no sub_8285E500 fault."
+      ],
+      "counter_evidence": [],
+      "next_tests": []
+    },
+    {
+      "id": "H11",
+      "status": "confirmed",
+      "confidence": "high",
+      "statement": "The invalid post-DLC dispatches were one code-generation boundary class: address-taken script callbacks registered through sub_82845600 were executable PPC labels omitted from automatic function discovery.",
+      "supporting_evidence": [
+        "The original GTA IV registration tables pass each repaired address to sub_82845600 through a data reference.",
+        "All repaired addresses begin executable PPC and are retained as raw recompiled functions rather than host replacements.",
+        "The global registration audit found 2,776 unique callback addresses and zero missing generated entries after regeneration.",
+        "/tmp/liberty_dlc_final_smoke.log ran for the full timeout with no Invalid function report, fatal error, or access violation."
+      ],
+      "counter_evidence": [],
+      "next_tests": []
+    }
+  ],
+  "open_questions": [
+    "Does the active Xenos frontbuffer itself contain black pixels, or does conversion/presentation turn nonblack pixels black?",
+    "Does asynchronous placeholder use persist on later frames after the one-shot warning?",
+    "Are the missing postfx and water .dcl resources expected fallbacks or additional evidence of the same extracted-content/runtime mismatch?"
+  ]
+}

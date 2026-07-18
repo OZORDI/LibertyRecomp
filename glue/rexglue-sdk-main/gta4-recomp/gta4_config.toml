@@ -1,11 +1,6 @@
 # GTA4 - ReXGlue Codegen Configuration
 # Xbox 360 Static Recompilation - v8 (0.0.8.5)
 
-project_name = "gta4"
-file_path = "assets/default.xex"
-patched_file_path = "assets/default_v8.xex"
-out_directory_path = "generated"
-
 skip_lr = false
 ctr_as_local = false
 xer_as_local = false
@@ -25,9 +20,7 @@ large_function_threshold = 1048576
 # Format: FunctionName = guest_address
 [rexcrt]
 # String/memory CRT (verified PR #180 — corrected pass 3)
-# memset/memcpy addresses were WRONG in pass 2: 0x82A11D08/0x82A11940 are
-# format-parser helpers (scanf/sprintf specifier dispatch, call __savegprlr),
-# not memset/memcpy. FLIRT (dolphin.sig/gow3.sig) trust-flags the real entries:
+# FLIRT (dolphin.sig/gow3.sig) trust-flags the libc entries:
 #   memset = 0x829FF840 (357 callers, pure leaf, classic stb+rlwimi+stw pattern)
 #   memcpy = 0x82A00DC0 (577 callers, pure leaf, dcbt+ld/std cache-line aware)
 # Using the wrong addresses silently corrupted memory on 149+161 call sites,
@@ -38,108 +31,122 @@ _stricmp = 0x829FFCF0   # 477 xrefs - A-Z case folding (cmpwi 0x41/0x5A + ori r6
 strncmp  = 0x82A00C40   # 113 xrefs - byte compare with count (subfc. + bdnzf null-stop)
 strncpy  = 0x82A00BA0   # 101 xrefs - copy with null-pad remainder
 strchr   = 0x82A00B60   #  34 xrefs - lbz + cmpwi null + cmpw char match + lbzu advance
-XMemCpy  = 0x82A18CD0   #   1 xref  - VMX 128-byte streaming copy with dcbz128 (called from single hot path)
-strtok   = 0x82A01DE8   # token parser with static state (TLS-based on 360)
 strrchr  = 0x82A02100   #  30 xrefs - forward scan saving last match position, returns ptr or NULL
 strstr   = 0x829FFAD0   #  25 xrefs - nested byte-compare loops for substring search
-
-# Heap CRT (verified via Hex-Rays: takes heap_handle, flags, size/ptr)
-RtlAllocateHeap  = 0x82A17180  # 6 callers - 2196 bytes, manages free-lists + NtAllocateVirtualMemory
-RtlFreeHeap      = 0x82A17A68  # 5 callers - 660 bytes, coalesces blocks + NtFreeVirtualMemory
-RtlSizeHeap      = 0x82A16418  # 2 callers - 168 bytes, reads block header size
-RtlReAllocateHeap = 0x82A17D50 # 3 callers - 2108 bytes, alloc+copy+free internally
-
-# File CRT (verified via Hex-Rays + NT import xref tracing)
-CreateFileA        = 0x82A131B0
-ReadFile           = 0x82A12958
-WriteFile          = 0x82A13618
-CloseHandle        = 0x82A11F68
-SetFilePointer     = 0x82A127E0
-GetFileSizeEx      = 0x82A14918
-GetFileSize        = 0x82A125D0
-SetEndOfFile       = 0x82A14C68
-DeleteFileA        = 0x82A14D10
-MoveFileA          = 0x82A14DC8
-SetFileAttributesA = 0x82A14B30
-GetFileAttributesA = 0x82A14AC8
-SetFileTime        = 0x82A14A18
-FindFirstFileA     = 0x82A14988   # was 0x82A19F88 (NT-level NtQueryDirectoryFile wrapper, wrong layer)
-FindNextFileA      = 0x82A1A100
-FlushFileBuffers   = 0x82A188E0   # thin wrapper calling NtFlushBuffersFile
-CreateDirectoryA   = 0x82A14E98   # NtCreateFile + FILE_DIRECTORY_FILE, returns 1/0
-RemoveDirectoryA   = 0x82A1A160
 
 # New additions (FLIRT verified 2026-04-18 via dolphin.sig + gow3.sig)
 memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory.cpp
 
+# Heap and file wrappers intentionally remain raw recompiled code. Their native
+# RexGlue replacements do not preserve every guest heap, TLS, async I/O, status,
+# timestamp, or attribute behavior.
+
 [functions]
-# NOTE (2026-04-01): 13 of 14 original entries were verified as BAD addresses
-# by reading raw PPC bytes from default.bin. They pointed to mid-function code,
-# epilogues, blr instructions, VMX loop bodies, or outside .text entirely.
-# The codegen generated broken "functions" from these — executing from random
-# mid-function points. All 13 removed. See docs/rendering_research.md.
-#
-# Original bad entries (DO NOT RE-ADD):
-#   0x8217C108 — mid-function lis (no prologue)
-#   0x82A77E28 — outside .text (epilogue in padding)
-#   0x8219E410 — mid-function VMX instruction
-#   0x8219ACA0 — mid-function rlwinm (codegen fabricated synthetic stub)
-#   0x82A6C218 — mid-function addi (real entry at 0x82A6C208)
-#   0x82A69CC8 — mid-function addi
-#   0x82A69CA8 — epilogue lwz r12
-#   0x82A69C68 — mid-epilogue bl __restgprlr
-#   0x82A69428 — literal blr instruction
-#   0x82A69328 — mid-function addi
-#   0x82A69308 — epilogue lwz r12
-#   0x82A692C8 — mid-epilogue bl __restgprlr
-#
-# v8 cross-function branch targets — other functions (0x8217C5A8, 0x827BAC18,
-# 0x821A2EDC) branch directly to these mid-function addresses. The codegen
-# requires them as function entries so branches resolve. The real parent
 # Cross-function branch targets: other functions branch directly to these
 # mid-function addresses. Required by codegen to resolve the call graph.
 "0x8217C108" = {}   # branch target from sub_8217C5A8
 "0x82A77E28" = {}   # tail-call thunk: b sub_82812248
 "0x8219E410" = {}   # branch target from sub_821A2EDC
+"0x8219ACA0" = {}   # vtable slot +0x20 target in the original GTA IV .rdata tables
+"0x828944C8" = {}   # address-taken vtable slot +0x50 callback thunk
+"0x828944D8" = {}   # address-taken vtable slot +0x34 callback thunk
+
+# Address-taken script-native callbacks registered by sub_82581E10. IDA marks
+# these as local labels, so automatic discovery omitted their function entries.
+"0x82581508" = {}   # REMOVE_ALL_CHAR_WEAPONS
+"0x82581528" = {}   # HIDE_CHAR_WEAPON_FOR_SCRIPTED_CUTSCENE
+"0x82581548" = {}   # SET_CHAR_CURRENT_WEAPON_VISIBLE
+"0x82581568" = {}   # SET_CHAR_DROPS_WEAPONS_WHEN_DEAD
+"0x82581B68" = {}   # SET_MIN_MAX_PED_ACCURACY
+
+# Address-taken script VM callbacks registered by sub_82846068.
+"0x82843C38" = {}   # PRINTFLOAT2
+"0x82843C58" = {}   # PRINTINT
+"0x82845C70" = {}   # GET/RESET_LATEST_CONSOLE_COMMAND
+
+# Address-taken script-native callbacks omitted by automatic discovery. Each
+# address is a DATA XREF target passed to sub_82845600 and begins executable PPC.
+"0x82585E88" = {}   # GET_RANDOM_CAR_NODE
+"0x8258E2D0" = {}   # SET_OBJECT_DYNAMIC
+"0x825996F8" = {}   # TURN_CAR_TO_FACE_COORD
+"0x8259A9C0" = {}   # START_PLAYBACK_RECORDED_CAR_USING_AI
+"0x8259ABE8" = {}   # SET_CAR_STAY_IN_SLOW_LANE
+"0x8259B520" = {}   # SET_PLANE_UNDERCARRIAGE_UP
+"0x8259B588" = {}   # VEHICLE_CAN_BE_TARGETTED_BY_HS_MISSILE
+"0x8259BB20" = {}   # SET_CAR_COLLISION
+"0x8259C1E0" = {}   # SET_EXTRA_CAR_COLOURS
+"0x8259EF50" = {}   # CREATE_CAR_GENERATOR
+"0x8259F4B8" = {}   # GET_DRIVER_OF_CAR
+"0x8259F908" = {}   # GET_RANDOM_CAR_MODEL_IN_MEMORY
+"0x8259FB78" = {}   # PLAY_CAR_ANIM
+"0x825A0048" = {}   # GET_CAR_FORWARD_VECTOR
+"0x825A0178" = {}   # GET_VEHICLE_COMPONENT_INFO
+"0x825A2388" = {}   # FLUSH_PATROL_ROUTE
+"0x825A4740" = {}   # CLEAR_EVENT_PRECEDENCE
+"0x825AE4F8" = {}   # TASK_OPEN_PASSENGER_DOOR
+"0x825AE510" = {}   # TASK_ENTER_CAR_AS_DRIVER
+"0x825C3000" = {}   # SET_CHAR_DESIRED_HEADING
+"0x825C3928" = {}   # BLEND_OUT_CHAR_MOVE_ANIMS
+"0x825C3980" = {}   # SET_CHAR_MAX_MOVE_BLEND_RATIO
+"0x825C56F0" = {}   # SET_CAN_TARGET_CHAR_WITHOUT_LOS
+"0x825C5C90" = {}   # GET_CHAR_GRAVITY
+"0x825C5E78" = {}   # SET_CHAR_MAX_TIME_UNDERWATER
+"0x825C5E88" = {}   # GET_GROUP_CHAR_DUCKS_WHEN_AIMED_AT
+"0x825C7D68" = {}   # SET_HEADING_LIMIT_FOR_ATTACHED_PED
+"0x825C89B8" = {}   # SET_PED_WONT_ATTACK_PLAYER_WITHOUT_WANT
+"0x825CDAB0" = {}   # CREATE_CHAR_INSIDE_CAR
+"0x825CDCF0" = {}   # GET_CURRENT_BASIC_COP_MODEL
+"0x825CE5F8" = {}   # GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE
+"0x825CE660" = {}   # GET_CHAR_EXTRACTED_DISPLACEMENT
+"0x825CE690" = {}   # SET_NM_MESSAGE_STRING
+"0x825D4D88" = {}   # GET_IS_AUTOSAVE_OFF
+"0x825D5820" = {}   # GET_MODEL_DIMENSIONS
+"0x825D5830" = {}   # GET_OFFSET_FROM_INTERIOR_IN_WORLD_COORDS
+"0x825DD198" = {}   # SET_MULTIPLAYER_HUD_TIME
+"0x825DD278" = {}   # ADD_BLIP_FOR_GANG_TERRITORY
+"0x825E1428" = {}   # SET_CAMERA_BEGIN_CAM_COMMANDS_REQUIRED
+"0x825E5440" = {}   # REMOVE_CLOSE_MIC_PED
+"0x825E5C90" = {}   # GET_AUDIO_ROOM_ID
 
 # CRT global-constructor thunks (re-added 2026-04-25).
 # Prior analysis used PE-section offsets (VA - 0x82000000 - 0x4800) which was wrong.
 # Correct formula is flat-image offset (VA - 0x82000000). With correct offset every
-# one of these is a real function stub: preceded by unconditional "b 0x8286C878"
-# (tail-call end of prior stub) and starts with lis/mr — genuine function prologue.
-# All confirmed present in the CRT ctor pointer table [0x82A90010-0x82A916B0].
-"0x82A692C8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F58]
-"0x82A692E8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F5C]
-"0x82A69308" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F60]
-"0x82A69328" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F64]
-"0x82A69428" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90F84]
-"0x82A69C68" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FE4]
-"0x82A69CA8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FEC]
-"0x82A69CC8" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A90FF0]
-"0x82A6C218" = {}   # CRT ctor thunk -> sub_8286C878, table[0x82A912D8]
+# All are independently terminated routines referenced by the CRT constructor
+# table; they do not all share the same tail-branch destination.
+"0x82A692C8" = {}   # CRT constructor-table target, table[0x82A90F58]
+"0x82A692E8" = {}   # CRT constructor-table target, table[0x82A90F5C]
+"0x82A69308" = {}   # CRT constructor-table target, table[0x82A90F60]
+"0x82A69328" = {}   # CRT constructor-table target, table[0x82A90F64]
+"0x82A69428" = {}   # CRT constructor-table target, table[0x82A90F84]
+"0x82A69C68" = {}   # CRT constructor-table target, table[0x82A90FE4]
+"0x82A69CA8" = {}   # CRT constructor-table target, table[0x82A90FEC]
+"0x82A69CC8" = {}   # CRT constructor-table target, table[0x82A90FF0]
+"0x82A6C218" = {}   # CRT constructor-table target, table[0x82A912D8]
 "0x828764B8" = {}   # tail-call thunk: mr r3,r4 + b 0x82847338 (after b-boundary)
 
 # CRT function boundaries: force codegen to split these out as separate functions
 # (corrected pass 2 — old 0x829xxxxx addresses were mid-function offsets in physics/animation code)
-# NOTE: 0x82A11D08 and 0x82A11940 are NOT memset/memcpy — they're format-parser
-# helpers called by sprintf/scanf. Kept as forced-split entries with no name so
-# codegen emits them as ordinary sub_XXXXXXXX PPC_FUNC_IMPLs.
-"0x82A11D08" = {}   # format-parser helper (was mislabelled memset in pass 2)
-"0x82A11940" = {}   # format-parser helper (was mislabelled memcpy in pass 2)
+# Preserve these boundaries while leaving their original PPC bodies intact.
+# Neither address has a trusted exact-name FLIRT match.
+"0x82A11D08" = {}   # optimized destination/value/count fill routine
+"0x82A11940" = {}
 "0x829FFCF0" = { name = "_stricmp" }
 "0x82A00C40" = { name = "strncmp" }
 "0x82A00BA0" = { name = "strncpy" }
 "0x82A00B60" = { name = "strchr" }
-"0x82A18CD0" = { name = "XMemCpy" }
-"0x82A01DE8" = { name = "strtok" }
+"0x82A18CD0" = {}
+"0x82A01DE8" = {}
 "0x82A02100" = { name = "strrchr" }
 "0x829FFAD0" = { name = "strstr" }
 
 # Heap CRT function boundaries
 "0x82A17180" = { name = "RtlAllocateHeap" }
+"0x82A17A14" = {}
 "0x82A17A68" = { name = "RtlFreeHeap" }
+"0x82A17CFC" = {}
 "0x82A16418" = { name = "RtlSizeHeap" }
 "0x82A17D50" = { name = "RtlReAllocateHeap" }
+"0x82A1858C" = {}
 
 # File CRT function boundaries
 "0x82A131B0" = { name = "CreateFileA" }
@@ -148,7 +155,8 @@ memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory
 "0x82A11F68" = { name = "CloseHandle" }
 "0x82A127E0" = { name = "SetFilePointer" }
 "0x82A14918" = { name = "GetFileSizeEx" }
-"0x82A125D0" = { name = "GetFileSize" }
+"0x82A125D0" = {}   # XFileSectorInformation helper; not GetFileSize
+"0x82A135B0" = { name = "GetFileSize" }
 "0x82A14C68" = { name = "SetEndOfFile" }
 "0x82A14D10" = { name = "DeleteFileA" }
 "0x82A14DC8" = { name = "MoveFileA" }
@@ -156,10 +164,12 @@ memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory
 "0x82A14AC8" = { name = "GetFileAttributesA" }
 "0x82A14A18" = { name = "SetFileTime" }
 "0x82A14988" = { name = "FindFirstFileA" }  # was 0x82A19F88 (NT-level, wrong)
-"0x82A1A100" = { name = "FindNextFileA" }
+"0x82A14C10" = {}
+"0x82A1A100" = {}
 "0x82A188E0" = { name = "FlushFileBuffers" }
 "0x82A14E98" = { name = "CreateDirectoryA" }
-"0x82A1A160" = { name = "RemoveDirectoryA" }
+"0x82A14F28" = {}
+"0x82A1A160" = {}
 
 # =============================================================================
 # FLIRT-verified additions (2026-04-18)

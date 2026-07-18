@@ -12,7 +12,6 @@
 #include <rex/logging.h>
 #include <rex/runtime.h>
 #include <rex/string.h>
-#include <rex/string/util.h>
 #include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
 
@@ -21,7 +20,6 @@
 REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
                     "Don't display any UI, using defaults for prompts as needed");
 #include <rex/kernel/xam/private.h>
-#include <rex/kernel/xam/keyboard_dialog.h>
 #include <rex/hook.h>
 #include <rex/types.h>
 #include <rex/system/xtypes.h>
@@ -357,7 +355,7 @@ class KeyboardInputDialog : public XamDialog {
     }
     text_ = default_text;
     text_buffer_.resize(max_length);
-    rex::string::util_copy_truncating(text_buffer_.data(), default_text_, text_buffer_.size());
+    rex::string::copy_truncating(text_buffer_.data(), default_text_, text_buffer_.size());
   }
 
   const std::string& text() const { return text_; }
@@ -438,7 +436,7 @@ u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, mapped_wstring default_te
       if (!default_text) {
         std::memset(buffer, 0, buffer_size);
       } else {
-        rex::string::util_copy_and_swap_truncating(buffer, default_text.value(), buffer_length);
+        rex::string::copy_and_swap_truncating(buffer, default_text.value(), buffer_length);
       }
       return X_ERROR_SUCCESS;
     };
@@ -453,7 +451,7 @@ u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, mapped_wstring default_te
       } else {
         // Zero the output buffer.
         auto text = rex::string::to_utf16(dialog->text());
-        rex::string::util_copy_and_swap_truncating(buffer, text, buffer_length);
+        rex::string::copy_and_swap_truncating(buffer, text, buffer_length);
         extended_error = X_ERROR_SUCCESS;
         length = 0;
         return X_ERROR_SUCCESS;
@@ -476,34 +474,6 @@ u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, mapped_wstring default_te
                            REX_KERNEL_MEMORY()->TranslateVirtual(default_text.guest_address())))
                      : "";
 
-    // Prefer a platform-native keyboard dialog backend (PS4 sceImeDialog,
-    // Switch swkbd, iOS UIAlertController, Android AlertDialog) when one is
-    // registered. These backends block until the user confirms/cancels.
-    if (HasKeyboardDialogBackend()) {
-      KeyboardDialogParams kp;
-      kp.title = title_str;
-      kp.description = desc_str;
-      kp.default_text = def_text_str;
-      kp.max_length = buffer_length;
-      kp.flags = static_cast<uint32_t>(flags);
-      auto run = [kp, buffer, buffer_length](uint32_t& extended_error,
-                                             uint32_t& length) -> X_RESULT {
-        KeyboardDialogResult r = ShowKeyboardDialogEx(kp);
-        if (!r.accepted) {
-          extended_error = X_ERROR_CANCELLED;
-          length = 0;
-          return X_ERROR_SUCCESS;
-        }
-        auto text16 = rex::string::to_utf16(r.text);
-        rex::string::util_copy_and_swap_truncating(buffer, text16, buffer_length);
-        extended_error = X_ERROR_SUCCESS;
-        length = 0;
-        return X_ERROR_SUCCESS;
-      };
-      result = xeXamDispatchHeadlessEx(run, overlapped.guest_address());
-      return result;
-    }
-
     if (imgui_drawer) {
       uint32_t buffer_length_safe = buffer_length + 1;  // +1 for null terminator, just in case
       result = xeXamDispatchDialogEx<KeyboardInputDialog>(
@@ -516,7 +486,7 @@ u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, mapped_wstring default_te
         if (!default_text) {
           std::memset(buffer, 0, buffer_size);
         } else {
-          rex::string::util_copy_and_swap_truncating(buffer, default_text.value(), buffer_length);
+          rex::string::copy_and_swap_truncating(buffer, default_text.value(), buffer_length);
         }
         return X_ERROR_SUCCESS;
       };

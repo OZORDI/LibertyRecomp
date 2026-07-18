@@ -6,21 +6,18 @@ set_target_properties(rexfilesystem PROPERTIES EXPORT_NAME filesystem)
 set_target_properties(rexui PROPERTIES EXPORT_NAME ui)
 set_target_properties(rexinput PROPERTIES EXPORT_NAME input)
 set_target_properties(rexaudio PROPERTIES EXPORT_NAME audio)
-set_target_properties(rexgraphics PROPERTIES EXPORT_NAME graphics)
-set_target_properties(rexsystem PROPERTIES EXPORT_NAME system)
-set_target_properties(rexkernel PROPERTIES EXPORT_NAME kernel)
+set_target_properties(rexruntime PROPERTIES EXPORT_NAME runtime)
 set_target_properties(rexcodegen PROPERTIES EXPORT_NAME codegen)
+
+include(${CMAKE_CURRENT_LIST_DIR}/rexglue_helpers.cmake)
 
 # Build install target list dynamically based on backend options
 set(REXGLUE_INSTALL_TARGETS
-    # ReX SDK libraries
-    rexcore rexfilesystem rexui rexinput
-    rexaudio rexgraphics rexsystem rexkernel rexcodegen
-    # Vendored thirdparty libraries (required by SDK)
-    disruptorplus renderdoc simde tomlplusplus  # INTERFACE (header-only)
-    aes128 mspack o1heap disasm xxhash imgui  # STATIC libraries
-    libavcodec libavutil           # FFmpeg (vendored build)
-    # CLI tool
+    rexruntime
+    rexgpu-xenos
+    disruptorplus renderdoc simde tomlplusplus
+    aes128 mspack o1heap disasm xxhash
+    libavcodec libavutil
     rexglue
 )
 
@@ -54,19 +51,6 @@ install(TARGETS ${REXGLUE_INSTALL_TARGETS}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-# MoltenVK's upstream CMake target graph is not export-safe in this vendored
-# layout, so install the runtime separately on Apple platforms.
-# Skip for console platforms (PS4/Switch) — they use their own GNM/NVN backends.
-if(APPLE AND REXGLUE_USE_VULKAN
-   AND NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
-            OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
-    include(${CMAKE_SOURCE_DIR}/cmake/rexglue_moltenvk.cmake)
-    rexglue_find_moltenvk_library(REXGLUE_MOLTENVK_LIBRARY REQUIRED)
-    install(FILES "${REXGLUE_MOLTENVK_LIBRARY}"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
-endif()
 
 if(REXGLUE_INSTALL_FIDELITYFX_TARGETS)
     install(TARGETS ${REXGLUE_INSTALL_FIDELITYFX_TARGETS}
@@ -131,19 +115,12 @@ if(REXGLUE_USE_VULKAN)
     )
 endif()
 
-# Install platform entry point sources and ReXApp for SDK consumers.
-# Desktop-only: console platforms (PS4/Switch) ship their own entry points
-# via their native toolchains and don't consume the windowed_app_main_* sources.
-if(NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
-        OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
-    install(FILES
-        src/ui/windowed_app_main_win.cpp
-        src/ui/windowed_app_main_macos.cpp
-        src/ui/windowed_app_main_posix.cpp
-        src/ui/rex_app.cpp
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
-    )
-endif()
+# Install the entry point source and ReXApp for SDK consumers
+install(FILES
+    src/ui/windowed_app_main_sdl.cpp
+    src/ui/rex_app.cpp
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
+)
 
 # Install DXC API headers (vendored, for D3D12 backend)
 if(REXGLUE_USE_D3D12)
@@ -152,6 +129,27 @@ if(REXGLUE_USE_D3D12)
         thirdparty/dxc/include/dxcapi.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/dxc
     )
+endif()
+
+if(APPLE AND REXGLUE_USE_VULKAN)
+    rexglue_find_macos_vulkan_runtime(_rexglue_macos_vulkan_runtime_root)
+    if(_rexglue_macos_vulkan_runtime_root)
+        foreach(_rexglue_runtime_file
+                lib/libvulkan.1.dylib
+                lib/libvulkan.dylib
+                lib/libMoltenVK.dylib
+                lib/libSPIRV-Tools-shared.dylib
+                share/vulkan/icd.d/MoltenVK_icd.json)
+            if(EXISTS "${_rexglue_macos_vulkan_runtime_root}/${_rexglue_runtime_file}")
+                get_filename_component(_rexglue_runtime_dir "${_rexglue_runtime_file}" DIRECTORY)
+                install(FILES "${_rexglue_macos_vulkan_runtime_root}/${_rexglue_runtime_file}"
+                    DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue/vulkan/${_rexglue_runtime_dir}
+                )
+            endif()
+        endforeach()
+    else()
+        _rexglue_warn_missing_macos_vulkan_runtime()
+    endif()
 endif()
 
 # Generate and install package config files
@@ -163,7 +161,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rexglueConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
+    VERSION ${REXGLUE_NUMERIC_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
@@ -177,16 +175,6 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/cmake/rexglue_helpers.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rexglue
 )
-
-# MoltenVK helper is only needed on desktop macOS; consoles (PS4/Switch) don't
-# use Vulkan so the helper script is irrelevant there.
-if(APPLE AND NOT (LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4"
-                  OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch"))
-    install(FILES
-        ${CMAKE_SOURCE_DIR}/cmake/rexglue_moltenvk.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rexglue
-    )
-endif()
 
 # Export targets with rex:: namespace
 install(EXPORT rexglueTargets

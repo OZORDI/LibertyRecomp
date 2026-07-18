@@ -37,8 +37,8 @@ add_custom_command(
            ${PPC_GEN_DIR}/ppc_test_decls.h
     COMMAND $<TARGET_FILE:rexglue> recompile-tests
             --output=${PPC_GEN_DIR}
-            --bin_dir=${PPC_BIN_DIR}
-            --asm_dir=${CMAKE_CURRENT_SOURCE_DIR}/asm
+            --bin-dir=${PPC_BIN_DIR}
+            --asm-dir=${CMAKE_CURRENT_SOURCE_DIR}/asm
     DEPENDS ${TEST_BINS} ${TEST_MAPS} ${ASM_FILES} rexglue
     COMMENT "Generating Catch2 test code with rexglue"
     VERBATIM
@@ -63,7 +63,7 @@ target_include_directories(ppc_tests PRIVATE
 
 target_link_libraries(ppc_tests PRIVATE
     simde
-    rexkernel
+    rexruntime
     rexcore
     fmt::fmt
     Catch2::Catch2WithMain
@@ -85,12 +85,18 @@ if(WIN32)
 endif()
 
 set_target_properties(ppc_tests PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/bin
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>
 )
+if(UNIX AND NOT APPLE)
+    set_target_properties(ppc_tests PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
+endif()
 
 target_compile_options(ppc_tests PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING
-    -UREXGLUE_ENABLE_PERF_COUNTERS
+    -UREXGLUE_ENABLE_PERF_COUNTERS -UREXGLUE_PROFILE_GUEST_FUNCTIONS
     -msse4.1 -mssse3
 )
 

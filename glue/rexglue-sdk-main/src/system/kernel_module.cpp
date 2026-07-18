@@ -36,7 +36,7 @@ KernelModule::KernelModule(KernelState* kernel_state, const std::string_view pat
 
 KernelModule::~KernelModule() {}
 
-uint32_t KernelModule::GetProcAddressByOrdinal(uint16_t ordinal) {
+uint32_t KernelModule::GetProcAddressByOrdinal(uint16_t ordinal, uint32_t caller_address) {
   // Look up the export in the resolver
   auto export_entry = export_resolver_->GetExportByOrdinal(name_, ordinal);
   if (!export_entry) {
@@ -51,8 +51,12 @@ uint32_t KernelModule::GetProcAddressByOrdinal(uint16_t ordinal) {
     return export_entry->variable_ptr;
   }
 
-  // Check thunk cache first (already allocated)
-  auto thunk_it = thunk_cache_.find(ordinal);
+  auto* dispatcher = emulator_->function_dispatcher();
+  uint32_t caller_module_base = dispatcher->FindCallerModuleBase(caller_address);
+  ThunkKey key{caller_module_base, ordinal};
+
+  // Check thunk cache first (already allocated for this caller's module)
+  auto thunk_it = thunk_cache_.find(key);
   if (thunk_it != thunk_cache_.end()) {
     REXSYS_DEBUG("GetProcAddressByOrdinal: {} ({:04X}) in {} -> cached thunk {:08X}",
                  export_entry->name, ordinal, name_, thunk_it->second);
@@ -64,10 +68,9 @@ uint32_t KernelModule::GetProcAddressByOrdinal(uint16_t ordinal) {
   REXSYS_DEBUG("GetProcAddressByOrdinal: searching registry for '{}'", imp_name);
   PPCFunc* func = rex::ppc::FindPPCFuncByName(imp_name.c_str());
   if (func) {
-    auto* dispatcher = emulator_->function_dispatcher();
-    uint32_t thunk_addr = dispatcher->AllocateThunk(func);
+    uint32_t thunk_addr = dispatcher->AllocateThunk(func, caller_address);
     if (thunk_addr) {
-      thunk_cache_[ordinal] = thunk_addr;
+      thunk_cache_[key] = thunk_addr;
       REXSYS_INFO("GetProcAddressByOrdinal: {} ({:04X}) in {} -> thunk at {:08X}",
                   export_entry->name, ordinal, name_, thunk_addr);
       return thunk_addr;
@@ -85,6 +88,16 @@ uint32_t KernelModule::GetProcAddressByName(const std::string_view name) {
   (void)name;
   REXSYS_ERROR("KernelModule::GetProcAddressByName not implemented");
   return 0;
+}
+
+void KernelModule::InvalidateThunkCacheInRange(uint32_t lo, uint32_t hi) {
+  for (auto it = thunk_cache_.begin(); it != thunk_cache_.end();) {
+    if (it->second >= lo && it->second < hi) {
+      it = thunk_cache_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 }  // namespace rex::system

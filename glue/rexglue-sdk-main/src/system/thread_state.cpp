@@ -58,7 +58,8 @@ ThreadState* ThreadState::Get() {
 }
 
 uint32_t ThreadState::GetThreadID() {
-  return thread_state_ ? thread_state_->thread_id_ : 0xFFFFFFFF;
+  auto* thread_state = Get();
+  return thread_state ? thread_state->thread_id_ : 0xFFFFFFFF;
 }
 
 }  // namespace rex::runtime

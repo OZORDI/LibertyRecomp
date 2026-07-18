@@ -190,7 +190,7 @@ void discoverFunction(CodegenContext& ctx, uint32_t funcAddr,
 }
 
 void discoverAllFunctions(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: starting iterative discovery...");
+  REXCODEGEN_TRACE("Analyze: starting iterative discovery...");
 
   auto& graph = ctx.graph;
   auto& binary = ctx.binary();
@@ -218,7 +218,7 @@ void discoverAllFunctions(CodegenContext& ctx) {
     }
   }
 
-  REXCODEGEN_INFO("Analyze: {} functions after call graph expansion", graph.functionCount());
+  REXCODEGEN_TRACE("Analyze: {} functions after call graph expansion", graph.functionCount());
 
   // VTable scanning
   {
@@ -241,8 +241,8 @@ void discoverAllFunctions(CodegenContext& ctx) {
       }
     }
 
-    REXCODEGEN_INFO("Analyze: VTable scan found {} vtables, {} new functions", vtables.size(),
-                    newFunctions);
+    REXCODEGEN_TRACE("Analyze: VTable scan found {} vtables, {} new functions", vtables.size(),
+                     newFunctions);
 
     // Continue discovery for vtable functions
     if (newFunctions > 0) {
@@ -263,7 +263,7 @@ void discoverAllFunctions(CodegenContext& ctx) {
     }
   }
 
-  REXCODEGEN_INFO("Analyze: {} total functions after vtable scan", graph.functionCount());
+  REXCODEGEN_TRACE("Analyze: {} total functions after vtable scan", graph.functionCount());
 }
 
 //=============================================================================
@@ -398,7 +398,7 @@ void functionPointerScan(CodegenContext& ctx) {
     }
   }
 
-  REXCODEGEN_INFO("functionPointerScan: found {} new function pointer targets", foundCount);
+  REXCODEGEN_TRACE("functionPointerScan: found {} new function pointer targets", foundCount);
 }
 
 }  // anonymous namespace
@@ -420,7 +420,8 @@ size_t discoverPendingFunctions(CodegenContext& ctx,
 
 namespace phases {
 
-VoidResult Discover(CodegenContext& ctx) {
+VoidResult Discover(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   discoverAllFunctions(ctx);
   return Ok();
 }

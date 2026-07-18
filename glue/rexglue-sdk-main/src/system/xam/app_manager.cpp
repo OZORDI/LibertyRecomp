@@ -27,20 +27,28 @@ void AppManager::RegisterApp(std::unique_ptr<App> app) {
 
 X_HRESULT AppManager::DispatchMessageSync(uint32_t app_id, uint32_t message, uint32_t buffer_ptr,
                                           uint32_t buffer_length) {
-  const auto& it = app_lookup_.find(app_id);
-  if (it == app_lookup_.end()) {
-    return X_E_NOTFOUND;
+  App* app;
+  {
+    auto it = app_lookup_.find(app_id);
+    if (it == app_lookup_.end()) {
+      return X_E_NOTFOUND;
+    }
+    app = it->second;
   }
-  return it->second->DispatchMessageSync(message, buffer_ptr, buffer_length);
+  return app->DispatchMessageSync(message, buffer_ptr, buffer_length);
 }
 
 X_HRESULT AppManager::DispatchMessageAsync(uint32_t app_id, uint32_t message, uint32_t buffer_ptr,
                                            uint32_t buffer_length) {
-  const auto& it = app_lookup_.find(app_id);
-  if (it == app_lookup_.end()) {
-    return X_E_NOTFOUND;
+  App* app;
+  {
+    auto it = app_lookup_.find(app_id);
+    if (it == app_lookup_.end()) {
+      return X_E_NOTFOUND;
+    }
+    app = it->second;
   }
-  return it->second->DispatchMessageSync(message, buffer_ptr, buffer_length);
+  return app->DispatchMessageSync(message, buffer_ptr, buffer_length);
 }
 
 }  // namespace xam

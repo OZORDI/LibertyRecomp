@@ -15,12 +15,22 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project("LibertyRecomp-ALL")
 
-# Force FMT_USE_CONSTEVAL off - Homebrew LLVM consteval is broken with vcpkg spdlog
-add_compile_definitions(FMT_USE_CONSTEVAL=0)
+set(LIBERTY_RECOMP_GRAINE_MAC OFF)
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
+   (NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM OR
+    LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop"))
+    set(LIBERTY_RECOMP_GRAINE_MAC ON)
+endif()
+
+if(NOT LIBERTY_RECOMP_GRAINE_MAC)
+    add_compile_definitions(FMT_USE_CONSTEVAL=0)
+endif()
 
 # ─── vcpkg check (desktop platforms only) ──────────────────────────────────
 # Mobile/console platforms use system SDKs and don't need vcpkg
-if(NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM OR LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
+if(NOT LIBERTY_RECOMP_GRAINE_MAC AND
+   (NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM OR
+    LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop"))
     if(NOT DEFINED ENV{VCPKG_ROOT})
         message(FATAL_ERROR "VCPKG_ROOT is not defined! Set it or use a platform-specific preset.")
     endif()
@@ -145,6 +155,18 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(_DEBUG)
 endif()
 
+option(USE_REXGLUE_RUNTIME "Use RexGlue SDK for runtime infrastructure" ON)
+
+if(LIBERTY_RECOMP_GRAINE_MAC)
+    if(NOT USE_REXGLUE_RUNTIME)
+        message(FATAL_ERROR "The macOS build requires the Graine RexGlue runtime")
+    endif()
+
+    message(STATUS "macOS: building the pure Graine RexGlue/Xenos consumer")
+    add_subdirectory("glue")
+    return()
+endif()
+
 add_subdirectory(${LIBERTY_RECOMP_THIRDPARTY_ROOT})
 # xbox_support: XEX/XDBF/big-endian helpers used by both desktop and console
 # builds (previously sourced from the now-removed XenonRecomp tool).
@@ -179,8 +201,7 @@ else()
     endif()
 endif()
 
-# RexGlue SDK integration (core/filesystem/runtime/kernel only)
-option(USE_REXGLUE_RUNTIME "Use RexGlue SDK for runtime infrastructure" ON)
+# RexGlue SDK integration
 if(USE_REXGLUE_RUNTIME)
     add_subdirectory("glue")
 endif()

@@ -34,6 +34,7 @@ enum class ErrorCategory {
   Validation,      // Validation errors (e.g., unresolved functions)
   NotFound,        // Resource not found
   NotImplemented,  // Feature not implemented
+  UserAbort,       // User declined an interactive prompt
 };
 
 //=============================================================================

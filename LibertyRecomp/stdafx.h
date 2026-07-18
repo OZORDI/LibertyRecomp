@@ -31,7 +31,7 @@ using Microsoft::WRL::ComPtr;
 #include <ankerl/unordered_dense.h>
 #include <ddspp.h>
 // RexGlue PPC types + gta4-recomp function declarations
-#include "../glue/gta4-recomp/generated/gta4_init.h"
+#include "../glue/rexglue-sdk-main/gta4-recomp/generated/gta4_init.h"
 #include <toml++/toml.hpp>
 #include <zstd.h>
 #include <stb_image.h>

@@ -37,11 +37,10 @@ std::string D3D12GraphicsSystem::name() const {
   return "Direct3D 12";
 }
 
-X_STATUS D3D12GraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispatcher,
-                                    system::KernelState* kernel_state,
-                                    ui::WindowedAppContext* app_context, bool with_presentation) {
+void D3D12GraphicsSystem::CreateProvider(bool /*with_presentation*/) {
+  // D3D12 doesn't differentiate headless vs. swapchain-capable providers;
+  // swapchains are created lazily per-window by the presenter.
   provider_ = rex::ui::d3d12::D3D12Provider::Create();
-  return GraphicsSystem::Setup(function_dispatcher, kernel_state, app_context, with_presentation);
 }
 
 std::unique_ptr<CommandProcessor> D3D12GraphicsSystem::CreateCommandProcessor() {

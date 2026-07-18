@@ -1005,7 +1005,7 @@ class Shader {
   std::string ucode_disassembly_;
   std::vector<VertexBinding> vertex_bindings_;
   std::vector<TextureBinding> texture_bindings_;
-  ConstantRegisterMap constant_register_map_ = {0};
+  ConstantRegisterMap constant_register_map_ = {};
   std::set<uint32_t> label_addresses_;
   uint32_t cf_pair_index_bound_ = 0;
   uint32_t register_static_address_bound_ = 0;

@@ -61,11 +61,12 @@ bool VulkanPrimitiveProcessor::Initialize() {
   bool rectangle_lists_supported_without_vs_expansion =
       geometry_shader_primitive_emulation_allowed &&
       !REXCVAR_GET(vulkan_force_expand_rectangle_lists_in_vs);
+  bool primitive_restart_cannot_be_disabled = device_properties.driverID == VK_DRIVER_ID_MOLTENVK;
 
   if (!InitializeCommon(
           device_properties.fullDrawIndexUint32, triangle_fans_supported_without_conversion, false,
           quad_lists_supported_without_conversion, point_sprites_supported_without_vs_expansion,
-          rectangle_lists_supported_without_vs_expansion)) {
+          rectangle_lists_supported_without_vs_expansion, primitive_restart_cannot_be_disabled)) {
     Shutdown();
     return false;
   }

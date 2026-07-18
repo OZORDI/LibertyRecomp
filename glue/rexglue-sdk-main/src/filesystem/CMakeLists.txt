@@ -1,4 +1,4 @@
-add_library(rexfilesystem STATIC
+add_library(rexfilesystem OBJECT
     device.cpp
     entry.cpp
     virtual_file_system.cpp

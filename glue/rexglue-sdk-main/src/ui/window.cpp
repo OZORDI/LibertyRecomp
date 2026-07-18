@@ -31,13 +31,31 @@ REXCVAR_DEFINE_INT32(window_height, 0, "UI/Window",
     .range(0, 8192)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(fullscreen, false, "UI/Window", "Start the window in fullscreen mode")
+REXCVAR_DEFINE_BOOL(fullscreen, true, "UI/Window", "Start the window in fullscreen mode")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(monitor, 0, "UI/Window",
                      "Monitor index to display on (0 = default, 1 = primary, 2 = "
                      "second monitor, etc.)")
     .range(0, 16)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_INT32(video_mode_width, 1280, "Display", "Guest video mode width in pixels")
+    .range(640, 0x0FFF)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_INT32(video_mode_height, 720, "Display", "Guest video mode height in pixels")
+    .range(480, 0x0FFF)
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_STRING(resolution, "", "Display",
+                      "Common resolution preset for both guest video mode and startup window (for "
+                      "example: 720p, 1080p, 1440p, 4k, 1280x720)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_DOUBLE(video_mode_refresh_rate, 60.0, "Display",
+                      "Guest video mode refresh rate in Hz")
+    .range(24.0, 240.0)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rex {
@@ -532,6 +550,42 @@ void Window::OnFocusUpdate(bool new_has_focus, WindowDestructionReceiver& destru
   if (destruction_receiver.IsWindowDestroyed()) {
     return;
   }
+}
+
+bool Window::SendCloseRequestToListeners(WindowDestructionReceiver& destruction_receiver) {
+  if (!CanSendEventsToListeners()) {
+    return true;
+  }
+  UIEvent e(this);
+  // Snapshot: listeners may add/remove listeners or destroy the window from
+  // within the callback, and a veto must stop iteration immediately.
+  std::vector<WindowListener*> listeners(listeners_);
+  for (WindowListener* listener : listeners) {
+    bool proceed = listener->OnCloseRequested(e);
+    if (destruction_receiver.IsWindowDestroyed()) {
+      return false;
+    }
+    if (!proceed) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void Window::OnMinimized(WindowDestructionReceiver& destruction_receiver) {
+  if (!CanSendEventsToListeners()) {
+    return;
+  }
+  UIEvent e(this);
+  SendEventToListeners([&e](auto listener) { listener->OnMinimized(e); }, destruction_receiver);
+}
+
+void Window::OnRestored(WindowDestructionReceiver& destruction_receiver) {
+  if (!CanSendEventsToListeners()) {
+    return;
+  }
+  UIEvent e(this);
+  SendEventToListeners([&e](auto listener) { listener->OnRestored(e); }, destruction_receiver);
 }
 
 void Window::OnPaint(bool force_paint) {

@@ -27,6 +27,14 @@ using utf8_citer = utfcpp::iterator<std::string_view::const_iterator>;
 
 namespace rex::string {
 
+std::string to_utf8(const std::u16string_view source) {
+  return utfcpp::utf16to8(source);
+}
+
+std::u16string to_utf16(const std::string_view source) {
+  return utfcpp::utf8to16(source);
+}
+
 std::string to_string(char32_t c) {
   std::string result;
   utfcpp::append(c, result);

@@ -30,6 +30,18 @@ class DiscImageDevice : public Device {
   void Dump(string::StringBuffer* string_buffer) override;
   Entry* ResolvePath(const std::string_view path) override;
 
+  struct DiscInfo {
+    size_t game_offset;
+    size_t root_sector;
+    size_t root_size;
+    size_t host_size;
+  };
+
+  const Entry* root() const { return root_entry_.get(); }
+  uint64_t file_count() const { return file_count_; }
+  uint64_t total_file_size() const { return total_file_size_; }
+  const DiscInfo& disc_info() const { return disc_info_; }
+
   const std::string& name() const override { return name_; }
   uint32_t attributes() const override { return 0; }
   uint32_t component_name_max_length() const override { return 255; }
@@ -54,6 +66,9 @@ class DiscImageDevice : public Device {
   std::filesystem::path host_path_;
   std::unique_ptr<Entry> root_entry_;
   std::unique_ptr<memory::MappedMemory> mmap_;
+  DiscInfo disc_info_{};
+  uint64_t file_count_ = 0;
+  uint64_t total_file_size_ = 0;
 
   typedef struct {
     uint8_t* ptr;

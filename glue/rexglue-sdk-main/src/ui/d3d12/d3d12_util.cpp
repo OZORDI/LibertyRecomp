@@ -16,10 +16,6 @@
 namespace rex::ui::d3d12 {
 namespace util {
 
-const D3D12_HEAP_PROPERTIES kHeapPropertiesDefault = {D3D12_HEAP_TYPE_DEFAULT};
-const D3D12_HEAP_PROPERTIES kHeapPropertiesUpload = {D3D12_HEAP_TYPE_UPLOAD};
-const D3D12_HEAP_PROPERTIES kHeapPropertiesReadback = {D3D12_HEAP_TYPE_READBACK};
-
 ID3D12RootSignature* CreateRootSignature(const D3D12Provider& provider,
                                          const D3D12_ROOT_SIGNATURE_DESC& desc) {
   ID3DBlob* blob;

@@ -34,8 +34,8 @@ const char kProggyTinyCompressedDataBase85[10950 + 1] =
 
 static_assert(sizeof(ImmediateVertex) == sizeof(ImDrawVert), "Vertex types must match");
 
-ImGuiDrawer::ImGuiDrawer(rex::ui::Window* window, size_t z_order)
-    : window_(window), z_order_(z_order) {
+ImGuiDrawer::ImGuiDrawer(rex::ui::Window* window, size_t z_order, FontSetupCallback font_setup)
+    : window_(window), z_order_(z_order), font_setup_(std::move(font_setup)) {
   Initialize();
 }
 
@@ -133,6 +133,10 @@ void ImGuiDrawer::Initialize() {
     REXLOG_WARN("Unable to load Japanese font; JP characters will be boxes");
   }
 #endif
+
+  if (font_setup_) {
+    font_setup_(io.Fonts);
+  }
 
   auto& style = ImGui::GetStyle();
   style.ScrollbarRounding = 0;
@@ -325,7 +329,6 @@ void ImGuiDrawer::SetPresenter(Presenter* new_presenter) {
     if (!dialogs_.empty()) {
       presenter_->RemoveUIDrawerFromUIThread(this);
     }
-    ImGuiIO& io = GetIO();
   }
   presenter_ = new_presenter;
   if (presenter_) {
@@ -344,19 +347,28 @@ void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
     font_texture_.reset();
   }
   immediate_drawer_ = new_immediate_drawer;
-  if (immediate_drawer_) {
+  // Eagerly upload the font atlas only when a presenter is attached (SDK mode).
+  // In detached mode (presenter_ == nullptr) the app's renderer device may not
+  // exist yet at SetupPresentation, so defer to the idempotent Draw-time
+  // SetupFontTexture().
+  if (immediate_drawer_ && presenter_) {
     SetupFontTexture();
   }
 }
 
 void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
-  // Drawing of anything is initiated by the presenter.
-  assert_not_null(presenter_);
+  // Drawing is initiated by the presenter (SDK mode), or by the app in detached
+  // mode (config.graphics == nullptr), where there is no presenter.
   if (!immediate_drawer_) {
-    // A presenter has been attached, but an immediate drawer hasn't been
-    // attached yet.
+    // A drawer target has been attached, but an immediate drawer hasn't yet.
     return;
   }
+
+  // In detached mode the app's immediate drawer (and the renderer device
+  // backing it) may only become usable on the first frame, after the guest
+  // creates its D3D device. Upload the font atlas lazily and idempotently;
+  // SetupFontTexture early-returns once font_texture_ is set.
+  SetupFontTexture();
 
   if (dialogs_.empty()) {
     return;
@@ -405,8 +417,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   DetachIfLastDialogRemoved();
 
   if (!dialogs_.empty()) {
-    // Repaint (and handle input) continuously if still active.
-    presenter_->RequestUIPaintFromUIThread();
+    // Repaint (and handle input) continuously if still active. In detached mode
+    // there is no presenter; the app drives repaint via its own present loop.
+    if (presenter_) {
+      presenter_->RequestUIPaintFromUIThread();
+    }
   }
 }
 

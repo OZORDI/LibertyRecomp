@@ -15,7 +15,6 @@
 
 REXCVAR_DECLARE(bool, headless);
 REXCVAR_DECLARE(bool, log_high_frequency_kernel_calls);
-REXCVAR_DECLARE(bool, xex_apply_patches);
 REXCVAR_DECLARE(uint32_t, license_mask);
 REXCVAR_DECLARE(uint32_t, user_country);
 REXCVAR_DECLARE(uint32_t, user_language);

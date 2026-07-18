@@ -55,13 +55,14 @@ class GraphicsSystem : public system::IGraphicsSystem {
   memory::Memory* memory() const { return memory_; }
   runtime::FunctionDispatcher* function_dispatcher() const { return function_dispatcher_; }
   system::KernelState* kernel_state() const { return kernel_state_; }
-  ::rex::ui::GraphicsProvider* provider() const { return provider_.get(); }
-  ::rex::ui::Presenter* presenter() const { return presenter_.get(); }
+  ::rex::ui::GraphicsProvider* provider() const override { return provider_.get(); }
+  ::rex::ui::Presenter* presenter() const override { return presenter_.get(); }
 
-  virtual X_STATUS Setup(runtime::FunctionDispatcher* function_dispatcher,
-                         system::KernelState* kernel_state,
-                         ::rex::ui::WindowedAppContext* app_context, bool with_presentation);
-  virtual void Shutdown();
+  X_STATUS SetupPresentation(::rex::ui::WindowedAppContext* app_context) override;
+  X_STATUS SetupGuestGpu(runtime::FunctionDispatcher* function_dispatcher,
+                         system::KernelState* kernel_state) override;
+  bool has_presentation() const override { return presenter_ != nullptr; }
+  void Shutdown() override;
 
   // May be called from any thread any number of times, even during recovery
   // from a device loss.
@@ -70,17 +71,17 @@ class GraphicsSystem : public system::IGraphicsSystem {
   RegisterFile* register_file() { return &register_file_; }
   CommandProcessor* command_processor() const { return command_processor_.get(); }
 
-  virtual void InitializeRingBuffer(uint32_t ptr, uint32_t size_log2);
-  virtual void EnableReadPointerWriteBack(uint32_t ptr, uint32_t block_size_log2);
+  void InitializeRingBuffer(uint32_t ptr, uint32_t size_log2) override;
+  void EnableReadPointerWriteBack(uint32_t ptr, uint32_t block_size_log2) override;
 
-  virtual void SetInterruptCallback(uint32_t callback, uint32_t user_data);
+  void SetInterruptCallback(uint32_t callback, uint32_t user_data) override;
   void DispatchInterruptCallback(uint32_t source, uint32_t cpu);
 
   virtual void ClearCaches();
   virtual void InvalidateGpuMemory();
 
   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
-                               bool blocking);
+                               bool blocking) override;
 
   void RequestFrameTrace();
   void BeginTracing();
@@ -95,6 +96,10 @@ class GraphicsSystem : public system::IGraphicsSystem {
 
  protected:
   GraphicsSystem();
+
+  // Backends build their provider here. Called lazily from either setup
+  // entry point; with_presentation is false only on headless guest-GPU paths.
+  virtual void CreateProvider(bool with_presentation) = 0;
 
   virtual std::unique_ptr<CommandProcessor> CreateCommandProcessor() = 0;
 
@@ -112,6 +117,7 @@ class GraphicsSystem : public system::IGraphicsSystem {
   system::KernelState* kernel_state_ = nullptr;
   ::rex::ui::WindowedAppContext* app_context_ = nullptr;
   std::unique_ptr<::rex::ui::GraphicsProvider> provider_;
+  bool provider_supports_presentation_ = false;
 
   uint32_t interrupt_callback_ = 0;
   uint32_t interrupt_callback_data_ = 0;

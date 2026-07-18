@@ -20,7 +20,7 @@
 
 #include <rex/filesystem/device.h>
 #include <rex/math.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 
 namespace rex::filesystem {
 

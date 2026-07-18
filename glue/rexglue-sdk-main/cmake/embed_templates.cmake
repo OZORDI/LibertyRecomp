@@ -1,26 +1,17 @@
-# cmake/embed_templates.cmake
-# Converts resources/templates/**/*.inja into C++ headers with constexpr string_view.
-# Generates:
-#   - One header per .inja file (e.g., init_app_header.inja.h)
-#   - A master embedded_templates.h with a map of canonical ID -> content
-
 if(NOT DEFINED TEMPLATE_SOURCE_DIR OR NOT DEFINED TEMPLATE_OUTPUT_DIR)
     message(FATAL_ERROR "embed_templates.cmake requires -DTEMPLATE_SOURCE_DIR and -DTEMPLATE_OUTPUT_DIR")
 endif()
 
 file(GLOB_RECURSE INJA_TEMPLATE_FILES "${TEMPLATE_SOURCE_DIR}/*.inja")
 
-# Validate delimiter safety
 set(FORBIDDEN_DELIMITER ")__TMPL__\"")
 
 set(EMBEDDED_INCLUDES "")
 set(EMBEDDED_MAP_ENTRIES "")
 
 foreach(TEMPLATE_FILE ${INJA_TEMPLATE_FILES})
-    # Read the template content
     file(READ "${TEMPLATE_FILE}" TEMPLATE_CONTENT)
 
-    # Check for delimiter collision
     string(FIND "${TEMPLATE_CONTENT}" "${FORBIDDEN_DELIMITER}" DELIMITER_POS)
     if(NOT DELIMITER_POS EQUAL -1)
         message(FATAL_ERROR
@@ -29,33 +20,26 @@ foreach(TEMPLATE_FILE ${INJA_TEMPLATE_FILES})
             "Please remove or rename this sequence in the template.")
     endif()
 
-    # Compute canonical ID: relative path without .inja extension
     file(RELATIVE_PATH REL_PATH "${TEMPLATE_SOURCE_DIR}" "${TEMPLATE_FILE}")
     string(REGEX REPLACE "\\.inja$" "" CANONICAL_ID "${REL_PATH}")
 
-    # Compute C++ variable name: replace / and - with _
     string(REPLACE "/" "_" VAR_NAME "${CANONICAL_ID}")
     string(REPLACE "-" "_" VAR_NAME "${VAR_NAME}")
 
-    # Generate individual header
     set(HEADER_FILE "${TEMPLATE_OUTPUT_DIR}/${VAR_NAME}.inja.h")
     file(WRITE "${HEADER_FILE}"
         "// Auto-generated from resources/templates/${REL_PATH} -- DO NOT EDIT\n"
         "#pragma once\n"
         "#include <string_view>\n\n"
         "namespace rex::codegen::embedded {\n"
-        "inline constexpr std::string_view ${VAR_NAME} = R\"__TMPL__(\n"
-        "${TEMPLATE_CONTENT}"
-        ")__TMPL__\";\n"
+        "inline constexpr std::string_view ${VAR_NAME} = R\"__TMPL__(${TEMPLATE_CONTENT})__TMPL__\";\n"
         "}  // namespace rex::codegen::embedded\n"
     )
 
-    # Accumulate for master header
     string(APPEND EMBEDDED_INCLUDES "#include \"${VAR_NAME}.inja.h\"\n")
     string(APPEND EMBEDDED_MAP_ENTRIES "    {\"${CANONICAL_ID}\", embedded::${VAR_NAME}},\n")
 endforeach()
 
-# Generate master header
 file(WRITE "${TEMPLATE_OUTPUT_DIR}/embedded_templates.h"
     "// Auto-generated master template index -- DO NOT EDIT\n"
     "#pragma once\n\n"

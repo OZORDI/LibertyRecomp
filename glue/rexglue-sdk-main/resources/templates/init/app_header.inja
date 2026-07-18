@@ -1,6 +1,5 @@
 // {{ names.snake_case }} - ReXGlue Recompiled Project
 //
-// This file is yours to edit. 'rexglue migrate' will NOT overwrite it.
 // Customize your app by overriding virtual hooks from rex::ReXApp.
 
 #pragma once
@@ -18,10 +17,15 @@ class {{ names.pascal_case }}App : public rex::ReXApp {
   }
 
   // Override virtual hooks for customization:
+  // void OnPostInitLogging() override {}
   // void OnPreSetup(rex::RuntimeConfig& config) override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
+  // void OnPostLoadXexImage() override {}
   // void OnPostSetup() override {}
   // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
+  // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
+  // std::unique_ptr<rex::ui::AchievementNotificationDialog>
+  // CreateAchievementNotificationDialog() override;
   // void OnShutdown() override {}
   // void OnConfigurePaths(rex::PathConfig& paths) override {}
 };

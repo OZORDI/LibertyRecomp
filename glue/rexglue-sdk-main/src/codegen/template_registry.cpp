@@ -57,6 +57,23 @@ struct TemplateRegistry::Impl {
       oss << "0x" << std::hex << std::uppercase << val;
       return oss.str();
     });
+
+    // Resolve {% include "<id>" %} against the embedded registry. Templates
+    // are embedded under canonical IDs without the .inja extension; accept
+    // either form so include directives can use either.
+    env_.set_search_included_templates_in_files(false);
+    env_.set_include_callback(
+        [this](const std::filesystem::path&, const std::string& name) -> inja::Template {
+          std::string id = name;
+          if (id.size() > 5 && id.compare(id.size() - 5, 5, ".inja") == 0) {
+            id.erase(id.size() - 5);
+          }
+          auto it = embedded_.find(id);
+          if (it == embedded_.end()) {
+            throw TemplateError(name, "include not found in embedded registry");
+          }
+          return env_.parse(std::string(it->second));
+        });
   }
 
   std::string renderImpl(const std::string& id, const nlohmann::json& data) {
@@ -130,7 +147,7 @@ void TemplateRegistry::loadOverrides(const std::filesystem::path& dir) {
       }();
       auto tmpl = impl_->env_.parse(content);
       impl_->overrides_[id] = std::move(tmpl);
-      REXCODEGEN_INFO("Loaded template override: {} -> {}", id, entry.path().string());
+      REXCODEGEN_TRACE("Loaded template override: {} -> {}", id, entry.path().string());
     } catch (const std::exception& e) {
       throw TemplateError(id, e.what(), entry.path().string());
     }

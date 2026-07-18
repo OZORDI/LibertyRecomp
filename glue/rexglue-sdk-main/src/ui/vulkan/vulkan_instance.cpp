@@ -9,9 +9,6 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
-#include <algorithm>
-#include <array>
-#include <filesystem>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -19,76 +16,20 @@
 #include <vector>
 
 #include <rex/cvar.h>
-#include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/vulkan/instance.h>
 #include <rex/ui/vulkan/presenter.h>
+
+#if REX_PLATFORM_MAC
+#include "vulkan_moltenvk.h"
+#endif
 
 REXCVAR_DEFINE_BOOL(vulkan_log_debug_messages, true, "UI/Vulkan", "Log Vulkan debug messages");
 
 namespace rex {
 namespace ui {
 namespace vulkan {
-
-#if REX_PLATFORM_MAC
-namespace {
-
-bool LoadMacVulkanLoader(platform::DynamicLibrary& loader) {
-  if (loader.Load(platform::lib_names::kVulkanLoader)) {
-    return true;
-  }
-
-  const auto exe_dir = rex::filesystem::GetExecutableFolder();
-  const std::array<const char*, 4> fallback_names = {
-      "libMoltenVKd.dylib",
-      "libMoltenVKd.1.dylib",
-      "libMoltenVK.dylib",
-      "libMoltenVK.1.dylib",
-  };
-  for (const char* fallback_name : fallback_names) {
-    if (loader.Load(exe_dir / fallback_name)) {
-      return true;
-    }
-  }
-
-  std::vector<std::filesystem::path> versioned_candidates;
-  for (const auto& entry : std::filesystem::directory_iterator(exe_dir)) {
-    if (!entry.is_regular_file()) {
-      continue;
-    }
-    const auto filename = entry.path().filename().string();
-    if (!filename.starts_with("libMoltenVK") || entry.path().extension() != ".dylib") {
-      continue;
-    }
-    versioned_candidates.push_back(entry.path());
-  }
-  std::sort(versioned_candidates.begin(), versioned_candidates.end());
-  for (const auto& candidate : versioned_candidates) {
-    if (loader.Load(candidate)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-}  // namespace
-#endif
-
-// Platforms where the Vulkan entry points are linked statically into the app
-// binary — either because (a) the system has no dynamic Vulkan loader we can
-// dlopen (PS4 GNM-bridged stacks, Switch's nvn/deko3d Vulkan WSI), or (b)
-// dynamic loading of system dylibs is restricted (iOS sandbox; MoltenVK is
-// linked as a framework). In those cases we bypass platform::DynamicLibrary
-// entirely and pull `vkGetInstanceProcAddr` straight from the linker.
-#if REX_PLATFORM_IOS || REX_PLATFORM_PS4 || REX_PLATFORM_NX
-#define REX_VULKAN_STATIC_LOADER 1
-extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
-vkGetInstanceProcAddr(VkInstance instance, const char* pName);
-#else
-#define REX_VULKAN_STATIC_LOADER 0
-#endif
 
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
@@ -104,50 +45,43 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
 
   bool functions_loaded = true;
   bool loader_loaded = false;
-#if REX_VULKAN_STATIC_LOADER
-  // iOS / PS4 / NX: no external loader to dlopen. Use the statically linked
-  // vkGetInstanceProcAddr and fetch vkDestroyInstance through it.
-  ifn.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
-  ifn.vkDestroyInstance = PFN_vkDestroyInstance(
-      ifn.vkGetInstanceProcAddr(nullptr, "vkDestroyInstance"));
-  if (!ifn.vkDestroyInstance) {
-    REXLOG_ERROR(
-        "Failed to resolve vkDestroyInstance via statically-linked "
-        "vkGetInstanceProcAddr; host Vulkan may be unavailable on this "
-        "platform.");
-    return nullptr;
+#if REX_PLATFORM_MAC
+  const MacOSVulkanRuntimePaths macos_runtime_paths = DetectMacOSVulkanRuntimePaths();
+  ConfigureMacOSVulkanEnvironment(macos_runtime_paths);
+
+  std::vector<std::filesystem::path> loader_candidates = macos_runtime_paths.loader_candidates;
+  loader_candidates.emplace_back(platform::lib_names::kVulkanLoader);
+  loader_candidates.emplace_back("libvulkan.dylib");
+  loader_candidates.emplace_back("libMoltenVK.dylib");
+
+  std::vector<std::string> attempted_loader_paths;
+  attempted_loader_paths.reserve(loader_candidates.size());
+  for (const std::filesystem::path& candidate : loader_candidates) {
+    if (candidate.empty()) {
+      continue;
+    }
+    attempted_loader_paths.push_back(candidate.string());
+    if (vulkan_instance->loader_.Load(candidate)) {
+      loader_loaded = true;
+      REXLOG_INFO("Loaded Vulkan runtime from {}", candidate.string());
+      break;
+    }
   }
-  loader_loaded = true;
-#elif REX_PLATFORM_MAC
-  loader_loaded = LoadMacVulkanLoader(vulkan_instance->loader_);
   if (!loader_loaded) {
-    REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
-    return nullptr;
-  }
-#define XE_VULKAN_LOAD_LOADER_FUNCTION(name) \
-  functions_loaded &= (ifn.name = vulkan_instance->loader_.GetSymbol<PFN_##name>(#name)) != nullptr;
-  XE_VULKAN_LOAD_LOADER_FUNCTION(vkGetInstanceProcAddr);
-  XE_VULKAN_LOAD_LOADER_FUNCTION(vkDestroyInstance);
-#undef XE_VULKAN_LOAD_LOADER_FUNCTION
-  if (!functions_loaded) {
-    REXLOG_ERROR("Failed to get Vulkan loader function pointers");
+    REXLOG_ERROR("Failed to load a Vulkan runtime on macOS");
+    for (const std::string& attempted_loader_path : attempted_loader_paths) {
+      REXLOG_ERROR("* tried {}", attempted_loader_path);
+    }
     return nullptr;
   }
 #else
-  // Defensive: some targets (theoretical future platforms) may leave
-  // kVulkanLoader as nullptr. Bail cleanly instead of invoking
-  // std::filesystem::path(nullptr) inside DynamicLibrary::Load.
-  if (platform::lib_names::kVulkanLoader == nullptr) {
-    REXLOG_ERROR(
-        "Vulkan loader is unavailable on this platform; falling back to "
-        "native backend.");
-    return nullptr;
-  }
   loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
   if (!loader_loaded) {
     REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
     return nullptr;
   }
+#endif
+
 #define XE_VULKAN_LOAD_LOADER_FUNCTION(name) \
   functions_loaded &= (ifn.name = vulkan_instance->loader_.GetSymbol<PFN_##name>(#name)) != nullptr;
   XE_VULKAN_LOAD_LOADER_FUNCTION(vkGetInstanceProcAddr);
@@ -157,8 +91,6 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     REXLOG_ERROR("Failed to get Vulkan loader function pointers");
     return nullptr;
   }
-#endif
-  (void)loader_loaded;
 
   // Load global functions.
 
@@ -202,12 +134,9 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   // #129.
   requested_extensions.emplace("VK_EXT_debug_utils",
                                &vulkan_instance->extensions_.ext_EXT_debug_utils);
-#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
-  // #395. MoltenVK is technically a portability subset implementation on
-  // Apple platforms, so the enumeration bit is needed on both macOS and iOS.
-  requested_extensions.emplace(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+  // #395.
+  requested_extensions.emplace("VK_KHR_portability_enumeration",
                                &vulkan_instance->extensions_.ext_KHR_portability_enumeration);
-#endif
   if (with_surface) {
     // #1.
     requested_extensions.emplace("VK_KHR_surface", &vulkan_instance->extensions_.ext_KHR_surface);
@@ -227,7 +156,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                  &vulkan_instance->extensions_.ext_KHR_win32_surface);
 #endif
 #ifdef VK_USE_PLATFORM_METAL_EXT
-    // #218.
+    // #217.
     requested_extensions.emplace("VK_EXT_metal_surface",
                                  &vulkan_instance->extensions_.ext_EXT_metal_surface);
 #endif
@@ -415,14 +344,12 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   instance_create_info.pNext = nullptr;
   instance_create_info.flags = 0;
-#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
   // VK_KHR_get_physical_device_properties2 is needed to get the portability
   // subset features.
   if (vulkan_instance->extensions_.ext_KHR_portability_enumeration &&
       vulkan_instance->extensions_.ext_1_1_KHR_get_physical_device_properties2) {
     instance_create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   }
-#endif
   instance_create_info.pApplicationInfo = &application_info;
   instance_create_info.enabledLayerCount = uint32_t(enabled_layers.size());
   instance_create_info.ppEnabledLayerNames = enabled_layers.data();

@@ -1193,7 +1193,7 @@ RenderTargetCache::RenderTarget* RenderTargetCache::GetOrCreateRenderTarget(Rend
     uint32_t width = key.GetWidth();
     uint32_t height = GetRenderTargetHeight(key.pitch_tiles_at_32bpp, key.msaa_samples);
     if (render_target) {
-      REXGPU_INFO(
+      REXGPU_DEBUG(
           "Created a {}x{} {}xMSAA {} render target with guest format {} at "
           "EDRAM base {}",
           width, height, uint32_t(1) << uint32_t(key.msaa_samples),

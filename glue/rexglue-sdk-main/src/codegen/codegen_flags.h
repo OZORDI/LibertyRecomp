@@ -33,7 +33,3 @@ REXCVAR_DECLARE(uint32_t, max_seh_scope_entries);
 REXCVAR_DECLARE(uint32_t, backward_scan_limit);
 REXCVAR_DECLARE(uint32_t, max_jump_table_entries);
 REXCVAR_DECLARE(uint32_t, max_blocks_per_function);
-
-// Codegen (moved from main.cpp)
-REXCVAR_DECLARE(bool, force);
-REXCVAR_DECLARE(bool, enable_exception_handlers);

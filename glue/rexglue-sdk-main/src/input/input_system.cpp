@@ -16,33 +16,11 @@
 #include <rex/input/flags.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
-#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
 #include <rex/input/mnk/mnk_input_driver.h>
-#endif
 #include <rex/input/nop/nop_input_driver.h>
-#include <rex/logging.h>
-#include <rex/platform.h>
-// The SDL + XInput drivers both include backend headers (SDL3/SDL.h,
-// Windows.h) that aren't usable on console cross-builds. Gate on the
-// platforms where they actually compile.
-#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
 #include <rex/input/sdl/sdl_input_driver.h>
-#endif
-#if REX_PLATFORM_WIN32
 #include <rex/input/xinput/xinput_input_driver.h>
-#endif
-#if REX_PLATFORM_IOS
-#include "ios/ios_input_driver.h"
-#endif
-#if REX_PLATFORM_NX
-#include "switch/switch_input_driver.h"
-#endif
-#if REX_PLATFORM_ANDROID
-#include "android/android_input_driver.h"
-#endif
-#if REX_PLATFORM_PS4
-#include "ps4/ps4_input_driver.h"
-#endif
+#include <rex/logging.h>
 
 REXCVAR_DEFINE_STRING(input_backend, "sdl", "Input", "Input backend: sdl, xinput")
     .allowed({"sdl", "xinput"});
@@ -194,65 +172,18 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
     }
 #endif
 
-#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
     if (REXCVAR_GET(input_backend) == "sdl") {
       auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0);
       if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
         input->AddDriver(std::move(sdl_driver));
       }
     }
-#endif
 
-#if REX_PLATFORM_IOS
-    // iOS: add the GameController.framework driver alongside SDL so MFi
-    // pads, Xbox/PS/Switch controllers, and haptics all work natively.
-    {
-      auto ios_driver = std::make_unique<ios::IOSInputDriver>(nullptr, 0);
-      if (ios_driver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(ios_driver));
-      }
-    }
-#endif
-
-#if REX_PLATFORM_NX
-    // Switch: native libnx HID driver (Pro Controller, Joy-Cons, handheld).
-    {
-      auto nx_driver = std::make_unique<nx::SwitchInputDriver>(nullptr, 0);
-      if (nx_driver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(nx_driver));
-      }
-    }
-#endif
-
-#if REX_PLATFORM_ANDROID
-    // Android: NDK AInput / ASensor based gamepad driver. Events are pushed
-    // in by the host activity's onInputEvent() via HandleInputEvent().
-    {
-      auto android_driver =
-          std::make_unique<android::AndroidInputDriver>(nullptr, 0);
-      if (android_driver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(android_driver));
-      }
-    }
-#endif
-
-#if REX_PLATFORM_PS4
-    // PS4: native scePad (DualShock 4 / DualSense) driver.
-    {
-      auto ps4_driver = std::make_unique<ps4::PS4InputDriver>(nullptr, 0);
-      if (ps4_driver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(ps4_driver));
-      }
-    }
-#endif
-
-#if !REX_PLATFORM_PS4 && !REX_PLATFORM_NX
     // MnK driver (keyboard/mouse -> controller emulation)
     auto mnk_driver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
     if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
       input->AddDriver(std::move(mnk_driver));
     }
-#endif
   }
 
   // NOP driver (primary in tool mode, fallback otherwise)

@@ -23,27 +23,33 @@
 
 namespace rex::codegen {
 
-Result<void> Analyze(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: starting analysis...");
+Result<void> Analyze(CodegenContext& ctx, ProgressReporter* reporter) {
+  REXCODEGEN_TRACE("Analyze: starting analysis...");
 
   ctx.initDecoded();
-  REXCODEGEN_INFO("Analyze: decoded {} instructions across {} code regions",
-                  ctx.decoded().instructionCount(), ctx.decoded().codeRegions().size());
+  REXCODEGEN_TRACE("Analyze: decoded {} instructions across {} code regions",
+                   ctx.decoded().instructionCount(), ctx.decoded().codeRegions().size());
 
   // 1. Register entry points (imports, helpers, config, pdata)
-  auto regResult = phases::Register(ctx);
+  if (reporter)
+    reporter->phaseChanged("Register");
+  auto regResult = phases::Register(ctx, reporter);
   if (!regResult) {
     return regResult;
   }
 
   // 2. Scan binary into code/data regions
-  auto scanResult = phases::Scan(ctx);
+  if (reporter)
+    reporter->phaseChanged("Scan");
+  auto scanResult = phases::Scan(ctx, reporter);
   if (!scanResult) {
     return scanResult;
   }
 
   // 3. Discover function blocks iteratively (includes vtable scan)
-  auto discoverResult = phases::Discover(ctx);
+  if (reporter)
+    reporter->phaseChanged("Discover");
+  auto discoverResult = phases::Discover(ctx, reporter);
   if (!discoverResult) {
     return discoverResult;
   }
@@ -53,25 +59,31 @@ Result<void> Analyze(CodegenContext& ctx) {
   // functionPointerScan(ctx);
 
   // 4. Gap fill uncovered regions + discover blocks for gap-filled functions + cleanup
-  auto gapFillResult = phases::GapFill(ctx);
+  if (reporter)
+    reporter->phaseChanged("GapFill");
+  auto gapFillResult = phases::GapFill(ctx, reporter);
   if (!gapFillResult) {
     return gapFillResult;
   }
 
   // 5. Merge: resolve jumps and seal functions
-  auto mergeResult = phases::Merge(ctx);
+  if (reporter)
+    reporter->phaseChanged("Merge");
+  auto mergeResult = phases::Merge(ctx, reporter);
   if (!mergeResult) {
     return mergeResult;
   }
 
   // 6. Validate
-  auto validateResult = phases::Validate(ctx);
+  if (reporter)
+    reporter->phaseChanged("Validate");
+  auto validateResult = phases::Validate(ctx, reporter);
   if (!validateResult) {
     return validateResult;
   }
 
-  REXCODEGEN_INFO("Analyze: complete - {} functions ready for code generation",
-                  ctx.graph.functionCount());
+  REXCODEGEN_TRACE("Analyze: complete - {} functions ready for code generation",
+                   ctx.graph.functionCount());
 
   return Ok();
 }

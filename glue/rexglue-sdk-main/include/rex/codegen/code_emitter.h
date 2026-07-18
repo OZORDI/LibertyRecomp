@@ -19,7 +19,7 @@
 namespace rex::codegen {
 
 // Forward declarations
-class RecompilerConfig;
+struct RecompilerConfig;
 
 /**
  * @brief CSR (Control/Status Register) state for FPU denormal handling.

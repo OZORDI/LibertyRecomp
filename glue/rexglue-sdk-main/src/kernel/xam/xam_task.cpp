@@ -14,7 +14,7 @@
 #include <rex/logging.h>
 #include <rex/hook.h>
 #include <rex/types.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/user_module.h>

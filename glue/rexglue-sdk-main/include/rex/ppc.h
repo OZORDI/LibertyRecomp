@@ -17,7 +17,6 @@
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
 #include <rex/ppc/intrinsics.h>
-#include <rex/ppc/memory.h>  // PPC_LOAD/STORE legacy macros for codegen output
 #include <rex/ppc/stack.h>
 
 // Consumer-facing using declarations

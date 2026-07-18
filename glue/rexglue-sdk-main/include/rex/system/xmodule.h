@@ -72,7 +72,7 @@ class XModule : public XObject {
   rex::runtime::Module* processor_module() const { return processor_module_; }
   uint32_t hmodule_ptr() const { return hmodule_ptr_; }
 
-  virtual uint32_t GetProcAddressByOrdinal(uint16_t ordinal) = 0;
+  virtual uint32_t GetProcAddressByOrdinal(uint16_t ordinal, uint32_t caller_address = 0) = 0;
   virtual uint32_t GetProcAddressByName(const std::string_view name) = 0;
   virtual X_STATUS GetSection(const std::string_view name, uint32_t* out_section_data,
                               uint32_t* out_section_size);

@@ -241,10 +241,14 @@ class PrimitiveProcessor {
   //     emulation. Overrides do not apply to these as hosts are not required to
   //     support the fallback paths since they require different vertex shader
   //     structure (for the fallback HostVertexShaderTypes).
+  // - primitive_restart_cannot_be_disabled:
+  //   - Pass true only for backends that always treat the maximum strip index
+  //     as primitive restart even when the graphics API requests otherwise.
   bool InitializeCommon(bool full_32bit_vertex_indices_supported, bool triangle_fans_supported,
                         bool line_loops_supported, bool quad_lists_supported,
                         bool point_sprites_supported_without_vs_expansion,
-                        bool rectangle_lists_supported_without_vs_expansion);
+                        bool rectangle_lists_supported_without_vs_expansion,
+                        bool primitive_restart_cannot_be_disabled);
   // If any primitive type conversion is needed for auto-indexed draws, called
   // from InitializeCommon (thus only once in the primitive processor's
   // lifetime) to set up the backend's index buffer containing indices for
@@ -638,6 +642,7 @@ class PrimitiveProcessor {
   bool convert_quad_lists_to_triangle_lists_ = false;
   bool expand_point_sprites_in_vs_ = false;
   bool expand_rectangle_lists_in_vs_ = false;
+  bool primitive_restart_cannot_be_disabled_ = false;
 
   // Byte offsets used, for simplicity, directly as handles.
   size_t builtin_ib_offset_two_triangle_strips_ = SIZE_MAX;
@@ -670,13 +675,17 @@ class PrimitiveProcessor {
       // index conversion used by non-kVertex host vertex shader types on
       // backends not supporting full 32-bit index fetch in this path.
       uint32_t non_vertex_32bit_dma_to_24bit : 1;  // 60
+      // If set, entry is for preserving a disabled guest strip restart on a
+      // host that always enables restart for strip topologies.
+      uint32_t sanitize_primitive_restart_disabled_strip : 1;  // 61
     };
 
     CacheKey() : key(0) { static_assert_size(*this, sizeof(key)); }
     CacheKey(uint32_t base, uint32_t count, xenos::IndexFormat format, xenos::Endian endian,
              bool is_reset_enabled,
              xenos::PrimitiveType conversion_guest_primitive_type = xenos::PrimitiveType::kNone,
-             bool non_vertex_32bit_dma_to_24bit = false) {
+             bool non_vertex_32bit_dma_to_24bit = false,
+             bool sanitize_primitive_restart_disabled_strip = false) {
       // Clear unused bits, then set each field explicitly, not via the
       // initializer list (which causes `uint64_t key = 0;` to be ignored, and
       // also can't contain initializers for aliasing union members).
@@ -688,6 +697,7 @@ class PrimitiveProcessor {
       this->is_reset_enabled = is_reset_enabled;
       this->conversion_guest_primitive_type = conversion_guest_primitive_type;
       this->non_vertex_32bit_dma_to_24bit = non_vertex_32bit_dma_to_24bit;
+      this->sanitize_primitive_restart_disabled_strip = sanitize_primitive_restart_disabled_strip;
     }
 
     struct Hasher {

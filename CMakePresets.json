@@ -154,18 +154,9 @@
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "installDir": "${sourceDir}/out/install/${presetName}",
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": {
-                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-                    "type": "FILEPATH"
-                },
-                "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0",
-                "VCPKG_TARGET_TRIPLET": {
-                    "value": "arm64-osx",
-                    "type": "STRING"
-                }
-            },
-            "environment": {
-                "VCPKG_ROOT": "${sourceDir}/thirdparty/vcpkg"
+                "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
+                "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++",
+                "CMAKE_OSX_ARCHITECTURES": "arm64"
             },
             "condition": {
                 "type": "equals",
@@ -199,8 +190,7 @@
             "displayName": "macOS-Release",
             "inherits": "macos-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {

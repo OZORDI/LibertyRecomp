@@ -34,9 +34,13 @@ class ConsoleDialog : public ImGuiDialog {
   void ExecuteCommand(std::string_view cmd);
   void RefreshCategories();
   static int InputTextCallback(ImGuiInputTextCallbackData* data);
+  void UpdateCompletionCandidates(const char* buf, int len);
+  void ApplyCompletion(ImGuiInputTextCallbackData* data);
+  void HandleHistoryOrCompletionNav(ImGuiInputTextCallbackData* data);
 
   bool focus_input_next_frame_ = true;
   bool scroll_to_bottom_ = true;
+  float console_height_ = 0.0f;  // 0 = initialize to default fraction on first draw
   uint64_t last_generation_ = 0;
 
   std::shared_ptr<rex::LogCaptureSink> sink_;
@@ -53,6 +57,11 @@ class ConsoleDialog : public ImGuiDialog {
   std::deque<std::string> history_;
   int history_pos_ = -1;
   static constexpr size_t kMaxHistory = 32;
+
+  // Autocomplete over cvar/command names.
+  std::vector<std::string> completion_candidates_;
+  int completion_index_ = -1;  // selected popup item, -1 = none highlighted
+  bool completion_open_ = false;
 };
 
 }  // namespace rex::ui

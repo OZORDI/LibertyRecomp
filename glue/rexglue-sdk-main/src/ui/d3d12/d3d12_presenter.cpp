@@ -426,9 +426,8 @@ D3D12Presenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_sur
           return SurfacePaintConnectResult::kFailure;
         }
         // Disable automatic Alt+Enter handling - DXGI fullscreen doesn't
-        // support ALLOW_TEARING, and using custom fullscreen in ui::Win32Window
-        // anyway as with Alt+Enter the menu is kept, state changes are tracked
-        // better, and nothing is presented for some reason.
+        // support ALLOW_TEARING, and the window implementation provides
+        // borderless fullscreen anyway with better state tracking.
         dxgi_factory->MakeWindowAssociation(surface_hwnd, DXGI_MWA_NO_ALT_ENTER);
       } break;
 #endif

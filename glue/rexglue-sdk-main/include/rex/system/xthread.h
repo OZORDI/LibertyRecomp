@@ -10,6 +10,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <string>
@@ -314,6 +315,10 @@ class XThread : public XObject {
   static uint32_t GetCurrentThreadHandle();
   static uint32_t GetCurrentThreadId();
 
+  // If the title is terminating and this is a running guest thread, self-exits
+  // via Exit(0) and DOES NOT RETURN. Called from the kernel wait primitives.
+  static void CheckTitleTermination();
+
   static uint32_t GetLastError();
   static void SetLastError(uint32_t error_code);
 
@@ -368,7 +373,7 @@ class XThread : public XObject {
   uint32_t suspend_count();
   X_STATUS Resume(uint32_t* out_suspend_count = nullptr);
   X_STATUS Suspend(uint32_t* out_suspend_count = nullptr);
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
   // Increment suspend count and block until another thread resumes us.
   uint32_t SelfSuspend();
 #endif
@@ -411,14 +416,16 @@ class XThread : public XObject {
   uint32_t stack_limit_ = 0;       // Low address
   bool guest_thread_ = false;
   bool main_thread_ = false;  // Entry-point thread
-  bool running_ = false;
+  // Atomic: written by the thread itself in Exit/Terminate, read cross-thread by
+  // KernelState::TerminateTitle's cooperative drain.
+  std::atomic<bool> running_{false};
 
   std::string thread_name_;
   std::unique_ptr<runtime::ThreadState> thread_state_;
 
   int32_t priority_ = 0;
 
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
   std::mutex suspend_mutex_;
   std::condition_variable suspend_cv_;
 #endif

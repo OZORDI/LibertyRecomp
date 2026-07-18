@@ -10,36 +10,46 @@
 #include <rex/chrono/clock.h>
 #include <rex/platform.h>
 
-static_assert(REX_PLATFORM_POSIX, "This file is POSIX-only");
+static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only");
 
 #include <sys/time.h>
 
-// CLOCK_MONOTONIC_RAW is a Linux extension (avoids NTP slew adjustments).
-// macOS and other POSIX platforms only expose CLOCK_MONOTONIC.
-#if REX_PLATFORM_LINUX && defined(CLOCK_MONOTONIC_RAW)
-#  define REX_CLOCK_MONOTONIC CLOCK_MONOTONIC_RAW
-#else
-#  define REX_CLOCK_MONOTONIC CLOCK_MONOTONIC
+#ifdef __APPLE__
+#include <mach/mach_time.h>
 #endif
 
 namespace rex::chrono {
 
 uint64_t Clock::host_tick_frequency_platform() {
+#ifdef __APPLE__
+  mach_timebase_info_data_t info;
+  mach_timebase_info(&info);
+  return (uint64_t)((1000000000ull * (uint64_t)info.denom) / (uint64_t)info.numer);
+#else
   timespec res;
-  int error = clock_getres(REX_CLOCK_MONOTONIC, &res);
+  int error = clock_getres(CLOCK_MONOTONIC_RAW, &res);
   assert_zero(error);
   assert_zero(res.tv_sec);  // Sub second resolution is required.
 
   // Convert nano seconds to hertz. Resolution is 1ns on most systems.
   return 1000000000ull / res.tv_nsec;
+#endif
 }
 
 uint64_t Clock::host_tick_count_platform() {
+#ifdef __APPLE__
+  // mach_absolute_time() returns raw hardware ticks; host_tick_frequency_platform()
+  // expresses the rate of these same ticks via mach_timebase_info.
+  // clock_gettime(CLOCK_MONOTONIC_RAW) returns nanoseconds, which would be
+  // inconsistent with the 24 MHz mach frequency and cause ~41x time acceleration.
+  return mach_absolute_time();
+#else
   timespec tp;
-  int error = clock_gettime(REX_CLOCK_MONOTONIC, &tp);
+  int error = clock_gettime(CLOCK_MONOTONIC_RAW, &tp);
   assert_zero(error);
 
   return tp.tv_nsec + tp.tv_sec * 1000000000ull;
+#endif
 }
 
 uint64_t Clock::QueryHostSystemTime() {

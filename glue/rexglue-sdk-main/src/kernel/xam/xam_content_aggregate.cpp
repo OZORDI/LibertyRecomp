@@ -15,7 +15,8 @@
 #include <rex/math.h>
 #include <rex/hook.h>
 #include <rex/types.h>
-#include <rex/string/util.h>
+#include <rex/string.h>
+#include <rex/string/numeric.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xam/content_device.h>

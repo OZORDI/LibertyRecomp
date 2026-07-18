@@ -83,8 +83,9 @@ class TextureCache {
   void MarkRangeAsResolved(uint32_t start_unscaled, uint32_t length_unscaled);
   // Ensures the memory backing the range in the scaled resolve address space is
   // allocated and returns whether it is.
-  virtual bool EnsureScaledResolveMemoryCommitted(uint32_t start_unscaled, uint32_t length_unscaled,
-                                                  uint32_t length_scaled_alignment_log2 = 0) {
+  virtual bool EnsureScaledResolveMemoryCommitted(uint32_t /*start_unscaled*/,
+                                                  uint32_t /*length_unscaled*/,
+                                                  uint32_t /*length_scaled_alignment_log2*/ = 0) {
     return false;
   }
 
@@ -484,11 +485,11 @@ class TextureCache {
   // Whether the signed version of the texture has a different representation on
   // the host than its unsigned version (for example, if it's a fixed-point
   // texture emulated with a larger host pixel format).
-  virtual bool IsSignedVersionSeparateForFormat(TextureKey key) const { return false; }
+  virtual bool IsSignedVersionSeparateForFormat(TextureKey /*key*/) const { return false; }
   // Parameters like whether the texture is tiled and its dimensions are checked
   // externally, the implementation should take only format-related parameters
   // such as the format itself and the signedness into account.
-  virtual bool IsScaledResolveSupportedForFormat(TextureKey key) const { return false; }
+  virtual bool IsScaledResolveSupportedForFormat(TextureKey /*key*/) const { return false; }
   // For formats with less than 4 components, implementations normally should
   // replicate the last component into the non-existent ones, similar to what is
   // done for unused components of operands in shaders by Microsoft's Xbox 360
@@ -542,7 +543,7 @@ class TextureCache {
   }
   // Called when something in a texture binding is changed for the
   // implementation to update the internal dependencies of the binding.
-  virtual void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) {}
+  virtual void UpdateTextureBindingsImpl(uint32_t /*fetch_constant_mask*/) {}
 
  private:
   struct PendingTextureLoad {

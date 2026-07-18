@@ -1,28 +1,26 @@
 /**
  * @file        rexglue/cli_utils.h
- * @brief       CLI utility functions and helpers
+ * @brief       Shared types for rexglue CLI subcommands
  *
- * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
- *              All rights reserved.
- *
+ * @copyright   Copyright (c) 2026 Tom Clay
  * @license     BSD 3-Clause License
- *              See LICENSE file in the project root for full license text.
  */
 
 #pragma once
 
-#include <filesystem>
-#include <string>
+#include <functional>
+
+#include <rex/result.h>
 
 namespace rexglue::cli {
 
-/**
- * Shared CLI context passed to command handlers
- */
 struct CliContext {
   bool verbose = false;
-  bool force = false;                    // Generate output despite validation errors
-  bool enableExceptionHandlers = false;  // Enable SEH exception handler generation
+  bool overwrite_existing = false;
+  bool generate_despite_errors = false;
+  bool skip_upgrade_consent = false;
 };
+
+using DeferredAction = std::function<rex::Result<void>()>;
 
 }  // namespace rexglue::cli

@@ -729,12 +729,13 @@ u32 IoCreateDevice_entry(u32 device_struct, u32 r4, u32 r5, u32 r6, u32 r7, mapp
 }
 
 u32 IoDismountVolumeByFileHandle_entry(u32 handle) {
-  REXKRNL_WARN("IoDismountVolumeByFileHandle({:#x}) - stub", (uint32_t)handle);
+  REXKRNL_DEBUG("IoDismountVolumeByFileHandle({:#x}) ignored for host-backed VFS",
+                (uint32_t)handle);
   return X_STATUS_SUCCESS;
 }
 
 u32 IoDismountVolumeByName_entry(ppc_ptr_t<X_ANSI_STRING> name) {
-  REXKRNL_WARN("IoDismountVolumeByName - stub");
+  REXKRNL_DEBUG("IoDismountVolumeByName ignored for host-backed VFS");
   return X_STATUS_SUCCESS;
 }
 

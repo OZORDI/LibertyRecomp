@@ -418,7 +418,7 @@ void detectSaveRestoreHelpers(const BinaryView& binary, AnalysisState& state) {
 //=============================================================================
 
 VoidResult registerEntryPoints(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: registering entry points...");
+  REXCODEGEN_TRACE("Analyze: registering entry points...");
 
   auto& graph = ctx.graph;
   auto& config = ctx.Config();
@@ -502,8 +502,9 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
       importCount++;
     }
 
-    REXCODEGEN_INFO("Analyze: loaded {} imports ({} resolved, {} unresolved, {} variables skipped)",
-                    importCount, resolvedCount, unresolvedCount, variableCount);
+    REXCODEGEN_TRACE(
+        "Analyze: loaded {} imports ({} resolved, {} unresolved, {} variables skipped)",
+        importCount, resolvedCount, unresolvedCount, variableCount);
   }
 
   // Register save/restore helpers
@@ -579,7 +580,7 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
   uint32_t offsetInSection = pdataAddr - pdataSection->baseAddress;
   const uint8_t* pdataData = pdataSection->data + offsetInSection;
 
-  REXCODEGEN_INFO("Analyze: PDATA base=0x{:08X}, size={}", pdataAddr, pdataSize);
+  REXCODEGEN_TRACE("Analyze: PDATA base=0x{:08X}, size={}", pdataAddr, pdataSize);
 
   size_t count = pdataSize / sizeof(IMAGE_CE_RUNTIME_FUNCTION);
   auto* entries = reinterpret_cast<const IMAGE_CE_RUNTIME_FUNCTION*>(pdataData);
@@ -669,7 +670,7 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
     pdataAdded++;
   }
 
-  REXCODEGEN_INFO("Analyze: added {} functions from PDATA", pdataAdded);
+  REXCODEGEN_TRACE("Analyze: added {} functions from PDATA", pdataAdded);
 
   // Queue EH-discovered functions
   size_t ehFuncsQueued = 0;
@@ -684,7 +685,7 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
   }
 
   if (ehFuncsQueued > 0) {
-    REXCODEGEN_INFO("Analyze: queued {} functions from exception handling", ehFuncsQueued);
+    REXCODEGEN_TRACE("Analyze: queued {} functions from exception handling", ehFuncsQueued);
   }
 
   return Ok();
@@ -694,7 +695,8 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
 
 namespace phases {
 
-VoidResult Register(CodegenContext& ctx) {
+VoidResult Register(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   return registerEntryPoints(ctx);
 }
 

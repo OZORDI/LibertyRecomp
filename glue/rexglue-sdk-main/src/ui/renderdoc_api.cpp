@@ -15,14 +15,12 @@
 namespace rex {
 namespace ui {
 
+std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
 #if REX_PLATFORM_MAC
-std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
+  // The vendored RenderDoc app API header doesn't expose a macOS path.
+  // Keep RenderDoc optional and simply report "not connected" on this platform.
   return nullptr;
-}
-
-RenderDocAPI::~RenderDocAPI() = default;
 #else
-std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
   std::unique_ptr<RenderDocAPI> renderdoc_api(new RenderDocAPI());
 
   pRENDERDOC_GetAPI get_api = nullptr;
@@ -30,12 +28,6 @@ std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
   // Try to load the RenderDoc library. If RenderDoc is attached, the library
   // should already be loaded into the process and this will increment the
   // reference count. If not attached, the load will fail and we return nullptr.
-  // On platforms where RenderDoc is unavailable (PS4/Switch/iOS),
-  // kRenderDoc is nullptr — constructing std::filesystem::path(nullptr) is
-  // UB, so bail before calling Load.
-  if (platform::lib_names::kRenderDoc == nullptr) {
-    return nullptr;
-  }
   if (!renderdoc_api->library_.Load(platform::lib_names::kRenderDoc)) {
     return nullptr;
   }
@@ -51,12 +43,12 @@ std::unique_ptr<RenderDocAPI> RenderDocAPI::CreateIfConnected() {
   REXLOG_INFO("RenderDoc API initialized");
 
   return renderdoc_api;
+#endif
 }
 
 RenderDocAPI::~RenderDocAPI() {
   library_.Close();
 }
-#endif
 
 }  // namespace ui
 }  // namespace rex

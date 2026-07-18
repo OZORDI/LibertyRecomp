@@ -34,6 +34,8 @@ class XSemaphore : public XObject {
 
   [[nodiscard]] bool ReleaseSemaphore(int32_t release_count, int32_t* out_previous_count);
 
+  int32_t maximum_count() const { return static_cast<int32_t>(maximum_count_); }
+
   bool Save(stream::ByteStream* stream) override;
   static object_ref<XSemaphore> Restore(KernelState* kernel_state, stream::ByteStream* stream);
 

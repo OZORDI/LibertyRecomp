@@ -80,32 +80,56 @@ GraphicsSystem::GraphicsSystem() : vsync_worker_running_(false) {}
 
 GraphicsSystem::~GraphicsSystem() = default;
 
-X_STATUS GraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispatcher,
-                               system::KernelState* kernel_state,
-                               ui::WindowedAppContext* app_context, bool with_presentation) {
+X_STATUS GraphicsSystem::SetupPresentation(ui::WindowedAppContext* app_context) {
+  if (presenter_) {
+    return X_STATUS_SUCCESS;
+  }
+
+  if (!provider_) {
+    CreateProvider(true);
+    if (!provider_) {
+      REXGPU_ERROR("Unable to create graphics provider");
+      return X_STATUS_UNSUCCESSFUL;
+    }
+    provider_supports_presentation_ = true;
+  } else if (!provider_supports_presentation_) {
+    // A prior SetupGuestGpu built a headless provider; backends like Vulkan
+    // need swapchain support baked in at provider creation time.
+    REXGPU_ERROR("SetupPresentation called after headless SetupGuestGpu; call order is reversed");
+    return X_STATUS_UNSUCCESSFUL;
+  }
+
+  app_context_ = app_context;
+  auto loss_cb = [this](bool is_responsible, bool statically_from_ui_thread) {
+    OnHostGpuLossFromAnyThread(is_responsible);
+  };
+  if (app_context_) {
+    // Presenter creation must happen on the UI thread.
+    app_context_->CallInUIThreadSynchronous(
+        [this, loss_cb]() { presenter_ = provider_->CreatePresenter(loss_cb); });
+  } else {
+    // Offscreen path (e.g. capturing guest output without a window).
+    presenter_ = provider_->CreatePresenter(loss_cb);
+  }
+
+  if (!presenter_) {
+    REXGPU_ERROR("Unable to create presenter");
+    return X_STATUS_UNSUCCESSFUL;
+  }
+  return X_STATUS_SUCCESS;
+}
+
+X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dispatcher,
+                                       system::KernelState* kernel_state) {
   memory_ = function_dispatcher->memory();
   function_dispatcher_ = function_dispatcher;
   kernel_state_ = kernel_state;
-  app_context_ = app_context;
 
-  // Create presenter if presentation is requested and provider is available
-  if (with_presentation && provider_) {
-    // Safe if either the UI thread call or the presenter creation fails.
-    if (app_context_) {
-      app_context_->CallInUIThreadSynchronous([this]() {
-        presenter_ =
-            provider_->CreatePresenter([this](bool is_responsible, bool statically_from_ui_thread) {
-              OnHostGpuLossFromAnyThread(is_responsible);
-            });
-      });
-    } else {
-      // May be needed for offscreen use, such as capturing the guest output
-      // image.
-      presenter_ =
-          provider_->CreatePresenter([this](bool is_responsible, bool statically_from_ui_thread) {
-            OnHostGpuLossFromAnyThread(is_responsible);
-          });
-    }
+  // Headless path: no one set up presentation, so build a no-presentation
+  // provider just for the command processor.
+  if (!provider_) {
+    CreateProvider(false);
+    provider_supports_presentation_ = false;
   }
 
   // Create command processor. This will spin up a thread to process all

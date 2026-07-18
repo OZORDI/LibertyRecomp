@@ -43,7 +43,7 @@ const CallEdge* findCallEdgeAt(const FunctionNode* node, uint32_t site) {
 }
 
 VoidResult validateGraph(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: validating call graph...");
+  REXCODEGEN_TRACE("Analyze: validating call graph...");
 
   auto& graph = ctx.graph;
   auto& binary = ctx.binary();
@@ -140,8 +140,8 @@ VoidResult validateGraph(CodegenContext& ctx) {
     }
   }
 
-  REXCODEGEN_INFO("Analyze: checked {} branches in {} functions, verified {} edges", callsChecked,
-                  functionsChecked, edgesVerified);
+  REXCODEGEN_TRACE("Analyze: checked {} branches in {} functions, verified {} edges", callsChecked,
+                   functionsChecked, edgesVerified);
 
   if (errors.HasErrors()) {
     REXCODEGEN_ERROR("Analyze: found {} errors", errors.Count());
@@ -151,7 +151,7 @@ VoidResult validateGraph(CodegenContext& ctx) {
                            errors.Count(AnalysisErrors::Category::UnresolvedCall)));
   }
 
-  REXCODEGEN_INFO("Analyze: all calls resolve");
+  REXCODEGEN_TRACE("Analyze: all calls resolve");
   return Ok();
 }
 
@@ -159,7 +159,8 @@ VoidResult validateGraph(CodegenContext& ctx) {
 
 namespace phases {
 
-VoidResult Validate(CodegenContext& ctx) {
+VoidResult Validate(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   return validateGraph(ctx);
 }
 

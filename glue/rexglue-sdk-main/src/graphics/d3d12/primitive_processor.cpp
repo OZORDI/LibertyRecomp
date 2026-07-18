@@ -29,7 +29,7 @@ D3D12PrimitiveProcessor::~D3D12PrimitiveProcessor() {
 }
 
 bool D3D12PrimitiveProcessor::Initialize() {
-  if (!InitializeCommon(true, false, false, true, true, true)) {
+  if (!InitializeCommon(true, false, false, true, true, true, false)) {
     Shutdown();
     return false;
   }

@@ -16,7 +16,7 @@
 #include <string_view>
 
 #include <rex/cvar.h>
-#include <rex/graphics/flags.h>
+#include <rex/ui/flags.h>
 
 namespace rex::graphics::video_mode_util {
 

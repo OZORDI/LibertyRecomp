@@ -17,65 +17,20 @@
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/logging.h>
 #include <rex/math.h>
-#include <rex/platform.h>
 #include <rex/string/utf8.h>
-
-#if REX_PLATFORM_NX
-#include <switch.h>
-#endif
 
 namespace rex::filesystem {
 
-namespace {
-// Returns the libnx fsdev mount name (everything before the first ':') if
-// |host_path| is a libnx-mounted save device path (e.g. "save:/profile/0").
-// Returns an empty string otherwise.
-std::string ExtractSaveMountName(const std::filesystem::path& host_path) {
-  const std::string s = host_path.string();
-  const auto colon = s.find(':');
-  if (colon == std::string::npos || colon == 0) {
-    return {};
-  }
-  // libnx save mounts are conventionally named "save" or "save<N>". Be
-  // permissive: any mount whose name starts with "save" is treated as a save
-  // device that needs explicit commit-to-flash.
-  std::string name = s.substr(0, colon);
-  if (name.compare(0, 4, "save") == 0) {
-    return name;
-  }
-  return {};
-}
-}  // namespace
-
-void CommitSaveMount(const std::string& mount_name) {
-#if REX_PLATFORM_NX
-  if (mount_name.empty()) {
-    return;
-  }
-  Result rc = fsdevCommitDevice(mount_name.c_str());
-  if (R_FAILED(rc)) {
-    REXFS_ERROR("fsdevCommitDevice(\"{}\") failed: 0x{:08X}", mount_name,
-                static_cast<uint32_t>(rc));
-  }
-#else
-  (void)mount_name;
-#endif
-}
-
 HostPathDevice::HostPathDevice(const std::string_view mount_path,
-                               const std::filesystem::path& host_path, bool read_only)
-    : Device(mount_path), name_("STFS"), host_path_(host_path), read_only_(read_only) {}
+                               const std::filesystem::path& host_path, bool read_only,
+                               bool allow_share_delete)
+    : Device(mount_path),
+      name_("STFS"),
+      host_path_(host_path),
+      read_only_(read_only),
+      allow_share_delete_(allow_share_delete) {}
 
-HostPathDevice::~HostPathDevice() {
-  // Flush any buffered writes for Switch save mounts so data survives
-  // reboot / sudden power loss.
-  if (!read_only_) {
-    auto save_name = ExtractSaveMountName(host_path_);
-    if (!save_name.empty()) {
-      CommitSaveMount(save_name);
-    }
-  }
-}
+HostPathDevice::~HostPathDevice() = default;
 
 bool HostPathDevice::Initialize() {
   if (!std::filesystem::exists(host_path_)) {

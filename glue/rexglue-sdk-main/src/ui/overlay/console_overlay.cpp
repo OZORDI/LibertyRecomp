@@ -55,29 +55,109 @@ void ConsoleDialog::RefreshCategories() {
 
 int ConsoleDialog::InputTextCallback(ImGuiInputTextCallbackData* data) {
   auto* self = static_cast<ConsoleDialog*>(data->UserData);
-  if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
-    const int prev = self->history_pos_;
-    if (data->EventKey == ImGuiKey_UpArrow) {
-      if (self->history_pos_ == -1) {
-        self->history_pos_ = static_cast<int>(self->history_.size()) - 1;
-      } else if (self->history_pos_ > 0) {
-        --self->history_pos_;
-      }
-    } else if (data->EventKey == ImGuiKey_DownArrow) {
-      if (self->history_pos_ != -1) {
-        if (++self->history_pos_ >= static_cast<int>(self->history_.size())) {
-          self->history_pos_ = -1;
-        }
-      }
-    }
-    if (prev != self->history_pos_) {
-      const char* hist =
-          (self->history_pos_ >= 0) ? self->history_[self->history_pos_].c_str() : "";
-      data->DeleteChars(0, data->BufTextLen);
-      data->InsertChars(0, hist);
-    }
+  switch (data->EventFlag) {
+    case ImGuiInputTextFlags_CallbackAlways:
+      self->UpdateCompletionCandidates(data->Buf, data->BufTextLen);
+      break;
+    case ImGuiInputTextFlags_CallbackCompletion:
+      self->ApplyCompletion(data);
+      break;
+    case ImGuiInputTextFlags_CallbackHistory:
+      self->HandleHistoryOrCompletionNav(data);
+      break;
+    default:
+      break;
   }
   return 0;
+}
+
+void ConsoleDialog::UpdateCompletionCandidates(const char* buf, int len) {
+  std::string_view text(buf, static_cast<size_t>(len));
+  // Complete the command/cvar name only (the first token). Once a space is
+  // typed the user is editing arguments, so close the popup.
+  if (text.empty() || text.find(' ') != std::string_view::npos) {
+    completion_candidates_.clear();
+    completion_open_ = false;
+    completion_index_ = -1;
+    return;
+  }
+  std::vector<std::string> matches;
+  for (auto& name : rex::cvar::ListFlags()) {
+    if (name.size() >= text.size() && std::string_view(name).substr(0, text.size()) == text) {
+      matches.push_back(name);
+    }
+  }
+  if (matches != completion_candidates_) {
+    completion_candidates_ = std::move(matches);
+    completion_index_ = -1;
+  }
+  completion_open_ = !completion_candidates_.empty();
+}
+
+void ConsoleDialog::ApplyCompletion(ImGuiInputTextCallbackData* data) {
+  if (completion_candidates_.empty())
+    return;
+  std::string completion;
+  bool full = false;
+  if (completion_index_ >= 0 &&
+      completion_index_ < static_cast<int>(completion_candidates_.size())) {
+    completion = completion_candidates_[completion_index_];
+    full = true;
+  } else if (completion_candidates_.size() == 1) {
+    completion = completion_candidates_[0];
+    full = true;
+  } else {
+    // Longest common prefix of all candidates.
+    completion = completion_candidates_[0];
+    for (size_t i = 1; i < completion_candidates_.size(); ++i) {
+      const std::string& cand = completion_candidates_[i];
+      size_t j = 0;
+      while (j < completion.size() && j < cand.size() && completion[j] == cand[j])
+        ++j;
+      completion.resize(j);
+    }
+  }
+  data->DeleteChars(0, data->BufTextLen);
+  data->InsertChars(0, completion.c_str());
+  if (full) {
+    data->InsertChars(data->CursorPos, " ");
+    completion_candidates_.clear();
+    completion_open_ = false;
+    completion_index_ = -1;
+  }
+}
+
+void ConsoleDialog::HandleHistoryOrCompletionNav(ImGuiInputTextCallbackData* data) {
+  // When the completion popup is open, arrows move the selection.
+  if (completion_open_ && !completion_candidates_.empty()) {
+    const int count = static_cast<int>(completion_candidates_.size());
+    if (data->EventKey == ImGuiKey_UpArrow) {
+      completion_index_ = (completion_index_ <= 0) ? count - 1 : completion_index_ - 1;
+    } else if (data->EventKey == ImGuiKey_DownArrow) {
+      completion_index_ = (completion_index_ + 1) % count;
+    }
+    return;
+  }
+  // Otherwise: command history.
+  const int prev = history_pos_;
+  if (data->EventKey == ImGuiKey_UpArrow) {
+    if (history_pos_ == -1) {
+      history_pos_ = static_cast<int>(history_.size()) - 1;
+    } else if (history_pos_ > 0) {
+      --history_pos_;
+    }
+  } else if (data->EventKey == ImGuiKey_DownArrow) {
+    if (history_pos_ != -1) {
+      if (++history_pos_ >= static_cast<int>(history_.size())) {
+        history_pos_ = -1;
+      }
+    }
+  }
+  if (prev != history_pos_) {
+    const char* hist = (history_pos_ >= 0) ? history_[history_pos_].c_str() : "";
+    data->DeleteChars(0, data->BufTextLen);
+    data->InsertChars(0, hist);
+  }
 }
 
 void ConsoleDialog::ExecuteCommand(std::string_view cmd) {
@@ -110,28 +190,42 @@ void ConsoleDialog::ExecuteCommand(std::string_view cmd) {
     return;
   }
 
-  // Split on first space: "name value"
+  // Split on first space into name + args.
   auto sep = cmd.find(' ');
+  std::string name(sep == std::string_view::npos ? cmd : cmd.substr(0, sep));
+  std::string args;
+  if (sep != std::string_view::npos) {
+    std::string_view rest = cmd.substr(sep + 1);
+    while (!rest.empty() && rest.front() == ' ')
+      rest.remove_prefix(1);
+    args = std::string(rest);
+  }
+
+  const auto* info = rex::cvar::GetFlagInfo(name);
+
+  // Command dispatch takes priority over get/set.
+  if (info && info->type == rex::cvar::FlagType::Command) {
+    rex::cvar::InvokeCommand(name, args);
+    local_entries_.push_back(
+        {spdlog::level::info, "console", "[console] > " + name + (args.empty() ? "" : " " + args)});
+    scroll_to_bottom_ = true;
+    return;
+  }
+
   if (sep == std::string_view::npos) {
-    // No space: treat as "get" - show current value.
-    std::string val = rex::cvar::GetFlagByName(cmd);
-    if (val.empty() && !rex::cvar::GetFlagInfo(cmd)) {
-      local_entries_.push_back(
-          {spdlog::level::warn, "console", "[console] unknown cvar: " + std::string(cmd)});
+    // No args: treat as "get" - show current value.
+    std::string val = rex::cvar::GetFlagByName(name);
+    if (val.empty() && !info) {
+      local_entries_.push_back({spdlog::level::warn, "console", "[console] unknown cvar: " + name});
     } else {
-      local_entries_.push_back(
-          {spdlog::level::info, "console", "[console] " + std::string(cmd) + " = " + val});
+      local_entries_.push_back({spdlog::level::info, "console", "[console] " + name + " = " + val});
     }
     return;
   }
 
-  std::string name(cmd.substr(0, sep));
-  std::string value(cmd.substr(sep + 1));
-  while (!value.empty() && value.front() == ' ')
-    value.erase(value.begin());
-
-  if (rex::cvar::SetFlagByName(name, value)) {
-    local_entries_.push_back({spdlog::level::info, "console", "[console] " + name + " = " + value});
+  // Has args, non-command: set.
+  if (rex::cvar::SetFlagByName(name, args)) {
+    local_entries_.push_back({spdlog::level::info, "console", "[console] " + name + " = " + args});
   } else {
     local_entries_.push_back({spdlog::level::warn, "console", "[console] unknown cvar: " + name});
   }
@@ -151,9 +245,13 @@ void ConsoleDialog::OnDraw(ImGuiIO& io) {
     }
   }
 
-  const float window_height = io.DisplaySize.y * 0.45f;
-  ImGui::SetNextWindowPos(ImVec2(0, io.DisplaySize.y - window_height), ImGuiCond_Always);
-  ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, window_height), ImGuiCond_Always);
+  if (console_height_ <= 0.0f)
+    console_height_ = io.DisplaySize.y * 0.45f;
+  const float min_height = ImGui::GetFrameHeightWithSpacing() * 3.0f;
+  console_height_ = std::clamp(console_height_, min_height, io.DisplaySize.y);
+
+  ImGui::SetNextWindowPos(ImVec2(0, io.DisplaySize.y - console_height_), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, console_height_), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.80f);
 
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
@@ -163,6 +261,13 @@ void ConsoleDialog::OnDraw(ImGuiIO& io) {
     ImGui::End();
     return;
   }
+
+  // Drag handle along the top edge to resize the console vertically.
+  ImGui::InvisibleButton("##resize_handle", ImVec2(-1.0f, 4.0f));
+  if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+  if (ImGui::IsItemActive())
+    console_height_ = std::clamp(console_height_ - io.MouseDelta.y, min_height, io.DisplaySize.y);
 
   // --- Filter bar ---
   static const char* kLevelNames[] = {"trace", "debug", "info", "warn", "error", "critical"};
@@ -217,7 +322,8 @@ void ConsoleDialog::OnDraw(ImGuiIO& io) {
   ImGui::Separator();
   bool submit = false;
   ImGuiInputTextFlags input_flags =
-      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
+      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory |
+      ImGuiInputTextFlags_CallbackCompletion | ImGuiInputTextFlags_CallbackAlways;
   ImGui::SetNextItemWidth(-1.0f);
   if (focus_input_next_frame_) {
     ImGui::SetKeyboardFocusHere();
@@ -227,14 +333,52 @@ void ConsoleDialog::OnDraw(ImGuiIO& io) {
                        this)) {
     submit = true;
   }
+  const ImVec2 input_min = ImGui::GetItemRectMin();
+  const ImVec2 input_max = ImGui::GetItemRectMax();
+
+  // Close the completion popup whenever the input loses keyboard focus. The
+  // popup is a separate window; without this it could stay open and (if it ever
+  // grabbed focus) block the input until an app restart.
+  if (!ImGui::IsItemFocused()) {
+    completion_open_ = false;
+    completion_candidates_.clear();
+    completion_index_ = -1;
+  }
 
   if (submit && input_buf_[0] != '\0') {
     ExecuteCommand(input_buf_);
     input_buf_[0] = '\0';
+    completion_candidates_.clear();
+    completion_open_ = false;
+    completion_index_ = -1;
     ImGui::SetKeyboardFocusHere(-1);
   }
 
   ImGui::End();
+
+  // Completion popup: anchored to the input's top-left, growing upward.
+  if (completion_open_ && !completion_candidates_.empty()) {
+    const float width = input_max.x - input_min.x;
+    ImGui::SetNextWindowPos(ImVec2(input_min.x, input_min.y), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, 200.0f));
+    ImGui::SetNextWindowBgAlpha(0.95f);
+    // NoInputs makes the popup purely visual: it can never be hovered, clicked,
+    // or focused, so it cannot steal focus from the input. Navigation is driven
+    // entirely by the input's Tab/Up/Down callbacks.
+    ImGuiWindowFlags popup_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                   ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoInputs |
+                                   ImGuiWindowFlags_NoNavInputs;
+    if (ImGui::Begin("##rex_completions", nullptr, popup_flags)) {
+      for (int i = 0; i < static_cast<int>(completion_candidates_.size()); ++i) {
+        const bool selected = (i == completion_index_);
+        ImGui::Selectable(completion_candidates_[i].c_str(), selected);
+        if (selected)
+          ImGui::SetScrollHereY();
+      }
+    }
+    ImGui::End();
+  }
 }
 
 }  // namespace rex::ui

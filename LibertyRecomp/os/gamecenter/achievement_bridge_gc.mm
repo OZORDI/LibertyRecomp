@@ -1,168 +1,298 @@
-// achievement_bridge_gc.mm — Game Center achievement bridge (iOS + macOS)
-//
-// Objective-C++ so we can call GameKit APIs from a C++ translation unit.
-// The public interface is pure C (extern "C"-compatible) so callers don't
-// need to include any ObjC headers.
+// achievement_bridge_gc.mm - Game Center achievement bridge (iOS + macOS)
 //
 // Achievement ID convention (must match App Store Connect registration):
-//   "ach_NNN"     — NNN is the zero-padded Xbox achievement ID (001..065)
-//   "ach_platinum" — awarded automatically once all 65 are 100 % complete
-//
-// Authentication:
-//   GKLocalPlayer.localPlayer.authenticateHandler fires a UIViewController
-//   on iOS when login UI is required, and a completion block on macOS.
-//   We store the result and silently skip reporting if auth failed.
-//
-// Thread safety:
-//   GKAchievement reporting dispatches the SCE call to the main queue via
-//   dispatch_async, so it is safe to call LibertyGCOnXboxAchievementUnlocked
-//   from any thread (including the XAM worker thread).
+//   "ach_NNN"      - zero-padded Xbox achievement ID (001..065)
+//   "ach_platinum" - awarded once all 65 base + DLC achievements are complete
 
 #ifdef LIBERTY_RECOMP_GAMECENTER
 
 #include <rex/platform.h>
-#import <GameKit/GameKit.h>
 #import <Foundation/Foundation.h>
+#import <GameKit/GameKit.h>
+#if REX_PLATFORM_IOS
+#import <UIKit/UIKit.h>
+#else
+#import <AppKit/AppKit.h>
+#endif
 #include "achievement_bridge_gc.h"
 
-// ── constants ─────────────────────────────────────────────────────────────────
-
 static constexpr uint32_t kNonPlatinumCount = 65;
-static NSString* const kPlatinumIdentifier  = @"ach_platinum";
+static constexpr uint32_t kFirstAchievementId = 1;
+static NSString* const kPlatinumIdentifier = @"ach_platinum";
 
-// ── state ─────────────────────────────────────────────────────────────────────
+static BOOL s_gc_authenticated = NO;
 
-// Protected by dispatch_once (init) and only written from main queue.
-static BOOL  s_gcAuthenticated  = NO;
-static BOOL  s_initCalled       = NO;
+static NSMutableSet<NSString*>* PendingAchievementIdentifiers()
+{
+    static NSMutableSet<NSString*>* pending = [[NSMutableSet alloc] init];
+    return pending;
+}
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-// Build the Game Center identifier string for a given Xbox achievement ID.
 static NSString* GCIdentifierForXboxId(uint32_t xbox_id)
 {
     return [NSString stringWithFormat:@"ach_%03u", xbox_id];
 }
 
-// Submit a single GKAchievement at 100 % completion.
-// No-ops if not authenticated.  Must be called from main queue.
-static void SubmitAchievement(NSString* identifier)
+#if REX_PLATFORM_IOS
+static UIViewController* TopViewController(UIViewController* controller)
 {
-    if (!s_gcAuthenticated) return;
+    while (controller.presentedViewController) {
+        controller = controller.presentedViewController;
+    }
 
-    GKAchievement* ach = [[GKAchievement alloc] initWithIdentifier:identifier];
-    ach.percentComplete   = 100.0;
-    ach.showsCompletionBanner = YES;  // let GC show its own banner
+    if ([controller isKindOfClass:UINavigationController.class]) {
+        return TopViewController(((UINavigationController*)controller).visibleViewController);
+    }
 
-    [GKAchievement reportAchievements:@[ach]
-                withCompletionHandler:^(NSError* error) {
+    if ([controller isKindOfClass:UITabBarController.class]) {
+        return TopViewController(((UITabBarController*)controller).selectedViewController);
+    }
+
+    return controller;
+}
+
+static UIViewController* ActiveRootViewController()
+{
+    UIApplication* app = UIApplication.sharedApplication;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene* scene in app.connectedScenes) {
+            if (scene.activationState != UISceneActivationStateForegroundActive ||
+                ![scene isKindOfClass:UIWindowScene.class]) {
+                continue;
+            }
+
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            for (UIWindow* window in windowScene.windows) {
+                if (window.isKeyWindow && window.rootViewController) {
+                    return TopViewController(window.rootViewController);
+                }
+            }
+
+            for (UIWindow* window in windowScene.windows) {
+                if (!window.hidden && window.rootViewController) {
+                    return TopViewController(window.rootViewController);
+                }
+            }
+        }
+    }
+
+    return nil;
+}
+
+static BOOL PresentAuthViewControllerNow(UIViewController* viewController)
+{
+    UIViewController* presenter = ActiveRootViewController();
+    if (!presenter) {
+        return NO;
+    }
+
+    [presenter presentViewController:viewController animated:YES completion:nil];
+    return YES;
+}
+
+static void PresentAuthViewController(UIViewController* viewController, uint32_t attempt)
+{
+    static constexpr uint32_t kMaxAttempts = 8;
+
+    if (PresentAuthViewControllerNow(viewController)) {
+        return;
+    }
+
+    if (attempt >= kMaxAttempts) {
+        NSLog(@"[LibertyRecomp] Game Center auth UI could not be presented.");
+        return;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        PresentAuthViewController(viewController, attempt + 1);
+    });
+}
+#else
+static NSViewController* ActiveMacPresenter()
+{
+    NSApplication* app = NSApplication.sharedApplication;
+    NSWindow* window = app.keyWindow ?: app.mainWindow;
+
+    if (!window) {
+        for (NSWindow* candidate in app.windows) {
+            if (candidate.isVisible) {
+                window = candidate;
+                break;
+            }
+        }
+    }
+
+    return window.contentViewController;
+}
+
+static BOOL PresentAuthViewControllerNow(NSViewController* viewController)
+{
+    NSViewController* presenter = ActiveMacPresenter();
+    if (!presenter) {
+        return NO;
+    }
+
+    [presenter presentViewControllerAsSheet:viewController];
+    return YES;
+}
+
+static void PresentAuthViewController(NSViewController* viewController, uint32_t attempt)
+{
+    static constexpr uint32_t kMaxAttempts = 8;
+
+    if (PresentAuthViewControllerNow(viewController)) {
+        return;
+    }
+
+    if (attempt >= kMaxAttempts) {
+        NSLog(@"[LibertyRecomp] Game Center auth UI could not be presented.");
+        return;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        PresentAuthViewController(viewController, attempt + 1);
+    });
+}
+#endif
+
+static void CheckAndGrantPlatinumIfComplete();
+
+static void ReportAchievementNow(NSString* identifier)
+{
+    GKAchievement* achievement = [[GKAchievement alloc] initWithIdentifier:identifier];
+    achievement.percentComplete = 100.0;
+    achievement.showsCompletionBanner = YES;
+
+    [GKAchievement reportAchievements:@[achievement]
+                 withCompletionHandler:^(NSError* error) {
         if (error) {
             NSLog(@"[LibertyRecomp] GC achievement report failed (%@): %@",
                   identifier, error.localizedDescription);
+            return;
+        }
+
+        if (![identifier isEqualToString:kPlatinumIdentifier]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                CheckAndGrantPlatinumIfComplete();
+            });
         }
     }];
 }
 
-// Query all 65 non-platinum achievements; returns YES if every one is complete.
-// Calls back on whatever queue GK uses internally, so the completion handler
-// does the platinum grant via dispatch_async(main_queue).
+static void SubmitAchievement(NSString* identifier)
+{
+    if (!s_gc_authenticated) {
+        [PendingAchievementIdentifiers() addObject:identifier];
+        return;
+    }
+
+    ReportAchievementNow(identifier);
+}
+
+static void FlushPendingAchievements()
+{
+    if (!s_gc_authenticated) {
+        return;
+    }
+
+    NSArray<NSString*>* pending = [PendingAchievementIdentifiers() allObjects];
+    [PendingAchievementIdentifiers() removeAllObjects];
+
+    for (NSString* identifier in pending) {
+        ReportAchievementNow(identifier);
+    }
+}
+
 static void CheckAndGrantPlatinumIfComplete()
 {
-    if (!s_gcAuthenticated) return;
+    if (!s_gc_authenticated) {
+        return;
+    }
 
     [GKAchievement loadAchievementsWithCompletionHandler:^(NSArray<GKAchievement*>* loaded,
                                                             NSError* error) {
-        if (error || !loaded) return;
+        if (error || !loaded) {
+            if (error) {
+                NSLog(@"[LibertyRecomp] GC achievement load failed: %@",
+                      error.localizedDescription);
+            }
+            return;
+        }
 
-        // Build a set of identifiers that are at 100 %
         NSMutableSet<NSString*>* complete = [NSMutableSet setWithCapacity:loaded.count];
         for (GKAchievement* ach in loaded) {
-            if (ach.percentComplete >= 100.0)
+            if (ach.percentComplete >= 100.0) {
                 [complete addObject:ach.identifier];
+            }
         }
 
-        // Check every non-platinum achievement
-        for (uint32_t i = 1; i <= kNonPlatinumCount; ++i) {
+        for (uint32_t i = kFirstAchievementId; i <= kNonPlatinumCount; ++i) {
             NSString* ident = GCIdentifierForXboxId(i);
-            if (![complete containsObject:ident])
-                return;  // at least one not done — no platinum yet
+            if (![complete containsObject:ident]) {
+                return;
+            }
         }
 
-        // All done — grant the platinum from the main queue
         dispatch_async(dispatch_get_main_queue(), ^{
-            SubmitAchievement(kPlatinumIdentifier);
+            ReportAchievementNow(kPlatinumIdentifier);
         });
     }];
 }
 
-// ── public API ────────────────────────────────────────────────────────────────
-
 void LibertyGCInit()
 {
-    // dispatch_once ensures we only install the authenticateHandler once.
     static dispatch_once_t token;
     dispatch_once(&token, ^{
-        s_initCalled = YES;
-
+        dispatch_async(dispatch_get_main_queue(), ^{
 #if REX_PLATFORM_IOS
-        // On iOS, GK may present a sign-in view controller on first launch.
-        // We store it in the window's rootViewController when available.
-        GKLocalPlayer.localPlayer.authenticateHandler =
-            ^(UIViewController* viewController, NSError* error) {
+            GKLocalPlayer.localPlayer.authenticateHandler =
+                ^(UIViewController* viewController, NSError* error) {
                 if (viewController) {
-                    // Present the sign-in UI over the root controller.
-                    UIWindow* win = [UIApplication sharedApplication].keyWindow;
-                    [win.rootViewController presentViewController:viewController
-                                                         animated:YES
-                                                       completion:nil];
+                    PresentAuthViewController(viewController, 0);
                 } else if (GKLocalPlayer.localPlayer.isAuthenticated) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        s_gcAuthenticated = YES;
-                        NSLog(@"[LibertyRecomp] Game Center authenticated: %@",
-                              GKLocalPlayer.localPlayer.displayName);
-                    });
+                    s_gc_authenticated = YES;
+                    NSLog(@"[LibertyRecomp] Game Center authenticated: %@",
+                          GKLocalPlayer.localPlayer.displayName);
+                    FlushPendingAchievements();
+                    CheckAndGrantPlatinumIfComplete();
                 } else {
+                    s_gc_authenticated = NO;
                     NSLog(@"[LibertyRecomp] Game Center auth failed: %@",
                           error ? error.localizedDescription : @"(unknown)");
                 }
             };
 #else
-        // macOS: no view controller; block receives nil + auth result directly.
-        GKLocalPlayer.localPlayer.authenticateHandler =
-            ^(NSViewController* viewController, NSError* error) {
+            GKLocalPlayer.localPlayer.authenticateHandler =
+                ^(NSViewController* viewController, NSError* error) {
                 if (viewController) {
-                    // Rare on macOS but handle it: present as sheet.
-                    NSApplication* app = NSApplication.sharedApplication;
-                    if (app.keyWindow) {
-                        [app.keyWindow.windowController presentViewControllerAsSheet:viewController];
-                    }
+                    PresentAuthViewController(viewController, 0);
                 } else if (GKLocalPlayer.localPlayer.isAuthenticated) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        s_gcAuthenticated = YES;
-                        NSLog(@"[LibertyRecomp] Game Center authenticated: %@",
-                              GKLocalPlayer.localPlayer.displayName);
-                    });
+                    s_gc_authenticated = YES;
+                    NSLog(@"[LibertyRecomp] Game Center authenticated: %@",
+                          GKLocalPlayer.localPlayer.displayName);
+                    FlushPendingAchievements();
+                    CheckAndGrantPlatinumIfComplete();
                 } else {
+                    s_gc_authenticated = NO;
                     NSLog(@"[LibertyRecomp] Game Center auth failed: %@",
                           error ? error.localizedDescription : @"(unknown)");
                 }
             };
 #endif
+        });
     });
 }
 
 void LibertyGCOnXboxAchievementUnlocked(uint32_t xbox_id)
 {
-    if (xbox_id < 1 || xbox_id > kNonPlatinumCount)
+    if (xbox_id < kFirstAchievementId || xbox_id > kNonPlatinumCount) {
         return;
+    }
 
-    // All GK calls must be dispatched to the main queue.
+    LibertyGCInit();
     NSString* identifier = GCIdentifierForXboxId(xbox_id);
     dispatch_async(dispatch_get_main_queue(), ^{
         SubmitAchievement(identifier);
-        // After submitting the non-platinum, do the full scan to
-        // see if the platinum should now be granted.
-        CheckAndGrantPlatinumIfComplete();
     });
 }
 

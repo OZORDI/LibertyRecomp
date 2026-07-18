@@ -14,18 +14,6 @@
 // clang-format off
 
 //=============================================================================
-// Codegen (general)
-//=============================================================================
-
-REXCVAR_DEFINE_BOOL(force, false, "Codegen",
-                    "Generate output even if validation errors occur")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-
-REXCVAR_DEFINE_BOOL(enable_exception_handlers, false, "Codegen",
-                    "Enable generation of SEH exception handler code")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-
-//=============================================================================
 // Codegen/Output
 //=============================================================================
 

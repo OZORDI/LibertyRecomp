@@ -11,13 +11,11 @@
 
 #include <rex/exception_handler.h>
 
-#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS4 || REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
 
 #include <signal.h>
-#include <unistd.h>  // write(), STDERR_FILENO
 
 #include <cstdint>
-#include <cstdlib>   // _Exit
 #include <cstring>
 
 #include <rex/assert.h>
@@ -28,54 +26,6 @@
 #include <ucontext.h>
 
 namespace rex::arch {
-
-// --------------------------------------------------------------------------
-// Async-signal-safe helpers.
-//
-// Everything inside a SIGSEGV / SIGBUS / SIGILL handler must use only
-// functions from the POSIX.1-2017 async-signal-safe list. spdlog /
-// REXLOG_ERROR / std::string / fmt::format all take mutexes and call
-// malloc, so invoking them from the handler self-deadlocks if the faulting
-// thread happens to hold the spdlog sink mutex. Use write(2) with stack
-// buffers only.
-// --------------------------------------------------------------------------
-
-static inline void SigSafeWriteCStr(const char* s) {
-  if (!s) return;
-  size_t n = 0;
-  while (s[n]) ++n;
-  // Ignore short-write / EINTR; we're about to die anyway.
-  (void)::write(STDERR_FILENO, s, n);
-}
-
-// Append up to 16 hex digits (0x-prefixed) for a 64-bit value into a stack
-// buffer; returns the number of bytes written.
-static inline size_t SigSafeFormatHex(char* buf, size_t cap, uint64_t value) {
-  static const char kHex[] = "0123456789abcdef";
-  if (cap < 4) return 0;
-  size_t w = 0;
-  buf[w++] = '0';
-  buf[w++] = 'x';
-  // Find highest nibble that's non-zero (at least one digit).
-  int shift = 60;
-  while (shift > 0 && ((value >> shift) & 0xF) == 0) shift -= 4;
-  while (shift >= 0 && w < cap) {
-    buf[w++] = kHex[(value >> shift) & 0xF];
-    shift -= 4;
-  }
-  return w;
-}
-
-// Write a labelled hex value to stderr: "<label>=0x<hex>\n".
-static inline void SigSafeWriteLabelHex(const char* label, uint64_t value) {
-  char buf[96];
-  size_t w = 0;
-  for (const char* p = label; *p && w < sizeof(buf) - 1; ++p) buf[w++] = *p;
-  if (w < sizeof(buf) - 1) buf[w++] = '=';
-  w += SigSafeFormatHex(buf + w, sizeof(buf) - w - 1, value);
-  if (w < sizeof(buf)) buf[w++] = '\n';
-  (void)::write(STDERR_FILENO, buf, w);
-}
 
 bool signal_handlers_installed_ = false;
 struct sigaction original_sigill_handler_;
@@ -142,8 +92,7 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
         break;
     }
   }
-  // NOTE: assert_not_null() would funnel through spdlog here, which is not
-  // async-signal-safe. Silently skip NEON state if unavailable (rare).
+  assert_not_null(mcontext_fpsimd);
   if (mcontext_fpsimd) {
     thread_context.fpsr = mcontext_fpsimd->fpsr;
     thread_context.fpcr = mcontext_fpsimd->fpcr;
@@ -189,10 +138,10 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
                                            ? Exception::AccessViolationOperation::kWrite
                                            : Exception::AccessViolationOperation::kRead;
         } else {
-          // Signal-safe: can't call assert_always here (spdlog/abort path).
-          SigSafeWriteCStr(
-              "[rex] SIGSEGV: no ESR + unknown faulting instruction at pc=");
-          SigSafeWriteLabelHex("pc", static_cast<uint64_t>(mcontext.pc));
+          assert_always(
+              "No ESR in the exception thread context, or it's not a Data "
+              "Abort, and the faulting instruction is not a known load, "
+              "prefetch or store instruction");
           access_violation_operation = Exception::AccessViolationOperation::kUnknown;
         }
       }
@@ -204,12 +153,7 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
                                    access_violation_operation);
     } break;
     default:
-      // Signal-safe: can't funnel through spdlog. Dump what we can and die
-      // with a distinct exit code so crash harnesses can distinguish this
-      // path from a regular access violation.
-      SigSafeWriteCStr("[rex] unhandled signal in exception handler sig=");
-      SigSafeWriteLabelHex("sig", static_cast<uint64_t>(signal_number));
-      _Exit(128 + signal_number);
+      assert_unhandled_case(signal_number);
   }
 
   for (size_t i = 0; i < rex::countof(handlers_) && handlers_[i].first; ++i) {
@@ -252,13 +196,9 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
         uint32_t modified_v_registers_remaining = ex.modified_v_registers();
         while (rex::bit_scan_forward(modified_v_registers_remaining, &modified_register_index)) {
           modified_v_registers_remaining &= ~(UINT32_C(1) << modified_register_index);
-          // NOTE: write V-register index into NEON bank only. Previously this
-          // loop ALSO wrote `mcontext.regs[idx] = thread_context.x[idx]` — a
-          // V-register index used as a GPR index, corrupting x0..x31 on
-          // resume. That stray write was removed (GPRs already handled in the
-          // dedicated GPR loop above).
           std::memcpy(&mcontext_fpsimd->vregs[modified_register_index],
                       &thread_context.v[modified_register_index], sizeof(vec128_t));
+          mcontext.regs[modified_register_index] = thread_context.x[modified_register_index];
         }
       }
 #endif  // REX_ARCH
@@ -280,15 +220,6 @@ void ExceptionHandler::Install(Handler fn, void* data) {
     }
     if (sigaction(SIGSEGV, &signal_handler, &original_sigsegv_handler_) != 0) {
       assert_always("Failed to install new SIGSEGV handler");
-    }
-    // Ignore SIGPIPE process-wide so that writes to closed sockets (multiplayer,
-    // remote logging, tracy profiler, etc.) return EPIPE instead of killing the
-    // process. Matches the empty swallower RPCS3 installs in Utilities/Thread.cpp.
-    struct sigaction sigpipe_action;
-    std::memset(&sigpipe_action, 0, sizeof(sigpipe_action));
-    sigpipe_action.sa_handler = SIG_IGN;
-    if (sigaction(SIGPIPE, &sigpipe_action, nullptr) != 0) {
-      assert_always("Failed to install new SIGPIPE handler");
     }
     signal_handlers_installed_ = true;
   }
@@ -337,4 +268,4 @@ void ExceptionHandler::Uninstall(Handler fn, void* data) {
 
 }  // namespace rex::arch
 
-#endif  // REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS4 || REX_PLATFORM_IOS || REX_PLATFORM_ANDROID
+#endif  // REX_PLATFORM_LINUX || REX_PLATFORM_MAC

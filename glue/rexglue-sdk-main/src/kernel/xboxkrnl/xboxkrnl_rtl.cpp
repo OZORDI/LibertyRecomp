@@ -338,39 +338,6 @@ struct X_RTL_CRITICAL_SECTION {
 #pragma pack(pop)
 static_assert_size(X_RTL_CRITICAL_SECTION, 28);
 
-// Ported from XeniOS xboxkrnl_rtl.cc @ 551-577.
-// If RtlLeaveCriticalSection finds an owner-mismatch or non-positive recursion
-// count, the release build would otherwise proceed into the unlock path with
-// corrupt state and permanently wedge the cs. Instead, log and normalize state
-// so the next Enter can make progress. Matches Xenia/XeniOS behavior exactly.
-static void RecoverCriticalSection(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs,
-                                   uint32_t current_thread,
-                                   const char* reason) {
-  const int32_t lock_count = cs->lock_count;
-  const int32_t recursion_count = cs->recursion_count;
-  const uint32_t owning_thread = cs->owning_thread;
-
-  REXKRNL_WARN(
-      "Recovering critical section {}: cs=0x{:08X} owner=0x{:08X} "
-      "current=0x{:08X} lock_count={} recursion_count={}",
-      reason, cs.guest_address(), owning_thread, current_thread, lock_count,
-      recursion_count);
-
-  int32_t release_depth = recursion_count > 0 ? recursion_count : 1;
-  int32_t normalized_lock_count = lock_count - release_depth;
-  if (normalized_lock_count < -1) {
-    normalized_lock_count = -1;
-  }
-
-  cs->owning_thread = 0;
-  cs->recursion_count = 0;
-  cs->lock_count = normalized_lock_count;
-
-  if (normalized_lock_count != -1) {
-    xeKeSetEvent(reinterpret_cast<X_KEVENT*>(cs.host_address()), 1, 0);
-  }
-}
-
 void xeRtlInitializeCriticalSection(X_RTL_CRITICAL_SECTION* cs, uint32_t cs_ptr) {
   cs->header.type = 1;      // EventSynchronizationObject (auto reset)
   cs->header.absolute = 0;  // spin count div 256
@@ -410,10 +377,6 @@ u32 RtlInitializeCriticalSectionAndSpinCount_entry(ppc_ptr_t<X_RTL_CRITICAL_SECT
 }
 
 void RtlEnterCriticalSection_entry(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs) {
-  if (!cs.guest_address()) {
-    REXKRNL_ERROR("Null critical section in RtlEnterCriticalSection!");
-    return;
-  }
   uint32_t cur_thread = XThread::GetCurrentThread()->guest_object();
   uint32_t spin_count = cs->header.absolute * 256;
 
@@ -439,26 +402,12 @@ void RtlEnterCriticalSection_entry(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs) {
     xeKeWaitForSingleObject(reinterpret_cast<void*>(cs.host_address()), 8, 0, 0, nullptr);
   }
 
-  // Steal the waited critical section. When the prior owner abandoned the cs
-  // (e.g. thread terminated without Leave), owning_thread stays non-zero; log
-  // and take ownership rather than asserting. Matches XeniOS behavior.
-  if (cs->owning_thread != 0) {
-    REXKRNL_WARN(
-        "RtlEnterCriticalSection: stealing waited critical section "
-        "cs=0x{:08X} previous_owner=0x{:08X} current=0x{:08X} lock_count={} "
-        "recursion_count={}",
-        cs.guest_address(), uint32_t(cs->owning_thread), cur_thread,
-        int32_t(cs->lock_count), int32_t(cs->recursion_count));
-  }
+  assert_true(cs->owning_thread == 0);
   cs->owning_thread = cur_thread;
   cs->recursion_count = 1;
 }
 
 u32 RtlTryEnterCriticalSection_entry(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs) {
-  if (!cs.guest_address()) {
-    REXKRNL_ERROR("Null critical section in RtlTryEnterCriticalSection!");
-    return 1;  // pretend we got the critical section.
-  }
   uint32_t thread = XThread::GetCurrentThread()->guest_object();
 
   if (rex::thread::atomic_cas(-1, 0, &cs->lock_count)) {
@@ -478,22 +427,13 @@ u32 RtlTryEnterCriticalSection_entry(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs) {
 }
 
 void RtlLeaveCriticalSection_entry(ppc_ptr_t<X_RTL_CRITICAL_SECTION> cs) {
-  if (!cs.guest_address()) {
-    REXKRNL_ERROR("Null critical section in RtlLeaveCriticalSection!");
-    return;
-  }
-  uint32_t current_thread = XThread::GetCurrentThread()->guest_object();
-  if (cs->owning_thread != current_thread) {
-    RecoverCriticalSection(cs, current_thread, "owner-mismatch");
-    return;
-  }
+  assert_true(cs->owning_thread == XThread::GetCurrentThread()->guest_object());
 
   // Drop recursion count - if it isn't zero we still have the lock.
-  if (cs->recursion_count <= 0) {
-    RecoverCriticalSection(cs, current_thread, "invalid-recursion");
-    return;
-  }
+  assert_true(cs->recursion_count > 0);
   if (--cs->recursion_count != 0) {
+    assert_true(cs->recursion_count >= 0);
+
     rex::thread::atomic_dec(&cs->lock_count);
     return;
   }

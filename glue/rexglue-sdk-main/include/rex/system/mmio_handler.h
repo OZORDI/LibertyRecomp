@@ -57,7 +57,7 @@ class MMIOHandler {
                                               const void* host_to_guest_virtual_context,
                                               AccessViolationCallback access_violation_callback,
                                               void* access_violation_callback_context);
-  static MMIOHandler* global_handler() { return global_handler_; }
+  static MMIOHandler* global_handler();
 
   bool RegisterRange(uint32_t virtual_address, uint32_t mask, uint32_t size, void* context,
                      MMIOReadCallback read_callback, MMIOWriteCallback write_callback);
@@ -65,13 +65,6 @@ class MMIOHandler {
 
   bool CheckLoad(uint32_t virtual_address, uint32_t* out_value);
   bool CheckStore(uint32_t virtual_address, uint32_t value);
-
-  // Public fault-handling entry point for platforms that deliver faults
-  // outside of POSIX signals (e.g. Switch / libnx user exception handler).
-  // Returns true if the fault was handled (and resume_pc_out was written),
-  // false to propagate to the default abort path.
-  static bool HandleFault(uintptr_t fault_va, uintptr_t fault_pc, bool is_write,
-                          arch::HostThreadContext* thread_context, uintptr_t* resume_pc_out);
 
  protected:
   MMIOHandler(uint8_t* virtual_membase, uint8_t* physical_membase, uint8_t* membase_end,

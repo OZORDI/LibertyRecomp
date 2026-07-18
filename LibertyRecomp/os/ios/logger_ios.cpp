@@ -1,5 +1,7 @@
 // iOS logger — custom spdlog sink routing through os_log (unified logging).
-#ifdef LIBERTY_RECOMP_IOS
+#include <rex/platform.h>
+
+#if REX_PLATFORM_IOS
 #include <os/logger.h>
 
 #include <cstdio>
@@ -64,4 +66,4 @@ void os::logger::PlatformInitSinks()
     rex::logging::AddSink(sink);
 }
 
-#endif // LIBERTY_RECOMP_IOS
+#endif // REX_PLATFORM_IOS

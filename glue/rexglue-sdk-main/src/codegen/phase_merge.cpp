@@ -28,7 +28,7 @@ namespace {
 // Merge to resolve jumps then seal functions
 //=============================================================================
 void mergeAndSeal(CodegenContext& ctx) {
-  REXCODEGEN_INFO("Analyze: resolving jumps and sealing functions...");
+  REXCODEGEN_TRACE("Analyze: resolving jumps and sealing functions...");
 
   auto& graph = ctx.graph;
   auto& binary = ctx.binary();
@@ -71,11 +71,11 @@ void mergeAndSeal(CodegenContext& ctx) {
   size_t totalSealed = graph.sealAllReady();
   size_t stillPending = graph.pendingCount();
 
-  REXCODEGEN_INFO("Analyze: {} iterations, resolved={}, sealed={}/{}", iteration, totalResolved,
-                  totalSealed, graph.functionCount());
+  REXCODEGEN_TRACE("Analyze: {} iterations, resolved={}, sealed={}/{}", iteration, totalResolved,
+                   totalSealed, graph.functionCount());
 
   if (stillPending > 0) {
-    REXCODEGEN_WARN("Analyze: {} functions still PENDING with unresolved jumps", stillPending);
+    REXCODEGEN_DEBUG("Analyze: {} functions still PENDING with unresolved jumps", stillPending);
   }
 }
 
@@ -83,7 +83,8 @@ void mergeAndSeal(CodegenContext& ctx) {
 
 namespace phases {
 
-VoidResult Merge(CodegenContext& ctx) {
+VoidResult Merge(CodegenContext& ctx, ProgressReporter* reporter) {
+  (void)reporter;
   mergeAndSeal(ctx);
   return Ok();
 }

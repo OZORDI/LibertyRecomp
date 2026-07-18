@@ -9,13 +9,19 @@
  *              See LICENSE file in the project root for full license text.
  */
 
+#if defined(__APPLE__) && !defined(_XOPEN_SOURCE)
+// Darwin hides the deprecated ucontext API unless a POSIX/XSI feature level
+// is requested before <ucontext.h> is included. fiber.h includes ucontext.h,
+// so the feature macro must be set in this translation unit first.
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <rex/platform.h>
-#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
 
 #include <rex/thread/fiber.h>
 
 #include <cassert>
-#include <ucontext.h>
 
 namespace rex::thread {
 
@@ -75,4 +81,4 @@ void Fiber::Destroy() {
 
 }  // namespace rex::thread
 
-#endif  // REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#endif  // REX_PLATFORM_LINUX || REX_PLATFORM_MAC

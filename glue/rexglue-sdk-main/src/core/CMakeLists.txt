@@ -1,7 +1,7 @@
 # rexcore - Core utilities library
 # Foundation types, data structures, and threading primitives
 
-add_library(rexcore STATIC
+add_library(rexcore OBJECT
     arena.cpp
     bit_map.cpp
     bit_stream.cpp
@@ -11,13 +11,11 @@ add_library(rexcore STATIC
     exception_handler.cpp
     filesystem.cpp
     filesystem_wildcard.cpp
-    keyboard_dialog.cpp
     logging.cpp
     memory.cpp
     mutex.cpp
     ring_buffer.cpp
     sha256.cpp
-    string.cpp
     string_buffer.cpp
     threading.cpp
     timer_queue.cpp
@@ -39,133 +37,33 @@ if(WIN32)
         mapped_memory_win.cpp
         math_msvc.cpp
         memory_win.cpp
+        platform/console_win.cpp
+        platform/env_win.cpp
         seh_win.cpp
         socket_win.cpp
-        string_win.cpp
+        system_win.cpp
         threading_win.cpp
     )
-elseif(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # iOS: Darwin/AArch64, BSD signals. Shares POSIX surface with macOS but
-    # uses iOS-specific memory/fiber/net/logging/filesystem/dynlib files.
-    target_sources(rexcore PRIVATE
-        atomic_posix.cpp
-        clock_posix.cpp
-        dbg_posix.cpp
-        math_gcc.cpp
-        mapped_memory_posix.cpp
-        seh_posix.cpp
-        socket_posix.cpp
-        string_posix.cpp
-        threading_posix.cpp
-        exception_handler_posix.cpp
-    )
-    foreach(_ios_src
-        memory_ios.cpp
-        fiber_ios.cpp
-        net_ios.cpp
-        logging_ios.cpp
-        filesystem_ios.mm
-        dynlib_ios.cpp)
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_ios_src}")
-            target_sources(rexcore PRIVATE ${_ios_src})
-        endif()
-    endforeach()
+    target_compile_definitions(rexcore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 elseif(APPLE)
     target_sources(rexcore PRIVATE
         atomic_posix.cpp
         clock_posix.cpp
-        dbg_posix.cpp
+        dbg_mac.cpp
         dynlib_posix.cpp
         exception_handler_mac.cpp
-        filesystem_posix.cpp
-        fiber_mac.cpp
-        mapped_memory_posix.cpp
+        filesystem_mac.cpp
+        fiber_posix.cpp
+        mapped_memory_mac.cpp
         math_gcc.cpp
         memory_mac.cpp
+        platform/console_posix.cpp
+        platform/env_posix.cpp
         seh_posix.cpp
         socket_posix.cpp
-        string_posix.cpp
+        system_posix.cpp
         threading_mac.cpp
     )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # Android: bionic libc, POSIX signals, AArch64/ARMv7. Shares the POSIX
-    # sources but uses Android-specific memory/net/logging/filesystem.
-    target_sources(rexcore PRIVATE
-        atomic_posix.cpp
-        clock_posix.cpp
-        dbg_posix.cpp
-        dynlib_posix.cpp
-        exception_handler_posix.cpp
-        fiber_android.cpp
-        mapped_memory_posix.cpp
-        math_gcc.cpp
-        seh_posix.cpp
-        socket_posix.cpp
-        string_posix.cpp
-        threading_posix.cpp
-    )
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/memory_android.cpp")
-        target_sources(rexcore PRIVATE memory_android.cpp)
-    else()
-        target_sources(rexcore PRIVATE memory_posix.cpp)
-    endif()
-    foreach(_android_src
-        net_android.cpp
-        logging_android.cpp
-        filesystem_android.cpp)
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_android_src}")
-            target_sources(rexcore PRIVATE ${_android_src})
-        endif()
-    endforeach()
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    # Switch (libnx/newlib/AArch64): fork of POSIX sources using libnx kernel
-    # APIs for threading + setjmp/longjmp-based fibers. threading_posix.cpp
-    # and fiber_posix.cpp are NOT compiled on this target.
-    target_sources(rexcore PRIVATE
-        atomic_posix.cpp
-        clock_posix.cpp
-        dbg_posix.cpp
-        exception_handler_posix.cpp
-        filesystem_posix.cpp
-        fiber_switch.cpp
-        mapped_memory_posix.cpp
-        math_gcc.cpp
-        memory_switch.cpp
-        seh_posix.cpp
-        socket_posix.cpp
-        string_posix.cpp
-        threading_switch.cpp
-    )
-    foreach(_switch_src
-        dynlib_switch.cpp
-        exception_handler_switch.cpp
-        mmio_handler_switch.cpp)
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_switch_src}")
-            target_sources(rexcore PRIVATE ${_switch_src})
-        endif()
-    endforeach()
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    # PS4 (OpenOrbis / FreeBSD-like): fork of POSIX sources plus the local
-    # musl-compatible ucontext shim (libc ships headers but no impl).
-    # threading_posix.cpp and fiber_posix.cpp are NOT compiled on this target.
-    target_sources(rexcore PRIVATE
-        atomic_posix.cpp
-        clock_posix.cpp
-        dbg_posix.cpp
-        exception_handler_posix.cpp
-        filesystem_posix.cpp
-        fiber_ps4.cpp
-        ucontext_ps4.c
-        mapped_memory_posix.cpp
-        math_gcc.cpp
-        memory_ps4.cpp
-        seh_posix.cpp
-        socket_posix.cpp
-        string_posix.cpp
-        threading_ps4.cpp
-        logging_ps4.cpp
-    )
-    target_sources(rexcore PRIVATE dynlib_ps4.cpp)
 elseif(UNIX)
     target_sources(rexcore PRIVATE
         atomic_posix.cpp
@@ -178,39 +76,25 @@ elseif(UNIX)
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_posix.cpp
+        platform/console_posix.cpp
+        platform/env_posix.cpp
         seh_posix.cpp
         socket_posix.cpp
-        string_posix.cpp
+        system_posix.cpp
         threading_posix.cpp
     )
 endif()
 
-# Platform-specific networking (console targets)
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    target_sources(rexcore PRIVATE net_ps4.cpp)
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    target_sources(rexcore PRIVATE net_switch.cpp)
-endif()
-
-# Platform-specific keyboard dialog backends for XamShowKeyboardUI.
-# Each file is self-guarded by #if REX_PLATFORM_* so unused TUs compile out.
-if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "ps4")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/keyboard_dialog_ps4.cpp")
-        target_sources(rexcore PRIVATE keyboard_dialog_ps4.cpp)
-    endif()
-elseif(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "switch")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/keyboard_dialog_switch.cpp")
-        target_sources(rexcore PRIVATE keyboard_dialog_switch.cpp)
-    endif()
-elseif(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/keyboard_dialog_ios.mm")
-        target_sources(rexcore PRIVATE keyboard_dialog_ios.mm)
-    endif()
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/keyboard_dialog_android.cpp")
-        target_sources(rexcore PRIVATE keyboard_dialog_android.cpp)
-    endif()
-endif()
+# Xenos data-format layer (stateless; headers under include/rex/graphics/).
+# The GPU emulation consuming it lives in the rexgpu-xenos plugin.
+target_sources(rexcore PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/graphics/xenos.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/pipeline/texture/info.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/pipeline/texture/info_formats.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/pipeline/texture/extent.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/pipeline/texture/util.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/pipeline/texture/conversion.cpp
+)
 
 target_include_directories(rexcore PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -223,14 +107,10 @@ target_include_directories(rexcore PRIVATE
     ${PROJECT_SOURCE_DIR}/thirdparty/cli11/include
 )
 
-if(UNIX)
-    target_link_libraries(rexcore PRIVATE Threads::Threads)
-    if(CMAKE_DL_LIBS)
-        target_link_libraries(rexcore PRIVATE ${CMAKE_DL_LIBS})
-    endif()
-    if(NOT APPLE AND NOT ANDROID)
-        target_link_libraries(rexcore PRIVATE rt)
-    endif()
+if(APPLE)
+    target_link_libraries(rexcore PRIVATE pthread)
+elseif(UNIX)
+    target_link_libraries(rexcore PRIVATE pthread rt dl)
 endif()
 
 target_link_libraries(rexcore
@@ -242,7 +122,15 @@ target_link_libraries(rexcore
     PRIVATE
         disruptorplus
         utf8cpp
+        xxHash::xxhash
 )
+
+if(REXGLUE_USE_D3D12)
+    target_compile_definitions(rexcore PUBLIC REX_HAS_D3D12=1)
+endif()
+if(REXGLUE_USE_VULKAN)
+    target_compile_definitions(rexcore PUBLIC REX_HAS_VULKAN=1)
+endif()
 
 if(REXGLUE_ENABLE_TRACY)
     target_link_libraries(rexcore PUBLIC TracyClient)

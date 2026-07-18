@@ -94,8 +94,8 @@ class FunctionNode {
 
   /// Emit C++ code for this function
   /// Requires: state() == kSealed
-  /// For imports: emits PPC_IMPORT macro
-  /// For normal functions: emits PPC_FUNC with blocks and instructions
+  /// For imports: emits REX_IMPORT macro
+  /// For normal functions: emits REX_FUNC with blocks and instructions
   std::string emitCpp(const EmitContext& ctx) const;
 
   //=========================================================================

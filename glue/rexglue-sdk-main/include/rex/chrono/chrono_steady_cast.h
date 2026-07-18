@@ -20,14 +20,15 @@
 // epoch as a steady clock in waits. In such cases, include this header and use
 // clock_cast<>().
 
-namespace rex::chrono {
+namespace std::chrono {
 
 // This conveniently works only for Host time domain because Guest needs
 // additional scaling. Convert XSystemClock to WinSystemClock first if
 // necessary.
 template <>
-struct ClockTimeConversion<WinSystemClock, std::chrono::steady_clock> {
-  using WinSystemClock_ = WinSystemClock;
+struct clock_time_conversion<::rex::chrono::WinSystemClock, std::chrono::steady_clock> {
+  // using NtSystemClock_ = ::rex::chrono::internal::NtSystemClock<domain_>;
+  using WinSystemClock_ = ::rex::chrono::WinSystemClock;
   using steady_clock_ = std::chrono::steady_clock;
 
   template <typename Duration>
@@ -52,8 +53,8 @@ struct ClockTimeConversion<WinSystemClock, std::chrono::steady_clock> {
 };
 
 template <>
-struct ClockTimeConversion<std::chrono::steady_clock, WinSystemClock> {
-  using WinSystemClock_ = WinSystemClock;
+struct clock_time_conversion<std::chrono::steady_clock, ::rex::chrono::WinSystemClock> {
+  using WinSystemClock_ = ::rex::chrono::WinSystemClock;
   using steady_clock_ = std::chrono::steady_clock;
 
   template <typename Duration>
@@ -69,4 +70,4 @@ struct ClockTimeConversion<std::chrono::steady_clock, WinSystemClock> {
   }
 };
 
-}  // namespace rex::chrono
+}  // namespace std::chrono

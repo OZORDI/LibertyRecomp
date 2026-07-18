@@ -23,7 +23,6 @@
 #include <rex/string.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/thread_state.h>
-#include <rex/kernel/xboxkrnl/threading.h>
 #include <rex/system/xfile.h>
 #include <rex/system/xtypes.h>
 
@@ -112,26 +111,7 @@ u32 ReadFile_entry(u32 hFile, mapped_void lpBuffer, u32 nNumberOfBytesToRead,
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
     ov[0] = 0;
     ov[1] = bytes_read;
-
-    // Signal OVERLAPPED.hEvent (Win32 layout: offset +16 = ov[4]).
-    // The kernel NtReadFile path does this via XEvent::Set(); the CRT wrapper
-    // was missing it, leaving callers that wait on hEvent permanently blocked.
-    uint32_t hEvent = static_cast<uint32_t>(ov[4]);
-    if (hEvent != 0) {
-      rex::kernel::xboxkrnl::xeNtSetEvent(hEvent, nullptr);
-    }
-  }
-
-  // Always write lpNumberOfBytesRead when provided, even if OVERLAPPED was
-  // supplied. rexcrt completes synchronously, so the byte count is known by
-  // the time we return. Per Microsoft Learn (ReadFile docs), synchronous
-  // handles MUST write lpNumberOfBytesRead even when OVERLAPPED is non-NULL.
-  // RAGE's fiDeviceLocal::Read (sub_8285F6E8) reads back from
-  // lpNumberOfBytesRead and never consults the OVERLAPPED struct — leaving
-  // it at 0 makes fiPackfile::Read report a size mismatch, the async worker
-  // bails out without releasing its completion semaphore, and the main
-  // thread hangs forever (e.g. F8000CD4 during font/texture load).
-  if (lpNumberOfBytesRead) {
+  } else if (lpNumberOfBytesRead) {
     *lpNumberOfBytesRead = bytes_read;
   }
 
@@ -165,16 +145,7 @@ u32 WriteFile_entry(u32 hFile, mapped_void lpBuffer, u32 nNumberOfBytesToWrite,
         static_cast<uint8_t*>(static_cast<void*>(lpOverlapped)));
     ov[0] = 0;
     ov[1] = bytes_written;
-
-    // Signal OVERLAPPED.hEvent — same fix as ReadFile above.
-    uint32_t hEvent = static_cast<uint32_t>(ov[4]);
-    if (hEvent != 0) {
-      rex::kernel::xboxkrnl::xeNtSetEvent(hEvent, nullptr);
-    }
-  }
-
-  // Always write lpNumberOfBytesWritten when provided — see ReadFile note.
-  if (lpNumberOfBytesWritten) {
+  } else if (lpNumberOfBytesWritten) {
     *lpNumberOfBytesWritten = bytes_written;
   }
 
@@ -295,7 +266,7 @@ static void FillFindData(mapped_void lpFindFileData, rex::filesystem::Entry* ent
 
   // 0x2C cFileName[260]
   const auto& name = entry->name();
-  std::strncpy(reinterpret_cast<char*>(buf + 0x2C), name.c_str(), 259);
+  rex::string::copy_truncating(reinterpret_cast<char*>(buf + 0x2C), name, 260);
   // 0x130 cAlternateFileName[14] already zero
 }
 
@@ -325,7 +296,7 @@ u32 FindFirstFileA_entry(mapped_string lpFileName, mapped_void lpFindFileData) {
   }
 
   FillFindData(lpFindFileData, entry);
-  REXKRNL_DEBUG("rexcrt_FindFirstFileA: '{}' first match='{}' handle={:#x}", path, entry->name(),
+  REXKRNL_TRACE("rexcrt_FindFirstFileA: '{}' first match='{}' handle={:#x}", path, entry->name(),
                 xfile->handle());
   return xfile->handle();
 }
@@ -355,8 +326,28 @@ u32 CreateDirectoryA_entry(mapped_string lpPathName, mapped_void lpSecurityAttri
 }
 
 u32 MoveFileA_entry(mapped_string lpExistingFileName, mapped_string lpNewFileName) {
-  REXKRNL_WARN("rexcrt_MoveFileA: STUB '{}' -> '{}'", static_cast<const char*>(lpExistingFileName),
-               static_cast<const char*>(lpNewFileName));
+  const char* src = static_cast<const char*>(lpExistingFileName);
+  const char* dst = static_cast<const char*>(lpNewFileName);
+
+  auto* fs = REX_KERNEL_FS();
+  auto* src_entry = fs->ResolvePath(src);
+  if (!src_entry) {
+    REXKRNL_DEBUG("rexcrt_MoveFileA: source not found '{}'", src);
+    return 0;
+  }
+  // Win32 MoveFileA fails if the destination already exists; callers wanting
+  // overwrite semantics use MoveFileExA with MOVEFILE_REPLACE_EXISTING.
+  if (fs->ResolvePath(dst)) {
+    REXKRNL_DEBUG("rexcrt_MoveFileA: destination exists '{}'", dst);
+    return 0;
+  }
+
+  X_STATUS rename_status = src_entry->Rename(rex::to_path(dst));
+  if (rename_status != X_STATUS_SUCCESS) {
+    REXKRNL_DEBUG("rexcrt_MoveFileA: rename failed '{}' -> '{}': {:#x}", src, dst, rename_status);
+    return 0;
+  }
+  REXKRNL_TRACE("rexcrt_MoveFileA: '{}' -> '{}'", src, dst);
   return 1;
 }
 
@@ -373,7 +364,7 @@ u32 GetFileAttributesA_entry(mapped_string lpFileName) {
     REXKRNL_DEBUG("rexcrt_GetFileAttributesA: not found '{}'", path);
     return kInvalidHandleValue;  // INVALID_FILE_ATTRIBUTES
   }
-  REXKRNL_DEBUG("rexcrt_GetFileAttributesA: '{}' -> attrs={:#x}", path, entry->attributes());
+  REXKRNL_TRACE("rexcrt_GetFileAttributesA: '{}' -> attrs={:#x}", path, entry->attributes());
   return entry->attributes();
 }
 
@@ -518,7 +509,7 @@ u32 CopyFileA_entry(mapped_string lpExistingFileName, mapped_string lpNewFileNam
 
   dst_file->Destroy();
   src_file->Destroy();
-  REXKRNL_DEBUG("rexcrt_CopyFileA: '{}' -> '{}' {}", src, dst, ok ? "OK" : "FAILED");
+  REXKRNL_TRACE("rexcrt_CopyFileA: '{}' -> '{}' {}", src, dst, ok ? "OK" : "FAILED");
   return ok ? 1u : 0u;
 }
 
@@ -573,7 +564,7 @@ u32 GetDiskFreeSpaceExA_entry(mapped_string lpDirectoryName,
     out[1] = static_cast<uint32_t>(free_bytes >> 32);
   }
 
-  REXKRNL_DEBUG("rexcrt_GetDiskFreeSpaceExA: '{}' total={}MB free={}MB", path,
+  REXKRNL_TRACE("rexcrt_GetDiskFreeSpaceExA: '{}' total={}MB free={}MB", path,
                 total_bytes / (1024 * 1024), free_bytes / (1024 * 1024));
   return 1;
 }

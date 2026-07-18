@@ -19,6 +19,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+#include <rex/string.h>
 #include <rex/ui/vulkan/device.h>
 
 REXCVAR_DEFINE_BOOL(vulkan_require_fragment_stores_and_atomics, true, "UI/Vulkan",
@@ -29,18 +30,13 @@ REXCVAR_DEFINE_BOOL(vulkan_require_vertex_pipeline_stores_and_atomics, true, "UI
                     "Deprecated and ignored for parity; vertexPipelineStoresAndAtomics is always "
                     "required for Vulkan GPU emulation")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-#if REX_PLATFORM_MAC
-constexpr bool kVulkanRequireGeometryShaderDefault = false;
-#else
-constexpr bool kVulkanRequireGeometryShaderDefault = true;
-#endif
-
-REXCVAR_DEFINE_BOOL(vulkan_require_geometry_shader, kVulkanRequireGeometryShaderDefault,
-                    "UI/Vulkan",
+// Apple Silicon / MoltenVK does not expose geometryShader or fillModeNonSolid;
+// default both to false on macOS so the device can still be selected.
+REXCVAR_DEFINE_BOOL(vulkan_require_geometry_shader, !REX_PLATFORM_MAC, "UI/Vulkan",
                     "Require geometryShader support for Vulkan GPU emulation (disable to allow "
                     "fallback primitive emulation paths)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-REXCVAR_DEFINE_BOOL(vulkan_require_fill_mode_non_solid, true, "UI/Vulkan",
+REXCVAR_DEFINE_BOOL(vulkan_require_fill_mode_non_solid, !REX_PLATFORM_MAC, "UI/Vulkan",
                     "Require fillModeNonSolid support for Vulkan GPU emulation (disable to "
                     "allow fallback to solid fill for line/point polygon modes)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -524,7 +520,8 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   device->properties_.driverVersion = properties.driverVersion;
   device->properties_.vendorID = properties.vendorID;
   device->properties_.deviceID = properties.deviceID;
-  std::strcpy(device->properties_.deviceName, properties.deviceName);
+  rex::string::copy_truncating(device->properties_.deviceName, properties.deviceName,
+                               sizeof(device->properties_.deviceName));
 
   REXLOG_INFO(
       "Vulkan device '{}': API {}.{}.{}, vendor 0x{:04X}, device 0x{:04X}, "
@@ -630,7 +627,12 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   XE_UI_VULKAN_LIMIT(nonCoherentAtomSize)
 
   if (with_gpu_emulation) {
-    XE_UI_VULKAN_FEATURE(robustBufferAccess)
+    if (device->properties_.driverID != VK_DRIVER_ID_MOLTENVK) {
+      XE_UI_VULKAN_FEATURE(robustBufferAccess)
+    } else {
+      device->properties_.robustBufferAccess = false;
+      REXLOG_INFO("* robustBufferAccess omitted because MoltenVK cannot implement it on Metal");
+    }
     XE_UI_VULKAN_FEATURE(fullDrawIndexUint32)
     XE_UI_VULKAN_FEATURE(independentBlend)
     XE_UI_VULKAN_FEATURE(geometryShader)

@@ -2,44 +2,54 @@
  * @file        rexglue/commands/init_command.h
  * @brief       Project initialization command interface
  *
- * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
- *              All rights reserved.
- *
+ * @copyright   Copyright (c) 2026 Tom Clay
  * @license     BSD 3-Clause License
- *              See LICENSE file in the project root for full license text.
  */
 
 #pragma once
 
 #include "../cli_utils.h"
 
+#include <cstdint>
 #include <string>
 
 #include <rex/result.h>
+
+namespace CLI {
+class App;
+}
 
 namespace rexglue::cli {
 
 using rex::Result;
 
-/**
- * Options for the init command
- */
 struct InitOptions {
-  std::string app_name;      // Project name (required)
-  std::string app_root;      // Project root directory (required)
-  std::string app_desc;      // Optional project description
-  std::string app_author;    // Optional author name
-  std::string template_dir;  ///< Optional custom template directory
-  bool sdk_example = false;  // If true, omit vcpkg.json (child of rexglue)
-  bool force = false;        // Overwrite existing directory contents
+  std::string project_name;
+  std::string xex_path;
+  std::string game_root;
+  std::string project_root;
+  bool scan_dlls = false;
+  std::string template_dir;
+  bool force = false;
 };
 
-/**
- * Initialize a new rexglue project
- * @param opts Init options
- * @param ctx CLI context
- * @return Success or error
- */
+struct InitModuleOptions {
+  std::string app_root;
+  std::string xex_path;
+  std::string guest_path;
+};
+
+struct InitAchievementsOptions {
+  std::string xex_path;
+  std::string output_dir;
+  // XLanguage ID to extract strings for; defaults to English (1) when unset.
+  uint32_t language = 1;
+};
+
 Result<void> InitProject(const InitOptions& opts, const CliContext& ctx);
+Result<void> InitModule(const InitModuleOptions& opts, const CliContext& ctx);
+Result<void> InitAchievements(const InitAchievementsOptions& opts, const CliContext& ctx);
+
+void RegisterInit(CLI::App& parent, const CliContext& ctx, DeferredAction& pending);
 
 }  // namespace rexglue::cli
