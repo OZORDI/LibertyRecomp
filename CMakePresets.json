@@ -148,6 +148,62 @@
             }
         },
         {
+            "name": "linux-base-arm64",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "installDir": "${sourceDir}/out/install/${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": {
+                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                    "type": "FILEPATH"
+                },
+                "VCPKG_TARGET_TRIPLET": {
+                    "value": "arm64-linux",
+                    "type": "STRING"
+                },
+                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchains/linux-clang.cmake"
+            },
+            "environment": {
+                "VCPKG_ROOT": "${sourceDir}/thirdparty/vcpkg"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "vendor": {
+                "microsoft.com/VisualStudioRemoteSettings/CMake/2.0": {
+                    "remoteSourceRootDir": "$env{HOME}/.vs/$ms{projectDirName}"
+                }
+            }
+        },
+        {
+            "name": "linux-arm64-debug",
+            "displayName": "Linux-ARM64-Debug",
+            "inherits": "linux-base-arm64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "linux-arm64-relwithdebinfo",
+            "displayName": "Linux-ARM64-RelWithDebInfo",
+            "inherits": "linux-base-arm64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "linux-arm64-release",
+            "displayName": "Linux-ARM64-Release",
+            "inherits": "linux-base-arm64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true
+            }
+        },
+        {
             "name": "macos-base",
             "hidden": true,
             "generator": "Ninja",
