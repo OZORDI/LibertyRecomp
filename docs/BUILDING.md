@@ -9,7 +9,7 @@ Liberty Recompiled is an unofficial PC port of Grand Theft Auto IV for Xbox 360,
 | Windows | x64 | Supported | `x64-Clang-Release` |
 | Windows | ARM64 | Supported | `arm64-Clang-Release` |
 | Linux | x64 | Supported | `linux-release` |
-| Linux | ARM64 | Supported | `linux-release` |
+| Linux | ARM64 | Supported | `linux-arm64-release` |
 | macOS | ARM64 (Apple Silicon) | Supported | `macos-release` |
 | macOS | x64 (Intel) | Supported | `macos-release` |
 | iOS | ARM64 | Experimental | `ios-release` |
