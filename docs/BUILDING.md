@@ -131,7 +131,7 @@ cmake . --preset linux-release
 ```
 
 > [!NOTE]
-> The available presets are `linux-debug`, `linux-relwithdebinfo` and `linux-release`.
+> The available presets are `linux-debug`, `linux-relwithdebinfo` and `linux-release`. Presets for ARM64 are `linux-arm64-debug`, `linux-arm64-relwithdebinfo`, `linux-arm64-release`.
 
 2. Build the recompiled game library, then the main application:
 ```bash
