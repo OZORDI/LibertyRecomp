@@ -62,7 +62,7 @@ For **ARM64 builds**, also install:
 ### Linux
 The following command will install the required dependencies on a distro that uses `apt` (such as Debian-based distros).
 ```bash
-sudo apt install autoconf automake libtool pkg-config curl cmake ninja-build clang clang-tools libgtk-3-dev
+sudo apt install autoconf automake libtool pkg-config curl cmake ninja-build clang clang-tools libgtk-3-dev lld libsdl2-dev libx11-xcb-dev
 ```
 The following command will install the required dependencies on a distro that uses `pacman` (such as Arch-based distros).
 ```bash
