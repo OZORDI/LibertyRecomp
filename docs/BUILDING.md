@@ -123,7 +123,7 @@ cmake --build .\out\build\arm64-Clang-Release --target LibertyRecomp
 > - **ARM64**: `arm64-Clang-Debug`, `arm64-Clang-RelWithDebInfo`, `arm64-Clang-Release`
 
 ### Linux (x64 and ARM64)
-The build process is the same for both x64 and ARM64 - the architecture is auto-detected.
+The build process is not the same for both x64 and ARM64 - the architecture is currently not auto-detected.
 
 1. Configure the project using CMake by navigating to the repository and running the following command.
 ```bash
@@ -137,6 +137,13 @@ cmake . --preset linux-release
 ```bash
 cmake --build ./out/build/linux-release --target LibertyRecompLib
 cmake --build ./out/build/linux-release --target LibertyRecomp
+```
+
+> [!NOTE]
+> For ARM64:
+```bash
+cmake --build ./out/build/linux-arm64-release --target LibertyRecompLib
+cmake --build ./out/build/linux-arm64-release --target LibertyRecomp
 ```
 
 3. Navigate to the directory that was specified as the output in the previous step and run the game.
