@@ -73,6 +73,37 @@ You can also find the equivalent packages for your preferred distro.
 > [!NOTE]
 > This list may not be comprehensive for your particular distro and you may be required to install additional packages, should an error occur during configuration.
 
+Additionally ARM64 needs DirectX Shader Compiler:
+Clone and initialise:
+```bash
+git clone https://github.com/microsoft/DirectXShaderCompiler
+cd DirectXShaderCompiler
+git submodule update --init --recursive
+```
+Configure for ARM64:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -C cmake/caches/PredefinedParams.cmake \
+  -DLLVM_TARGETS_TO_BUILD="" \
+  -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-linux-gnu \
+  -DLLVM_ENABLE_EH=ON \
+  -DLLVM_ENABLE_RTTI=ON
+```
+Compile:
+```bash
+cmake --build build -- -j$(nproc)
+```
+Copy the binaries into the project:
+```bash
+cd ~/DirectXShaderCompiler
+
+cp build/lib/libdxcompiler.so \
+~/LibertyRecomp_arm64/tools/XenosRecomp/thirdparty/dxc-bin/lib/arm64/
+
+cp build/bin/dxc \
+~/LibertyRecomp_arm64/tools/XenosRecomp/thirdparty/dxc-bin/bin/arm64/dxc-linux
+```
+
 ### macOS
 You will need to install the latest Xcode from Apple.
 
