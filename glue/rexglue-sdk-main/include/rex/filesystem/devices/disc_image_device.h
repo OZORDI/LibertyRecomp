@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 #include <rex/filesystem/device.h>
 #include <rex/memory/mapped_memory.h>
@@ -77,13 +78,16 @@ class DiscImageDevice : public Device {
     size_t root_sector;  // Offset (sector) of root.
     size_t root_offset;  // Offset (bytes) of root.
     size_t root_size;    // Size (bytes) of root.
+    size_t visited_entries;
   } ParseState;
 
   Error Verify(ParseState* state);
   bool VerifyMagic(ParseState* state, size_t offset);
   Error ReadAllEntries(ParseState* state, const uint8_t* root_buffer);
-  bool ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
-                 DiscImageEntry* parent);
+  bool ReadEntry(ParseState* state, const uint8_t* buffer, size_t buffer_size,
+                 uint16_t entry_ordinal, DiscImageEntry* parent,
+                 std::unordered_set<uint16_t>& active_ordinals,
+                 std::unordered_set<uint16_t>& visited_ordinals, size_t depth);
 };
 
 }  // namespace rex::filesystem

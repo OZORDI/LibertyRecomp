@@ -55,7 +55,7 @@ inline std::filesystem::path GetSavePath(bool checkForMods)
     if (!g_switchSaveMountPoint.empty())
         return std::filesystem::path(g_switchSaveMountPoint);
 #endif
-    return GetUserPath() / "save";
+    return GetUserPath() / "saves";
 }
 
 // Returned file name may not necessarily be

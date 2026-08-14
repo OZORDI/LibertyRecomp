@@ -4,6 +4,13 @@
 <p align="center">
   <a href="https://fusionfix.io/iv" target="_blank"><img width="600" src="https://raw.githubusercontent.com/ThirteenAG/GTAIV.EFLC.FusionFix/refs/heads/master/installer/ff_iv_outline.svg"></a>
   <br />
+  <a href="https://patreon.fusionfix.io/" target="_blank"><img width="100%" src="https://fusionlegacyinitiative.com/sponsors-progress/sponsors-progress-ffiv.svg"></a>
+  <br />
+  <a href="https://github.com/sponsors/ThirteenAG"><img src="https://thirteenag.github.io/img/buttons/github.svg" width="250"></a>
+  <a href="https://ko-fi.com/thirteenag"><img src="https://thirteenag.github.io/img/buttons/kofi.svg" width="250"></a>
+  <a href="https://paypal.me/SergeyP13"><img src="https://thirteenag.github.io/img/buttons/paypal.svg" width="250"></a>
+  <a href="https://www.patreon.com/ThirteenAG"><img src="https://thirteenag.github.io/img/buttons/patreon.svg" width="250"></a>
+  <a href="https://boosty.to/thirteenag"><img src="https://thirteenag.github.io/img/buttons/boosty.svg" width="250"></a><br><br>
   <a href="https://discord.gg/2ckFCS572Z" target="_blank"><img width="200" src="https://raw.githubusercontent.com/ThirteenAG/GTAIV.EFLC.FusionFix/refs/heads/master/installer/discord.svg"></a>
   &nbsp;&nbsp;&nbsp;
   <a href="https://t.me/fusionfix" target="_blank"><img width="200" src="https://raw.githubusercontent.com/ThirteenAG/GTAIV.EFLC.FusionFix/refs/heads/master/installer/telegram.svg"></a>
@@ -70,16 +77,6 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 > 
 > No support will be provided for illegal copies of the game. Purchase an official copy from either [Steam](https://store.steampowered.com/app/12210/) or [Rockstar Games Launcher](https://store.rockstargames.com/game/buy-grand-theft-auto-iv).
 
-## Donation links
-
-<div align="left">
-<a href="https://github.com/sponsors/ThirteenAG"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-5c5c5c?style=for-the-badge&logo=github&logoColor=white" width="250"></a><br>
-<a href="https://ko-fi.com/thirteenag"><img src="https://img.shields.io/badge/Support_on_Ko--Fi-ff5e5b?style=for-the-badge&logo=kofi&logoColor=white" width="250"></a><br>
-<a href="https://paypal.me/SergeyP13"><img src="https://img.shields.io/badge/Donate_with_PayPal-009cde?style=for-the-badge&logo=paypal&logoColor=white" width="250"></a><br>
-<a href="https://www.patreon.com/ThirteenAG"><img src="https://img.shields.io/badge/Support_on_Patreon-ff424d?style=for-the-badge&logo=patreon&logoColor=white" width="250"></a><br>
-<a href="https://boosty.to/thirteenag/donate"><img src="https://img.shields.io/badge/Support_on_Boosty-f15e2d?style=for-the-badge&logo=data:image/png;base64,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&logoColor=white" width="250"></a>
-</div>
-
 ## New menu options
 
 > FusionFix adds new options to the in-game menu that can be easily toggled and customized in real time. The config file allows for further customization by advanced users.
@@ -101,14 +98,15 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 
 #### Graphics
 
-- **FPS Limiter**, set a custom FPS limit, select from a list of predefined values, or turn it off
+- **FPS Limiter**, set a custom FPS limit, selects from a list of predefined values, or turn it off
 - **Anti-aliasing**, a toggle for FXAA or SMAA
 - **Volumetric Fog**, a more advanced fog shader that hides the edges of the world
 - **Sun Shafts**, a godrays implementation faithful to the original art style
 - **Extended Sunlight Reach**, allows sunlight to reach surfaces that it couldn't before, and increases cloud shading
 - **Tone Mapping**, prevents highlights from being blown out, more operators can be found [here](https://github.com/Parallellines0451/GTAIV.EFLC.FusionShaders/tree/main/assets/luts/samples)
+- **Ambient Occlusion**, a toggle for scalable ambient obscurance
 - **Shadow Filter**, toggles between sharp, soft, or contact hardening shadows
-- **Graphics API**, select between DirectX 9 and Vulkan (through [DXVK](https://github.com/doitsujin/dxvk/releases)), requires a restart 
+- **Graphics API**, selects between DirectX 9 and Vulkan (through [DXVK](https://github.com/doitsujin/dxvk/releases)), requires a restart 
 
 #### Game
 
@@ -126,17 +124,17 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 
 ![LightSyncRGB](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/assets/4904157/f925ad27-19ce-4dde-8801-0cec1578ade7)
 
-- **Seasonal Events**, enable added seasonal events at specific date
+- **Seasonal Events**, enables added seasonal events at specific date
 - **Check For Fusion Fix Updates**, checks if there's an update available on startup
 
 #### Audio
 
-- **Cutscene Audio Sync**, [see issue 691](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/issues/691), only enable this if you experience audio desynchronization in cutscenes
+- **Cutscene Audio Sync**, [see issue 691](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/issues/691), only enables this if you experience audio desynchronization in cutscenes
 - **Alternative Dialogues**, when enabled, forces the game to use alternative dialogues in some missions
 
 #### Controls
 
-- **Always Run**, allows to run by default, like in classic GTA games
+- **Always Run**, allows running by default and sprinting in interiors, tap Sprint button to toggle between walk and run
 - **Allow Movement When Zoomed**, allows movement when aiming with a sniper rifle
 - **Extended Sniper Controls**, allows aiming with sniper rifles without using the scope, press Jump button to toggle between third-person aim and the scope
 - **Camera Shake**, shake effect has been fixed to work consistently at any frame rate and can be disabled with this option
@@ -144,6 +142,12 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - **Centered On Foot Camera**, makes on foot camera centered, also for more options install the [original mod](https://github.com/gennariarmando/iv-centered-onfoot-cam)
 - **Turn Indicators**, allows the player to use vehicle turn indicators and hazard lights
 - **Always Show Bullet Traces**, shows bullet traces on every shot instead of randomly, like in the older games
+- **Disable Wardrobe Transition**, disables all screen fading in/out process when switching clothes in the wardrobe or buying clothes in the clothes stores
+- **Instant Taxi Stop**, makes the taxi stop immediately after skipping taxi ride journey
+- **Look-Around Sensitivity**, controls the look sensitivity when using controller
+- **Aiming Sensitivity**, controls the aim sensitivity when using controller
+- **Mouse Look Sensitivity**, controls the look sensitivity when using mouse
+- **Mouse Aim Sensitivity**, controls the aim sensitivity when using mouse
 - **Vehicle Camera Centering Delay**, controls the time until vehicle camera auto centering kicks in after moving it
 - **On Foot Camera Centering Delay**, controls the time until on foot camera auto centering kicks in after moving it
 - **Vehicle Camera Turn Speed**, controls the camera turn speed when driving a vehicle and turning
@@ -158,64 +162,127 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - [Fixed recoil behavior that was different when playing with keyboard/mouse and gamepad](https://github.com/GTAmodding/GTAIV-Issues-List/issues/6)
 - [Fixed forced "definition off" setting in cutscenes, now cutscenes will respect the menu setting](https://github.com/GTAmodding/GTAIV-Issues-List/issues/5)
 - [Fixed DLC car lights in TBoGT](https://github.com/GTAmodding/GTAIV-Issues-List/issues/3)
-- [Fixed various issues related to high frame rates](https://github.com/GTAmodding/GTAIV-Issues-List/issues/112)
-- [Added various frame limiting options to address fps related issues](https://github.com/GTAmodding/GTAIV-Issues-List/issues/1)
+- [Fixed various issues related to frame rate](https://github.com/GTAmodding/GTAIV-Issues-List/issues/112)
 - [Fixed aiming zoom in TBoGT](https://github.com/GTAmodding/GTAIV-Issues-List/issues/19)
-- [Fixed P90 being selectable in vehicles on keyboard](https://github.com/GTAmodding/GTAIV-Issues-List/issues/90)
-- [Fixed possible crash when manually dial a phone number using the keypad in TLAD](https://github.com/GTAmodding/GTAIV-Issues-List/issues/232)
+- [Fixed possible crash when manually dialing a phone number using the keypad in TLAD](https://github.com/GTAmodding/GTAIV-Issues-List/issues/232)
 - [Fixed possible crash in TLAD mission "Marta Full of Grace"](https://github.com/GTAmodding/GTAIV-Issues-List/issues/235)
 - [Added an option to fix a bug that only make taxis spawn](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/issues/85)
 - [Added a file overload solution that allows to replace game files without actually replacing them](https://github.com/ThirteenAG/Ultimate-ASI-Loader?tab=readme-ov-file#update-folder-overload-from-folder)
 - Added IMG Loader (from update folder)
-- Added GXT Overloading, allow game to load additional .gxt files to overwrite vanilla lines or add new lines, without changing vanilla gxt files
+- Added GXT Overloading, allow game to load additional gxt files to overwrite vanilla lines or add new lines, without editing vanilla gxt files
+- Added a solution to add entries to shader preload list dynamically
 - Increased corona limit to avoid heavy flickering of game's lights
 - Improved ultrawide support
 - Fixed improper VRAM detection on some setups
 - Fixed draw distance sliders not being applied on startup
-- Fixed mouse cursor scale, and mouse cursor is hidden when using controller now
+- Fixed mouse cursor scale, and hidden mouse cursor when using controller
 - Significantly sped up loading screens
 - Added various fixed weapon, movement and other animations
 - Added various fixed vehicle models
-- Fixed incorrect TBoGT bullet tracer position
+- Fixed Johnny and Luis' broken head models
+- Workaround for Johnny's broken facial animations in cutscene
 - Restored missing lamppost coronas and uncompressed corona texture from console
-- Fixed PC grass models stuck underground
 - Added new tree LOD atlas based on the PC trees
+- Fixed PC grass models stuck underground
 - Fixed jagged vehicle reflections
 - LOD lights now appear at the appropriate time and can render in cutscene, like on the console version
-- Added an option to allow various postfx effect to render behind transparent objects properly
-- Make night shadows resolution be adjusted by night shadows option
+- Added an option to allow depth related postfx effect to render behind transparent objects properly
+- Added an option to apply MSAA for various reflection maps
 - Restored higher shadow render distance from old versions of the game
 - Improved cascaded shadows performance, and added an option to double their resolution
 - Added dynamic shadows for trees
-- Reduced water flickering issue (need to disable **Extra Night Shadows**)
-- Added several cheat code to enable seasonal events, restore some unused player assets for Niko and Johnny, and spawn some vehicles in TLAD and TBoGT, they can be found hidden in relevant locations, or finding them [here](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/blob/master/source/cheats.ixx)
+- Restored night shadow for vehicles
+- Made night shadows resolution be adjusted by night shadows option
+- Reduced water flickering issue (only when **Extra Night Shadows** is off)
+- Added several cheat code to enable seasonal events, restore some unused player assets for Niko and Johnny, speed up game physics, and spawn some vehicles in TLAD and TBoGT, they can be found hidden in relevant locations, or finding them [here](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix/blob/master/source/cheats.ixx)
 
 ### Scripts
 
+#### General
+
+- [Fixed various script issues related to frame rate](https://github.com/GTAmodding/GTAIV-Issues-List/issues/294)
+- Fixed police computer softlock where one interface from it couldn't be closed with the keyboard
+- Fixed too sensitive arrow keys inputs in police computer virtual keyboard
+- Fixed possible issue where player gets stuck on buying food for several seconds in fast-food restaurants
+- Fixed possible crash when The Lost clubhouse memorial wall photos are full
+- Fixed busker script terminating too early in TBoGT, now Luis can give money to buskers normally
+- Fixed Armando and Henrique's respect not increasing after finishing hang out friend activity
+- Restored Star Junction Burger Shot blip in TBoGT
+- Improved various scripted camera mouse controls
+- Added a new phone option to save game anywhere
+
+#### Models
+
+- Fixed pool ball shadows flickering in Playboy apartment's pool table
 - Restored transparency on pool minigame
+- Restored console player transparency on air hockey minigame
 - Restored traffic cops in toll booths
 - Restored non-cop pedestrians in helicopters flying around city
-- Fixed Johnny's incorrect voice lines when exiting the gun shop after buying something (used to use voice lines from Higgin's Heli Tours)
+- Restored missing book from one kind of preacher in IV
+- Restored own unique soda can model for eCola vending machines instead of reusing Sprunk ones
+- Restored TLAD combat shotgun own unique prop model (prop_e1_pumpshot) instead of reusing IV model (cj_prop_pumpshot)
+- Restored the gun shop owner own unique model (M_M_GunNut_01) instead of using the strip club bouncer model (M_Y_bouncer_01)
+- Fixed two bought PC Perseus suits textures not matching prop models
+- Fixed Niko's hands being forced back to vanilla while switching clothes to Perseus suits
+- Fixed Esperanto being spawned instead of Roman's Taxi in Roman's cab depot
+
+#### Voice Lines
+
+- Fixed incorrect voice lines after exiting Chinatown gun shop when not buying something
+- Fixed Johnny's incorrect voice lines after exiting the gun shop when buying something (used to use voice lines from Higgin's Heli Tours)
 - Restored Luis' voice lines when exiting the gun shop (buying/not buying)
 - Restored missing voice lines from Luis & Johnny when exiting the Broker gun shop
-- The gun shop owner now uses his unique model (M_M_GunNut_01) instead of the strip club bouncer model (M_Y_bouncer_01).
-- The Desert Eagle and Micro SMG are now using their unique sounds when viewing them (required modifying the animation dictionary "missgunlockup.wad")
-- Restored the temporary ban from the gun shop when attacking the owner in TLAD/TBOGT
-- Chinatown gun shop: Fixed a small bug where the wrong voice lines is used after exiting when not buying something
-- Restored voice lines from Luis, he'll now respond to what the pilot tells him about the landmarks during the tour
-- Uptown Riders now use their own voice lines rather than Angels of Death voice in TLAD's arm wrestling
-- Restored Clay's voice lines which is used when he meets Johnny in hangout friend activity in TLAD
-- Restored Jim, Terry, Clay own voice lines in TLAD hi_lo_cards minigame
-- Restored TLAD Combat Shotgun's own unique prop model
-- Fixed the busker script terminates too early in TBoGT, now Luis can give money to busker normally
-- Fixed several motorcycles use incorrect paying animation at toll station in TBoGT
-- Fixed ilyena call and brycebug content can't trigger after load the save (From ilyena's random character mission and stubbs' job)
-- Fixed the FIB arriving too early at the abandoned mansion in Phil's mission "To live and die in Alderney"
-- Fixed the heli climb QTE being impossible on really high framerates
+- Restored missing voice lines from Johnny when triggering pool minigame
+- Restored non-friend NPC voice lines on air hockey minigame
+- Restored Jim, Terry, Clay own voice lines on hi-lo cards minigame
+- Restored Uptown Riders' own voice lines on arm wrestling minigame (used to use Angels of Death's voice lines)
+- Restored Clay's voice lines, he'll now respond to Johnny's arrival in hang out friend activity
+- Restored Armando and Henrique's voice lines, they'll now greet Luis when he is close to them in strip club
+- Restored Luis' voice lines, he'll now respond to what the pilot tells him about the landmarks during Heli Tours
+- Workaround for TLAD Heli Tours, now pilot voice trigger time won't be affected by Johnny voice text clear bug
+
+#### Missions
+>Note: this section contains story spoilers.
+>
+- Fixed scripted depth of field not being removed properly in several missions (e.g. "Catch the Wave")
+- Fixed Faustin execution animation sync issue in mission "The Master and the Molotov"
+- Fixed one dialogue couldn't be restored and continue if Niko is too far away from Packie in mission "Diamonds are a Girl's Best Friend"
+- Fixed the FIB arriving too early at the abandoned mansion in mission "To Live and Die in Alderney"
 - Workaround for a bug where Niko dies after being kicked off of Dimitri's helicopter and falling into the water (Deal Ending)
-- Workaround for a bug where Jacob crashes the Annihilator on high framerates (Deal Ending)
-- Workaround for burned AOD won't trigger ragdoll behavior on high frame rates in TLAD mission "Action/Reaction"
-- Fixed TLAD intro scripted cutscene's cut off distant world in several shots 
+- Workaround for a bug where one burned target fails to fall from hotel rooftop in mission "Late Checkout"
+- Fixed Ilyena call and Brycebug content not triggering after loading save (From Ilyena's random encounter and Stubbs' job)
+- Fixed damaged vehicles increasing payment, rather than decreasing payment, in Brucie's web email vehicles theft
+- Fixed vehicles being removed too early after parking it in garage in Brucie's web email vehicles theft
+- Fixed TLAD intro scripted cutscene cutting off distant world in several shots
+- Fixed Johnny being invisible in the second intro cutscene
+- Fixed possible issue where mission fails to continue even though Johnny has been close to Roman's Taxi in mission "Roman's Holiday"
+- Fixed Roman sometimes lacking clothes model or using incorrect clothes textures in TLAD ending credits
+- Fixed Malc's motorcycle using incorrect colors in TLAD ending credits
+- Fixed Yusuf's incorrect position during one scripted cutscene in mission "Caught With Your Pants Down"
+- Fixed delayed animations in two scripted cutscenes in mission "Departure Time"
+- Fixed Luis sometimes leaving cover automatically while shooting behind cover in Bulgarin's plane in mission "Departure Time"
+
+#### Misc
+
+- Fixed ammo reset when buying different pistol from gun shop in IV
+- Fixed ammo reset when buying different weapon from gun shop in TLAD/TBoGT
+- The Desert Eagle and Micro SMG are now using their unique sounds when viewing them (required modifying the animation dictionary "missgunlockup.wad")
+- Restored the temporary ban from the gun shop when attacking the owner in TLAD/TBoGT
+- Re-enabled Roman's cab depot script in TLAD
+- Superd2 is now accepted by car wash, meanwhile packer2, police3, police4, policew are now not accepted
+- Fixed incorrect car wash price help text for a one type of taxi
+- Fixed time won't advance after skipping taxi ride journey
+- Fixed 200 pigeons extermination annihilator reward preventing Brucie from landing helicopter at Star Junction landing site
+- Fixed damaged vending machines being usable
+- Fixed phone being not usable after giving money to buskers
+- Fixed using phone camera will terminate beggar script immediately
+- Fixed NPCs driving away with a delay after finishing paying in toll booths
+- Workaround for NPCs abnormal overtaking behavior in toll booths
+- Added support to use mouse wheel when using phone keypad
+- Fixed memorial wall photos not spawning while entering The Lost clubhouse from roof entry in TLAD
+- Fixed several motorcycles using incorrect paying animation in toll booths in TBoGT
+- Fixed Luis' vehicle always being removed after playing golf and drinking minigame
+- Fixed scripted depth of field not being removed after playing drinking minigame
 
 ### Episodic content
 
@@ -225,7 +292,7 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - Added an option to enable support for DSR1, grenade launcher, pipe bomb, sticky bomb, AA12 explosive shells, P90 vehicle check, partially parachute and all their abilities in IV, TLAD and TBoGT
 - Added an option to enable explosive rounds on annihilator in IV
 - Added an option to enable camera bobbing in clubs, cell phone switching, altimeter in helicopters and parachute, explosive sniper and fists cheats in IV and TLAD
-- Added an option to raise height limit for helicopters in IV and TLAD to match TBOGT level
+- Added an option to raise height limit for helicopters in IV and TLAD to match TBoGT level
 - Added an option to give P90 and AA12 to SWAT and FIB and M249 to police in helicopters in IV and TLAD
 - Added an option to disable SCO signature check, allow game to use any episodic SCO on all episodes
 
@@ -234,10 +301,10 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - Restored timecycles from consoles with improved auto exposure and restored missing moon in certain weather
 - Fixed glass shards lacking colors
 - Fixed particles flickering in some situations
-- Restored console particle file, and fixed some broken particles
+- Restored particle file from console and fixed some broken particles
 - Restored environment reflection intensity from consoles
 - Added an option to restore the more reflective cars from consoles
-- Fixed incorrect water texture and post processing noise tiling on "Water Quality" levels other than medium
+- Fixed incorrect water texture and post processing noise tiling on **Water Quality** levels other than medium
 - Restored Xbox360 contrast slider behavior
 - Disabled Z-write behavior for emissive shaders to fix some visual issues
 - Improved phone screen resolution
@@ -249,18 +316,25 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - Restored console rain density
 - Sped up menu and pause transitions
 - Pressed radar zoom out button now will make it stay zoomed out for a few seconds
-- Fixed helicopter searchlights flicker violently when more than one helicopter is present
+- Fixed date won't advance after dying, being busted or respraying at certain time
+- Fixed helicopter searchlights flickering violently when more than one helicopter is present
 - Fixed radio reset after cutscene
-- Workaround for lights & motion blur flicker intermittently when player is drunk
-- Fixed player can't give beggar money normally on PC
+- Fixed incorrect TBoGT bullet tracer position
+- Fixed NPC lanes swerving suddenly on the Algonquin Bridge when there is a train under it
+- Partially fixed P90 being selectable in vehicles on keyboard
+- Workaround for lights & motion blur flickering intermittently when player is drunk
+- Made stunt jump camera speed be controlled by mouse wheel when using keyboard and mouse
+- Added an option to restore unused death music in IV
+- Fixed not being able to give money to beggars normally on PC
 - Fixed TLAD phone keypad rendering on top of the plastic cover
-- Fixed TLAD an incorrect traffic cops head texture
-- Fixed some cutscene and interiors models
+- Fixed TLAD incorrect traffic cops head texture
+- Fixed some cutscenes and interiors models
 - Fixed and improved some lights and emissive materials
-- Fixed a font uses incorrect style in TBoGT
+- Fixed one font '9' using incorrect style in TBoGT
+- Restored missing color combination for blade
 - Added an option to enable shadows for some objects and vegetation that lack them
 - Added options to customize shadow blur, bias and cascade blending 
-- Various other fixes, like regular cops & fat cops will now spawn with their hat prop disabled when in a vehicle, like on the console version
+- Various other fixes, like now driveby is disabled when using cellphone
 
 ### Some details
 
@@ -268,7 +342,7 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - **FpsLimit** - enter a desired value to specify the number of frames per second you want for the game. Like 30, 45, 60 or more. This will affect all gameplay. Refresh rate offsets may also be used.
 - **CutsceneFpsLimit** - enter a desired value to specify the number of frames per second you want for the game to use on cutscenes only.
 - **DefaultCameraAngleInTLAD** - TLAD uses a different camera angle on bikes, this option can force the original IV camera angle. [Enabled](https://i.imgur.com/PqFHJfU.jpg) / [Disabled](https://i.imgur.com/5kM5Sgn.jpg)
-- **PedDeathAnimFixFromTBOGT** - when you perform a counter attack after a dodge in IV & TLAD, the ped after falling and dying performs an additional death animation, which doesn't happen in TBOGT. [Enabled](https://imgur.com/EYsiGPe) / [Disabled](https://imgur.com/CR3LEdR)
+- **PedDeathAnimFixFromTBoGT** - when you perform a counter attack after a dodge in IV & TLAD, the ped after falling and dying performs an additional death animation, which doesn't happen in TBoGT. [Enabled](https://imgur.com/EYsiGPe) / [Disabled](https://imgur.com/CR3LEdR)
 - **DisableCameraCenteringInCover** - [see issue 20](https://github.com/GTAmodding/GTAIV-Issues-List/issues/20).
 - **VehicleBudget** - allows to increase the budget of vehicles, used to avoid only taxi will spawn. For more information about TaxiBug and VehicleBudget, please watch [TJGM's video](https://www.youtube.com/watch?v=wr8m9kL3U20&t=237s).
 - **PedBudget** - allows to increase the budget of pedestrians.
@@ -343,7 +417,7 @@ Also available for [Max Payne 3](https://github.com/ThirteenAG/MaxPayne3.FusionF
 - Fixed particles flickering in some interiors
 - Fixed stuttery particle animations caused by patch 1.0.5.0
 - Fixed rain being almost invisible, especially at night
-- Fixed rain streaks becoming shorter at high framerates
+- Fixed rain streaks becoming shorter at high frame rates
 
 #### Water
 

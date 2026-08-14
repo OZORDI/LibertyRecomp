@@ -44,10 +44,12 @@ namespace GTAIV {
 
 #include <app.h>
 #include <bc_diff.h>
+#include <bit>
 #include <cpu/guest_thread.h>
 #include <cstdint>
 #include <cstdio>
 #include <decompressor.h>
+#include <limits>
 #include <kernel/function.h>
 #include <kernel/heap.h>
 #include <kernel/lod_hooks.h>
@@ -9835,134 +9837,20 @@ PPC_FUNC_HOOK(sub_82A499B8)
 }
 
 // =============================================================================
-// GTA IV D3D Wrapper Function Hooks (from RENDERING_RESEARCH.md Section 4.1)
-// Priority: P1 = Critical draw/present, P2 = Shaders, P3 = State, P4 = Low priority
-// =============================================================================
-
-// --- Priority 1: Draw and Present Functions ---
-// sub_82A46330 is GTA IV's internal UnifiedDraw(device, isIndexed) — 2 args only.
-// Stubbed to no-op to prevent PM4 command buffer code from running.
-// sub_82A46330 = UnifiedDraw(device, isIndexed).
-// Only called when device[22280]&4 (special unified draw mode).
-// Log first N calls so we know if this path is active.
+// Hardware-only draw serialization sinks. Semantic draws have already been
+// captured by the high-level hooks before these helpers would emit PM4.
 PPC_FUNC_HOOK(sub_82A46330)
 {
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 5 || s_count % 1000 == 0)
-        LOGF_WARNING("[UnifiedDraw] #{} device={:#x} isIndexed={}", s_count, ctx.r3.u32, ctx.r4.u32);
-    // No-op: PM4 bypass (sub_82A492A8 stub handles all actual packet skipping)
 }
 
-// sub_82A46578 = DrawSurface(device, indexBufAddr, drawArg)
-// Confirmed from PPC recomp: the real draw dispatch called from FlushRenderState
-// when device[22280]&4 == 0 (which is the NORMAL rendering path).
-// It calls sub_82A46330 if device[22280]&4, otherwise writes PM4 directly.
-// We log this to confirm which draw path fires in normal rendering.
 PPC_FUNC_HOOK(sub_82A46578)
 {
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 10 || s_count % 2000 == 0)
-        LOGF_WARNING("[DrawSurface] #{} device={:#x} ibAddr={:#x} drawArg={:#x}",
-                     s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
-    // No-op: sub_82A492A8 and sub_82A499B8 stubs prevent actual PM4 submission
 }
 
 // =============================================================================
-// PM4-Level No-Op Stubs (0x82A3xxxx-0x82A4xxxx)
-// These intercept Xbox 360 PM4 command buffer functions. They must be no-ops
-// to prevent Xenos GPU commands from being written, but they do NOT perform
-// any D3D-level rendering work. The actual D3D hooks are in the RAGE wrapper
-// layer below (0x828xxxxx-0x828Exxxx).
-//
-// RESEARCH NOTE (2026-03-31): Previous hooks at these addresses incorrectly
-// treated PM4 register addresses/packet data as D3D parameters (e.g. shader
-// pointers, texture handles). This caused crashes and silent drops because
-// PM4 packet fields don't correspond to D3D API arguments.
+// Hardware serialization boundary. Native mode preserves CPU-visible state in
+// dedicated high-level hooks and never initializes or advances a Xenos ring.
 // =============================================================================
-
-// =============================================================================
-// GTA IV Rendering Hook Layer (2026-03-31)
-//
-// ARCHITECTURE (from 30-agent research + generated code analysis):
-//
-// GTA IV has NO separate D3D wrapper layer. RAGE calls PM4 builders directly.
-// The PM4 state setters (sub_82A3E7A0, sub_82A44B78, etc.) update the device
-// context state AND emit PM4 packets. With sub_82A492A8/sub_82A499B8 no-op'd,
-// the PM4 packet emission is safely discarded. The device state updates still
-// happen because the PM4 functions write to device fields BEFORE emitting PM4.
-//
-// Strategy: Let PM4 state setters RUN as recompiled code (they populate device
-// context). Hook ONLY the draw functions. In draw hooks, read all current state
-// from the device context, call FlushRenderStateForMainThread + enqueue draw.
-// The existing render thread processes RenderCommands → host GPU draws.
-//
-// PM4 state setters UNHOOKED (recompiled code runs freely):
-//   sub_82A3E7A0  — VS PM4 builder (updates device+12700, emits PM4 -> no-op'd)
-//   sub_82A47AE0  — VS+PS PM4 builder (updates device+12700/12704)
-//   sub_82A3BF50  — SetShader (updates device+12432+type*4)
-//
-// PM4 state setters HOOKED (require host-side state translation):
-//   sub_82A3A890  — VDecl writer (updates device+10456)
-//   sub_82A42930  — VDecl writer (updates device+11812)
-//   sub_82A44B78  — Texture fetch const (updates device+12536+slot*4)
-//   sub_82A3B690  — RT register writer (updates device+12452+idx*4)
-//   sub_82A3B7B0  — DS register writer (updates device+12428)
-//
-// PM4 state setters HOOKED (shader binding requires handle translation):
-//   sub_82A42760  — SetVertexShader (stores VS handle at device[3172]=+12688)
-//   sub_82A424A8  — SetPixelShader  (stores PS handle at device[3171]=+12684)
-//
-// PM4 infrastructure stubs KEPT (prevent ring buffer corruption):
-//   sub_82A492A8  — PM4 packet builder (returns cmdPtr unchanged)
-//   sub_82A499B8  — PM4 flush (recycles ring buffer pointers)
-//   sub_82A49CB0  — PM4 resolve draw (no-op)
-//   sub_82A3DF60  — dirty-state PM4 flusher (no-op)
-//   sub_82A49458  — secondary-buffer allocator (scratch-buffer shim)
-//   sub_82A47E28  — secondary ring buffer PM4 state flusher (no-op)
-// =============================================================================
-
-static uint32_t AllocatePM4Scratch(uint32_t requestedBytes)
-{
-    constexpr uint32_t PM4ScratchSize = 0x10000;
-    constexpr uint32_t PM4ScratchAlignment = 0x20;
-    constexpr uint32_t PM4ScratchMinimumRequest = 0x20;
-
-    static Mutex s_pm4ScratchMutex;
-    static uint8_t* s_pm4ScratchHost = nullptr;
-    static uint32_t s_pm4ScratchGuest = 0;
-    static uint32_t s_pm4ScratchOffset = 0;
-
-    std::lock_guard lock(s_pm4ScratchMutex);
-
-    if (s_pm4ScratchHost == nullptr)
-    {
-        s_pm4ScratchHost = static_cast<uint8_t*>(g_userHeap.AllocPhysical(PM4ScratchSize, PM4ScratchAlignment));
-        if (s_pm4ScratchHost == nullptr)
-        {
-            LOGF_ERROR("[PM4Scratch] failed to allocate {} bytes", PM4ScratchSize);
-            return 0;
-        }
-
-        std::memset(s_pm4ScratchHost, 0, PM4ScratchSize);
-        s_pm4ScratchGuest = g_memory.MapVirtual(s_pm4ScratchHost);
-        LOGF_WARNING("[PM4Scratch] host={:p} guest=0x{:08X} size=0x{:X}",
-            (void*)s_pm4ScratchHost, s_pm4ScratchGuest, PM4ScratchSize);
-    }
-
-    requestedBytes = std::max(requestedBytes, PM4ScratchMinimumRequest);
-    requestedBytes = (requestedBytes + (PM4ScratchAlignment - 1)) & ~(PM4ScratchAlignment - 1);
-    requestedBytes = std::min(requestedBytes, PM4ScratchSize);
-
-    if (s_pm4ScratchOffset + requestedBytes > PM4ScratchSize)
-        s_pm4ScratchOffset = 0;
-
-    uint32_t result = s_pm4ScratchGuest + s_pm4ScratchOffset;
-    s_pm4ScratchOffset += requestedBytes;
-
-    return result;
-}
 
 // sub_82A49CB0 — PM4 resolve draw packet writer (no-op)
 PPC_FUNC_HOOK(sub_82A49CB0) { }
@@ -9976,114 +9864,34 @@ PPC_FUNC_HOOK(sub_82A49CB0) { }
 // level DrawPrimitive/DrawPrimitiveUP hooks.
 PPC_FUNC_HOOK(sub_82A3DF60)
 {
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || (s_count % 5000) == 0)
-    {
-        LOGF_WARNING("[PM4StateFlush] #{} skipped device=0x{:08X} lr=0x{:08X}",
-            s_count, ctx.r3.u32, ctx.lr);
-    }
 }
 
-// sub_82A49458 — secondary command buffer allocator.
-//
-// The original function reads secondary_struct+16 as a parent D3D::CDevice
-// back-pointer, then calls sub_82A48B90. In the current build that field is
-// zero, so sub_82A48B90 dereferences NULL+0x2ABD. PM4 packets are not consumed
-// by Liberty's host renderer, so all remaining callers get a writable scratch
-// chunk and can complete without touching the fake Xenos ring.
-PPC_FUNC_HOOK(sub_82A49458)
+// Command-list replay retains CPU-visible lifetime and dirty-state semantics,
+// while all packet serialization in the generated body is intentionally omitted.
+PPC_FUNC_IMPL(__imp__sub_82A46EA8);
+PPC_FUNC_HOOK(sub_82A47E28)
 {
-    constexpr uint32_t PM4SecondaryChunkSize = 0x1080;
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t commandListAddr = ctx.r4.u32;
+    const uint32_t selectorMask = ctx.r5.u32;
 
-    uint32_t secondaryStruct = ctx.r3.u32;
-    uint32_t scratch = AllocatePM4Scratch(PM4SecondaryChunkSize);
+    const uint32_t liveFence = PPC_LOAD_U32(deviceAddr + 10908);
+    PPC_STORE_U32(commandListAddr + 8, liveFence);
 
-    if (secondaryStruct != 0 && scratch != 0)
+    const uint32_t selectorTree = PPC_LOAD_U32(commandListAddr + 112);
+    if (selectorTree != 0)
     {
-        PPC_STORE_U32(secondaryStruct + 8, scratch);
-        PPC_STORE_U32(secondaryStruct + 12, scratch + PM4SecondaryChunkSize);
+        ctx.r3.u32 = liveFence;
+        ctx.r4.u32 = selectorTree;
+        ctx.r5.u32 = selectorMask;
+        __imp__sub_82A46EA8(ctx, base);
     }
 
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || (s_count % 5000) == 0)
-    {
-        LOGF_WARNING("[PM4SecondaryAlloc] #{} secondary=0x{:08X} scratch=0x{:08X} lr=0x{:08X}",
-            s_count, secondaryStruct, scratch, ctx.lr);
-    }
-
-    ctx.r3.u32 = scratch;
-}
-
-// sub_82A47E28 — secondary ring buffer PM4 state flusher (no-op)
-//
-// Writes PM4 packets to a secondary ring buffer tracked by device+13232.
-// When write_ptr (device[13240])+16 > end_boundary (device[13244]) — both 0
-// from memset, so always true on first call — it calls sub_82A49458, which
-// reads device[13248] (back-pointer to device, also 0) and passes it as r3
-// to sub_82A48B90. sub_82A48B90 then accesses r3+0x2ABD → crash at guest
-// addr 0x2ABD. device[13248] is never initialized by any path (confirmed:
-// no REX_STORE_U32 to offset 13248 in any generated file).
-//
-// No-op: PM4 is bypassed. The secondary ring buffer has no real GPU consumer.
-// Source: gta4_recomp.83.cpp:418 (addi r3,r31,13232), :3507 (lwz r3,16(r30))
-PPC_FUNC_HOOK(sub_82A47E28) { }
-
-PPC_FUNC_HOOK(sub_82A488B8)
-{
-    const uint32_t streamState = ctx.r3.u32;
-    const uint32_t commandStart = ctx.r4.u32;
-    const uint32_t commandEnd = ctx.r5.u32;
-
-    const auto storeGuestU32 = [base](uint32_t guestAddr, uint32_t value) -> bool
-    {
-        if (guestAddr <= 0xFFFFu || g_memory.Translate(guestAddr) == nullptr)
-            return false;
-
-        PPC_STORE_U32(guestAddr, value);
-        return true;
-    };
-
-    const auto ppcSubmitAddr = [](uint32_t guestAddr) -> uint32_t
-    {
-        const uint32_t pageBits = ((guestAddr << 12) | (guestAddr >> 20)) & 0xFFFu;
-        const uint32_t pageSelect = (pageBits + 512u) & 0x1000u;
-        return (guestAddr & 0x1FFFFFFFu) + pageSelect - 0x40000000u;
-    };
-
-    const uint32_t commandStartToken = ppcSubmitAddr(commandStart);
-    const uint32_t commandEndMinusFour = commandEnd - 4u;
-
-    const bool wroteCommandStart = storeGuestU32(commandStart, commandStartToken);
-    const bool wroteStreamStart = storeGuestU32(streamState + 4u, commandStart);
-    const bool wroteStreamEnd = storeGuestU32(streamState + 8u, commandEndMinusFour);
-
-    static uint32_t s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || (s_count % 5000) == 0)
-    {
-        LOGF_WARNING("[PM4SubmitNoMMIO] #{} stream=0x{:08X} cmd=0x{:08X} end=0x{:08X} wrote={}/{}/{} lr=0x{:08X}",
-            s_count,
-            streamState,
-            commandStart,
-            commandEnd,
-            wroteCommandStart ? "yes" : "no",
-            wroteStreamStart ? "yes" : "no",
-            wroteStreamEnd ? "yes" : "no",
-            ctx.lr);
-    }
-}
-
-PPC_FUNC_HOOK(sub_82A48C78)
-{
-    static uint32_t s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || (s_count % 5000) == 0)
-    {
-        LOGF_WARNING("[PM4SubmitCallback] #{} skipped device=0x{:08X} cmd=0x{:08X} count=0x{:08X} lr=0x{:08X}",
-            s_count, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.lr);
-    }
+    PPC_STORE_U64(deviceAddr + 32, ~PPC_LOAD_U64(commandListAddr + 96));
+    PPC_STORE_U64(deviceAddr + 0, ~PPC_LOAD_U64(commandListAddr + 64));
+    PPC_STORE_U64(deviceAddr + 8, ~PPC_LOAD_U64(commandListAddr + 72));
+    PPC_STORE_U64(deviceAddr + 16, ~PPC_LOAD_U64(commandListAddr + 80));
+    PPC_STORE_U64(deviceAddr + 24, ~PPC_LOAD_U64(commandListAddr + 88));
 }
 
 static GuestVertexDeclaration* TryResolveHostVertexDeclaration(uint32_t declarationAddr)
@@ -10566,99 +10374,261 @@ PPC_FUNC_HOOK(sub_82A424A8)
     SetPixelShader(device, shader);
 }
 
-// =============================================================================
-// Render State Hooks — sub_82A3B690 (SetRenderTarget) / sub_82A3B7B0 (SetDS)
-//                       sub_82A44B78 (SetTexture)
-//
-// These PM4 state setters update device context fields AND emit PM4 packets.
-// We let the recompiled code run (to populate device state), then translate
-// the guest surface/texture handle to a host object and enqueue the
-// corresponding render command so the host GPU tracks state changes.
-//
-// sub_82A3B690: r3=device, r4=RT index, r5=surfacePtr, r6/r7/r8=register data
-// sub_82A3B7B0: r3=device, r4=surfacePtr
-// sub_82A44B78: r3=device, r4=slot, r5=texturePtr, r6=dirty mask
-// =============================================================================
+// Native resource binding. These hooks preserve the generated setters'
+// guest-visible state transitions but omit their command-list release packets.
+// Native render commands retain host resources in submission order instead.
 
-PPC_FUNC_IMPL(__imp__sub_82A3B690);
+static constexpr uint32_t kNativeStreamCount = 17;
+static constexpr uint32_t kNativeTextureStageCount = 26;
+static constexpr uint32_t kStreamBufferBase = 12452;
+static constexpr uint32_t kStreamSizeBase = 1916;
+static constexpr uint32_t kStreamFetchBase = 1912;
+static constexpr uint32_t kIndexBufferOffset = 12428;
+static constexpr uint32_t kTextureHandleBase = 12536;
+static constexpr uint32_t kTextureFetchBase = 1152;
+static constexpr uint32_t kResourceFenceOffset = 8;
+static constexpr uint32_t kLiveResourceFenceOffset = 10908;
+
+static void RetireNativeBoundResource(uint32_t deviceAddr, uint32_t resourceAddr)
+{
+    if (resourceAddr == 0)
+        return;
+
+    const uint32_t liveFence = PPC_LOAD_U32(deviceAddr + kLiveResourceFenceOffset);
+    if (liveFence != 0)
+        PPC_STORE_U32(resourceAddr + kResourceFenceOffset, liveFence);
+}
+
+static uint32_t EncodeNativeFetchAddress(uint32_t address)
+{
+    const uint32_t page = std::rotl(address, 12) & 0xFFF;
+    const uint32_t bank = (page + 512) & 0x1000;
+    return bank + (address & 0x1FFFFFFF);
+}
+
 PPC_FUNC_HOOK(sub_82A3B690)
 {
-    uint32_t deviceAddr  = ctx.r3.u32;
-    uint32_t rtIndex     = ctx.r4.u32;
-    uint32_t surfaceAddr = ctx.r5.u32;
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t streamIndex = ctx.r4.u32;
+    const uint32_t bufferAddr = ctx.r5.u32;
+    const uint32_t offset = ctx.r6.u32;
+    const uint32_t stride = ctx.r7.u32;
+    const uint64_t dirtyMask = ctx.r8.u64;
 
-    // Let recompiled code run: updates device RT slots + dirty flags
-    __imp__sub_82A3B690(ctx, base);
+    if (streamIndex >= kNativeStreamCount)
+        return;
 
-    GuestSurface* surface = nullptr;
-    if (surfaceAddr != 0) {
-        surface = GTAIV::LookupSurface(surfaceAddr);
+    if (bufferAddr != 0)
+    {
+        const uint32_t resourceAddress = PPC_LOAD_U32(bufferAddr + 24) + offset;
+        const uint32_t resourceSize = PPC_LOAD_U32(bufferAddr + 28) - offset;
+        PPC_STORE_U32(deviceAddr + kStreamSizeBase - streamIndex * 8, resourceSize);
+        PPC_STORE_U32(deviceAddr + kStreamFetchBase - streamIndex * 8,
+            EncodeNativeFetchAddress(resourceAddress));
+        PPC_STORE_U64(deviceAddr + 24, PPC_LOAD_U64(deviceAddr + 24) | dirtyMask);
     }
 
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || s_count % 5000 == 0) {
-        LOGF_WARNING("[SetRT] #{} idx={} addr={:#x} -> surface={}",
-                     s_count, rtIndex, surfaceAddr, surface ? "OK" : "NULL");
+    const uint32_t slotAddr = deviceAddr + kStreamBufferBase + streamIndex * 4;
+    RetireNativeBoundResource(deviceAddr, PPC_LOAD_U32(slotAddr));
+    PPC_STORE_U32(slotAddr, bufferAddr);
+
+    const uint32_t frequency = (stride >> 2) & 0xFF;
+    PPC_STORE_U8(deviceAddr + 12520 + streamIndex, uint8_t(frequency));
+    if (frequency != 0 &&
+        frequency != PPC_LOAD_U8(deviceAddr + 11824 + streamIndex))
+    {
+        PPC_STORE_U64(deviceAddr + 16,
+            PPC_LOAD_U64(deviceAddr + 16) | uint64_t(524288));
     }
 
-    auto* device = reinterpret_cast<GuestDevice*>(
-        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
-    SetRenderTarget(device, rtIndex, surface);
+    auto* device = reinterpret_cast<GuestDevice*>(g_memory.Translate(deviceAddr));
+    if (device != nullptr)
+        SetStreamSource(device, streamIndex, GTAIV::LookupBuffer(bufferAddr), offset, stride);
 }
 
-PPC_FUNC_IMPL(__imp__sub_82A3B7B0);
 PPC_FUNC_HOOK(sub_82A3B7B0)
 {
-    uint32_t deviceAddr  = ctx.r3.u32;
-    uint32_t surfaceAddr = ctx.r4.u32;
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t bufferAddr = ctx.r4.u32;
+    const uint32_t slotAddr = deviceAddr + kIndexBufferOffset;
 
-    // Let recompiled code run: updates device DS slot
-    __imp__sub_82A3B7B0(ctx, base);
+    RetireNativeBoundResource(deviceAddr, PPC_LOAD_U32(slotAddr));
+    PPC_STORE_U32(slotAddr, bufferAddr);
 
-    GuestSurface* surface = nullptr;
-    if (surfaceAddr != 0) {
-        surface = GTAIV::LookupSurface(surfaceAddr);
-    }
-
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 20 || s_count % 5000 == 0) {
-        LOGF_WARNING("[SetDS] #{} addr={:#x} -> surface={}",
-                     s_count, surfaceAddr, surface ? "OK" : "NULL");
-    }
-
-    auto* device = reinterpret_cast<GuestDevice*>(
-        static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
-    SetDepthStencilSurface(device, surface);
+    auto* device = reinterpret_cast<GuestDevice*>(g_memory.Translate(deviceAddr));
+    if (device != nullptr)
+        SetIndices(device, GTAIV::LookupBuffer(bufferAddr));
 }
 
-PPC_FUNC_IMPL(__imp__sub_82A44B78);
+static int32_t TruncateNativeViewportCoordinate(float value)
+{
+    if (std::isnan(value) ||
+        value <= float(std::numeric_limits<int32_t>::min()))
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+    if (value >= float(std::numeric_limits<int32_t>::max()))
+        return std::numeric_limits<int32_t>::max();
+    return int32_t(value);
+}
+
+// CPU-semantic portion of GTA IV's viewport/scissor updater. The generated
+// tail calls sub_82A38F28 solely to serialize the resulting state into PM4.
+PPC_FUNC_HOOK(sub_82A3B540)
+{
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t rectAddr = ctx.r4.u32;
+
+    const int32_t viewportX = TruncateNativeViewportCoordinate(
+        std::bit_cast<float>(PPC_LOAD_U32(deviceAddr + 12640)));
+    const int32_t viewportY = TruncateNativeViewportCoordinate(
+        std::bit_cast<float>(PPC_LOAD_U32(deviceAddr + 12644)));
+    const int32_t viewportWidth = TruncateNativeViewportCoordinate(
+        std::bit_cast<float>(PPC_LOAD_U32(deviceAddr + 12648)));
+    const int32_t viewportHeight = TruncateNativeViewportCoordinate(
+        std::bit_cast<float>(PPC_LOAD_U32(deviceAddr + 12652)));
+
+    const int32_t rectLeft = int32_t(PPC_LOAD_U32(rectAddr));
+    const int32_t rectTop = int32_t(PPC_LOAD_U32(rectAddr + 4));
+    const int32_t rectRight = int32_t(PPC_LOAD_U32(rectAddr + 8));
+    const int32_t rectBottom = int32_t(PPC_LOAD_U32(rectAddr + 12));
+
+    PPC_STORE_U32(deviceAddr + 12668, uint32_t(rectLeft));
+    PPC_STORE_U32(deviceAddr + 12672, uint32_t(rectTop));
+    PPC_STORE_U32(deviceAddr + 12676, uint32_t(rectRight));
+    PPC_STORE_U32(deviceAddr + 12680, uint32_t(rectBottom));
+
+    int32_t clippedLeft = viewportX;
+    int32_t clippedTop = viewportY;
+    int32_t clippedRight = std::bit_cast<int32_t>(
+        uint32_t(viewportX) + uint32_t(viewportWidth));
+    int32_t clippedBottom = std::bit_cast<int32_t>(
+        uint32_t(viewportY) + uint32_t(viewportHeight));
+
+    if (int32_t(PPC_LOAD_U32(deviceAddr + 11848)) != 0)
+    {
+        clippedLeft = std::max(clippedLeft, rectLeft);
+        clippedTop = std::max(clippedTop, rectTop);
+        clippedRight = std::min(clippedRight, rectRight);
+        clippedBottom = std::min(clippedBottom, rectBottom);
+    }
+
+    uint32_t packedTopLeft = PPC_LOAD_U32(deviceAddr + 10436);
+    packedTopLeft = (packedTopLeft & 0x8000FFFF) |
+        ((uint32_t(clippedTop) << 16) & 0x7FFF0000);
+    packedTopLeft = (packedTopLeft & 0xFFFF8000) |
+        (uint32_t(clippedLeft) & 0x00007FFF);
+
+    uint32_t packedBottomRight = PPC_LOAD_U32(deviceAddr + 10440);
+    packedBottomRight = (packedBottomRight & 0x8000FFFF) |
+        ((uint32_t(clippedBottom) << 16) & 0x7FFF0000);
+    packedBottomRight = (packedBottomRight & 0xFFFF8000) |
+        (uint32_t(clippedRight) & 0x00007FFF);
+
+    PPC_STORE_U32(deviceAddr + 10436, packedTopLeft);
+    PPC_STORE_U32(deviceAddr + 10440, packedBottomRight);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82A3BF50);
+PPC_FUNC_HOOK(sub_82A3BF50)
+{
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t targetIndex = ctx.r4.u32;
+    const uint32_t surfaceAddr = ctx.r5.u32;
+    __imp__sub_82A3BF50(ctx, base);
+
+    auto* device = reinterpret_cast<GuestDevice*>(g_memory.Translate(deviceAddr));
+    GuestSurface* surface = GTAIV::LookupSurface(surfaceAddr);
+    if (device != nullptr && (targetIndex == 0 || surface == nullptr)) {
+        SetRenderTarget(device, targetIndex, surface);
+    }
+}
+
+PPC_FUNC_IMPL(__imp__sub_82A3C2B8);
+PPC_FUNC_HOOK(sub_82A3C2B8)
+{
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t surfaceAddr = ctx.r4.u32;
+    __imp__sub_82A3C2B8(ctx, base);
+
+    auto* device = reinterpret_cast<GuestDevice*>(g_memory.Translate(deviceAddr));
+    if (device != nullptr) {
+        SetDepthStencilSurface(device, GTAIV::LookupSurface(surfaceAddr));
+    }
+}
+
 PPC_FUNC_HOOK(sub_82A44B78)
 {
-    uint32_t deviceAddr  = ctx.r3.u32;
-    uint32_t slot        = ctx.r4.u32;
-    uint32_t textureAddr = ctx.r5.u32;
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t slot = ctx.r4.u32;
+    const uint32_t textureAddr = ctx.r5.u32;
+    const uint64_t dirtyMask = ctx.r6.u64;
 
-    // Let recompiled code run: updates device texture fetch slots
-    __imp__sub_82A44B78(ctx, base);
+    if (slot >= kNativeTextureStageCount)
+        return;
 
-    GuestTexture* texture = nullptr;
-    if (textureAddr != 0) {
-        texture = GTAIV::LookupTexture(textureAddr);
+    const uint32_t slotAddr = deviceAddr + kTextureHandleBase + slot * 4;
+    const uint32_t previousTexture = PPC_LOAD_U32(slotAddr);
+
+    if (textureAddr != 0)
+    {
+        const uint32_t fetchAddr = deviceAddr + kTextureFetchBase + slot * 24;
+        const uint32_t textureWord28 = PPC_LOAD_U32(textureAddr + 28);
+        const uint32_t textureWord32 = PPC_LOAD_U32(textureAddr + 32);
+        const uint32_t textureWord36 = PPC_LOAD_U32(textureAddr + 36);
+        const uint32_t textureWord40 = PPC_LOAD_U32(textureAddr + 40);
+        const uint32_t textureWord44 = PPC_LOAD_U32(textureAddr + 44);
+        const uint32_t textureWord48 = PPC_LOAD_U32(textureAddr + 48);
+
+        uint32_t fetchWord0 = textureWord28;
+        fetchWord0 = (fetchWord0 & 0xFFC003FF) |
+            (PPC_LOAD_U32(fetchAddr) & 0x003FFC00);
+
+        uint32_t fetchWord4 = EncodeNativeFetchAddress(textureWord32);
+        fetchWord4 = (fetchWord4 & 0xFFFFF7FF) |
+            (PPC_LOAD_U32(fetchAddr + 4) & 0x00000800);
+
+        uint32_t fetchWord12 = textureWord40;
+        fetchWord12 = (fetchWord12 & 0x8007FFFF) |
+            (PPC_LOAD_U32(fetchAddr + 12) & 0x7FF80000);
+
+        uint32_t fetchWord16 = textureWord44;
+        fetchWord16 = (fetchWord16 & 0x000003FC) |
+            (PPC_LOAD_U32(fetchAddr + 16) & 0xFFFFFC03);
+
+        uint32_t lowerMip = std::rotl(textureWord44, 30) & 0xF;
+        const uint32_t lowerLimit = PPC_LOAD_U8(deviceAddr + 11942 + slot);
+        if (lowerMip <= lowerLimit)
+            lowerMip = lowerLimit;
+        fetchWord16 = (fetchWord16 & 0xFFFFFFC3) | ((lowerMip << 2) & 0x3C);
+
+        uint32_t upperMip = std::rotl(textureWord44, 26) & 0xF;
+        const uint32_t upperLimit = PPC_LOAD_U8(deviceAddr + 11968 + slot);
+        if (upperMip >= upperLimit)
+            upperMip = upperLimit;
+        fetchWord16 = (fetchWord16 & 0xFFFFFC3F) | ((upperMip << 6) & 0x3C0);
+
+        uint32_t fetchWord20 = EncodeNativeFetchAddress(textureWord48);
+        fetchWord20 = (fetchWord20 & 0xFFFFFE00) |
+            (PPC_LOAD_U32(fetchAddr + 20) & 0x000001FF);
+
+        PPC_STORE_U32(fetchAddr, fetchWord0);
+        PPC_STORE_U32(fetchAddr + 4, fetchWord4);
+        PPC_STORE_U32(fetchAddr + 8, textureWord36);
+        PPC_STORE_U32(fetchAddr + 12, fetchWord12);
+        PPC_STORE_U32(fetchAddr + 16, fetchWord16);
+        PPC_STORE_U32(fetchAddr + 20, fetchWord20);
+        PPC_STORE_U64(deviceAddr + 24, PPC_LOAD_U64(deviceAddr + 24) | dirtyMask);
     }
 
-    static int s_count = 0;
-    ++s_count;
-    if (s_count <= 50 || s_count % 10000 == 0) {
-        LOGF_WARNING("[SetTex] #{} slot={} addr={:#x} -> texture={}",
-                     s_count, slot, textureAddr, texture ? "OK" : "NULL");
-    }
+    PPC_STORE_U32(slotAddr, textureAddr);
+    RetireNativeBoundResource(deviceAddr, previousTexture);
 
-    if (slot < 16) {
-        auto* device = reinterpret_cast<GuestDevice*>(
-            static_cast<uint8_t*>(g_memory.Translate(deviceAddr)));
-        SetTexture(device, slot, texture);
+    if (slot < 16)
+    {
+        auto* device = reinterpret_cast<GuestDevice*>(g_memory.Translate(deviceAddr));
+        if (device != nullptr)
+            SetTexture(device, slot, GTAIV::LookupTexture(textureAddr));
     }
 }
 
@@ -10680,123 +10650,62 @@ static thread_local struct {
     uint32_t stride;
     uint32_t deviceAddr;
     uint32_t bufferAddr;
+    void* stagingHost;
     bool active;
 } s_pendingDrawUP;
 
-PPC_FUNC_HOOK(sub_82A3DAB0) {
-    uint32_t deviceAddr = ctx.r3.u32;
-    // [WATCH] per-entry log: capture setup args + whether we're trampling a prior unmatched setup
+PPC_FUNC_HOOK(sub_82A3DAB0)
+{
+    if (s_pendingDrawUP.stagingHost != nullptr)
     {
-        static thread_local uint64_t s_dab0_seq = 0;
-        uint64_t seq = ++s_dab0_seq;
-        if (seq <= 50 || (seq % 1000) == 0) {
-            LOGF_WARNING("[WATCH] DAB0 seq={} LR=0x{:08X} dev=0x{:08X} prim={} vc={} str={} prior_active={}{}",
-                         seq, ctx.lr, deviceAddr, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32,
-                         s_pendingDrawUP.active ? "yes" : "no",
-                         s_pendingDrawUP.active ? " *** TRAMPLING UNMATCHED SETUP ***" : "");
-        }
+        g_userHeap.Free(s_pendingDrawUP.stagingHost);
+        s_pendingDrawUP = {};
     }
-    s_pendingDrawUP.primType  = ctx.r4.u32;
-    s_pendingDrawUP.vertCount = ctx.r5.u32;
-    s_pendingDrawUP.stride    = ctx.r6.u32;
+
+    const uint32_t deviceAddr = ctx.r3.u32;
+    const uint32_t vertCount = ctx.r5.u32;
+    const uint32_t stride = ctx.r6.u32;
+    const uint64_t stagingSize = uint64_t(vertCount) * uint64_t(stride);
+    if (stagingSize == 0 || stagingSize > UINT32_MAX)
+    {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    void* stagingHost = g_userHeap.AllocPhysical(size_t(stagingSize), 0x20);
+    if (stagingHost == nullptr)
+    {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    s_pendingDrawUP.primType = ctx.r4.u32;
+    s_pendingDrawUP.vertCount = vertCount;
+    s_pendingDrawUP.stride = stride;
     s_pendingDrawUP.deviceAddr = deviceAddr;
+    s_pendingDrawUP.stagingHost = stagingHost;
+    s_pendingDrawUP.bufferAddr = g_memory.MapVirtual(stagingHost);
     s_pendingDrawUP.active = true;
 
-    // Return the command buffer write pointer as a vertex staging area.
-    // PM4 is no-op'd so this memory is never consumed by a GPU — safe to reuse.
-    uint8_t* devicePtr = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
-    uint32_t writePtr = GTAIV::GetDeviceU32(devicePtr, GTAIV::DeviceOffset::CommandBufferPtr);
-
-    // Mirror the original __imp__sub_82A3DAB0 epilogue: stw r11,13428(r31).
-    // The original saves the pre-vertex-staging cmdPtr to device[13428] so that
-    // sub_82A3DF50's epilogue (device[48] = device[13428]) restores it correctly.
-    // Without this, device[13428] stays 0 (memset from the 0x5780-byte allocation;
-    // sub_82A49D08 never touches offset 13428), and the DF50 epilogue zeros
-    // device[48] (CommandBufferPtr) on every UP commit call — causing the next
-    // stwu r11,4(r3=0) in any PM4 writer (e.g. sub_82A3E7A0 +0x524) to fault
-    // at guest addr 0x4.
-    GTAIV::SetDeviceU32(devicePtr, 13428, writePtr);
-
-    // Advance past any PM4 header area (align to 32 bytes)
-    uint32_t bufAddr = (writePtr + 32) & ~31u;
-    s_pendingDrawUP.bufferAddr = bufAddr;
-
-    ctx.r3.u32 = bufAddr;
+    ctx.r3.u32 = s_pendingDrawUP.bufferAddr;
 }
 
-// --- sub_82A3DF50: Commit (captures vertex data + enqueues DrawPrimitiveUP) ---
-// Original function: device[48] = device[13428] (3-line pointer advance)
-PPC_FUNC_HOOK(sub_82A3DF50) {
-    // [WATCH] per-entry log: capture r3, active state, and correlation-key match.
-    // The core hypothesis: dispatch based on s_pendingDrawUP.active is wrong because
-    // sub_82A3DF50 has two unrelated callers. The correct key is ctx.r3 == deviceAddr.
-    {
-        static thread_local uint64_t s_df50_seq = 0;
-        uint64_t seq = ++s_df50_seq;
-        bool key_match = (ctx.r3.u32 == s_pendingDrawUP.deviceAddr);
-        if (seq <= 50 || (seq % 1000) == 0 ||
-            (s_pendingDrawUP.active && !key_match)) {
-            const char* branch = s_pendingDrawUP.active
-                ? (key_match ? "DRAW(match)" : "DRAW(MISMATCH)")
-                : "epilogue";
-            LOGF_WARNING("[WATCH] DF50 seq={} LR=0x{:08X} r3=0x{:08X} active={} pending.dev=0x{:08X} key_match={} branch={}",
-                         seq, ctx.lr, ctx.r3.u32,
-                         s_pendingDrawUP.active ? "yes" : "no",
-                         s_pendingDrawUP.deviceAddr, key_match ? "yes" : "no", branch);
-        }
-    }
-    if (ctx.r3.u32 < 0x80000000u || ctx.r3.u32 == 0xFFE1E1E1u) {
-        LOGF_WARNING("[WATCH] DEREF sub_82A3DF50 LR=0x{:08X} r3=0x{:08X} pendingDrawUP={} *** WILL DEREF ***",
-                     ctx.lr, ctx.r3.u32, s_pendingDrawUP.active ? "yes" : "no");
-    }
-    if (s_pendingDrawUP.active) {
-        s_pendingDrawUP.active = false;
+// --- sub_82A3DF50: Commit (copies staged vertices into a native render command) ---
+PPC_FUNC_HOOK(sub_82A3DF50)
+{
+    if (!s_pendingDrawUP.active || ctx.r3.u32 != s_pendingDrawUP.deviceAddr)
+        return;
 
-        auto* device = reinterpret_cast<GuestDevice*>(
-            static_cast<uint8_t*>(g_memory.Translate(s_pendingDrawUP.deviceAddr)));
-        void* vertexData = static_cast<uint8_t*>(g_memory.Translate(s_pendingDrawUP.bufferAddr));
+    auto* device = reinterpret_cast<GuestDevice*>(
+        static_cast<uint8_t*>(g_memory.Translate(s_pendingDrawUP.deviceAddr)));
+    DrawPrimitiveUP(device,
+        s_pendingDrawUP.primType,
+        s_pendingDrawUP.vertCount,
+        s_pendingDrawUP.stagingHost,
+        s_pendingDrawUP.stride);
 
-        // [WATCH] log the first vertex + DrawPrimitiveUP args. sub_828C2290 writes
-        // 9 words per vertex: [0..5]=f1..f6, [6]=r9 (color/u32 — can be 0xFFE1E1E1 poison
-        // if upstream handle is freed), [7..8]=f7..f8. Rate-limit to avoid flooding.
-        {
-            static thread_local uint64_t s_call_seq = 0;
-            uint64_t seq = ++s_call_seq;
-            if (seq <= 30 || (seq % 500) == 0) {
-                uint32_t* vd = static_cast<uint32_t*>(vertexData);
-                // Byte-swap (guest is big-endian)
-                uint32_t w[9];
-                for (int i = 0; i < 9; ++i) w[i] = __builtin_bswap32(vd[i]);
-                float f[9];
-                for (int i = 0; i < 9; ++i) { std::memcpy(&f[i], &w[i], 4); }
-                LOGF_WARNING("[WATCH] DrawPrimUP seq={} dev={} prim={} vc={} str={} buf_guest=0x{:08X} v0.pos=[{:.3f},{:.3f},{:.3f},{:.3f}] v0.extra=[{:.3f},{:.3f}] v0.color=0x{:08X} v0.uv=[{:.3f},{:.3f}]",
-                             seq, (void*)device,
-                             s_pendingDrawUP.primType, s_pendingDrawUP.vertCount, s_pendingDrawUP.stride,
-                             s_pendingDrawUP.bufferAddr,
-                             f[0], f[1], f[2], f[3],
-                             f[4], f[5],
-                             w[6],
-                             f[7], f[8]);
-                if (w[6] == 0xFFE1E1E1u) {
-                    LOGF_WARNING("[WATCH] DrawPrimUP seq={} *** COLOR IS RAGE POISON 0xFFE1E1E1 ***", seq);
-                }
-            }
-        }
-
-        DrawPrimitiveUP(device,
-            s_pendingDrawUP.primType,
-            s_pendingDrawUP.vertCount,
-            vertexData,
-            s_pendingDrawUP.stride);
-    }
-
-    // Replicate the original epilogue: device[48] = device[13428]
-    uint32_t deviceAddr = ctx.r3.u32;
-    if (deviceAddr != 0) {
-        uint8_t* dp = static_cast<uint8_t*>(g_memory.Translate(deviceAddr));
-        uint32_t savedPtr = GTAIV::GetDeviceU32(dp, 13428);
-        GTAIV::SetDeviceU32(dp, GTAIV::DeviceOffset::CommandBufferPtr, savedPtr);
-    }
+    g_userHeap.Free(s_pendingDrawUP.stagingHost);
+    s_pendingDrawUP = {};
 }
 
 // --- sub_82A3CC68: DrawPrimitivesInternal (27 callers, main draw path) ---

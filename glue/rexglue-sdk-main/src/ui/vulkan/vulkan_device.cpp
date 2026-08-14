@@ -61,7 +61,8 @@ struct VulkanFeatures {
 
 std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
     const VulkanInstance* const vulkan_instance, const VkPhysicalDevice physical_device,
-    const bool with_gpu_emulation, const bool with_swapchain) {
+    const bool with_gpu_emulation, const bool with_swapchain,
+    const bool with_native_shader_support, const bool with_dynamic_rendering) {
   assert_not_null(vulkan_instance);
   assert_not_null(physical_device);
 
@@ -91,6 +92,21 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
 
   VkPhysicalDeviceFeatures supported_features = {};
   ifn.vkGetPhysicalDeviceFeatures(physical_device, &supported_features);
+
+  if (with_native_shader_support &&
+      properties.apiVersion < VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+    REXLOG_WARN(
+        "Vulkan device '{}' exposes API {}.{}, but Liberty native shaders require Vulkan 1.2",
+        properties.deviceName, VK_VERSION_MAJOR(properties.apiVersion),
+        VK_VERSION_MINOR(properties.apiVersion));
+    return nullptr;
+  }
+  if (with_native_shader_support && !supported_features.shaderInt64) {
+    REXLOG_WARN(
+        "Vulkan device '{}' doesn't support shaderInt64 required by Liberty native shaders",
+        properties.deviceName);
+    return nullptr;
+  }
 
   if (with_gpu_emulation) {
     if (!supported_features.independentBlend) {
@@ -210,6 +226,11 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   bool ext_1_3_EXT_shader_demote_to_helper_invocation = false;
   bool ext_1_3_KHR_dynamic_rendering = false;
   bool ext_EXT_non_seamless_cube_map = false;
+  if (get_physical_device_properties2_supported &&
+      (with_gpu_emulation || with_dynamic_rendering)) {
+    // #55.
+    XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_dynamic_rendering, 1, 3)
+  }
   if (with_gpu_emulation) {
     // #15.
     XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_sampler_mirror_clamp_to_edge, 1, 2)
@@ -226,8 +247,6 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
       XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_shader_float_controls, 1, 2)
       // #252.
       XE_UI_VULKAN_LOCAL_EXTENSION(EXT_fragment_shader_interlock)
-      // #55.
-      XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_dynamic_rendering, 1, 3)
       // #277.
       XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(EXT_shader_demote_to_helper_invocation, 1, 3)
       // #423.
@@ -378,6 +397,32 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
     }
     ifn.vkGetPhysicalDeviceProperties2(physical_device, &properties_2);
     ifn.vkGetPhysicalDeviceFeatures2(physical_device, &supported_features_2);
+  }
+
+  if (with_native_shader_support &&
+      (!features_1_2.supported.runtimeDescriptorArray ||
+       !features_1_2.supported.descriptorBindingPartiallyBound ||
+       !features_1_2.supported.bufferDeviceAddress)) {
+    REXLOG_WARN(
+        "Vulkan device '{}' lacks native shader features: runtimeDescriptorArray={}, "
+        "descriptorBindingPartiallyBound={}, bufferDeviceAddress={}",
+        properties.deviceName, features_1_2.supported.runtimeDescriptorArray != VK_FALSE,
+        features_1_2.supported.descriptorBindingPartiallyBound != VK_FALSE,
+        features_1_2.supported.bufferDeviceAddress != VK_FALSE);
+    return nullptr;
+  }
+  if (with_dynamic_rendering) {
+    const bool dynamic_rendering_supported =
+        properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)
+            ? features_1_3.supported.dynamicRendering != VK_FALSE
+            : ext_1_3_KHR_dynamic_rendering &&
+                  features_1_3_KHR_dynamic_rendering.supported.dynamicRendering != VK_FALSE;
+    if (!dynamic_rendering_supported) {
+      REXLOG_WARN("Vulkan device '{}' doesn't support dynamic rendering required by the native "
+                  "graphics backend",
+                  properties.deviceName);
+      return nullptr;
+    }
   }
 
   uint32_t queue_family_count = 0;
@@ -640,7 +685,6 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
     XE_UI_VULKAN_FEATURE(sampleRateShading)
     XE_UI_VULKAN_FEATURE(depthClamp)
     XE_UI_VULKAN_FEATURE(fillModeNonSolid)
-    XE_UI_VULKAN_FEATURE(samplerAnisotropy)
     XE_UI_VULKAN_FEATURE(occlusionQueryPrecise)
     XE_UI_VULKAN_FEATURE(vertexPipelineStoresAndAtomics)
     XE_UI_VULKAN_FEATURE(fragmentStoresAndAtomics)
@@ -650,11 +694,24 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
     XE_UI_VULKAN_FEATURE(sparseResidencyBuffer)
   }
 
+  if (with_gpu_emulation || with_native_shader_support) {
+    XE_UI_VULKAN_FEATURE(samplerAnisotropy)
+  }
+
+  if (with_native_shader_support) {
+    XE_UI_VULKAN_FEATURE(shaderInt64)
+  }
+
   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
     if (with_gpu_emulation) {
       XE_UI_VULKAN_FEATURE_2(features_1_2, samplerMirrorClampToEdge);
       XE_UI_VULKAN_FEATURE_2(features_1_2, uniformBufferStandardLayout);
       XE_UI_VULKAN_FEATURE_2(features_1_2, scalarBlockLayout);
+    }
+    if (with_native_shader_support) {
+      XE_UI_VULKAN_FEATURE_2(features_1_2, runtimeDescriptorArray);
+      XE_UI_VULKAN_FEATURE_2(features_1_2, descriptorBindingPartiallyBound);
+      XE_UI_VULKAN_FEATURE_2(features_1_2, bufferDeviceAddress);
     }
   } else {
     if (ext_1_2_KHR_sampler_mirror_clamp_to_edge) {
@@ -665,11 +722,13 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
     if (with_gpu_emulation) {
       XE_UI_VULKAN_FEATURE_2(features_1_3, shaderDemoteToHelperInvocation);
+    }
+    if (with_gpu_emulation || with_dynamic_rendering) {
       XE_UI_VULKAN_FEATURE_2(features_1_3, dynamicRendering);
     }
   } else {
     if (ext_1_3_KHR_dynamic_rendering) {
-      if (with_gpu_emulation) {
+      if (with_gpu_emulation || with_dynamic_rendering) {
         XE_UI_VULKAN_FEATURE_2(features_1_3_KHR_dynamic_rendering, dynamicRendering);
       }
     }
@@ -776,6 +835,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
 #include <rex/ui/vulkan/functions/device_1_1_khr_bind_memory2.inc>
 #include <rex/ui/vulkan/functions/device_1_1_khr_get_memory_requirements2.inc>
+  }
+  if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+#include <rex/ui/vulkan/functions/device_1_2.inc>
   }
   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
 #include <rex/ui/vulkan/functions/device_1_3_khr_dynamic_rendering.inc>

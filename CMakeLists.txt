@@ -46,6 +46,14 @@ if(NOT DEFINED LIBERTY_RECOMP_TARGET_PLATFORM)
 endif()
 message(STATUS "Target platform: ${LIBERTY_RECOMP_TARGET_PLATFORM}")
 
+if(APPLE)
+    set(LIBERTY_IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple development team ID for iOS signing.")
+    set(LIBERTY_IOS_BUNDLE_IDENTIFIER "com.libertyrecomp" CACHE STRING "Bundle identifier for iOS builds.")
+    set(LIBERTY_IOS_PROVISIONING_PROFILE "" CACHE STRING "Optional iOS provisioning profile specifier.")
+    set(LIBERTY_MACOS_BUNDLE_IDENTIFIER "OZORDI.LibertyRecomp" CACHE STRING "Bundle identifier for macOS builds.")
+    set(LIBERTY_MACOS_CODE_SIGN_IDENTITY "" CACHE STRING "Optional macOS codesign identity for entitlement signing.")
+endif()
+
 # ─── Build-time Asset Path ──────────────────────────────────────────────────
 # For non-desktop platforms that cannot use a file-picker installer, all game
 # assets must be available at configure time and bundled into the package.
@@ -162,7 +170,7 @@ if(LIBERTY_RECOMP_GRAINE_MAC)
         message(FATAL_ERROR "The macOS build requires the Graine RexGlue runtime")
     endif()
 
-    message(STATUS "macOS: building the pure Graine RexGlue/Xenos consumer")
+    message(STATUS "macOS: building the pure Graine RexGlue consumer")
     add_subdirectory("glue")
     return()
 endif()

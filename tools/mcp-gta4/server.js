@@ -168,6 +168,7 @@ function parseFunctionsWithAddrs() {
 }
 
 function parseHookStatus() {
+  hookStatus.clear(); // rescan is authoritative each time; drop stale entries
   const dirs = [LIBERTY_RECOMP, LIBERTY_RECOMP_LIB];
   const patterns = [
     /GUEST_FUNCTION_HOOK\s*\(\s*(sub_[0-9a-fA-F]+)/g,
@@ -196,7 +197,7 @@ function parseHookStatus() {
       }
     }
   }
-  console.error(`Found ${hookStatus.size} active hooks`);
+  
 }
 
 function walkCppFiles(dir) {
@@ -627,6 +628,7 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     try {
+      parseHookStatus(); // live rescan: hook coverage changes constantly during active dev
       let result;
       switch (name) {
         case "get_function_info":

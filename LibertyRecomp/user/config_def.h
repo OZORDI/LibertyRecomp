@@ -205,11 +205,12 @@ CONFIG_DEFINE_HIDDEN("Install", std::string, DLCSourceDir, "", false);
 CONFIG_DEFINE_HIDDEN("Install", std::string, UpdateSourceDir, "", false);
 
 // Online Multiplayer
-CONFIG_DEFINE_ENUM("Multiplayer", EMultiplayerBackend, MultiplayerBackend, EMultiplayerBackend::Community, false);
+CONFIG_DEFINE_ENUM("Multiplayer", EMultiplayerBackend, MultiplayerBackend, EMultiplayerBackend::LAN, false);
+CONFIG_DEFINE_ENUM("Multiplayer", EMultiplayerRelayPolicy, MultiplayerRelayPolicy, EMultiplayerRelayPolicy::Auto, false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, CommunityServerURL, "https://liberty-sessions.libertyrecomp.com", false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, FirebaseProjectId, "", false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, FirebaseApiKey, "", false);
-CONFIG_DEFINE_HIDDEN("Multiplayer", int32_t, LANBroadcastPort, 3074, false);
+CONFIG_DEFINE_HIDDEN("Multiplayer", int32_t, LANBroadcastPort, 36002, false);
 CONFIG_DEFINE_HIDDEN("Multiplayer", std::string, PlayerName, "Player", false);
 
 // Voice Chat

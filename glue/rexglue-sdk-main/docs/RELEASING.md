@@ -15,10 +15,12 @@ Version format follows [CMake's `CMAKE_VERSION`](https://cmake.org/cmake/help/la
 The full version is derived at configure time:
 
 - On a tagged commit: version is the tag verbatim (minus the leading `v`). Tags may be 2, 3, or 4 components (`v0.7`, `v0.7.5`, `v0.7.5.1`). Whatever you tag is what ships.
-- On a `release/*` branch: version is `MAJOR.<floor-minor>.<next-patch>.<commit-count>-rc.g<sha>`.
-- On `development` or anywhere else: version is `MAJOR.<floor-minor>.<next-patch>.<commit-count>-dev.g<sha>`.
+- On a `release/*` branch: version is `MAJOR.<floor-minor>.<tag-patch>.<commit-count>-rc.g<sha>`.
+- On `development` or anywhere else: version is `MAJOR.<floor-minor>.<tag-patch>.<commit-count>-dev.g<sha>`.
 
-`<next-patch>` is `last-tag-patch + 1` when the floor minor matches the most recent tag's minor, or `0` when the floor is ahead. `<commit-count>` is the number of commits since that tag (the TWEAK slot). The `-id` trailer identifies the build channel (`dev` or `rc`) and the short commit SHA.
+When the floor major.minor is ahead of the most recent tag (a floor bump not yet released), the version instead holds at `MAJOR.<floor-minor>.0-<id>` with no commit-count tweak, and stays there until a release on that floor lands and `main` catches up.
+
+`<tag-patch>` is the patch of the most recent tag; it is not pre-incremented, so the build tracks the released base plus commits and the next release tag lands on the very next number. `<commit-count>` is the number of commits since that tag (the TWEAK slot). The `-id` trailer identifies the build channel (`dev` or `rc`) and the short commit SHA.
 
 Examples:
 
@@ -26,9 +28,9 @@ Examples:
 | --- | --- |
 | `git tag v0.7.5` pushed | `0.7.5` |
 | `git tag v0.7.5.1` pushed (hotfix tweak) | `0.7.5.1` |
-| `development`, 38 commits past `v0.7.4` | `0.7.5.38-dev.gb27f3f74` |
-| `release/0.7.5`, 15 commits past `v0.7.4` | `0.7.5.15-rc.gdeadbee` |
-| Floor bumped to `0.8`, 3 commits past `v0.7.5` | `0.8.0.3-dev.gdef5678` |
+| `development`, 38 commits past `v0.7.4` | `0.7.4.38-dev.gb27f3f74` |
+| `release/0.7.5`, 15 commits past `v0.7.4` | `0.7.4.15-rc.gdeadbee` |
+| Floor bumped to `0.8`, 3 commits past `v0.7.5` | `0.8.0-dev.gdef5678` |
 
 A version with `-dev` or `-rc` is unstable. Only a version without an `-id` trailer is covered by the public API.
 

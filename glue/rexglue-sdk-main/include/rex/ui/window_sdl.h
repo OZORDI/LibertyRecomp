@@ -32,14 +32,22 @@ class WindowSDL final : public Window {
   ~WindowSDL() override;
 
   void* GetNativeWindowHandle() const override;
+  bool SetRelativeMouseMode(bool enabled) override;
 
   // Called by SDLWindowedAppContext on the UI thread.
   void HandleWindowEvent(SDL_Event& event);
   void HandleKeyEvent(SDL_Event& event);
   void HandleTextInputEvent(SDL_Event& event);
   void HandleMouseEvent(SDL_Event& event);
+#if REX_PLATFORM_MAC
+  void HandleAcceleratedPointerMotion(float delta_x, float delta_y);
+#endif
   void HandleDropEvent(SDL_Event& event);
   void HandlePaintEvent();
+
+  bool IsHDREnabled() const override;
+  float GetSDRWhiteLevel() const override;
+  float GetHDRHeadroom() const override;
 
  protected:
   uint32_t GetLatestDpiImpl() const override;
@@ -69,6 +77,7 @@ class WindowSDL final : public Window {
   void DestroySDLWindow();
 
 #if REX_PLATFORM_MAC
+  static void AcceleratedPointerCallbackThunk(void* userdata, float delta_x, float delta_y);
   void DestroyMetalView();
   void* GetOrCreateMetalLayer();
 #endif
@@ -81,6 +90,7 @@ class WindowSDL final : public Window {
   std::atomic<bool> paint_pending_{false};
 #if REX_PLATFORM_MAC
   void* sdl_metal_view_ = nullptr;
+  void* accelerated_pointer_monitor_ = nullptr;
 #endif
   // Auto-hide cursor bookkeeping (CursorVisibility::kAutoHidden).
   SDL_TimerID cursor_hide_timer_ = 0;

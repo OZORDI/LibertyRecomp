@@ -41,6 +41,12 @@ namespace PlatformPaths
      * Returns: <install_dir>/shader_cache/
      */
     std::filesystem::path GetShaderCacheDirectory();
+
+    /**
+     * Get the saved-game data directory.
+     * Returns: <install_dir>/saves/
+     */
+    std::filesystem::path GetSavesDirectory();
     
     /**
      * Get temporary directory for extraction operations.

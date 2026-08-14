@@ -212,6 +212,11 @@ class Window {
   // the On* functions are for the implementation's feedback).
 
   virtual uint32_t GetMediumDpi() const { return 96; }
+  // Host display HDR properties. Implementations that don't expose dynamic
+  // HDR state retain SDR defaults.
+  virtual bool IsHDREnabled() const { return false; }
+  virtual float GetSDRWhiteLevel() const { return 1.0f; }
+  virtual float GetHDRHeadroom() const { return 1.0f; }
   uint32_t GetDpi() const {
     uint32_t dpi = GetLatestDpiImpl();
     return dpi ? dpi : GetMediumDpi();
@@ -301,6 +306,10 @@ class Window {
   bool IsMouseCaptureRequested() const { return mouse_capture_request_count_ != 0; }
   void CaptureMouse();
   void ReleaseMouse();
+  virtual bool SetRelativeMouseMode(bool enabled) {
+    (void)enabled;
+    return false;
+  }
 
   // Desired state stored by the common Window, externally modifiable, read-only
   // in the implementation.
@@ -310,6 +319,13 @@ class Window {
   // the cursor in fullscreen, to allow going into the fullscreen mode to hide
   // the cursor instantly.
   void SetCursorVisibility(CursorVisibility new_cursor_visibility);
+
+  uint32_t GetCursorAutoHideDelayMs() const { return cursor_auto_hide_delay_ms_; }
+  // Idle time before kAutoHidden hides the cursor. Takes effect the next time
+  // the auto-hide timer is armed (the next mouse motion).
+  void SetCursorAutoHideDelayMs(uint32_t delay_ms) {
+    cursor_auto_hide_delay_ms_ = delay_ms;
+  }
 
   bool HasFocus() const { return HasActualState() ? has_focus_ : false; }
   // May be applied in a delayed way or dropped at all, HasFocus will not
@@ -693,6 +709,8 @@ class Window {
   uint32_t mouse_capture_request_count_ = 0;
 
   CursorVisibility cursor_visibility_ = CursorVisibility::kVisible;
+
+  uint32_t cursor_auto_hide_delay_ms_ = kDefaultCursorAutoHideMilliseconds;
 
   bool has_focus_ = false;
 

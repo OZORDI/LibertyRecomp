@@ -63,8 +63,9 @@ open out/build/ios-debug/LibertyRecomp.xcodeproj
 |`LIBERTY_IOS_BUNDLE_IDENTIFIER`|`com.libertyrecomp`|Bundle ID. Must match your provisioning profile.|
 |`LIBERTY_IOS_PROVISIONING_PROFILE`|(empty)|Optional profile UUID. Leave blank for automatic signing.|
 |`LIBERTY_MACOS_BUNDLE_IDENTIFIER`|`OZORDI.LibertyRecomp`|Bundle ID for macOS builds. Must match the Game Center app record when shipping macOS achievements.|
+|`LIBERTY_MACOS_CODE_SIGN_IDENTITY`|(empty)|Optional macOS signing identity. Set this for Ninja-built macOS bundles that need Game Center entitlement signing.|
 
-These feed the Xcode target attributes `DEVELOPMENT_TEAM`,
+The iOS values feed the Xcode target attributes `DEVELOPMENT_TEAM`,
 `PRODUCT_BUNDLE_IDENTIFIER`, `CODE_SIGN_IDENTITY` (`iPhone Developer`), and
 `CODE_SIGN_STYLE` (`Automatic`), so the generated project signs itself
 without manual clicks in the Xcode UI.

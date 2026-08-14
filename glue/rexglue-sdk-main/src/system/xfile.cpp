@@ -10,6 +10,7 @@
  */
 
 #include <rex/filesystem/vfs.h>
+#include <rex/filesystem/devices/host_path_device.h>
 #include <rex/logging.h>
 #include <rex/math.h>
 #include <rex/memory.h>
@@ -27,6 +28,9 @@ XFile::XFile(KernelState* kernel_state, rex::filesystem::File* file, bool synchr
     : XObject(kernel_state, kObjectType), file_(file), is_synchronous_(synchronous) {
   async_event_ = rex::thread::Event::CreateAutoResetEvent(false);
   assert_not_null(async_event_);
+  if (IsIoTraceEnabled()) {
+    REXSYS_DEBUG("[PortableSave] Open file '{}'", entry()->absolute_path());
+  }
 }
 
 XFile::XFile() : XObject(kObjectType) {
@@ -36,8 +40,19 @@ XFile::XFile() : XObject(kObjectType) {
 
 XFile::~XFile() {
   // TODO(benvanik): signal that the file is closing?
+  if (IsIoTraceEnabled()) {
+    REXSYS_DEBUG("[PortableSave] Close file '{}'", entry()->absolute_path());
+  }
   async_event_->Set();
   file_->Destroy();
+}
+
+bool XFile::IsIoTraceEnabled() const {
+  if (!file_) {
+    return false;
+  }
+  const auto* host_device = dynamic_cast<const rex::filesystem::HostPathDevice*>(device());
+  return host_device && host_device->trace_io();
 }
 
 uint64_t XFile::position() const {
@@ -105,8 +120,16 @@ X_STATUS XFile::QueryDirectory(X_FILE_DIRECTORY_INFORMATION* out_info, size_t le
 X_STATUS XFile::Read(uint32_t buffer_guest_address, uint32_t buffer_length, uint64_t byte_offset,
                      uint32_t* out_bytes_read, uint32_t apc_context, bool notify_completion) {
   std::lock_guard<std::mutex> lock(file_lock_);
-  return ReadInternal(buffer_guest_address, buffer_length, byte_offset, out_bytes_read, apc_context,
-                      notify_completion);
+  const uint64_t effective_offset = byte_offset == uint64_t(-1) ? position_ : byte_offset;
+  uint32_t traced_bytes_read = 0;
+  uint32_t* bytes_read = out_bytes_read ? out_bytes_read : &traced_bytes_read;
+  const X_STATUS result = ReadInternal(buffer_guest_address, buffer_length, byte_offset, bytes_read,
+                                       apc_context, notify_completion);
+  if (IsIoTraceEnabled()) {
+    REXSYS_TRACE("[PortableSave] Read file='{}' offset={} requested={} transferred={} status={:08X}",
+                 entry()->absolute_path(), effective_offset, buffer_length, *bytes_read, result);
+  }
+  return result;
 }
 
 X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_length,
@@ -251,6 +274,12 @@ X_STATUS XFile::ReadScatter(uint32_t segments_guest_address, uint32_t length, ui
 
   async_event_->Set();
 
+  if (IsIoTraceEnabled()) {
+    REXSYS_TRACE(
+        "[PortableSave] ReadScatter file='{}' offset={} requested={} transferred={} status={:08X}",
+        entry()->absolute_path(), byte_offset, length, read_total, result);
+  }
+
   return result;
 }
 
@@ -282,17 +311,33 @@ X_STATUS XFile::Write(uint32_t buffer_guest_address, uint32_t buffer_length, uin
   }
 
   async_event_->Set();
+  if (IsIoTraceEnabled()) {
+    REXSYS_TRACE(
+        "[PortableSave] Write file='{}' offset={} requested={} transferred={} status={:08X}",
+        entry()->absolute_path(), byte_offset, buffer_length, bytes_written, result);
+  }
   return result;
 }
 
 X_STATUS XFile::SetLength(size_t length) {
   std::lock_guard<std::mutex> lock(file_lock_);
-  return file_->SetLength(length);
+  const X_STATUS result = file_->SetLength(length);
+  if (IsIoTraceEnabled()) {
+    REXSYS_TRACE("[PortableSave] Resize file='{}' length={} status={:08X}",
+                 entry()->absolute_path(), length, result);
+  }
+  return result;
 }
 
 X_STATUS XFile::Rename(const std::filesystem::path& file_path) {
   std::lock_guard<std::mutex> lock(file_lock_);
-  return entry()->Rename(file_path);
+  const std::string old_path = entry()->absolute_path();
+  const X_STATUS result = entry()->Rename(file_path);
+  if (IsIoTraceEnabled()) {
+    REXSYS_TRACE("[PortableSave] Rename file='{}' destination='{}' status={:08X}", old_path,
+                 file_path.string(), result);
+  }
+  return result;
 }
 
 void XFile::RegisterIOCompletionPort(uint32_t key, object_ref<XIOCompletion> port) {

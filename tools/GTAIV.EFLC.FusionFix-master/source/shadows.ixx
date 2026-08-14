@@ -178,7 +178,20 @@ public:
                         "15_blds1dtl2_mh5", "15_blds1dtl3_mh5", "15_blds4dtl1_mh5", "15_blds4dtl2_mh5", "15_blds5dtl_mh5", "16_01_dtl1_mh5", "16_01_dtl2_mh5", "16_01_dtl3_mh5", "16_02_dtl1_mh5", "16_02_dtl2_mh5",
                         "16_03_dtl1_mh5", "16_03_dtl2_mh5", "19_01_dtl1_mh5", "19_02_dtl1_mh5", "19_05_dtl1_mh5", "20_01_dtl1_mh5", "20_01_dtl2_mh5", "20_02_dtl1_mh5", "22_bld01dtl_mh5", "22_bld02dtl_mh5",
                         "22_bld03dtl_mh5", "22_bld05dtl_mh5", "24_bld01dtl1_mh5", "24_bld01dtl2_mh5", "24_bld01dtl3_mh5", "26_02_dtl2_mh5", "26_03_dtl1_mh5", "26_04_dtl1_mh5", "26_05_dtl1_mh5", "b12_bld01dtl_mh5",
-                        "b12_meatfdtl_mh5", "b12_warhs02dtl_mh5", "brownstdtl01_mh5", "policehqdtl_mh10", "taino_dtl01_mh5", "taino_dtl02_mh5"
+                        "b12_meatfdtl_mh5", "b12_warhs02dtl_mh5", "brownstdtl01_mh5", "policehqdtl_mh10", "taino_dtl01_mh5", "taino_dtl02_mh5", "metbanns_mh06", "mus_skylightmh06", "nj03ac13veg", "nj03ac2041",
+                        "nj03ac2312", "nj03ac23alph3", "nj03ac24plnts", "nj03ac2912alph", "nj03ac2916", "nj03ac3208", "nj03ac3442grs", "nj03ac36alph", "nj04e_cstglue", "nj04e_glue01", "nj04e_glue02",
+                        "nj04e_glue05", "nj04e_glue06", "nj04e_glue07", "nj04e_glue09", "nj04e_glue10", "nj04e_glue11", "nj04e_glue12", "nj04e_glue69", "nj04e_indbuild02", "nj04e_indbuild33", "nj04e_indbuild35",
+                        "nj04e_indbuild36", "nj04e_indbuild38", "nj04eleaf_pile03", "nj04paulieweed01", "xnj2_cd30_01alley", "14_alley_mh1", "bxwsb8_alley", "nj_alley1", "swn04_blokalley", "ag_bushytree11", 
+                        "ag_bushytree4", "ag_bushytree5", "ag_bushytree6", "ag_bushytree7", "bknbush_02", "et_bushlib02", "tr_dstore_det01_dc9", "ts_bawsaqdet_02_dc9", "ts_bilb8x14_dc9", "ts_bilbixrtile01_dc9",
+                        "ts_bilbstand1_dc9", "ts_bilcorn01_dc9", "ts_floodlitixr_dc9", "ts_floodlitixr2_dc9", "ts_floodlitixr3_dc9", "ts_roads03x_dc9", "ts_roads07_dc9", "ts_roads08_dc9", "ts_roads09x_dc9",
+                        "ts_roads12_dc9", "ts_roads14_dc9", "ts_roads15_dc9", "ts_roads18_dc9", "ts_roads19_dc9", "ts_roads21_dc9", "ts_roads22_dc9", "ts_roads23_dc9", "ts_roads29_dc9", "ts_roads31_dc9",
+                        "ts_roads32_dc9", "ts_roads58_dc9", "ts_roads60_dc9", "ts_rtheat1_det_dc9", "intbild1_d_mh12", "intbild2_d_mh12", "rez_bild8_33d_ix06", "bxw_coastfortwds", "bxw_constalpha",
+                        "sb4b_alpha", "sb6_glues", "sb7_alpha", "sb8_wires", "sbx4_weeds", "percyshpsd_mh8", "bc_clam_alpha", "bxwmanny_alpha", "hp_2_plants_alpha03", "hp1_alpha", "nj01_casino_alpha",
+                        "plant_weeds_bxe_e02", "plant_weeds_bxe_e03", "bkn_wi3_sigs2", "dmb_brokerd_bkn", "dmb_midg02_bkn", "hunts_p03_market", "03_waredet", "hl_warehsedet_02_mh3", "bm_aerial",
+                        "bxe_road_40", "bxe_road_54", "bxe_road_66", "bxe_road_81", "beacon1_mh8", "beacon2_mh8", "bears_lbayalfa", "hk_slumber01det_mh3", "nj05_bridge_ivy", "nj05_ivy_test",
+                        "nj05_plntgngat01", "pave_treehole4a_mxr", "brown_accomd_mh4", "cc1_gardn_01a", "b4_gcdet02_mh7", "blk02_05det_mh10", "blk07_03det_mh10", "blk10_01det_mh10", "blk10_06det_mh10",
+                        "road_qe_21", "agld04_03", "municipal_det17_mh2", "tg_cimidrf", "qm_fh_hedge", "et_firestation01", "gastation1d_mh8", "cop_det01_mh2", "coptrain_det", "coop_police_shops2",
+                        "qw_nwcost", "qw2_lic7"
                     };
 
                     modelNames.insert(modelNames.end(), miscNames.begin(), miscNames.end());

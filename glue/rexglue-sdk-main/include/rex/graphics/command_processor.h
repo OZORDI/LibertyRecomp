@@ -246,6 +246,14 @@ class CommandProcessor {
   // Shared memexport readback enable state with backend legacy-flag override support.
   bool IsReadbackMemexportEnabled(bool legacy_backend_flag) const;
 
+  void ArmNativeRendererOracleCapture();
+  void FinishNativeRendererOracleFrame();
+  void LogNativeRendererOracleDraw(const char* opcode_name,
+                                   const reg::VGT_DRAW_INITIATOR& draw_initiator,
+                                   uint32_t viz_query_condition, bool is_indexed,
+                                   const IndexBufferInfo& index_buffer_info,
+                                   bool major_mode_explicit, const char* outcome);
+
   memory::Memory* memory_ = nullptr;
   system::KernelState* kernel_state_ = nullptr;
   GraphicsSystem* graphics_system_ = nullptr;
@@ -291,6 +299,15 @@ class CommandProcessor {
 
   Shader* active_vertex_shader_ = nullptr;
   Shader* active_pixel_shader_ = nullptr;
+
+  bool native_renderer_oracle_requested_ = false;
+  bool native_renderer_oracle_active_ = false;
+  uint64_t native_renderer_oracle_frame_ = 0;
+  uint64_t native_renderer_oracle_draws_ = 0;
+  uint64_t native_renderer_oracle_logged_draws_ = 0;
+  uint64_t native_renderer_oracle_omitted_draws_ = 0;
+  uint64_t native_renderer_oracle_copy_draws_ = 0;
+  uint64_t native_renderer_oracle_backend_failures_ = 0;
 
   bool paused_ = false;
 

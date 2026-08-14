@@ -5,22 +5,51 @@ add_executable(unit_tests
     kernel/object_table_test.cpp
     core/cvar_test.cpp
     core/fiber_test.cpp
+    core/gta4_transition_test.cpp
     core/sha256_test.cpp
     core/stream_test.cpp
     core/byte_order_test.cpp
     core/chrono_test.cpp
+    audio/audio_conversion_test.cpp
+    audio/audio_ring_test.cpp
+    audio/audio_clock_test.cpp
+    graphics/postfx_resource_pool_test.cpp
+    graphics/gta4_native_surface_view_test.cpp
+    graphics/pipeline_cache_file_test.cpp
     graphics/primitive_restart_test.cpp
+    input/pointer_motion_test.cpp
     codegen/config_test.cpp
     codegen/template_registry_test.cpp
     ppc/import_function_test.cpp
     ppc/stack_test.cpp
     system/guest_path_test.cpp
+    system/gta4_loading_parallax_fix_test.cpp
+    system/content_manager_test.cpp
     system/achievement_manager_test.cpp
     system/function_dispatcher_test.cpp
+    system/live_compatibility_test.cpp
     codegen/manifest_test.cpp
     rexglue/migration_scan_test.cpp
     rexglue/ui_test.cpp
 )
+
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_sources(unit_tests PRIVATE audio/coreaudio_smoke_test.cpp)
+
+    add_executable(coreaudio_smoke
+        audio/coreaudio_smoke_main.cpp
+        ${PROJECT_SOURCE_DIR}/src/audio/coreaudio/coreaudio_output.cpp
+    )
+    target_include_directories(coreaudio_smoke PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(coreaudio_smoke PRIVATE
+        rexcore
+        "-framework AudioToolbox"
+        "-framework CoreAudio"
+    )
+    set_target_properties(coreaudio_smoke PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>
+    )
+endif()
 
 target_sources(unit_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/src/rexglue/commands/migration_scan.cpp
@@ -34,9 +63,9 @@ target_include_directories(unit_tests PRIVATE
 )
 
 target_link_libraries(unit_tests PRIVATE
-    rexcore
     rexcodegen
     rexruntime
+    rexinput
     Catch2::Catch2WithMain
 )
 

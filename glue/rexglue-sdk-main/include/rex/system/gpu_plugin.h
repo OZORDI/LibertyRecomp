@@ -1,6 +1,6 @@
 /**
  * @file        system/gpu_plugin.h
- * @brief       GPU emulation plugin ABI and host-side loader
+ * @brief       Graphics plugin ABI and host-side loader
  *
  * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  *              All rights reserved.
@@ -8,8 +8,8 @@
  * @license     BSD 3-Clause License
  *              See LICENSE file in the project root for full license text.
  *
- * @remarks     One plugin exists today (rexgpu-xenos). The factory carries an
- *              ABI version so this can grow into a general plugin API later.
+ * @remarks     Plugins may provide full GPU emulation or a title-specific
+ *              graphics system. The factory ABI is shared by both.
  */
 
 #pragma once
@@ -29,7 +29,7 @@
 namespace rex::system {
 
 // Bump on any change to GpuCreateInfo or to the IGraphicsSystem interface.
-inline constexpr uint32_t kGpuPluginAbiVersion = 1;
+inline constexpr uint32_t kGpuPluginAbiVersion = 2;
 
 inline constexpr const char* kGpuCreateSymbol = "rex_gpu_create";
 inline constexpr const char* kGpuAbiVersionSymbol = "rex_gpu_abi_version";

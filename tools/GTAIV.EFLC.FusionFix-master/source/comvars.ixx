@@ -474,10 +474,52 @@ public:
     }
 };
 
+export class CShaderFx_PushForcedTechnique : public CBaseDC
+{
+public:
+    int32_t m_nTechId;
+
+public:
+    CShaderFx_PushForcedTechnique(int32_t techID) : CBaseDC()
+    {
+        m_nTechId = techID;
+    }
+
+    static inline void* DrawCommandAddr;
+    void DrawCommand() override
+    {
+        reinterpret_cast<void (__thiscall*)(CShaderFx_PushForcedTechnique*)>(DrawCommandAddr)(this);
+    }
+
+    int32_t GetSize() override
+    {
+        return sizeof(T_CB_Generic_NoArgs);
+    }
+};
+
+export class CShaderFx_PopForcedTechnique : public CBaseDC
+{
+public:
+    CShaderFx_PopForcedTechnique() : CBaseDC()
+    {
+    }
+
+    static inline void* DrawCommandAddr;
+    void DrawCommand() override
+    {
+        reinterpret_cast<void (__thiscall*)(CShaderFx_PopForcedTechnique*)>(DrawCommandAddr)(this);
+    }
+
+    int32_t GetSize() override
+    {
+        return sizeof(T_CB_Generic_NoArgs);
+    }
+};
+
 export namespace rage
 {
-#define POOL_FLAG_ISFREE 0x80
-#define POOL_FLAG_REFERENCEMASK 0x7f
+    #define POOL_FLAG_ISFREE 0x80
+    #define POOL_FLAG_REFERENCEMASK 0x7f
 
     class fwBasePool
     {
@@ -698,9 +740,10 @@ namespace CPed
     }
 
     export template <typename... Args, typename = std::enable_if_t<(std::is_convertible_v<Args, TaskID> && ...)>>
-    bool ComparePedTasks(uintptr_t pPed, Args... args)
+        bool ComparePedTasks(uintptr_t pPed, Args... args)
     {
-        auto condition = [](TaskID val, TaskID param) -> bool {
+        auto condition = [](TaskID val, TaskID param) -> bool
+        {
             if (std::to_underlying(param) >= 0)
                 return std::to_underlying(val) == std::to_underlying(param);
             else
@@ -1227,7 +1270,8 @@ export namespace rage
             , field_29(0)
             , field_2A(0)
             , mFormat(GRCFMT_UNKNOWN)
-        {}
+        {
+        }
 
         char field_0;
         int mMultisampleCount;
@@ -1366,7 +1410,8 @@ export namespace rage
                 , BlurResult(false)
                 , NeedResolve(true)
                 , MipMap(true)
-            {}
+            {
+            }
 
             float Depth;
             float BlurKernelSize;
@@ -1523,13 +1568,13 @@ export namespace rage
             if (std::string_view(name) == "PHONE_SCREEN" || std::string_view(name) == "PHOTO" || std::string_view(name) == "FullScreenCopy2")
             {
                 auto res = (int32_t)(std::ceil((float)*rage::grcDevice::ms_nActiveHeight / 720.0f) * 256.0f);
-                width  = res;
+                width = res;
                 height = res;
             }
             else if (std::string_view(name) == "WATER_SURFACE0_COLOUR" || std::string_view(name) == "WATER_SURFACE1_COLOUR")
             {
                 // Force water surface rendertarget resolution to always be 256x256. This matches the water tiling on the console version.
-                width  = 256;
+                width = 256;
                 height = 256;
             }
             else if (std::string_view(name) == "MIRROR_RT" || std::string_view(name) == "MIRROR_DT")
@@ -1589,10 +1634,10 @@ export namespace rage
 
     enum eLightType
     {
-        LT_POINT   = 0x0,
-        LT_DIR     = 0x1,
-        LT_SPOT    = 0x2,
-        LT_AMBOCC  = 0x3,
+        LT_POINT = 0x0,
+        LT_DIR = 0x1,
+        LT_SPOT = 0x2,
+        LT_AMBOCC = 0x3,
         LT_CLAMPED = 0x4,
     };
 
@@ -1759,6 +1804,11 @@ export namespace rage
         {
             shsub_436D70.unsafe_fastcall(_this, edx, a2, index, pDataArr, nArrSize, a6, a7);
         }
+    };
+
+    namespace Matrix34
+    {
+        void (__fastcall* FromEulersXYZ)(float* _this, void* edx, float* a2) = nullptr;
     };
 }
 
@@ -1964,11 +2014,13 @@ export namespace CCamera
 export namespace CTimer
 {
     float* fTimeStep;
+    float* fCamTimeStep;
     float* fTimeScale1;
     float* fTimeScale2;
     uint8_t* m_UserPause = nullptr;
     uint8_t* m_CodePause = nullptr;
     int32_t* m_snTimeInMilliseconds = nullptr;
+    uint32_t* m_frameCount = nullptr;
 }
 
 export namespace CTimeCycle
@@ -2063,7 +2115,8 @@ export namespace RageDirect3DDevice9
 export class CRenderPhaseDeferredLighting_SceneToGBuffer
 {
 public:
-    static FusionFix::Event<>& OnBuildRenderList() {
+    static FusionFix::Event<>& OnBuildRenderList()
+    {
         static FusionFix::Event<> BuildRenderListEvent;
         return BuildRenderListEvent;
     }
@@ -2079,11 +2132,13 @@ public:
 export class CRenderPhaseDeferredLighting_LightsToScreen
 {
 public:
-    static FusionFix::Event<>& OnBuildRenderList() {
+    static FusionFix::Event<>& OnBuildRenderList()
+    {
         static FusionFix::Event<> BuildRenderListEvent;
         return BuildRenderListEvent;
     }
-    static FusionFix::Event<rage::CLightSource*>& OnAfterCopyLight() {
+    static FusionFix::Event<rage::CLightSource*>& OnAfterCopyLight()
+    {
         static FusionFix::Event<rage::CLightSource*> AfterCopyLightEvent;
         return AfterCopyLightEvent;
     }
@@ -2108,7 +2163,8 @@ public:
 export class CRenderPhaseDrawScene
 {
 public:
-    static FusionFix::Event<>& OnBuildRenderList() {
+    static FusionFix::Event<>& OnBuildRenderList()
+    {
         static FusionFix::Event<> BuildRenderListEvent;
         return BuildRenderListEvent;
     }
@@ -2135,10 +2191,16 @@ export namespace CTxdStore
     int* (__cdecl* at)(int);
 }
 
-export namespace Matrix34
+export namespace CReplayMgr
 {
-    void (__fastcall* fromEulersXYZ)(float* _this, void* edx, float* a2);
+    uint32_t* dword_11F7060 = nullptr;
+    HANDLE* dword_12088B4 = nullptr;
+    uint32_t* dword_1037720 = nullptr;
+    uint32_t* dword_11F704C = nullptr;
 }
+
+// Game libraries
+export int (__cdecl* game_rand)();
 
 export uint8_t(*GTAIV_ENCRYPTION_KEY)[32] = nullptr;
 
@@ -2162,6 +2224,7 @@ export bool bHighResolutionShadows = false;
 export bool bIsQUB3D = false;
 export float fMenuBlur = 0.0f;
 export bool bInSniperScope = false;
+export bool bSpeedupSimRateCheat = false;
 export eCamMode nCurrentCamera = NUM_CAM_MODES;
 
 export auto currentEpisodePath() -> std::filesystem::path
@@ -2228,7 +2291,7 @@ export namespace phMaterialGta
         HELIFX_WATER,
     };
 
-#pragma pack(push, 8)
+    #pragma pack(push, 8)
     struct phMaterial : rage::datBase
     {
         int field_4;
@@ -2251,7 +2314,7 @@ export namespace phMaterialGta
         float m_fPedDensity;
         int m_dwFlags;                        ///< 1 = SeeThru, 2 = ShootThru, 4 = IsWet
     };
-#pragma pack(pop)
+    #pragma pack(pop)
 }
 
 export struct gtaRainEmitter
@@ -2331,36 +2394,8 @@ export namespace ShockingEvents
 {
     enum eShockingEvents
     {
-        SexyCar,
-        RunningPed,
-        VisibleWeapon,
-        VisibleWeaponMELEE,
-        VisibleWeaponTHROWN,
-        VisibleWeaponHANDGUN,
-        VisibleWeaponSHOTGUN,
-        VisibleWeaponSMG,
-        VisibleWeaponSNIPER,
-        VisibleWeaponRIFLE,
-        VisibleWeaponHEAVY,
-        HornSounded,
-        PlaneFlyby,
-        SeenCarStolen,
-        HelicopterOverhead,
-        SeenMeleeAction,
-        SeenGangFight,
-        PedRunOver,
-        PanickedPed,
-        InjuredPed,
-        DeadBody,
-        DrivingOnPavement,
-        MadDriver,
-        CarCrash,
-        CarPileUp,
-        Fire,
-        GunshotFired,
-        PedShot,
-        GunFight,
-        Explosion,
+        DrivingOnPavement = 22,
+        MadDriver = 23,
     };
 
     constexpr auto ShockingEventIndexSize = 4;
@@ -2371,9 +2406,9 @@ export namespace ShockingEvents
 export class ISeasonal
 {
 public:
-   virtual auto Init() -> void = 0;
-   virtual auto Enable() -> void = 0;
-   virtual auto Disable() -> void = 0;
+    virtual auto Init() -> void = 0;
+    virtual auto Enable() -> void = 0;
+    virtual auto Disable() -> void = 0;
 };
 
 export inline LONG getWindowWidth()
@@ -2411,6 +2446,147 @@ export namespace CGameConfigReader
 
 export int* dwSniperInverted = nullptr;
 
+void* KeyboardBuffer = nullptr;
+bool (__fastcall* pIsKeyboardKeyPressed)(void* buffer, void* edx, int keycode, int type, const char* hint) = nullptr;
+
+export bool IsKeyboardKeyPressed(int vkeycode, int type = 1, const char* hint = nullptr)
+{
+    static auto VKToDIK = [](int vk) -> int
+    {
+        switch (vk)
+        {
+            case VK_LSHIFT: return 0x2A; // DIK_LSHIFT
+            case VK_RSHIFT: return 0x36; // DIK_RSHIFT
+            case VK_LCONTROL: return 0x1D; // DIK_LCONTROL
+            case VK_RCONTROL: return 0x9D; // DIK_RCONTROL
+            case VK_LMENU: return 0x38; // DIK_LALT
+            case VK_RMENU: return 0xB8; // DIK_RALT
+            case VK_RETURN: return 0x1C; // DIK_RETURN
+            case VK_SPACE: return 0x39; // DIK_SPACE
+            case VK_LEFT: return 0xCB; // DIK_LEFT
+            case VK_UP: return 0xC8; // DIK_UP
+            case VK_RIGHT: return 0xCD; // DIK_RIGHT
+            case VK_DOWN: return 0xD0; // DIK_DOWN
+            case VK_ESCAPE: return 0x01; // DIK_ESCAPE
+            case VK_TAB: return 0x0F; // DIK_TAB
+            case VK_BACK: return 0x0E; // DIK_BACK
+            case VK_DELETE: return 0xD3; // DIK_DELETE
+            case VK_HOME: return 0xC7; // DIK_HOME
+            case VK_END: return 0xCF; // DIK_END
+            case VK_PRIOR: return 0xC9; // DIK_PGUP
+            case VK_NEXT: return 0xD1; // DIK_PGDN
+            case VK_INSERT: return 0xD2; // DIK_INSERT
+            case VK_F1: return 0x3B; // DIK_F1
+            case VK_F2: return 0x3C; // DIK_F2
+            case VK_F3: return 0x3D; // DIK_F3
+            case VK_F4: return 0x3E; // DIK_F4
+            case VK_F5: return 0x3F; // DIK_F5
+            case VK_F6: return 0x40; // DIK_F6
+            case VK_F7: return 0x41; // DIK_F7
+            case VK_F8: return 0x42; // DIK_F8
+            case VK_F9: return 0x43; // DIK_F9
+            case VK_F10: return 0x44; // DIK_F10
+            case VK_F11: return 0x57; // DIK_F11
+            case VK_F12: return 0x58; // DIK_F12
+            case 'A': return 0x1E;
+            case 'B': return 0x30;
+            case 'C': return 0x2E;
+            case 'D': return 0x20;
+            case 'E': return 0x12;
+            case 'F': return 0x21;
+            case 'G': return 0x22;
+            case 'H': return 0x23;
+            case 'I': return 0x17;
+            case 'J': return 0x24;
+            case 'K': return 0x25;
+            case 'L': return 0x26;
+            case 'M': return 0x32;
+            case 'N': return 0x31;
+            case 'O': return 0x18;
+            case 'P': return 0x19;
+            case 'Q': return 0x10;
+            case 'R': return 0x13;
+            case 'S': return 0x1F;
+            case 'T': return 0x14;
+            case 'U': return 0x16;
+            case 'V': return 0x2F;
+            case 'W': return 0x11;
+            case 'X': return 0x2D;
+            case 'Y': return 0x15;
+            case 'Z': return 0x2C;
+            case '0': return 0x0B;
+            case '1': return 0x02;
+            case '2': return 0x03;
+            case '3': return 0x04;
+            case '4': return 0x05;
+            case '5': return 0x06;
+            case '6': return 0x07;
+            case '7': return 0x08;
+            case '8': return 0x09;
+            case '9': return 0x0A;
+            default: return -1;
+        }
+    };
+
+    int dik = VKToDIK(vkeycode);
+    if (dik != -1)
+    {
+        return pIsKeyboardKeyPressed(KeyboardBuffer, nullptr, dik, type, hint);
+    }
+    else
+    {
+        return (GetAsyncKeyState(vkeycode) & 0x8000) != 0;
+    }
+}
+
+export namespace CPhysical
+{
+    void (__fastcall* GetLocalSpeed)(void*, void*, float*, float*, char, int) = nullptr;
+    float* (__fastcall* GetTurnSpeed)(void*, void*, float*);
+}
+
+export namespace CPhysics
+{
+    void (__stdcall* ScanForBuildings)() = nullptr;
+    void (*UpdateRequestList)() = nullptr;
+    void (*ResetNumPoolGameCollisions)() = nullptr;
+    int* ms_NumTimeSlices = nullptr;
+    void (__cdecl* PreSimUpdate)(float TimeStep, int NumTimeSlices) = nullptr;
+    void (__cdecl* SimUpdate)(float TimeStep) = nullptr;
+    void (__cdecl* PostSimUpdate)(int NumTimeSlices, float TimeStep) = nullptr;
+    void (__stdcall* IterateOverManifolds)() = nullptr;
+}
+
+export namespace CWorld
+{
+    int* ms_listProcessControlPtrs = nullptr;
+}
+
+export namespace CCamera
+{
+    bool (__cdecl* isScreenFadedOut)() = nullptr;
+}
+
+export enum eControllerButtons
+{
+    BUTTON_BUMPER_LEFT = 4,
+    BUTTON_TRIGGER_LEFT = 5,
+    BUTTON_BUMPER_RIGHT = 6,
+    BUTTON_TRIGGER_RIGHT = 7,
+    BUTTON_DPAD_UP = 8,
+    BUTTON_DPAD_DOWN = 9,
+    BUTTON_DPAD_LEFT = 10,
+    BUTTON_DPAD_RIGHT = 11,
+    BUTTON_START = 12,
+    BUTTON_BACK = 13,
+    BUTTON_X = 14,
+    BUTTON_Y = 15,
+    BUTTON_A = 16,
+    BUTTON_B = 17,
+    BUTTON_STICK_LEFT = 18,
+    BUTTON_STICK_RIGHT = 19,
+};
+
 export namespace UAL
 {
     bool (WINAPI* GetOverloadPathW)(wchar_t* out, size_t out_size) = nullptr;
@@ -2441,6 +2617,12 @@ public:
         pattern = find_pattern("53 56 57 8B 7C 24 10 FF 74 24 14", "8B 44 24 08 56 57 8B 7C 24 0C 8B F7");
         CBaseDC::operator_newAddr = pattern.get_first(0);
 
+        pattern = find_pattern("56 57 8B F9 E8 ? ? ? ? 8B 35 ? ? ? ? FF 04 B5", "56 8B F1 E8 ? ? ? ? 8B 0D ? ? ? ? 83 04 8D");
+        CShaderFx_PushForcedTechnique::DrawCommandAddr = pattern.get_first();
+
+        pattern = find_pattern("56 8B 35 ? ? ? ? 8B 0C B5", "A1 ? ? ? ? 8B 0C 85 ? ? ? ? 8D 14 41");
+        CShaderFx_PopForcedTechnique::DrawCommandAddr = pattern.get_first();
+
         _dwCurrentEpisode = *find_pattern("83 3D ? ? ? ? ? 75 0F 6A 02", "89 35 ? ? ? ? 89 35 ? ? ? ? 6A 00 6A 01").get_first<int32_t*>(2);
 
         pattern = find_pattern("0A 05 ? ? ? ? 0A 05 ? ? ? ? 75 38", "0A 05 ? ? ? ? 0A 05");
@@ -2449,6 +2631,9 @@ public:
 
         pattern = find_pattern("A1 ? ? ? ? A3 ? ? ? ? EB 3A", "A1 ? ? ? ? 39 05 ? ? ? ? 76 1F");
         CTimer::m_snTimeInMilliseconds = *pattern.get_first<int32_t*>(1);
+
+        pattern = find_pattern("FF 05 ? ? ? ? F3 0F 2C C0 F3 0F 10 05", "83 05 ? ? ? ? ? D9 3C 24");
+        CTimer::m_frameCount = *pattern.get_first<uint32_t*>(2);
 
         pattern = find_pattern("83 3D ? ? ? ? ? 74 17 8B 4D 14", "83 3D ? ? ? ? ? 74 15 8B 44 24 1C", "83 3D ? ? ? ? ? 74 EF");
         rage::grcDevice::ms_pD3DDevice = *pattern.get_first<IDirect3DDevice9**>(2);
@@ -2484,6 +2669,9 @@ public:
 
         pattern = find_pattern("F3 0F 10 05 ? ? ? ? F3 0F 59 05 ? ? ? ? 8B 43 20 53", "F3 0F 10 05 ? ? ? ? F3 0F 59 44 24 ? 83 C4 04 83 7C 24");
         CTimer::fTimeStep = *pattern.get_first<float*>(4);
+
+        pattern = find_pattern("F3 0F 11 0D ? ? ? ? 74 ? 80 3D", "F3 0F 11 05 ? ? ? ? 74 ? 80 3D ? ? ? ? ? 74 ? D9 05");
+        CTimer::fCamTimeStep = *pattern.get_first<float*>(4);
 
         pattern = find_pattern("F3 0F 10 05 ? ? ? ? F3 0F 10 0D ? ? ? ? 0F 2F C8 F3 0F 11 44 24", "F3 0F 10 05 ? ? ? ? 0F 2F C8 77 ? F3 0F 10 05");
         CTimer::fTimeScale1 = *pattern.get_first<float*>(4);
@@ -2583,10 +2771,10 @@ public:
         rage::grcTextureFactoryPC::shCreateRT = safetyhook::create_inline(pattern.get_first(0), rage::grcTextureFactoryPC::CreateRT);
 
         pattern = find_pattern("53 55 56 57 8B F9 85 FF 74 3F", "53 55 8B 6C 24 0C 56 57 EB 06 8D 9B 00 00 00 00 0F B7 51 14 33 FF 83 EA 01 78 26 8B 59 10", "85 C9 53 55 56 57 74 40 8B 6C 24 14 8D 64 24 00");
-        CTxdStore::getEntryByKey = pattern.get_first<rage::grcTexturePC*(__fastcall)(int*, void*, unsigned int)>(0);
+        CTxdStore::getEntryByKey = pattern.get_first<rage::grcTexturePC * (__fastcall)(int*, void*, unsigned int)>(0);
 
         pattern = find_pattern("55 8B EC 83 E4 ? 83 EC ? F3 0F 10 05 ? ? ? ? 56 8B 75 ? 0F 57 DB F3 0F 10 0E 0F 2E CB 57 9F 8B F9 F3 0F 11 44 24 ? F6 C4 ? 7A ? 0F 28 CB F3 0F 11 44 24", "55 8B EC 83 E4 ? 0F 57 D2 83 EC ? 56 57");
-        Matrix34::fromEulersXYZ = pattern.get_first<void(__fastcall)(float*, void*, float*)>(0);
+        rage::Matrix34::FromEulersXYZ = pattern.get_first<void(__fastcall)(float*, void*, float*)>(0);
 
         pattern = hook::pattern("68 ? ? ? ? 68 ? ? ? ? 68 ? ? ? ? 68 ? ? ? ? E8 ? ? ? ? 8B C8 E8 ? ? ? ? A3 ? ? ? ? 5E");
         CTxdStore::at = (int* (__cdecl*)(int))injector::ReadMemory<uint32_t>(pattern.get_first(1), true);
@@ -2706,5 +2894,68 @@ public:
 
         pattern = find_pattern("E8 ? ? ? ? E9 ? ? ? ? 80 BC 3B", "E8 ? ? ? ? D9 45 ? F3 0F 10 05 ? ? ? ? F3 0F 2A 4D");
         rage::scrThread::shGetActiveThread = safetyhook::create_inline(injector::GetBranchDestination(pattern.get_first()).as_int(), rage::scrThread::GetActiveThreadHook);
+
+        pattern = find_pattern("B9 ? ? ? ? E8 ? ? ? ? 84 C0 74 ? C6 86", "B9 ? ? ? ? E8 ? ? ? ? 84 C0 74 ? C6 86");
+        KeyboardBuffer = *pattern.get_first<void**>(1);
+        pIsKeyboardKeyPressed = (decltype(pIsKeyboardKeyPressed))injector::GetBranchDestination(pattern.get_first(5)).as_int();
+
+        pattern = find_pattern("E8 ? ? ? ? F3 0F 10 B7 ? ? ? ? F3 0F 10 BF ? ? ? ? F3 0F 10 AF ? ? ? ? F3 0F 10 97", "E8 ? ? ? ? F3 0F 10 A6 ? ? ? ? F3 0F 10 6B");
+        CPhysical::GetLocalSpeed = (decltype(CPhysical::GetLocalSpeed))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = find_pattern("E8 ? ? ? ? F3 0F 10 40 ? F3 0F 10 48 ? 8B 08 F3 0F 11 87 ? ? ? ? F3 0F 10 45", "E8 ? ? ? ? D9 00 F3 0F 10 40 ? F3 0F 10 48 ? D9 9E ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 10 5D");
+        CPhysical::GetTurnSpeed = (decltype(CPhysical::GetTurnSpeed))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = hook::pattern("E8 ? ? ? ? E8 ? ? ? ? 8B 35 ? ? ? ? 85 F6 74 ? 8B 0E");
+        CPhysics::ScanForBuildings = (decltype(CPhysics::ScanForBuildings))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = hook::pattern("E8 ? ? ? ? 8B 35 ? ? ? ? 85 F6 74 ? 8B 0E");
+        CPhysics::UpdateRequestList = (decltype(CPhysics::UpdateRequestList))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = hook::pattern("8B 35 ? ? ? ? 85 F6 74 ? 8B 0E");
+        CWorld::ms_listProcessControlPtrs = *pattern.get_first<int*>(2);
+
+        pattern = find_pattern("E8 ? ? ? ? A1 ? ? ? ? F3 0F 10 0D ? ? ? ? 66 0F 6E C0 0F 5B C0", "E8 ? ? ? ? A1 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 2A C8");
+        CPhysics::ResetNumPoolGameCollisions = (decltype(CPhysics::ResetNumPoolGameCollisions))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = find_pattern("A1 ? ? ? ? F3 0F 10 0D ? ? ? ? 66 0F 6E C0 0F 5B C0", "A1 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 2A C8 33 F6");
+        CPhysics::ms_NumTimeSlices = *pattern.get_first<int*>(1);
+
+        pattern = hook::pattern("E8 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 59 44 24 ? 83 C4 ? F3 0F 11 04 24 E8");
+        CPhysics::PreSimUpdate = (decltype(CPhysics::PreSimUpdate))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = hook::pattern("E8 ? ? ? ? E8 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 59 44 24");
+        CPhysics::SimUpdate = (decltype(CPhysics::SimUpdate))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = hook::pattern("E8 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 59 44 24 ? F3 0F 11 04 24");
+        CPhysics::IterateOverManifolds = (decltype(CPhysics::IterateOverManifolds))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = find_pattern("E8 ? ? ? ? F3 0F 10 4C 24 ? 46", "E8 ? ? ? ? 83 C6 ? 83 C4 ? 3B 35 ? ? ? ? 7C ? 5E");
+        CPhysics::PostSimUpdate = (decltype(CPhysics::PostSimUpdate))injector::GetBranchDestination(pattern.get_first(0)).as_int();
+
+        pattern = find_pattern("E8 ? ? ? ? 84 C0 74 ? F3 0F 10 86 ? ? ? ? F3 0F 58 05", "E8 ? ? ? ? 50 56 E8 ? ? ? ? 83 C4 ? E8");
+        CCamera::isScreenFadedOut = (decltype(CCamera::isScreenFadedOut))injector::GetBranchDestination(pattern.get_first()).as_int();
+
+        pattern = hook::pattern("E8 ? ? ? ? 8B 48 ? 69 C9");
+        game_rand = *pattern.get_first<int(__cdecl)()>(0);
+
+        pattern = find_pattern("83 3D ? ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 59 C1", "83 3D ? ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 59 05");
+        CReplayMgr::dword_11F7060 = *pattern.get_first<uint32_t*>(2);
+
+        pattern = find_pattern("A1 ? ? ? ? 3B 05 ? ? ? ? 75 ? 83 3D ? ? ? ? ? 75 ? A1", "A1 ? ? ? ? 3B 05 ? ? ? ? 75 ? 83 3D ? ? ? ? ? 75 ? 8B 0D ? ? ? ? DB 05");
+        CReplayMgr::dword_12088B4 = *pattern.get_first<HANDLE*>(1);
+
+        pattern = find_pattern("83 3D ? ? ? ? ? 75 ? A1 ? ? ? ? 66 0F 6E C0", "83 3D ? ? ? ? ? 75 ? 8B 0D ? ? ? ? DB 05");
+        CReplayMgr::dword_1037720 = *pattern.get_first<uint32_t*>(2);
+
+        pattern = hook::pattern("A1 ? ? ? ? 66 0F 6E C0 F3 0F E6 C0 C1 E8 ? F2 0F 58 04 C5 ? ? ? ? 66 0F 5A C0 F3 0F 59 05 ? ? ? ? F3 0F 59 C1");
+        if (!pattern.empty())
+        {
+            CReplayMgr::dword_11F704C = *pattern.get_first<uint32_t*>(1);
+        }
+        else
+        {
+            pattern = hook::pattern("8B 0D ? ? ? ? DB 05 ? ? ? ? 85 C9 7D ? D8 05 ? ? ? ? D8 0D");
+            CReplayMgr::dword_11F704C = *pattern.get_first<uint32_t*>(2);
+        }
     }
 } Common;

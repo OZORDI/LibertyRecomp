@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <thread>
 
 #include <fmt/format.h>
 
@@ -967,6 +968,37 @@ X_STATUS XThread::Resume(uint32_t* out_suspend_count) {
     *out_suspend_count = previous_suspend_count;
   }
   return thread_->Resume(&unused_host_suspend_count) ? X_STATUS_SUCCESS : X_STATUS_UNSUCCESSFUL;
+#endif
+}
+
+X_STATUS XThread::ResumeFromInitialSuspension(uint32_t* out_suspend_count) {
+#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+  auto guest_thread = guest_object<X_KTHREAD>();
+  bool should_resume_host = false;
+  {
+    std::lock_guard<std::mutex> lock(suspend_mutex_);
+    uint8_t previous = guest_thread->suspend_count;
+    if (previous > 0) {
+      guest_thread->suspend_count--;
+    }
+    if (out_suspend_count) {
+      *out_suspend_count = previous;
+    }
+    should_resume_host = (guest_thread->suspend_count == 0);
+    suspend_cv_.notify_all();
+  }
+
+  if (!should_resume_host) {
+    return X_STATUS_SUCCESS;
+  }
+
+  uint32_t unused_host_suspend_count = 0;
+  while (!thread_->Resume(&unused_host_suspend_count)) {
+    std::this_thread::yield();
+  }
+  return X_STATUS_SUCCESS;
+#else
+  return Resume(out_suspend_count);
 #endif
 }
 

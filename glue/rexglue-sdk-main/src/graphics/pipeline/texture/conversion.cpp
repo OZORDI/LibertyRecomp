@@ -77,8 +77,51 @@ void ConvertTexelCTX1ToR8G8(xenos::Endian endian, void* output, const void* inpu
   }
 }
 
-void ConvertTexelDXT3AToDXT3(xenos::Endian endian, void* output, const void* input, size_t length) {
-  const uint32_t bytes_per_block = 16;
+static void ConvertTexelBC4ToR8(xenos::Endian endian, uint8_t* output, const void* input,
+                                size_t output_pitch, size_t output_component,
+                                size_t output_pixel_stride) {
+  uint8_t block[8];
+  CopySwapBlock(endian, block, input, sizeof(block));
+  uint8_t palette[8] = {block[0], block[1]};
+  if (block[0] > block[1]) {
+    for (uint32_t index = 2; index < 8; ++index) {
+      palette[index] = uint8_t(((8 - index) * uint32_t(block[0]) +
+                                (index - 1) * uint32_t(block[1])) /
+                               7);
+    }
+  } else {
+    for (uint32_t index = 2; index < 6; ++index) {
+      palette[index] = uint8_t(((6 - index) * uint32_t(block[0]) +
+                                (index - 1) * uint32_t(block[1])) /
+                               5);
+    }
+    palette[6] = 0;
+    palette[7] = UINT8_MAX;
+  }
+  uint64_t selectors = 0;
+  for (uint32_t byte = 0; byte < 6; ++byte) {
+    selectors |= uint64_t(block[byte + 2]) << (byte * 8);
+  }
+  for (uint32_t pixel = 0; pixel < 16; ++pixel) {
+    const uint32_t x = pixel & 3;
+    const uint32_t y = pixel >> 2;
+    const uint32_t selector = uint32_t((selectors >> (pixel * 3)) & 7);
+    output[y * output_pitch + x * output_pixel_stride + output_component] = palette[selector];
+  }
+}
+
+void ConvertTexelDXNToR8G8(xenos::Endian endian, void* output, const void* input, size_t length) {
+  auto* output_bytes = static_cast<uint8_t*>(output);
+  const auto* input_bytes = static_cast<const uint8_t*>(input);
+  ConvertTexelBC4ToR8(endian, output_bytes, input_bytes, length, 0, 2);
+  ConvertTexelBC4ToR8(endian, output_bytes, input_bytes + 8, length, 1, 2);
+}
+
+void ConvertTexelDXT5AToR8(xenos::Endian endian, void* output, const void* input, size_t length) {
+  ConvertTexelBC4ToR8(endian, static_cast<uint8_t*>(output), input, length, 0, 1);
+}
+
+void ConvertTexelDXT3AToDXT3(xenos::Endian endian, void* output, const void* input, size_t) {
   auto output_bytes = static_cast<uint8_t*>(output);
   CopySwapBlock(endian, &output_bytes[0], input, 8);
   std::memset(&output_bytes[8], 0, 8);

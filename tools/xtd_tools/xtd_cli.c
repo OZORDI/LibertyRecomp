@@ -404,6 +404,131 @@ const char *get_texture_format_name(uint32_t type) {
   }
 }
 
+// Decompress the resource payload once so a host-side batch transformer can
+// update every texture before a single recompression.
+int cmd_unpack(const char *xtd_path, const char *output_path) {
+  FILE *fin = fopen(xtd_path, "rb");
+  if (!fin) {
+    fprintf(stderr, "Cannot open: %s\n", xtd_path);
+    return 1;
+  }
+
+  fseek(fin, 0, SEEK_END);
+  size_t size = ftell(fin);
+  fseek(fin, 0, SEEK_SET);
+  if (size < 20) {
+    fclose(fin);
+    fprintf(stderr, "XTD is truncated: %s\n", xtd_path);
+    return 1;
+  }
+
+  uint8_t *data = (uint8_t *)malloc(size);
+  if (!data || fread(data, 1, size, fin) != size) {
+    fclose(fin);
+    free(data);
+    fprintf(stderr, "Cannot read: %s\n", xtd_path);
+    return 1;
+  }
+  fclose(fin);
+
+  if (memcmp(data, "RSC\x05", 4) != 0) {
+    free(data);
+    fprintf(stderr, "Invalid RSC5 header: %s\n", xtd_path);
+    return 1;
+  }
+
+  size_t decompressed_size = 0;
+  uint8_t *decompressed =
+      decompress_lzx(data + 20, size - 20, &decompressed_size);
+  free(data);
+  if (!decompressed) {
+    fprintf(stderr, "Decompression failed\n");
+    return 1;
+  }
+
+  FILE *fout = fopen(output_path, "wb");
+  if (!fout || fwrite(decompressed, 1, decompressed_size, fout) !=
+                   decompressed_size) {
+    if (fout)
+      fclose(fout);
+    free(decompressed);
+    fprintf(stderr, "Cannot write: %s\n", output_path);
+    return 1;
+  }
+  fclose(fout);
+  free(decompressed);
+  printf("Unpacked %zu bytes to %s\n", decompressed_size, output_path);
+  return 0;
+}
+
+// Recompress a host-modified resource payload while preserving the original
+// 16-byte RSC header. The compressed-size field is regenerated.
+int cmd_pack(const char *template_path, const char *input_path,
+             const char *output_path) {
+  FILE *ftemplate = fopen(template_path, "rb");
+  if (!ftemplate) {
+    fprintf(stderr, "Cannot open template: %s\n", template_path);
+    return 1;
+  }
+  uint8_t header[16];
+  if (fread(header, 1, sizeof(header), ftemplate) != sizeof(header)) {
+    fclose(ftemplate);
+    fprintf(stderr, "Template is truncated: %s\n", template_path);
+    return 1;
+  }
+  fclose(ftemplate);
+  if (memcmp(header, "RSC\x05", 4) != 0) {
+    fprintf(stderr, "Invalid RSC5 template: %s\n", template_path);
+    return 1;
+  }
+
+  FILE *fin = fopen(input_path, "rb");
+  if (!fin) {
+    fprintf(stderr, "Cannot open payload: %s\n", input_path);
+    return 1;
+  }
+  fseek(fin, 0, SEEK_END);
+  size_t input_size = ftell(fin);
+  fseek(fin, 0, SEEK_SET);
+  uint8_t *input = (uint8_t *)malloc(input_size);
+  if (!input || fread(input, 1, input_size, fin) != input_size) {
+    fclose(fin);
+    free(input);
+    fprintf(stderr, "Cannot read payload: %s\n", input_path);
+    return 1;
+  }
+  fclose(fin);
+
+  size_t compressed_size = 0;
+  uint8_t *compressed = compress_lzx(input, input_size, &compressed_size);
+  free(input);
+  if (!compressed) {
+    fprintf(stderr, "Compression failed\n");
+    return 1;
+  }
+
+  FILE *fout = fopen(output_path, "wb");
+  if (!fout) {
+    free(compressed);
+    fprintf(stderr, "Cannot create output: %s\n", output_path);
+    return 1;
+  }
+  uint32_t compressed_size_be = swap32((uint32_t)compressed_size);
+  int write_failed =
+      fwrite(header, 1, sizeof(header), fout) != sizeof(header) ||
+      fwrite(&compressed_size_be, 1, sizeof(compressed_size_be), fout) !=
+          sizeof(compressed_size_be) ||
+      fwrite(compressed, 1, compressed_size, fout) != compressed_size;
+  fclose(fout);
+  free(compressed);
+  if (write_failed) {
+    fprintf(stderr, "Cannot write output: %s\n", output_path);
+    return 1;
+  }
+  printf("Packed %zu bytes to %s\n", input_size, output_path);
+  return 0;
+}
+
 // List textures in XTD
 int cmd_list(const char *xtd_path) {
   FILE *fin = fopen(xtd_path, "rb");
@@ -871,6 +996,10 @@ void print_usage(const char *prog) {
   printf("      List all textures in an XTD file\n\n");
   printf("  %s export <input.xtd> <output_dir>\n", prog);
   printf("      Export texture info (names, dimensions, formats)\n\n");
+  printf("  %s unpack <input.xtd> <output.bin>\n", prog);
+  printf("      Decompress an XTD resource payload for host-side batch edits\n\n");
+  printf("  %s pack <template.xtd> <input.bin> <output.xtd>\n", prog);
+  printf("      Recompress a batch-edited payload using the template header\n\n");
   printf("  %s replace <input.xtd> <output.xtd> <texture_name> <dds_file>\n",
          prog);
   printf("      Replace a single texture with a DDS file\n\n");
@@ -897,6 +1026,10 @@ int main(int argc, char *argv[]) {
     result = cmd_list(argv[2]);
   } else if (strcmp(argv[1], "export") == 0 && argc >= 4) {
     result = cmd_export(argv[2], argv[3]);
+  } else if (strcmp(argv[1], "unpack") == 0 && argc >= 4) {
+    result = cmd_unpack(argv[2], argv[3]);
+  } else if (strcmp(argv[1], "pack") == 0 && argc >= 5) {
+    result = cmd_pack(argv[2], argv[3], argv[4]);
   } else if (strcmp(argv[1], "replace") == 0 && argc >= 6) {
     result = cmd_replace(argv[2], argv[3], argv[4], argv[5]);
   } else {

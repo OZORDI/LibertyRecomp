@@ -228,21 +228,25 @@ function(rexglue_configure_target target_name)
         endforeach()
     endif()
 
-    # Stage requested GPU emulation plugins next to the executable. Plugins
-    # are runtime-loaded (never linked), so TARGET_RUNTIME_DLLS misses them.
+    # Stage requested graphics plugins next to the executable. Plugins are
+    # runtime-loaded (never linked), so TARGET_RUNTIME_DLLS misses them. Make
+    # each plugin binary an explicit link dependency so rebuilding a plugin
+    # relinks the host and reruns this copy before any later bundle-signing
+    # POST_BUILD command.
     foreach(_plugin IN LISTS ARG_GPU_PLUGINS)
         if(TARGET rexgpu-${_plugin})
-            # In-tree build: depend on it so it gets built.
             set(_plugin_target rexgpu-${_plugin})
             add_dependencies(${target_name} ${_plugin_target})
         elseif(TARGET rex::gpu-${_plugin})
-            # Installed SDK import.
             set(_plugin_target rex::gpu-${_plugin})
         else()
             message(FATAL_ERROR
                 "rexglue_configure_target: unknown GPU plugin '${_plugin}' "
                 "(no target rexgpu-${_plugin} or rex::gpu-${_plugin})")
         endif()
+
+        set_property(TARGET ${target_name} APPEND PROPERTY
+            LINK_DEPENDS $<TARGET_FILE:${_plugin_target}>)
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${_plugin_target}>

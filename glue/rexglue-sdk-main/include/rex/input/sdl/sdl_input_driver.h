@@ -42,6 +42,7 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener 
   X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) override;
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                         X_INPUT_KEYSTROKE* out_keystroke) override;
+  bool TryGetMotionState(uint32_t user_index, MotionState* out_state) override;
   void OnWindowAvailable(rex::ui::Window* window) override;
 
  private:
@@ -49,6 +50,7 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener 
     SDL_Gamepad* sdl;
     X_INPUT_CAPABILITIES caps;
     X_INPUT_STATE state;
+    MotionState motion;
     bool state_changed;
     bool is_active;
   };
@@ -79,6 +81,7 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener 
   void OnControllerDeviceRemovedLocked(const SDL_Event& event);
   void OnControllerDeviceAxisMotionLocked(const SDL_Event& event);
   void OnControllerDeviceButtonChangedLocked(const SDL_Event& event);
+  void OnControllerDeviceSensorUpdateLocked(const SDL_Event& event);
 
   inline uint64_t AnalogToKeyfield(const X_INPUT_GAMEPAD& gamepad) const;
   std::optional<size_t> GetControllerIndexFromInstanceID(SDL_JoystickID instance_id);
@@ -92,6 +95,7 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener 
   bool SDL_Gamepad_initialized_;
   std::atomic<int> sdl_events_unflushed_;
   std::atomic<bool> sdl_pumpevents_queued_;
+  std::atomic<uint64_t> next_motion_device_generation_{1};
   std::array<ControllerState, HID_SDL_USER_COUNT> controllers_;
   std::mutex controllers_mutex_;
   std::mutex event_queue_mutex_;

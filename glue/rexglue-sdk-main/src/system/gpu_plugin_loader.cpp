@@ -1,6 +1,6 @@
 /**
  * @file        system/gpu_plugin_loader.cpp
- * @brief       Host-side loader for GPU emulation plugin DLLs
+ * @brief       Host-side loader for graphics plugin DLLs
  *
  * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  *              All rights reserved.

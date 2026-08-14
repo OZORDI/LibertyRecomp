@@ -10,8 +10,12 @@
 # See https://cmake.org/cmake/help/latest/variable/CMAKE_VERSION.html
 #
 # Tagged commit (vX.Y[.Z[.W]]): emits the tag verbatim (without the v).
-# Untagged commit: emits MAJOR.<floor-minor>.<derived-patch>.<commit-count>-<id>
-#   where id is "dev.gSHA" on any branch and "rc.gSHA" on a release/* branch.
+# Untagged commit, floor at the last tag's major.minor:
+#   emits MAJOR.MINOR.<tag-patch>.<commit-count>-<id> (the released base plus
+#   commits; the patch is not pre-incremented, so the next tag lands on it).
+# Untagged commit, floor ahead of the last tag (minor/major bumped on development
+#   but not yet released): holds at MAJOR.MINOR.0-<id> until main catches up.
+#   id is "dev.gSHA" on any branch and "rc.gSHA" on a release/* branch.
 #==========================================================
 function(rex_compute_version out_var)
     set(one_value FLOOR_MAJOR FLOOR_MINOR GIT_DESCRIBE_LONG GIT_DESCRIBE_EXACT BRANCH_NAME)
@@ -38,6 +42,7 @@ function(rex_compute_version out_var)
     if(NOT ARG_GIT_DESCRIBE_LONG MATCHES "^v([0-9]+)\\.([0-9]+)(\\.([0-9]+))?(\\.([0-9]+))?-([0-9]+)-g([0-9a-f]+)$")
         message(FATAL_ERROR "rex_compute_version: unparseable describe output '${ARG_GIT_DESCRIBE_LONG}'")
     endif()
+    set(tag_major ${CMAKE_MATCH_1})
     set(tag_minor ${CMAKE_MATCH_2})
     if(CMAKE_MATCH_4)
         set(tag_patch ${CMAKE_MATCH_4})
@@ -47,26 +52,30 @@ function(rex_compute_version out_var)
     set(commit_count ${CMAKE_MATCH_7})
     set(short_sha ${CMAKE_MATCH_8})
 
-    # Floor minor must never go backwards.
-    if(ARG_FLOOR_MINOR LESS tag_minor)
-        message(FATAL_ERROR
-            "rex_compute_version: floor minor (${ARG_FLOOR_MINOR}) is behind tag minor (${tag_minor}). "
-            "The floor in CMakeLists.txt must not regress.")
-    endif()
-
-    if(ARG_FLOOR_MINOR EQUAL tag_minor)
-        math(EXPR derived_patch "${tag_patch} + 1")
-    else()
-        set(derived_patch 0)
-    endif()
-
     if(ARG_BRANCH_NAME MATCHES "^release/")
         set(id "rc.g${short_sha}")
     else()
         set(id "dev.g${short_sha}")
     endif()
 
-    set(${out_var} "${ARG_FLOOR_MAJOR}.${ARG_FLOOR_MINOR}.${derived_patch}.${commit_count}-${id}" PARENT_SCOPE)
+    # The floor (major, minor) must never regress behind the last tag.
+    if(ARG_FLOOR_MAJOR LESS tag_major OR
+       (ARG_FLOOR_MAJOR EQUAL tag_major AND ARG_FLOOR_MINOR LESS tag_minor))
+        message(FATAL_ERROR
+            "rex_compute_version: floor version (${ARG_FLOOR_MAJOR}.${ARG_FLOOR_MINOR}) is behind "
+            "tag version (${tag_major}.${tag_minor}). The floor in CMakeLists.txt must not regress.")
+    endif()
+
+    if(ARG_FLOOR_MAJOR EQUAL tag_major AND ARG_FLOOR_MINOR EQUAL tag_minor)
+        # main has caught up to the floor: track the released base plus commits.
+        # Do not pre-increment the patch; the next release tag lands on it directly.
+        set(${out_var} "${ARG_FLOOR_MAJOR}.${ARG_FLOOR_MINOR}.${tag_patch}.${commit_count}-${id}" PARENT_SCOPE)
+    else()
+        # Floor is ahead of the last tag (minor/major bumped on development but not
+        # yet released): hold at MAJOR.MINOR.0 until main catches up, ignoring the
+        # commit count so the version does not track commits-ahead-of-main.
+        set(${out_var} "${ARG_FLOOR_MAJOR}.${ARG_FLOOR_MINOR}.0-${id}" PARENT_SCOPE)
+    endif()
 endfunction()
 
 #==========================================================

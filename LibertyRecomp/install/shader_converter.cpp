@@ -6,6 +6,31 @@
 #include <xxh3.h>
 #include <fmt/format.h>
 
+namespace
+{
+std::vector<std::filesystem::path> findGameShaderFiles(
+    const std::filesystem::path& gameDirectory)
+{
+    std::vector<std::filesystem::path> result;
+
+    std::filesystem::path baseShaderDirectory = gameDirectory / "shaders";
+    if (!std::filesystem::exists(baseShaderDirectory))
+    {
+        baseShaderDirectory = gameDirectory / "common" / "shaders";
+    }
+
+    auto appendDirectory = [&result](const std::filesystem::path& directory)
+    {
+        auto files = ShaderConverter::findShaderFiles(directory);
+        result.insert(result.end(), files.begin(), files.end());
+    };
+
+    appendDirectory(baseShaderDirectory);
+    appendDirectory(gameDirectory / "update" / "shaders");
+    return result;
+}
+}
+
 // RAGE FXC Magic: "rgxa" read as little-endian uint32
 static constexpr uint32_t RAGE_FXC_MAGIC = 0x61786772;
 
@@ -290,7 +315,6 @@ bool ShaderConverter::isCacheValid(
     const std::filesystem::path& gameDirectory)
 {
     std::filesystem::path cacheMarker = cacheDirectory / "shader_cache.marker";
-    std::filesystem::path shaderDir = gameDirectory / "shaders";
     
     if (!std::filesystem::exists(cacheMarker))
     {
@@ -300,7 +324,7 @@ bool ShaderConverter::isCacheValid(
     // Check if cache is newer than shader directory
     auto cacheTime = std::filesystem::last_write_time(cacheMarker);
     
-    for (const auto& shaderFile : findShaderFiles(shaderDir))
+    for (const auto& shaderFile : findGameShaderFiles(gameDirectory))
     {
         if (std::filesystem::last_write_time(shaderFile) > cacheTime)
         {
@@ -318,25 +342,7 @@ bool ShaderConverter::convertShaders(
     ShaderConversionJournal& journal,
     const std::function<bool()>& progressCallback)
 {
-    // Find shader directory in game installation
-    std::filesystem::path shaderDir = gameDirectory / "shaders";
-    
-    if (!std::filesystem::exists(shaderDir))
-    {
-        // Try alternate locations
-        shaderDir = gameDirectory / "common" / "shaders";
-        
-        if (!std::filesystem::exists(shaderDir))
-        {
-            // No shaders to convert - this is OK for some games
-            journal.lastResult = ShaderConversionJournal::Result::NoShadersFound;
-            journal.lastErrorMessage = "No shader directory found in game installation";
-            return true; // Not a fatal error
-        }
-    }
-    
-    // Find all .fxc files
-    auto shaderFiles = findShaderFiles(shaderDir);
+    auto shaderFiles = findGameShaderFiles(gameDirectory);
     
     if (shaderFiles.empty())
     {

@@ -21,6 +21,10 @@
 #include <rex/platform.h>
 #include <rex/stream.h>
 
+#if REX_ARCH_ARM64
+#include <arm_neon.h>
+#endif
+
 extern "C" {
 #if REX_COMPILER_MSVC
 #pragma warning(push)
@@ -53,6 +57,9 @@ XmaContext::~XmaContext() {
   if (av_frame_) {
     av_frame_free(&av_frame_);
   }
+  if (av_packet_) {
+    av_packet_free(&av_packet_);
+  }
 }
 
 int XmaContext::Setup(uint32_t id, memory::Memory* memory, uint32_t guest_ptr) {
@@ -63,7 +70,6 @@ int XmaContext::Setup(uint32_t id, memory::Memory* memory, uint32_t guest_ptr) {
   // Allocate ffmpeg stuff:
   av_packet_ = av_packet_alloc();
   assert_not_null(av_packet_);
-  av_packet_->buf = av_buffer_alloc(128 * 1024);
 
   // find the XMA2 audio decoder
   av_codec_ = avcodec_find_decoder(AV_CODEC_ID_XMAFRAMES);
@@ -460,7 +466,6 @@ int XmaContext::PrepareDecoder(int sample_rate, bool is_two_channel) {
 
     av_context_->sample_rate = sample_rate;
     av_context_->channels = channels;
-    av_context_->flags2 |= AV_CODEC_FLAG2_SKIP_MANUAL;
 
     if (avcodec_open2(av_context_, av_codec_, NULL) < 0) {
       REXAPU_ERROR("XmaContext: Failed to reopen FFmpeg context");
@@ -745,6 +750,34 @@ void XmaContext::ConvertFrame(const uint8_t** samples, bool is_two_channel,
       out_mm = _mm_shuffle_epi8(out_mm, shufmask);
       // Store, as [out + i * 2] movdqu.
       _mm_storeu_si128(reinterpret_cast<__m128i*>(&out[i]), out_mm);
+    }
+  }
+#elif REX_ARCH_ARM64
+  static_assert(kSamplesPerFrame % 8 == 0);
+  const auto in_channel_0 = reinterpret_cast<const float*>(samples[0]);
+  const float32x4_t minimum = vdupq_n_f32(-1.0f);
+  const float32x4_t maximum = vdupq_n_f32(1.0f);
+  const float32x4_t scale_neon = vdupq_n_f32(scale);
+  const auto convert_eight = [&](const float* input) {
+    float32x4_t first = vmaxq_f32(minimum, vminq_f32(maximum, vld1q_f32(input)));
+    float32x4_t second =
+        vmaxq_f32(minimum, vminq_f32(maximum, vld1q_f32(input + 4)));
+    const int32x4_t first_i32 = vcvtnq_s32_f32(vmulq_f32(first, scale_neon));
+    const int32x4_t second_i32 = vcvtnq_s32_f32(vmulq_f32(second, scale_neon));
+    int16x8_t packed = vcombine_s16(vqmovn_s32(first_i32), vqmovn_s32(second_i32));
+    return vreinterpretq_s16_u8(vrev16q_u8(vreinterpretq_u8_s16(packed)));
+  };
+
+  if (is_two_channel) {
+    const auto in_channel_1 = reinterpret_cast<const float*>(samples[1]);
+    for (uint32_t i = 0; i < kSamplesPerFrame; i += 8) {
+      const int16x8x2_t stereo{{convert_eight(in_channel_0 + i),
+                               convert_eight(in_channel_1 + i)}};
+      vst2q_s16(&out[i * 2], stereo);
+    }
+  } else {
+    for (uint32_t i = 0; i < kSamplesPerFrame; i += 8) {
+      vst1q_s16(&out[i], convert_eight(in_channel_0 + i));
     }
   }
 #else

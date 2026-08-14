@@ -140,6 +140,11 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
   if (with_surface) {
     // #1.
     requested_extensions.emplace("VK_KHR_surface", &vulkan_instance->extensions_.ext_KHR_surface);
+    // #105. Required for non-sRGB swapchain color spaces such as the
+    // extended-linear EDR color space used by the HDR presenter.
+    requested_extensions.emplace(
+        "VK_EXT_swapchain_colorspace",
+        &vulkan_instance->extensions_.ext_EXT_swapchain_colorspace);
 #ifdef VK_USE_PLATFORM_XCB_KHR
     // #6.
     requested_extensions.emplace("VK_KHR_xcb_surface",

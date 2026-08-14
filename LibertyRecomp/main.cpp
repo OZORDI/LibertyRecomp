@@ -1,4 +1,6 @@
 #include <cstdio>
+#include <algorithm>
+#include <limits>
 #include <stdafx.h>
 #ifdef __x86_64__
 #include <cpuid.h>
@@ -54,6 +56,7 @@
 #endif
 #include <ui/main_menu.h>
 #include <mod/mod_loader.h>
+#include <network/community_multiplayer.h>
 #include <iostream>
 #include <app.h>
 #include <debugger.h>
@@ -81,6 +84,8 @@
 #include "../glue/rexglue-sdk-main/src/audio/orbis/orbis_audio_system.h"
 #elif REX_PLATFORM_NX
 #include <rex/audio/switch/switch_audio_system.h>
+#elif REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+#include <rex/audio/coreaudio/coreaudio_audio_system.h>
 #else
 #include <rex/audio/sdl/sdl_audio_system.h>
 #endif
@@ -586,41 +591,6 @@ int main(int argc, char *argv[])
     }
 #endif  // !REX_PLATFORM_CONSOLE (audio config bridge)
 
-    // Bridge DLC directories to where RexGlue's ContentManager expects them.
-    // ContentManager::ListContent() scans: content_root / title_id / content_type / *
-    // GTA IV title_id = 545407F2, DLC content_type = 00000002 (kMarketplaceContent).
-    // Our DLC is at gamePath/dlc/TLAD and gamePath/dlc/TBOGT.
-    // Copy instead of symlink so there are no filesystem portability issues.
-    //
-    // Console builds ship DLC pre-laid-out in the PKG at the ContentManager
-    // path (or simply omit DLC); no runtime copy into /app0 is possible.
-#if !REX_PLATFORM_CONSOLE
-    {
-        const auto dlcContentDir = rexContentRoot / "545407F2" / "00000002";
-        std::error_code ec;
-        std::filesystem::create_directories(dlcContentDir, ec);
-
-        const char* dlcNames[] = { "TLAD", "TBOGT" };
-        for (const char* name : dlcNames) {
-            auto actualDlc = gamePath / "dlc" / name;
-            auto linkPath  = dlcContentDir / name;
-            if (std::filesystem::is_directory(actualDlc, ec) &&
-                !std::filesystem::exists(linkPath, ec)) {
-                std::filesystem::copy(actualDlc, linkPath,
-                    std::filesystem::copy_options::recursive |
-                    std::filesystem::copy_options::skip_existing, ec);
-                if (!ec) {
-                    fprintf(stderr, "[Main] DLC bridge copy: %s -> %s\n",
-                            actualDlc.string().c_str(), linkPath.string().c_str());
-                } else {
-                    fprintf(stderr, "[Main] WARN: DLC bridge copy failed for %s: %s\n",
-                            name, ec.message().c_str());
-                }
-            }
-        }
-    }
-#endif  // !REX_PLATFORM_CONSOLE (ContentManager DLC bridge)
-
     // Bridge DLC directories into game root for direct file probing.
     // GTA IV's DLC discovery probes hardcoded paths: game:\DLC1\setup2.xml
     // and game:\DLC1\DLC.rpf (TLAD = DLC1, TBOGT = DLC2). These bypass the
@@ -663,11 +633,27 @@ int main(int argc, char *argv[])
 
     {
         static std::unique_ptr<rex::Runtime> s_rexRuntime;
+        const auto rexSaveRoot = GetSavePath(false);
+        const auto rexMarketplaceRoot = gamePath / "dlc";
+        std::error_code pathError;
+        std::filesystem::create_directories(rexSaveRoot, pathError);
+        if (pathError) {
+            fprintf(stderr, "[Main] FATAL: Could not create save directory %s: %s\n",
+                    rexSaveRoot.string().c_str(), pathError.message().c_str());
+            return 1;
+        }
+        fprintf(stderr, "[Main] Save root: %s\n", rexSaveRoot.string().c_str());
+        fprintf(stderr, "[Main] Marketplace content root: %s\n",
+                rexMarketplaceRoot.string().c_str());
         fprintf(stderr, "[Main] Constructing rex::Runtime...\n");
         s_rexRuntime = std::make_unique<rex::Runtime>(
-            rexContentRoot,                // game_data_root
-            std::filesystem::path{},       // user_data_root (default)
-            rexContentRoot / "update");    // update_data_root — mounts update: VFS device
+            rexContentRoot,                    // game_data_root
+            rexSaveRoot,                       // user_data_root
+            rexContentRoot / "update",        // update_data_root
+            std::filesystem::path{},           // cache_root
+            std::filesystem::path{},           // metadata_root
+            rexMarketplaceRoot,                // marketplace_content_root
+            rexSaveRoot);                      // saved_game_root
         fprintf(stderr, "[Main] Runtime constructed, calling Setup() with func mappings...\n");
 
         // Let guest::initialize() (called inside Setup) install its SEH
@@ -676,7 +662,8 @@ int main(int argc, char *argv[])
         //   ExceptionHandler (NULL-PC, MMIO) → SEH (data faults in __try)
         // This matches standalone: ExceptionHandler saves SEH as its
         // "previous handler" and falls back to it for unhandled faults.
-        // Give RexGlue full audio control via its SDL AudioSystem.
+        // Give RexGlue full audio control via native CoreAudio on macOS and
+        // its SDL AudioSystem on the other desktop platforms.
         // Liberty's audio hooks in imports.cpp have been removed so RexGlue's
         // XBOXKRNL exports (XMACreateContext, XAudioRegisterRenderDriverClient,
         // etc.) handle all game audio calls with full Xenia-based implementations.
@@ -685,10 +672,47 @@ int main(int argc, char *argv[])
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::orbis::OrbisAudioSystem);
 #elif REX_PLATFORM_NX
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::nx::SwitchAudioSystem);
+#elif REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+        rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::coreaudio::CoreAudioAudioSystem);
 #else
         rexConfig.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
 #endif
         rexConfig.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
+        switch (Config::MultiplayerBackend.Value)
+        {
+            case EMultiplayerBackend::LAN:
+                rexConfig.live.backend = rex::system::xam::LiveBackend::kLan;
+                break;
+            case EMultiplayerBackend::Community:
+                rexConfig.live.backend = rex::system::xam::LiveBackend::kCommunity;
+                break;
+            case EMultiplayerBackend::Firebase:
+                // Firebase is deliberately unavailable until the LAN and community
+                // protocols share the same verified session ABI.
+                rexConfig.live.backend = rex::system::xam::LiveBackend::kOffline;
+                break;
+            case EMultiplayerBackend::Offline:
+                rexConfig.live.backend = rex::system::xam::LiveBackend::kOffline;
+                break;
+        }
+        rexConfig.live.community_url = Config::CommunityServerURL.Value;
+        rexConfig.live.player_name = Config::PlayerName.Value;
+        switch (Config::MultiplayerRelayPolicy.Value)
+        {
+            case EMultiplayerRelayPolicy::Auto:
+                rexConfig.live.relay_policy = rex::system::xam::RelayPolicy::kAuto;
+                break;
+            case EMultiplayerRelayPolicy::DirectOnly:
+                rexConfig.live.relay_policy = rex::system::xam::RelayPolicy::kDirectOnly;
+                break;
+            case EMultiplayerRelayPolicy::RelayOnly:
+                rexConfig.live.relay_policy = rex::system::xam::RelayPolicy::kRelayOnly;
+                break;
+        }
+        rexConfig.live.community_backend_factory =
+            &LibertyRecomp::Network::CreateCommunityMultiplayerBackend;
+        rexConfig.live.lan_discovery_port = static_cast<uint16_t>(std::clamp<int32_t>(
+            Config::LANBroadcastPort.Value, 1, std::numeric_limits<uint16_t>::max()));
 
         uint32_t rt_status = s_rexRuntime->Setup(
             static_cast<uint32_t>(PPC_CODE_BASE),

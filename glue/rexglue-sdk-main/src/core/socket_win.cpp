@@ -17,4 +17,8 @@ int socket_ioctl(SocketHandle handle, uint32_t cmd, uint8_t* arg) {
   return ioctlsocket(static_cast<SOCKET>(handle), cmd, reinterpret_cast<u_long*>(arg));
 }
 
+uint32_t socket_last_error() {
+  return static_cast<uint32_t>(WSAGetLastError());
+}
+
 }  // namespace rex::net

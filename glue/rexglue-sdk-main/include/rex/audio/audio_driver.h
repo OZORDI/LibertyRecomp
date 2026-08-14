@@ -22,6 +22,12 @@ class AudioDriver {
   virtual ~AudioDriver();
 
   virtual void SubmitFrame(uint32_t samples_ptr) = 0;
+  virtual uint32_t RecommendedInitialCredits(uint32_t configured_maximum) const {
+    return configured_maximum;
+  }
+  virtual void Pause() {}
+  virtual void Resume() {}
+  virtual void Flush() {}
 
  protected:
   inline uint8_t* TranslatePhysical(uint32_t guest_address) const {

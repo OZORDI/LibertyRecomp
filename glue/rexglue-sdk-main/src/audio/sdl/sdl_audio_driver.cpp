@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
+#include <string>
 
 #include <rex/assert.h>
 #include <rex/audio/conversion.h>
@@ -26,6 +28,27 @@
 REXCVAR_DEFINE_BOOL(audio_mute, false, "Audio", "Mute audio output");
 
 namespace rex::audio::sdl {
+
+namespace {
+
+struct SDLSubsystemResult {
+  bool success = false;
+  std::string error;
+};
+
+void SDLCALL InitializeAudioSubsystem(void* userdata) {
+  auto* result = static_cast<SDLSubsystemResult*>(userdata);
+  result->success = SDL_InitSubSystem(SDL_INIT_AUDIO);
+  if (!result->success) {
+    result->error = SDL_GetError();
+  }
+}
+
+void SDLCALL ShutdownAudioSubsystem(void*) {
+  SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
+
+}  // namespace
 
 SDLAudioDriver::SDLAudioDriver(memory::Memory* memory, rex::thread::Semaphore* semaphore)
     : AudioDriver(memory), semaphore_(semaphore) {}
@@ -45,29 +68,74 @@ bool SDLAudioDriver::Initialize() {
   // Set app name for audio device identification
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "rexglue");
 
-  if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-    REXAPU_ERROR("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
-    return false;
+  SDLSubsystemResult subsystem_result;
+  if (SDL_IsMainThread()) {
+    InitializeAudioSubsystem(&subsystem_result);
+  } else if (!SDL_RunOnMainThread(InitializeAudioSubsystem, &subsystem_result, true)) {
+    REXAPU_ERROR(
+        "SDL_RunOnMainThread() for audio initialization failed: {}; using paced silent "
+        "fallback",
+        SDL_GetError());
+    silent_fallback_ = true;
+    return true;
+  }
+  if (!subsystem_result.success) {
+    REXAPU_ERROR("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}; using paced silent fallback",
+                 subsystem_result.error);
+    silent_fallback_ = true;
+    return true;
   }
   sdl_initialized_ = true;
 
   SDL_AudioSpec desired_spec = {};
   SDL_AudioSpec obtained_spec = {};
+  SDL_AudioSpec preferred_spec = {};
   desired_spec.freq = frame_frequency_;
   desired_spec.format = SDL_AUDIO_F32LE;
-  desired_spec.channels = frame_channels_;
-  sdl_device_channels_ = frame_channels_;
+  if (SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &preferred_spec, nullptr)) {
+    REXAPU_INFO("Default playback device '{}' prefers {} Hz, {} channels, format {}",
+                SDL_GetAudioDeviceName(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK), preferred_spec.freq,
+                preferred_spec.channels, uint32_t(preferred_spec.format));
+  } else {
+    REXAPU_WARN("SDL_GetAudioDeviceFormat() before open failed: {}", SDL_GetError());
+  }
+
+  // The callback can provide either the guest's six channels or its existing
+  // stereo downmix. Select stereo before opening stereo-only devices so
+  // CoreAudio never has to start an unsupported six-channel queue merely to
+  // discover the physical layout.
+  const bool prefer_stereo = preferred_spec.channels > 0 && preferred_spec.channels < 6;
+  desired_spec.channels = prefer_stereo ? 2 : frame_channels_;
+  sdl_device_channels_ = desired_spec.channels;
   sdl_stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired_spec,
                                           SDLCallback, this);
   if (!sdl_stream_) {
-    REXAPU_ERROR("SDL_OpenAudioDeviceStream() failed: {}", SDL_GetError());
-    return false;
+    if (desired_spec.channels != 2) {
+      REXAPU_WARN("SDL_OpenAudioDeviceStream() for {} channels failed: {}; retrying stereo",
+                  desired_spec.channels, SDL_GetError());
+      desired_spec.channels = 2;
+      sdl_device_channels_ = 2;
+      sdl_stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired_spec,
+                                              SDLCallback, this);
+    }
+    if (!sdl_stream_) {
+      REXAPU_ERROR(
+          "SDL_OpenAudioDeviceStream() stereo fallback failed: {}; using paced silent "
+          "fallback",
+          SDL_GetError());
+      silent_fallback_ = true;
+      return true;
+    }
   }
 
   SDL_AudioDeviceID sdl_device = SDL_GetAudioStreamDevice(sdl_stream_);
   if (!sdl_device) {
-    REXAPU_ERROR("SDL_GetAudioStreamDevice() failed: {}", SDL_GetError());
-    return false;
+    REXAPU_ERROR("SDL_GetAudioStreamDevice() failed: {}; using paced silent fallback",
+                 SDL_GetError());
+    SDL_DestroyAudioStream(sdl_stream_);
+    sdl_stream_ = nullptr;
+    silent_fallback_ = true;
+    return true;
   }
 
   if (!SDL_GetAudioDeviceFormat(sdl_device, &obtained_spec, NULL)) {
@@ -75,33 +143,32 @@ bool SDLAudioDriver::Initialize() {
     obtained_spec = desired_spec;
   }
 
-  if (obtained_spec.channels == 2) {
+  REXAPU_INFO(
+      "Opened playback stream with {} input channels; device is {} Hz, {} channels, "
+      "format {}",
+      desired_spec.channels, obtained_spec.freq, obtained_spec.channels,
+      uint32_t(obtained_spec.format));
+
+  if (!SDL_ResumeAudioStreamDevice(sdl_stream_)) {
+    REXAPU_ERROR("SDL_ResumeAudioStreamDevice() failed: {}; using paced silent fallback",
+                 SDL_GetError());
     SDL_DestroyAudioStream(sdl_stream_);
     sdl_stream_ = nullptr;
-    desired_spec.channels = 2;
-    sdl_device_channels_ = 2;
-    sdl_stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired_spec,
-                                            SDLCallback, this);
-    if (!sdl_stream_) {
-      REXAPU_ERROR("SDL_OpenAudioDeviceStream() stereo fallback failed: {}", SDL_GetError());
-      return false;
-    }
-    sdl_device = SDL_GetAudioStreamDevice(sdl_stream_);
-    if (!sdl_device) {
-      REXAPU_ERROR("SDL_GetAudioStreamDevice() failed after stereo fallback: {}", SDL_GetError());
-      return false;
-    }
-  }
-
-  if (!SDL_ResumeAudioDevice(sdl_device)) {
-    REXAPU_ERROR("SDL_ResumeAudioDevice() failed: {}", SDL_GetError());
-    return false;
+    silent_fallback_ = true;
+    return true;
   }
 
   return true;
 }
 
 void SDLAudioDriver::SubmitFrame(uint32_t frame_ptr) {
+  if (silent_fallback_) {
+    rex::thread::Sleep(std::chrono::microseconds(silent_frame_duration_microseconds_));
+    const bool released = semaphore_->Release(1, nullptr);
+    assert_true(released);
+    return;
+  }
+
   const auto input_frame = memory_->TranslateVirtual<float*>(frame_ptr);
   float* output_frame;
   {
@@ -130,13 +197,59 @@ void SDLAudioDriver::SubmitFrame(uint32_t frame_ptr) {
   }
 }
 
+void SDLAudioDriver::Pause() {
+  if (!sdl_stream_) {
+    FlushQueuedFrames();
+    return;
+  }
+  if (!SDL_PauseAudioStreamDevice(sdl_stream_)) {
+    REXAPU_WARN("SDL_PauseAudioStreamDevice() failed: {}", SDL_GetError());
+  }
+  Flush();
+}
+
+void SDLAudioDriver::Resume() {
+  if (sdl_stream_ && !SDL_ResumeAudioStreamDevice(sdl_stream_)) {
+    REXAPU_WARN("SDL_ResumeAudioStreamDevice() failed: {}", SDL_GetError());
+  }
+}
+
+void SDLAudioDriver::Flush() {
+  if (!sdl_stream_) {
+    FlushQueuedFrames();
+    return;
+  }
+  if (!SDL_LockAudioStream(sdl_stream_)) {
+    REXAPU_WARN("SDL_LockAudioStream() failed while flushing: {}", SDL_GetError());
+    return;
+  }
+  FlushQueuedFrames();
+  if (!SDL_ClearAudioStream(sdl_stream_)) {
+    REXAPU_WARN("SDL_ClearAudioStream() failed: {}", SDL_GetError());
+  }
+  SDL_UnlockAudioStream(sdl_stream_);
+}
+
+void SDLAudioDriver::FlushQueuedFrames() {
+  std::unique_lock<std::mutex> guard(frames_mutex_);
+  while (!frames_queued_.empty()) {
+    frames_unused_.push(frames_queued_.front());
+    frames_queued_.pop();
+  }
+}
+
 void SDLAudioDriver::Shutdown() {
+  silent_fallback_ = false;
   if (sdl_stream_) {
     SDL_DestroyAudioStream(sdl_stream_);
     sdl_stream_ = nullptr;
   }
   if (sdl_initialized_) {
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (SDL_IsMainThread()) {
+      ShutdownAudioSubsystem(nullptr);
+    } else if (!SDL_RunOnMainThread(ShutdownAudioSubsystem, nullptr, true)) {
+      REXAPU_ERROR("SDL_RunOnMainThread() for audio shutdown failed: {}", SDL_GetError());
+    }
     sdl_initialized_ = false;
   }
   std::unique_lock<std::mutex> guard(frames_mutex_);

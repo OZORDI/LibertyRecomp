@@ -137,33 +137,41 @@ target_compile_options(mspack PRIVATE -w)
 # NOTE: o1heap.c auto-detects CLZ via __builtin_clzl when __clang__/__GNUC__
 # are defined, but on Windows unsigned long is 32-bit even on x64.  We inject
 # a config header that provides a correct 64-bit CLZ
-add_library(o1heap STATIC
-    o1heap/o1heap/o1heap.c
-)
-target_include_directories(o1heap PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_compile_definitions(o1heap PRIVATE
-    "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
+if(NOT TARGET o1heap)
+    add_library(o1heap STATIC
+        o1heap/o1heap/o1heap.c
+    )
+    target_include_directories(o1heap PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_definitions(o1heap PRIVATE
+        "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
+endif()
 target_compile_options(o1heap PRIVATE -w)
 
 # xxHash - extremely fast non-cryptographic hash (git submodule)
-set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
-add_subdirectory(xxHash/cmake_unofficial)
+if(NOT TARGET xxHash::xxhash)
+    set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
+    add_subdirectory(xxHash/cmake_unofficial)
+endif()
 target_compile_options(xxhash PRIVATE -w)
 
 # disasm - PowerPC disassembler (existing local library)
-add_subdirectory(disasm)
+if(NOT TARGET disasm)
+    add_subdirectory(disasm)
+endif()
 # Suppress warnings in disasm
 target_compile_options(disasm PRIVATE -w)
 
 #=============================================================================
 # fmt - Formatting library (must come before spdlog)
 #=============================================================================
-set(FMT_DOC OFF CACHE BOOL "" FORCE)
-set(FMT_TEST OFF CACHE BOOL "" FORCE)
-set(FMT_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(fmt)
+if(NOT TARGET fmt::fmt)
+    set(FMT_DOC OFF CACHE BOOL "" FORCE)
+    set(FMT_TEST OFF CACHE BOOL "" FORCE)
+    set(FMT_INSTALL ON CACHE BOOL "" FORCE)
+    add_subdirectory(fmt)
+endif()
 target_compile_options(fmt PRIVATE -w)
 
 #=============================================================================
@@ -267,7 +275,13 @@ set(SDL_FILESYSTEM OFF CACHE BOOL "" FORCE)
 set(SDL_LOCALE OFF CACHE BOOL "" FORCE)
 set(SDL_FILE OFF CACHE BOOL "" FORCE)
 set(SDL_MISC OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+# File dialogs: Linux consumers rely on SDL's xdg-desktop-portal/zenity
+# backends; Windows apps use IFileOpenDialog directly, so keep it off there.
+if(WIN32)
+    set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+else()
+    set(SDL_DIALOG ON CACHE BOOL "" FORCE)
+endif()
 set(SDL_TRAY OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 

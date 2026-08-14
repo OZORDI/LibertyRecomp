@@ -1,6 +1,7 @@
 #include "config.h"
 #include <hid/hid.h>
 #include <os/logger.h>
+#include <rex/cvar.h>
 #include <ui/game_window.h>
 #include <ui/options_menu.h>
 #include <user/paths.h>
@@ -506,7 +507,15 @@ CONFIG_DEFINE_ENUM_TEMPLATE(EMultiplayerBackend)
 {
     { "Community", EMultiplayerBackend::Community },
     { "Firebase",  EMultiplayerBackend::Firebase },
-    { "LAN",       EMultiplayerBackend::LAN }
+    { "LAN",       EMultiplayerBackend::LAN },
+    { "Offline",   EMultiplayerBackend::Offline }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EMultiplayerRelayPolicy)
+{
+    { "Auto",       EMultiplayerRelayPolicy::Auto },
+    { "DirectOnly", EMultiplayerRelayPolicy::DirectOnly },
+    { "RelayOnly",  EMultiplayerRelayPolicy::RelayOnly }
 };
 
 #undef  CONFIG_DEFINE
@@ -900,6 +909,16 @@ std::filesystem::path Config::GetConfigPath()
 
 void Config::CreateCallbacks()
 {
+    // GTA IV's visible HDR option owns the native Vulkan presenter's HDR
+    // selection too. Previously these were independent, so HDR presentation
+    // could remain active while this option displayed Off.
+    Config::HDRMode.Callback = [](ConfigDef<EHDRMode>* def)
+    {
+        const bool enabled = def->Value != EHDRMode::Off;
+        if (!rex::cvar::SetFlagByName("vulkan_hdr", enabled ? "true" : "false"))
+            LOGFN_WARNING("Failed to synchronize HDR mode with the Vulkan presenter");
+    };
+
     Config::Language.Callback = [](ConfigDef<ELanguage>* def)
     {
         if (!App::s_isInit)
@@ -1175,4 +1194,3 @@ std::string Config::GetButtonPromptsSubdir()
             return "xbox_one";  // Default fallback to Xbox One
     }
 }
-

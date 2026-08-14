@@ -34,6 +34,7 @@
 #include <rex/system/util/xdbf_utils.h>
 #include <rex/system/xam/app_manager.h>
 #include <rex/system/xam/content_manager.h>
+#include <rex/system/xam/live_compatibility.h>
 #include <rex/system/xam/user_profile.h>
 #include <rex/platform/dynlib.h>
 #include <rex/system/function_dispatcher.h>
@@ -200,6 +201,9 @@ class KernelState {
   xam::AppManager* app_manager() const { return app_manager_.get(); }
   xam::ContentManager* content_manager() const { return content_manager_.get(); }
   xam::UserProfile* user_profile() const { return user_profile_.get(); }
+  xam::LiveCompatibilityRuntime* live_compatibility() const {
+    return live_compatibility_.get();
+  }
 
   // Access must be guarded by the global critical region.
   util::ObjectTable* object_table() { return &object_table_; }
@@ -354,6 +358,7 @@ class KernelState {
   std::unique_ptr<xam::AppManager> app_manager_;
   std::unique_ptr<xam::ContentManager> content_manager_;
   std::unique_ptr<xam::UserProfile> user_profile_;
+  std::unique_ptr<xam::LiveCompatibilityRuntime> live_compatibility_;
 
   rex::thread::global_critical_region global_critical_region_;
 

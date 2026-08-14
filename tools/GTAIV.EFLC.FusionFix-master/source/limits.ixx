@@ -18,10 +18,12 @@ private:
     size_t    m_elementSize = 0;
     size_t    m_elementsCount = 0;
     size_t    m_xrefCount = 0;
-    uint8_t*  m_array = nullptr;
+    uint8_t* m_array = nullptr;
 public:
     LimitAdjuster(auto startAddress, auto elementSize, auto elementsCount, auto xrefCount) :
-        m_startAddress(startAddress), m_elementSize(elementSize), m_elementsCount(elementsCount), m_xrefCount(xrefCount){}
+        m_startAddress(startAddress), m_elementSize(elementSize), m_elementsCount(elementsCount), m_xrefCount(xrefCount)
+    {
+    }
 
     LimitAdjuster& IncreaseBy(auto num)
     {
@@ -45,7 +47,8 @@ public:
             auto max_needed_offset = *std::max_element(list.begin(), list.end());
             auto i = 0;
 
-            if (m_array == nullptr) {
+            if (m_array == nullptr)
+            {
                 auto vec = new std::vector<uint8_t>(m_increaseby * max_array_offset + ((max_needed_offset > max_array_offset) ? max_needed_offset - max_array_offset : 0), 0);
                 m_array = vec->data();
             }
@@ -78,17 +81,21 @@ public:
     {
         if (!m_patchedNumRefs && m_patchedXrefs)
         {
-            auto TryPatchAddr = [&]<typename T>(intptr_t ptr) {
+            auto TryPatchAddr = [&]<typename T>(intptr_t ptr)
+            {
                 auto val = injector::ReadMemory<T>(ptr, true);
-                if (val == m_elementsCount) {
+                if (val == m_elementsCount)
+                {
                     injector::WriteMemory<T>(ptr, T(m_elementsCount * m_increaseby), true);
                     return true;
                 }
-                if (val == m_elementsCount + 1) {
+                if (val == m_elementsCount + 1)
+                {
                     injector::WriteMemory<T>(ptr, T(m_elementsCount * m_increaseby + 1), true);
                     return true;
                 }
-                if (val == m_elementsCount - 1) {
+                if (val == m_elementsCount - 1)
+                {
                     injector::WriteMemory<T>(ptr, T(m_elementsCount * m_increaseby - 1), true);
                     return true;
                 }
@@ -98,13 +105,13 @@ public:
             auto list = std::initializer_list<intptr_t>{ pointers... };
             for (auto v : list)
             {
-                if (TryPatchAddr.template operator()<uint64_t>(v))
+                if (TryPatchAddr.template operator() < uint64_t > (v))
                     continue;
-                if (TryPatchAddr.template operator()<uint32_t>(v))
+                if (TryPatchAddr.template operator() < uint32_t > (v))
                     continue;
-                if (TryPatchAddr.template operator()<uint16_t>(v))
+                if (TryPatchAddr.template operator() < uint16_t > (v))
                     continue;
-                if (TryPatchAddr.template operator()<uint8_t>(v))
+                if (TryPatchAddr.template operator() < uint8_t > (v))
                     continue;
             }
             m_patchedNumRefs = true;
@@ -133,12 +140,18 @@ public:
 
             if (bExtendedLimits)
             {
-                poolNames.push_back("TxdStore");
-                poolNames.push_back("Anim Manager");
-                poolNames.push_back("PhysicsStore");
-                poolNames.push_back("BoundsStore");
-                poolNames.push_back("DrawblDictStore");
-                poolNames.push_back("IplStore");
+                poolNames.push_back("Anim Manager");    // .wad
+                poolNames.push_back("BoundsStore");     // .wbn
+                poolNames.push_back("DrawblDictStore"); // .wdd
+                poolNames.push_back("IplStore");        // .wpl | .ipl(?)
+                poolNames.push_back("PhysicsStore");    // .wbd
+                poolNames.push_back("TxdStore");        // .wtd(?)
+
+                // These need to be raised in order to fix a crash during hot coffee scenes when certain objects have more than 150 draw distance in .ides
+                poolNames.push_back("Building");
+                poolNames.push_back("Dummy Object");
+                poolNames.push_back("EntryInfoNodes");
+                poolNames.push_back("PtrNode Double");
             }
 
             if (nVehicleBudget)
@@ -146,7 +159,7 @@ public:
                 auto pattern = find_pattern("F7 2D ? ? ? ? 8B CA C1 E9 1F 03 CA B8 ? ? ? ? F7 2D ? ? ? ? 8B C2 C1 E8 1F 03 C2 89 0D ? ? ? ? A3 ? ? ? ? 83 C4 10 C3", "8B 0D ? ? ? ? B8 ? ? ? ? F7 E9 8B 0D");
                 injector::WriteMemory(*pattern.get_first<void*>(2), nVehicleBudget, true);
 
-                // Increase VehicleStruct pool size, to avoid certain crash with high budget
+                // Needed to avoid a predictable crash with high vehicle budgets (It usually happens in very specific places in the game world)
                 poolNames.push_back("VehicleStruct");
             }
 
@@ -164,7 +177,7 @@ public:
                     void operator()(injector::reg_pack& regs)
                     {
                         auto name = std::string_view(*(const char**)(regs.esp + 16));
-                        if (std::any_of(poolNames.begin(), poolNames.end(), [&name](auto& i) {return i == name; }) || (name == "VehicleStruct" && CText::hasViceCityStrings()))
+                        if (std::any_of(poolNames.begin(), poolNames.end(), [&name](auto& i) { return i == name; }) || (name == "VehicleStruct" && CText::hasViceCityStrings()))
                             regs.edi *= 2;
                         regs.eax = regs.edi * regs.edx;
                     }
@@ -178,7 +191,7 @@ public:
                     void operator()(injector::reg_pack& regs)
                     {
                         auto name = std::string_view(*(const char**)(regs.esp + 16));
-                        if (std::any_of(poolNames.begin(), poolNames.end(), [&name](auto& i) {return i == name; }) || (name == "VehicleStruct" && CText::hasViceCityStrings()))
+                        if (std::any_of(poolNames.begin(), poolNames.end(), [&name](auto& i) { return i == name; }) || (name == "VehicleStruct" && CText::hasViceCityStrings()))
                             regs.edi *= 2;
                         regs.ecx = regs.edi * regs.eax;
                     }
@@ -195,7 +208,7 @@ public:
             // Liveries
             if (nLiveriesLimit)
             {
-                static std::unordered_map<uint32_t, std::array<uint32_t, CHAR_MAX + 1>> liveries;
+                static std::unordered_map<uintptr_t, std::array<uintptr_t, CHAR_MAX + 1>> liveries;
 
                 auto pattern = find_pattern("89 86 ? ? ? ? 89 86 ? ? ? ? 89 86 ? ? ? ? 89 86 ? ? ? ? C7 86 ? ? ? ? ? ? ? ? C7 86 ? ? ? ? ? ? ? ? C7 86 ? ? ? ? ? ? ? ? C7 86 ? ? ? ? ? ? ? ? C7 86",
                                             "89 86 ? ? ? ? 89 86 ? ? ? ? 89 86 ? ? ? ? 89 86 ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 11 86 ? ? ? ? F3 0F 11 86 ? ? ? ? 80 A6 ? ? ? ? ? 88 8E ? ? ? ? 66 89 86 ? ? ? ? F3 0F 11 86 ? ? ? ? 89 86 ? ? ? ? 5E");
@@ -205,7 +218,7 @@ public:
                     {
                         void operator()(injector::reg_pack& regs)
                         {
-                            *(uint32_t**)(regs.esi + 0x13C) = &liveries[regs.esi][0];
+                            *(uintptr_t**)(regs.esi + 0x13C) = &liveries[regs.esi][0];
                         }
                     }; injector::MakeInline<CVehicleModelInfoInitializeHook>(pattern.get_first(0), pattern.get_first(6));
 
@@ -219,7 +232,10 @@ public:
 
                             auto it = liveries.find(regs.esi);
                             if (it != liveries.end())
+                            {
                                 liveries.erase(it);
+                                *(uintptr_t**)(regs.esi + 0x13C) = 0;
+                            }
                         }
                     }; injector::MakeInline<CBaseModelInfoTerminateHook>(pattern.get_first(0), pattern.get_first(8));
 
@@ -230,7 +246,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                regs.esi = *(uint32_t*)(regs.ebx + 0x13C);
+                                regs.esi = *(uintptr_t*)(regs.ebx + 0x13C);
                             }
                         }; injector::MakeInline<CVehicleModelInfoSetVehicleDrawableHook>(pattern.get_first(0), pattern.get_first(6));
                     }
@@ -241,7 +257,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                regs.esi = *(uint32_t*)(regs.ebp + 0x13C);
+                                regs.esi = *(uintptr_t*)(regs.ebp + 0x13C);
                             }
                         }; injector::MakeInline<CVehicleModelInfoSetVehicleDrawableHook>(pattern.get_first(0), pattern.get_first(6));
                     }
@@ -253,7 +269,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                auto arr = (uint32_t**)(regs.ecx + 0x13C);
+                                auto arr = (uintptr_t**)(regs.ecx + 0x13C);
                                 if (arr)
                                 {
                                     auto ptr = *arr;
@@ -276,7 +292,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                auto arr = (uint32_t**)(regs.ebx + 0x13C);
+                                auto arr = (uintptr_t**)(regs.ebx + 0x13C);
                                 if (arr)
                                 {
                                     auto ptr = *arr;
@@ -295,7 +311,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                auto arr = (uint32_t**)(regs.ebx + 0x13C);
+                                auto arr = (uintptr_t**)(regs.ebx + 0x13C);
                                 if (arr)
                                 {
                                     auto ptr = *arr;
@@ -314,7 +330,7 @@ public:
                         {
                             void operator()(injector::reg_pack& regs)
                             {
-                                auto arr = (uint32_t**)(regs.ebx + 0x13C);
+                                auto arr = (uintptr_t**)(regs.ebx + 0x13C);
                                 if (arr)
                                 {
                                     auto ptr = *arr;
@@ -499,7 +515,7 @@ public:
                     auto ref1 = (intptr_t)find_pattern("BF ? ? ? ? 8D 64 24 00 8B CE E8 ? ? ? ? 81 C6 ? ? ? ? 4F 79 F0 68 ? ? ? ? E8 ? ? ? ? 83 C4 04 5F 5E C3 56", "BE ? ? ? ? EB 03 8D 49 00 E8 ? ? ? ? 81 C1 ? ? ? ? 83 EE 01 79 F0 68 ? ? ? ? E8 ? ? ? ? 83 C4 04 5E C3").get_first(1);
                     auto ref2 = (intptr_t)find_pattern("83 F8 3C 7C F1", "83 F8 3C 7C EF").get_first(2);
                     auto WeaponInfo = LimitAdjuster(*pattern.get_first<uintptr_t>(2), 0x110, 60, 16).ReplaceXrefs(0, 0x24, 0x1A98, 0x1A9C, 0x1AB4, 0x1B30, 0x3430, 0x3540, 0x363C, 0x3870, 0x3980, 0x3DC0).ReplaceNumericRefs(ref1, ref2);
-                        
+
                     pattern = hook::pattern("7D 0C 69 C0");
                     injector::MakeNOP(pattern.get_first(), 2);
 

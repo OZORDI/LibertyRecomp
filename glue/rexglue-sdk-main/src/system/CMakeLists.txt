@@ -31,7 +31,9 @@ set(REXSYSTEM_SOURCES
     # XAM services
     xam/app_manager.cpp
     xam/content_manager.cpp
+    xam/live_compatibility.cpp
     xam/user_profile.cpp
+    xam/xsession.cpp
 
     ppc_types.cpp
     elf_module.cpp
@@ -57,6 +59,7 @@ set_target_properties(rexruntime PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 
 target_include_directories(rexruntime PUBLIC
     $<BUILD_INTERFACE:${REXGLUE_ROOT}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_include_directories(rexruntime PRIVATE

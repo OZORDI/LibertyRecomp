@@ -53,7 +53,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
   }
 
   native_handle_ = socket(af, type, proto);
-  if (native_handle_ == -1) {
+  if (native_handle_ == static_cast<uint64_t>(rex::net::kInvalidSocket)) {
     return X_STATUS_UNSUCCESSFUL;
   }
 
@@ -61,7 +61,15 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
 }
 
 X_STATUS XSocket::Close() {
-  int ret = rex::net::socket_close(native_handle_);
+  if (native_handle_ == static_cast<uint64_t>(rex::net::kInvalidSocket)) {
+    return X_STATUS_SUCCESS;
+  }
+
+  const uint64_t handle = native_handle_;
+  native_handle_ = static_cast<uint64_t>(rex::net::kInvalidSocket);
+  bound_ = false;
+  bound_port_ = 0;
+  int ret = rex::net::socket_close(handle);
   if (ret != 0) {
     return X_STATUS_UNSUCCESSFUL;
   }
@@ -163,6 +171,26 @@ int XSocket::Recv(uint8_t* buf, uint32_t buf_len, uint32_t flags) {
 
 int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
                       uint32_t* from_len) {
+  auto* live = kernel_state_ ? kernel_state_->live_compatibility() : nullptr;
+  if (type_ == X_SOCK_DGRAM && live && live->peer_transport()) {
+    auto datagram = live->ReceivePeerDatagram(bound_port_, buf_len);
+    if (datagram) {
+      const uint32_t copied_size =
+          std::min(buf_len, static_cast<uint32_t>(datagram->payload.size()));
+      std::memcpy(buf, datagram->payload.data(), copied_size);
+      if (from) {
+        from->sin_family = X_AF_INET;
+        from->sin_addr = ntohl(datagram->source_ipv4);
+        from->sin_port = datagram->source_port;
+        std::memset(from->x_sin_zero, 0, sizeof(from->x_sin_zero));
+      }
+      if (from_len) {
+        *from_len = sizeof(N_XSOCKADDR_IN);
+      }
+      return static_cast<int>(copied_size);
+    }
+  }
+
   // Pop from secure packets first
   // TODO(DrChat): Enable when I commit XNet
   /*
@@ -186,18 +214,18 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
   }
   */
 
-  sockaddr_in nfrom;
+  sockaddr_in nfrom{};
   socklen_t nfromlen = sizeof(sockaddr_in);
   int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
                      (sockaddr*)&nfrom, &nfromlen);
-  if (from) {
+  if (ret >= 0 && from) {
     from->sin_family = nfrom.sin_family;
     from->sin_addr = ntohl(nfrom.sin_addr.s_addr);  // BE <- BE
-    from->sin_port = nfrom.sin_port;
+    from->sin_port = ntohs(nfrom.sin_port);
     std::memset(from->x_sin_zero, 0, sizeof(from->x_sin_zero));
   }
 
-  if (from_len) {
+  if (ret >= 0 && from_len) {
     *from_len = nfromlen;
   }
 
@@ -206,6 +234,16 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
 
 int XSocket::Send(const uint8_t* buf, uint32_t buf_len, uint32_t flags) {
   return send(native_handle_, reinterpret_cast<const char*>(buf), buf_len, flags);
+}
+
+bool XSocket::UsesPeerDatagramTransport() const {
+  auto* live = kernel_state_ ? kernel_state_->live_compatibility() : nullptr;
+  return type_ == X_SOCK_DGRAM && live && live->peer_transport();
+}
+
+bool XSocket::HasPendingPeerDatagram() const {
+  auto* live = kernel_state_ ? kernel_state_->live_compatibility() : nullptr;
+  return type_ == X_SOCK_DGRAM && live && live->HasPendingPeerDatagram(bound_port_);
 }
 
 int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* to,
@@ -221,11 +259,22 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
   }
   */
 
-  sockaddr_in nto;
+  auto* live = kernel_state_ ? kernel_state_->live_compatibility() : nullptr;
+  if (type_ == X_SOCK_DGRAM && to && live && live->peer_transport()) {
+    const uint32_t destination_ipv4 = htonl(static_cast<uint32_t>(to->sin_addr));
+    if (live->FindRoute(destination_ipv4)) {
+      return live->SendPeerDatagram(destination_ipv4, to->sin_port, bound_port_,
+                                    std::span<const uint8_t>(buf, buf_len))
+                 ? static_cast<int>(buf_len)
+                 : -1;
+    }
+  }
+
+  sockaddr_in nto{};
   if (to) {
-    nto.sin_addr.s_addr = to->sin_addr;
+    nto.sin_addr.s_addr = htonl(static_cast<uint32_t>(to->sin_addr));
     nto.sin_family = to->sin_family;
-    nto.sin_port = to->sin_port;
+    nto.sin_port = htons(static_cast<uint16_t>(to->sin_port));
   }
 
   return sendto(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,

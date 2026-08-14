@@ -13,6 +13,7 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
 #include <rex/audio/audio_system.h>
+#include <rex/diagnostics/gta4_transition.h>
 #include <rex/kernel/xboxkrnl/private.h>
 #include <rex/logging.h>
 #include <rex/hook.h>
@@ -100,6 +101,11 @@ u32 XAudioSubmitRenderDriverFrame_entry(mapped_void driver_ptr, mapped_void samp
 
   auto* audio_system =
       static_cast<audio::AudioSystem*>(REX_KERNEL_STATE()->emulator()->audio_system());
+  diagnostics::gta4_transition::Record(
+      diagnostics::gta4_transition::EventSource::kAudio,
+      diagnostics::gta4_transition::EventType::kAudioSubmit, 0, 0, 0,
+      diagnostics::gta4_transition::kFlagBefore,
+      driver_ptr.guest_address(), samples_ptr.guest_address());
   audio_system->SubmitFrame(driver_ptr.guest_address() & 0x0000FFFF, samples_ptr.guest_address());
 
   return X_ERROR_SUCCESS;

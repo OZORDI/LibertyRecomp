@@ -6226,10 +6226,13 @@ bool VulkanRenderTargetCache::TryResolveCopyDirectly(const draw_util::ResolveInf
 bool VulkanRenderTargetCache::DumpRenderTargets(uint32_t dump_base, uint32_t dump_row_length_used,
                                                 uint32_t dump_rows, uint32_t dump_pitch) {
   assert_true(GetPath() == Path::kHostRenderTargets);
+  ++dump_call_count_;
 
   GetResolveCopyRectanglesToDump(dump_base, dump_row_length_used, dump_rows, dump_pitch,
                                  dump_rectangles_);
+  dump_rectangle_count_ += dump_rectangles_.size();
   if (dump_rectangles_.empty()) {
+    ++dump_empty_count_;
     return true;
   }
 
@@ -6326,6 +6329,7 @@ bool VulkanRenderTargetCache::DumpRenderTargets(uint32_t dump_base, uint32_t dum
     offsets.source_base_tiles = rt_key.base_tiles;
     ResolveCopyDumpRectangle::Dispatch dispatches[ResolveCopyDumpRectangle::kMaxDispatches];
     uint32_t dispatch_count = rectangle.GetDispatches(dump_pitch, dump_row_length_used, dispatches);
+    dump_dispatch_count_ += dispatch_count;
     for (uint32_t i = 0; i < dispatch_count; ++i) {
       const ResolveCopyDumpRectangle::Dispatch& dispatch = dispatches[i];
       offsets.dispatch_first_tile = dump_base + dispatch.offset;
@@ -6352,6 +6356,11 @@ bool VulkanRenderTargetCache::DumpRenderTargets(uint32_t dump_base, uint32_t dum
           1);
     }
     MarkEdramBufferModified();
+  }
+  if (all_pipelines_available) {
+    ++dump_success_count_;
+  } else {
+    ++dump_failure_count_;
   }
   return all_pipelines_available;
 }

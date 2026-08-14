@@ -11,7 +11,11 @@
 
 #include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/logging.h>
+#include <rex/system/xam/xsession.h>
 #include <rex/thread.h>
+
+#include <atomic>
+#include <limits>
 
 namespace rex {
 namespace kernel {
@@ -21,6 +25,47 @@ using namespace rex::system::xam;
 namespace apps {
 using namespace rex::system;
 
+namespace {
+
+constexpr uint32_t kAchievementEntryIdOffset = 0x4;
+constexpr uint32_t kAchievementEntryStride = 0x8;
+constexpr uint32_t kFirstAchievementId = 1;
+constexpr uint32_t kLastAchievementId = 65;
+constexpr uint32_t kGta4SessionCreateReportedLength = 0x10;
+constexpr X_HRESULT kUnsupportedHresult = X_HRESULT_FROM_WIN32(0x32);
+
+std::atomic<AchievementUnlockCallback> g_achievement_unlock_callback{nullptr};
+
+void DispatchAchievementUnlock(uint32_t xbox_id) {
+  AchievementUnlockCallback callback =
+      g_achievement_unlock_callback.load(std::memory_order_acquire);
+  if (callback) {
+    callback(xbox_id);
+  }
+}
+
+X_HRESULT SessionResult(X_RESULT result) {
+  return X_HRESULT_FROM_WIN32(result);
+}
+
+object_ref<XSession> LookupSession(KernelState* kernel_state, memory::Memory* memory,
+                                   uint32_t object_ptr) {
+  if (!object_ptr) {
+    return nullptr;
+  }
+  const auto* guest_session = memory->TranslateVirtual<const X_KSESSION*>(object_ptr);
+  if (!guest_session) {
+    return nullptr;
+  }
+  return kernel_state->object_table()->LookupObject<XSession>(guest_session->handle);
+}
+
+}  // namespace
+
+void SetAchievementUnlockCallback(AchievementUnlockCallback callback) {
+  g_achievement_unlock_callback.store(callback, std::memory_order_release);
+}
+
 XgiApp::XgiApp(KernelState* kernel_state) : App(kernel_state, 0xFB) {}
 
 // http://mb.mirage.org/bugzilla/xliveless/main.c
@@ -28,225 +73,227 @@ XgiApp::XgiApp(KernelState* kernel_state) : App(kernel_state, 0xFB) {}
 X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                                       uint32_t buffer_length) {
   // NOTE: buffer_length may be zero or valid.
-  auto buffer = memory_->TranslateVirtual(buffer_ptr);
+  auto buffer = buffer_ptr ? memory_->TranslateVirtual(buffer_ptr) : nullptr;
   switch (message) {
     case 0x000B0006: {
-      assert_true(!buffer_length || buffer_length == 24);
-      // dword r3 user index
-      // dword (unwritten?)
-      // qword 0
-      // dword r4 context enum
-      // dword r5 value
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t context_id = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t context_value = memory::load_and_swap<uint32_t>(buffer + 20);
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_XUSER_SET_CONTEXT))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_XUSER_SET_CONTEXT*>(buffer);
+      const uint32_t user_index = request.user_index;
+      const uint32_t context_id = request.context.context_id;
+      const uint32_t context_value = request.context.value;
       REXKRNL_DEBUG("XGIUserSetContextEx({:08X}, {:08X}, {:08X})", user_index, context_id,
                     context_value);
-      return X_E_SUCCESS;
+      if (user_index != 0 || !kernel_state_->live_compatibility()) {
+        return X_E_NO_SUCH_USER;
+      }
+      return kernel_state_->live_compatibility()->SetUserContext(context_id, context_value)
+                 ? X_E_SUCCESS
+                 : X_E_INVALIDARG;
     }
     case 0x000B0007: {
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t property_id = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t value_size = memory::load_and_swap<uint32_t>(buffer + 20);
-      uint32_t value_ptr = memory::load_and_swap<uint32_t>(buffer + 24);
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_XUSER_SET_PROPERTY))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_XUSER_SET_PROPERTY*>(buffer);
+      const uint32_t user_index = request.user_index;
+      const uint32_t property_id = request.property_id;
+      const uint32_t value_size = request.data_size;
+      const uint32_t value_ptr = request.data_ptr;
       REXKRNL_DEBUG("XGIUserSetPropertyEx({:08X}, {:08X}, {}, {:08X})", user_index, property_id,
                     value_size, value_ptr);
-      return X_E_SUCCESS;
+      if (user_index != 0 || !kernel_state_->live_compatibility()) {
+        return X_E_NO_SUCH_USER;
+      }
+      if (value_size && !value_ptr) {
+        return X_E_INVALIDARG;
+      }
+      std::span<const uint8_t> value;
+      if (value_size) {
+        value = {memory_->TranslateVirtual<const uint8_t*>(value_ptr), value_size};
+      }
+      return kernel_state_->live_compatibility()->SetUserProperty(property_id, value)
+                 ? X_E_SUCCESS
+                 : X_E_INVALIDARG;
     }
     case 0x000B0008: {
-      // Raw dump so we can confirm the actual buffer layout the game sends.
+      if (!buffer || (buffer_length && buffer_length != 8)) {
+        REXKRNL_WARN("XGIUserWriteAchievements invalid buffer ({:08X}, {})", buffer_ptr,
+                     buffer_length);
+        return X_E_SUCCESS;
+      }
+
       uint32_t raw0 = buffer_length >= 4 ? memory::load_and_swap<uint32_t>(buffer + 0) : 0;
       uint32_t raw4 = buffer_length >= 8 ? memory::load_and_swap<uint32_t>(buffer + 4) : 0;
       REXKRNL_INFO("XGIUserWriteAchievements called: buf_len={} raw[0]={:08X} raw[4]={:08X}",
                    buffer_length, raw0, raw4);
 
-      assert_true(!buffer_length || buffer_length == 8);
       uint32_t achievement_count = raw0;
       uint32_t achievements_ptr = raw4;
 
-      // Empirically confirmed from log: each entry is {u32 padding/user_index, u32 id, ...}.
-      // The achievement ID sits at offset 4, not 0. Stride 8 covers the observed fields.
-      constexpr uint32_t kEntryIdOffset = 4;
-      constexpr uint32_t kEntryStride = 8;
-      constexpr uint32_t kMaxAchievements = 1000;
-
-      if (achievements_ptr && achievement_count > 0) {
-        if (achievement_count > kMaxAchievements) {
-          REXKRNL_WARN("XGIUserWriteAchievements: count={} unreasonable, ignoring",
-                       achievement_count);
-          return X_E_FAIL;
-        }
-        uint32_t span_end = achievements_ptr + achievement_count * kEntryStride - 1;
-        if (!memory_->LookupHeap(achievements_ptr) || !memory_->LookupHeap(span_end)) {
-          REXKRNL_WARN("XGIUserWriteAchievements: ptr {:08X} OOB", achievements_ptr);
-          return X_E_FAIL;
-        }
-        auto* base = memory_->TranslateVirtual(achievements_ptr);
-        for (uint32_t i = 0; i < achievement_count; ++i) {
-          uint32_t id = memory::load_and_swap<uint32_t>(base + i * kEntryStride + kEntryIdOffset);
-          REXKRNL_INFO("XGIUserWriteAchievements: id={} ({})", id, i);
-          kernel_state_->UnlockAchievement(id);
-        }
-      } else {
+      if (!achievements_ptr || !achievement_count) {
         REXKRNL_INFO("XGIUserWriteAchievements: skipped (count={} ptr={:08X})", achievement_count,
                      achievements_ptr);
+        return X_E_SUCCESS;
+      }
+
+      if (achievement_count > kLastAchievementId) {
+        REXKRNL_WARN(
+            "XGIUserWriteAchievements: count={} exceeds GTA IV achievement count {}; "
+            "clamping",
+            achievement_count, kLastAchievementId);
+        achievement_count = kLastAchievementId;
+      }
+
+      const uint64_t span_end64 =
+          static_cast<uint64_t>(achievements_ptr) +
+          (static_cast<uint64_t>(achievement_count) * kAchievementEntryStride) - 1;
+      if (span_end64 > std::numeric_limits<uint32_t>::max() ||
+          !memory_->LookupHeap(achievements_ptr) ||
+          !memory_->LookupHeap(static_cast<uint32_t>(span_end64))) {
+        REXKRNL_WARN("XGIUserWriteAchievements: ptr {:08X} OOB", achievements_ptr);
+        return X_E_SUCCESS;
+      }
+
+      auto* base = memory_->TranslateVirtual(achievements_ptr);
+      for (uint32_t i = 0; i < achievement_count; ++i) {
+        const uint8_t* entry = base + (i * kAchievementEntryStride);
+        uint32_t user_index = memory::load_and_swap<uint32_t>(entry);
+        uint32_t id = memory::load_and_swap<uint32_t>(entry + kAchievementEntryIdOffset);
+        if (id < kFirstAchievementId || id > kLastAchievementId) {
+          REXKRNL_WARN("XGIUserWriteAchievements: ignored invalid id={} user={} index={}", id,
+                       user_index, i);
+          continue;
+        }
+
+        REXKRNL_INFO("XGIUserWriteAchievements: id={} user={} index={}", id, user_index, i);
+        kernel_state_->UnlockAchievement(id);
+        DispatchAchievementUnlock(id);
       }
       return X_E_SUCCESS;
     }
     case 0x000B0010: {
-      assert_true(!buffer_length || buffer_length == 28);
-      // Sequence:
-      // - XamSessionCreateHandle
-      // - XamSessionRefObjByHandle
-      // - [this]
-      // - CloseHandle
-      uint32_t session_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t num_slots_public = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint32_t num_slots_private = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t user_xuid = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t session_info_ptr = memory::load_and_swap<uint32_t>(buffer + 20);
-      uint32_t nonce_ptr = memory::load_and_swap<uint32_t>(buffer + 24);
-
-      REXKRNL_DEBUG(
-          "XGISessionCreateImpl({:08X}, {:08X}, {}, {}, {:08X}, {:08X}, "
-          "{:08X})",
-          session_ptr, flags, num_slots_public, num_slots_private, user_xuid, session_info_ptr,
-          nonce_ptr);
-      return X_E_SUCCESS;
+      // GTA IV reports 0x10 here despite passing the complete 0x1C-byte
+      // request. The generated call site stores all seven fields before the
+      // call, so validate and snapshot the actual ABI structure.
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_CREATE) &&
+                      buffer_length != kGta4SessionCreateReportedLength)) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_CREATE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Create(request));
     }
     case 0x000B0011: {
-      assert_true(!buffer_length || buffer_length == 16);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint64_t session_nonce = memory::load_and_swap<uint64_t>(buffer + 8);
-
-      REXKRNL_DEBUG("XGISessionDelete({:08X}, {:08X}, {:016X})", obj_ptr, flags, session_nonce);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_STATE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_STATE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Delete(request));
     }
     case 0x000B0012: {
-      assert_true(!buffer_length || buffer_length == 20);
-      uint32_t session_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t user_count = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t unk_0 = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint32_t user_index_array = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t private_slots_array = memory::load_and_swap<uint32_t>(buffer + 16);
-
-      assert_zero(unk_0);
-      REXKRNL_DEBUG("XGISessionJoinLocal({:08X}, {}, {}, {:08X}, {:08X})", session_ptr, user_count,
-                    unk_0, user_index_array, private_slots_array);
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_MANAGE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_MANAGE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Join(request));
+    }
+    case 0x000B0013: {
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_MANAGE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_MANAGE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Leave(request));
     }
     case 0x000B0014: {
-      assert_true(!buffer_length || buffer_length == 16);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint64_t session_nonce = memory::load_and_swap<uint64_t>(buffer + 8);
-
-      REXKRNL_DEBUG("XSessionStart({:08X}, {:08X}, {:016X})", obj_ptr, flags, session_nonce);
-
-      return X_STATUS_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_STATE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_STATE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Start(request));
     }
     case 0x000B0015: {
-      // send high scores?
-      assert_true(!buffer_length || buffer_length == 16);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint64_t session_nonce = memory::load_and_swap<uint64_t>(buffer + 8);
-
-      REXKRNL_DEBUG("XSessionEnd({:08X}, {:08X}, {:016X})", obj_ptr, flags, session_nonce);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_STATE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_STATE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->End(request));
     }
     case 0x000B0016: {
-      assert_true(!buffer_length || buffer_length == 32);
-
-      uint32_t proc_index = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t num_results = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint16_t num_props = memory::load_and_swap<uint16_t>(buffer + 12);
-      uint16_t num_ctx = memory::load_and_swap<uint16_t>(buffer + 14);
-      uint32_t props_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t ctx_ptr = memory::load_and_swap<uint32_t>(buffer + 20);
-      uint32_t results_buffer_size = memory::load_and_swap<uint32_t>(buffer + 24);
-      uint32_t search_results_ptr = memory::load_and_swap<uint32_t>(buffer + 28);
-
-      REXKRNL_DEBUG("XSessionSearch({}, {}, {}, {}, {}, {:08X}, {:08X}, {}, {:08X})", proc_index,
-                    user_index, num_results, num_props, num_ctx, props_ptr, ctx_ptr,
-                    results_buffer_size, search_results_ptr);
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_SEARCH))) {
+        return X_E_INVALIDARG;
+      }
+      auto& request = *reinterpret_cast<XGI_SESSION_SEARCH*>(buffer);
+      return SessionResult(XSession::Search(kernel_state_, request));
     }
     case 0x000B0018: {
-      assert_true(!buffer_length || buffer_length == 16);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t maxPublicSlots = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint16_t maxPrivateSlots = memory::load_and_swap<uint16_t>(buffer + 12);
-
-      REXKRNL_DEBUG("XSessionModify({:08X}, {:08X}, {:08X}, {:08X})", obj_ptr, flags,
-                    maxPublicSlots, maxPrivateSlots);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_MODIFY))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_MODIFY*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Modify(request));
     }
     case 0x000B001C: {
-      assert_true(!buffer_length || buffer_length == 36);
-
-      // session_search
-      uint32_t proc_index = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t num_results = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint16_t num_props = memory::load_and_swap<uint16_t>(buffer + 12);
-      uint16_t num_ctx = memory::load_and_swap<uint16_t>(buffer + 14);
-      uint32_t props_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t ctx_ptr = memory::load_and_swap<uint32_t>(buffer + 20);
-      uint32_t results_buffer_size = memory::load_and_swap<uint32_t>(buffer + 24);
-      uint32_t search_results_ptr = memory::load_and_swap<uint32_t>(buffer + 28);
-      //
-      uint32_t num_users = memory::load_and_swap<uint32_t>(buffer + 32);
-
-      REXKRNL_DEBUG("XSessionSearchEx({}, {}, {}, {}, {}, {:08X}, {:08X}, {}, {:08X}, {})",
-                    proc_index, user_index, num_results, num_props, num_ctx, props_ptr, ctx_ptr,
-                    results_buffer_size, search_results_ptr, num_users);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_SEARCH_EX))) {
+        return X_E_INVALIDARG;
+      }
+      auto& request = *reinterpret_cast<XGI_SESSION_SEARCH_EX*>(buffer);
+      return SessionResult(XSession::Search(kernel_state_, request.search));
     }
     case 0x000B001D: {
-      assert_true(!buffer_length || buffer_length == 24);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t details_buffer_size = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t session_details_ptr = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint32_t reserved1 = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t reserved2 = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t reserved3 = memory::load_and_swap<uint32_t>(buffer + 20);
-
-      REXKRNL_DEBUG("XSessionGetDetails({:08X}, {}, {:08X}, {}, {}, {})", obj_ptr,
-                    details_buffer_size, session_details_ptr, reserved1, reserved2, reserved3);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_DETAILS))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_DETAILS*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->GetDetails(request));
     }
     case 0x000B001E: {
-      assert_true(!buffer_length || buffer_length == 24);
-
-      uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t session_info_ptr = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint32_t reserved1 = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t reserved2 = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t reserved3 = memory::load_and_swap<uint32_t>(buffer + 20);
-
-      REXKRNL_DEBUG("XSessionMigrateHost({:08X}, {:08X}, {}, {}, {}, {})", obj_ptr,
-                    session_info_ptr, user_index, reserved1, reserved2, reserved3);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_MIGRATE))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request = *reinterpret_cast<const XGI_SESSION_MIGRATE*>(buffer);
+      auto session = LookupSession(kernel_state_, memory_, request.object_ptr);
+      if (!session) {
+        return SessionResult(X_ERROR_INVALID_HANDLE);
+      }
+      return SessionResult(session->Migrate(request));
     }
     case 0x000B0019: {
-      assert_true(!buffer_length || buffer_length == 8);
+      if (!buffer || (buffer_length && buffer_length != 8)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t session_info_ptr = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -254,10 +301,12 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       REXKRNL_DEBUG("XSessionGetInvitationData - unimplemented({}, {:08X})", user_index,
                     session_info_ptr);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B001A: {
-      assert_true(!buffer_length || buffer_length == 28);
+      if (!buffer || (buffer_length && buffer_length != 32)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t flags = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -270,28 +319,19 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                     obj_ptr, flags, session_nonce, session_duration_sec, results_buffer_size,
                     results_ptr);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B001B: {
-      assert_true(!buffer_length || buffer_length == 32);
-
-      uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t num_session_ids = memory::load_and_swap<uint32_t>(buffer + 4);
-      uint32_t session_ids_ptr = memory::load_and_swap<uint32_t>(buffer + 8);
-      uint32_t results_buffer_size = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t search_results_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
-      uint32_t reserved1 = memory::load_and_swap<uint32_t>(buffer + 20);
-      uint32_t reserved2 = memory::load_and_swap<uint32_t>(buffer + 24);
-      uint32_t reserved3 = memory::load_and_swap<uint32_t>(buffer + 28);
-
-      REXKRNL_DEBUG("XSessionSearchByID({}, {:08X}, {:08X}, {:08X}, {:08X}, {}, {}, {})",
-                    user_index, num_session_ids, session_ids_ptr, results_buffer_size,
-                    search_results_ptr, reserved1, reserved2, reserved3);
-
-      return X_E_SUCCESS;
+      if (!buffer || (buffer_length && buffer_length != sizeof(XGI_SESSION_SEARCH_BY_ID))) {
+        return X_E_INVALIDARG;
+      }
+      auto& request = *reinterpret_cast<XGI_SESSION_SEARCH_BY_ID*>(buffer);
+      return SessionResult(XSession::SearchById(kernel_state_, request));
     }
     case 0x000B001F: {
-      assert_true(!buffer_length || buffer_length == 24);
+      if (!buffer || (buffer_length && buffer_length != 24)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t array_count = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -303,20 +343,24 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       REXKRNL_DEBUG("XSessionModifySkill({:08X}, {}, {:08X}, {}, {}, {})", obj_ptr, array_count,
                     xuid_array_ptr, reserved1, reserved2, reserved3);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0020: {
-      assert_true(!buffer_length || buffer_length == 8);
+      if (!buffer || (buffer_length && buffer_length != 8)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t view_id = memory::load_and_swap<uint32_t>(buffer + 4);
 
       REXKRNL_DEBUG("XUserResetStatsView({:08X}, {})", user_index, view_id);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0021: {
-      assert_true(!buffer_length || buffer_length == 28);
+      if (!buffer || (buffer_length && buffer_length != 28)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t title_id = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t xuids_count = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -329,33 +373,37 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       REXKRNL_DEBUG("XUserReadStats({}, {}, {:08X}, {}, {:08X}, {}, {:08X})", title_id, xuids_count,
                     xuids_ptr, specs_count, specs_ptr, results_size, results_ptr);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0025: {
-      assert_true(!buffer_length || buffer_length == 20);
+      if (!buffer || (buffer_length && buffer_length != 24)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint64_t xuid = memory::load_and_swap<uint64_t>(buffer + 4);
-      uint32_t num_views = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t views_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
+      uint64_t xuid = memory::load_and_swap<uint64_t>(buffer + 8);
+      uint32_t num_views = memory::load_and_swap<uint32_t>(buffer + 16);
+      uint32_t views_ptr = memory::load_and_swap<uint32_t>(buffer + 20);
 
       REXKRNL_DEBUG("XSessionWriteStats({:08X}, {:016X}, {:08X}, {:08X})", obj_ptr, xuid, num_views,
                     views_ptr);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0026: {
-      assert_true(!buffer_length || buffer_length == 20);
+      if (!buffer || (buffer_length && buffer_length != 24)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t obj_ptr = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint64_t xuid = memory::load_and_swap<uint64_t>(buffer + 4);
-      uint32_t num_views = memory::load_and_swap<uint32_t>(buffer + 12);
-      uint32_t views_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
+      uint64_t xuid = memory::load_and_swap<uint64_t>(buffer + 8);
+      uint32_t num_views = memory::load_and_swap<uint32_t>(buffer + 16);
+      uint32_t views_ptr = memory::load_and_swap<uint32_t>(buffer + 20);
 
       REXKRNL_DEBUG("XSessionFlushStats({:08X}, {:016X}, {:08X}, {:08X})", obj_ptr, xuid, num_views,
                     views_ptr);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0036: {
       // Called after opening xbox live arcade and clicking on xbox live v5759
@@ -366,7 +414,9 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       return X_E_FAIL;
     }
     case 0x000B003D: {
-      assert_true(!buffer_length || buffer_length == 16);
+      if (!buffer || (buffer_length && buffer_length != 16)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t AnId_buffer_size = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -375,11 +425,26 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
 
       REXKRNL_DEBUG("XUserGetANID({:08X}, {:08X}, {:08X}, {:08X})", user_index, AnId_buffer_size,
                     AnId_buffer_ptr, block);
-
+      auto* live = kernel_state_->live_compatibility();
+      if (user_index != 0 || !AnId_buffer_size || !AnId_buffer_ptr || !live) {
+        return X_E_INVALIDARG;
+      }
+      static constexpr char kHexDigits[] = "0123456789abcdef";
+      const auto& secret = live->identity().install_secret;
+      auto* output = memory_->TranslateVirtual<uint8_t*>(AnId_buffer_ptr);
+      for (uint32_t index = 0; index + 1 < AnId_buffer_size; ++index) {
+        const uint8_t byte = secret[(index / 2) % secret.size()];
+        const uint8_t nibble =
+            index & 1 ? static_cast<uint8_t>(byte & 0x0F) : static_cast<uint8_t>(byte >> 4);
+        output[index] = static_cast<uint8_t>(kHexDigits[nibble]);
+      }
+      output[AnId_buffer_size - 1] = 0;
       return X_E_SUCCESS;
     }
     case 0x000B0041: {
-      assert_true(!buffer_length || buffer_length == 32);
+      if (!buffer || (buffer_length && buffer_length != 32)) {
+        return X_E_INVALIDARG;
+      }
       // 00000000 2789fecc 00000000 00000000 200491e0 00000000 200491f0 20049340
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t context_ptr = memory::load_and_swap<uint32_t>(buffer + 16);
@@ -387,14 +452,21 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       uint32_t context_id = context ? memory::load_and_swap<uint32_t>(context + 0) : 0;
       REXKRNL_DEBUG("XGIUserGetContext({:08X}, {:08X}, {:08X}))", user_index, context_ptr,
                     context_id);
-      uint32_t value = 0;
-      if (context) {
-        memory::store_and_swap<uint32_t>(context + 4, value);
+      auto* live = kernel_state_->live_compatibility();
+      if (user_index != 0 || !context || !live) {
+        return X_E_INVALIDARG;
       }
-      return X_E_FAIL;
+      const auto value = live->GetUserContext(context_id);
+      if (!value) {
+        return X_E_FAIL;
+      }
+      memory::store_and_swap<uint32_t>(context + 4, *value);
+      return X_E_SUCCESS;
     }
     case 0x000B0060: {
-      assert_true(!buffer_length || buffer_length == 32);
+      if (!buffer || (buffer_length && buffer_length != 32)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t num_session_ids = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -409,10 +481,12 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                     user_index, num_session_ids, session_ids_ptr, results_buffer_size,
                     search_results_ptr, reserved1, reserved2, reserved3);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0065: {
-      assert_true(!buffer_length || buffer_length == 52);
+      if (!buffer || (buffer_length && buffer_length != 52)) {
+        return X_E_INVALIDARG;
+      }
 
       uint32_t proc_index = memory::load_and_swap<uint32_t>(buffer + 0);
       uint32_t user_index = memory::load_and_swap<uint32_t>(buffer + 4);
@@ -438,11 +512,11 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
           non_weighted_search_properties_ptr, non_weighted_search_contexts_ptr, results_buffer_size,
           search_results_ptr, num_users, weighted_search);
 
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
     case 0x000B0071: {
       REXKRNL_DEBUG("XGI 0x000B0071, unimplemented");
-      return X_E_SUCCESS;
+      return kUnsupportedHresult;
     }
   }
   REXKRNL_ERROR(

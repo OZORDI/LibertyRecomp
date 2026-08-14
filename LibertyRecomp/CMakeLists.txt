@@ -37,6 +37,7 @@ if (APPLE)
     set(LIBERTY_IOS_BUNDLE_IDENTIFIER "com.libertyrecomp" CACHE STRING "Bundle identifier for iOS builds.")
     set(LIBERTY_IOS_PROVISIONING_PROFILE "" CACHE STRING "Optional iOS provisioning profile specifier.")
     set(LIBERTY_MACOS_BUNDLE_IDENTIFIER "OZORDI.LibertyRecomp" CACHE STRING "Bundle identifier for macOS builds.")
+    set(LIBERTY_MACOS_CODE_SIGN_IDENTITY "" CACHE STRING "Optional macOS codesign identity for entitlement signing.")
 endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
@@ -346,6 +347,19 @@ set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     "patches/gta4_motion_patches.cpp"        # GTA IV motion (PlayStation gyro/accel)
     "patches/gta4_ds4_patches.cpp"           # DualShock 4/DualSense features
 
+    # High-frame-rate corrections verified against GTA IV Xbox 360 PPC
+    "patches/gta4_fps_camera_shake_fix.cpp"
+    "patches/gta4_fps_drunk_steering_fix.cpp"
+    "patches/gta4_fps_helicopter_fix.cpp"
+    "patches/gta4_fps_ladder_fix.cpp"
+    "patches/gta4_fps_loading_ui_fix.cpp"
+    "patches/gta4_fps_pathfinding_fix.cpp"
+    "patches/gta4_fps_physics_fix.cpp"
+    "patches/gta4_fps_police_blip_fix.cpp"
+    "patches/gta4_fps_vehicle_camera_fix.cpp"
+    "patches/gta4_fps_water_force_fix.cpp"
+    "patches/gta4_fps_water_particle_fix.cpp"
+
     # Rendering
     "patches/gta4_aspect_ratio_patches.cpp"
     "patches/postfx_hooks.cpp"               # PostFX (bloom, sun shafts)
@@ -478,6 +492,7 @@ set_source_files_properties(${LIBERTY_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP
 set(LIBERTY_RECOMP_CXX_SOURCES
     "app.cpp"
     "main.cpp"
+    "network/community_multiplayer.cpp"
     "stdafx.cpp"
     "version.cpp"
     # Removed: exports.cpp (Sonic audio stub), misc_impl.cpp (wrong-address
@@ -643,6 +658,17 @@ elseif (APPLE)
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${LIBERTY_MACOS_BUNDLE_IDENTIFIER}"
             XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/res/macos/LibertyRecomp.entitlements"
     )
+
+    if (LIBERTY_MACOS_CODE_SIGN_IDENTITY)
+        add_custom_command(TARGET LibertyRecomp POST_BUILD
+            COMMAND /usr/bin/codesign
+                --force
+                --sign "${LIBERTY_MACOS_CODE_SIGN_IDENTITY}"
+                --entitlements "${CMAKE_CURRENT_SOURCE_DIR}/res/macos/LibertyRecomp.entitlements"
+                "$<TARGET_BUNDLE_DIR:LibertyRecomp>"
+            COMMENT "Signing macOS bundle with Game Center entitlement..."
+        )
+    endif()
 
     # Linking with MoltenVK directly would prevent using the system Vulkan loader to load with debug layers.
     # Instead, copy the MoltenVK dylib to the app bundle along with an ICD file for the loader to find it.

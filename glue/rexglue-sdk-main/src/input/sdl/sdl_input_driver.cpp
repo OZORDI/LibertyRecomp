@@ -9,6 +9,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 
@@ -132,8 +133,15 @@ void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
     }
     for (size_t i = 0; i < controllers_.size(); i++) {
       if (controllers_.at(i).sdl) {
-        SDL_CloseGamepad(controllers_.at(i).sdl);
-        controllers_.at(i) = {};
+        auto& state = controllers_.at(i);
+        if (state.motion.available_sensors & kMotionSensorAccelerometer) {
+          SDL_SetGamepadSensorEnabled(state.sdl, SDL_SENSOR_ACCEL, false);
+        }
+        if (state.motion.available_sensors & kMotionSensorGyroscope) {
+          SDL_SetGamepadSensorEnabled(state.sdl, SDL_SENSOR_GYRO, false);
+        }
+        SDL_CloseGamepad(state.sdl);
+        state = {};
       }
     }
     if (SDL_Gamepad_initialized_) {
@@ -223,6 +231,64 @@ X_RESULT SDLInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
     std::memset(&out_state->gamepad, 0, sizeof(out_state->gamepad));
   }
   return X_ERROR_SUCCESS;
+}
+
+bool SDLInputDriver::TryGetMotionState(uint32_t user_index, MotionState* out_state) {
+#if REX_PLATFORM_MAC
+  if (!CanServiceInputRequest(sdl_events_initialized_, SDL_Gamepad_initialized_)) {
+    return false;
+  }
+#else
+  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+#endif
+  if (!out_state || user_index >= HID_SDL_USER_COUNT || !is_active()) {
+    return false;
+  }
+
+  QueueControllerUpdate();
+  auto guard = DrainAndLock();
+  auto controller = GetControllerState(user_index);
+  if (!controller || controller->motion.available_sensors == kMotionSensorNone) {
+    return false;
+  }
+
+  // Some SDL gamepad backends expose and enable motion sensors but don't emit
+  // SDL_EVENT_GAMEPAD_SENSOR_UPDATE events. Polling is the documented alternate
+  // access path and keeps those controllers usable without changing the event-
+  // driven path for backends that do publish sensor timestamps.
+  bool sampled = false;
+  auto poll_sensor = [&](SDL_SensorType sensor, uint32_t flag, auto& values,
+                         uint64_t& host_timestamp_ns, const char* sensor_name) {
+    if (!(controller->motion.available_sensors & flag)) {
+      return;
+    }
+
+    const bool first_sample = !(controller->motion.valid_samples & flag);
+    if (!SDL_GetGamepadSensorData(controller->sdl, sensor, values.data(),
+                                  static_cast<int>(values.size()))) {
+      return;
+    }
+
+    host_timestamp_ns = SDL_GetTicksNS();
+    controller->motion.valid_samples |= flag;
+    sampled = true;
+    if (first_sample) {
+      REXLOG_INFO("SDL HID: Polled first {} sample for player index {}.", sensor_name,
+                  user_index);
+    }
+  };
+  poll_sensor(SDL_SENSOR_ACCEL, kMotionSensorAccelerometer,
+              controller->motion.acceleration_m_s2,
+              controller->motion.accelerometer_host_timestamp_ns, "accelerometer");
+  poll_sensor(SDL_SENSOR_GYRO, kMotionSensorGyroscope,
+              controller->motion.angular_velocity_rad_s,
+              controller->motion.gyroscope_host_timestamp_ns, "gyroscope");
+  if (sampled) {
+    ++controller->motion.sequence;
+  }
+
+  *out_state = controller->motion;
+  return true;
 }
 
 X_RESULT SDLInputDriver::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
@@ -464,6 +530,9 @@ void SDLInputDriver::ProcessEventLocked(const SDL_Event& event) {
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
       OnControllerDeviceButtonChangedLocked(event);
       break;
+    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+      OnControllerDeviceSensorUpdateLocked(event);
+      break;
     default:
       break;
   }
@@ -508,7 +577,27 @@ void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
   }
   if (user_id >= 0) {
     auto& state = controllers_.at(user_id);
-    state = {controller, {}};
+    state = {};
+    state.sdl = controller;
+    state.motion.device_generation =
+        next_motion_device_generation_.fetch_add(1, std::memory_order_relaxed);
+
+    auto enable_sensor = [&](SDL_SensorType sensor, uint32_t flag, float& out_rate) {
+      if (!SDL_GamepadHasSensor(controller, sensor)) {
+        return;
+      }
+      if (!SDL_SetGamepadSensorEnabled(controller, sensor, true)) {
+        REXLOG_WARN("SDL OnControllerDeviceAdded: Failed to enable sensor {}: {}",
+                    static_cast<int>(sensor), SDL_GetError());
+        return;
+      }
+      state.motion.available_sensors |= flag;
+      out_rate = SDL_GetGamepadSensorDataRate(controller, sensor);
+      REXLOG_INFO("SDL OnControllerDeviceAdded: Enabled sensor {} at {} Hz.",
+                  static_cast<int>(sensor), out_rate);
+    };
+    enable_sensor(SDL_SENSOR_ACCEL, kMotionSensorAccelerometer, state.motion.accelerometer_rate_hz);
+    enable_sensor(SDL_SENSOR_GYRO, kMotionSensorGyroscope, state.motion.gyroscope_rate_hz);
     // XInput seems to start with packet_number = 1 .
     state.state_changed = true;
     UpdateXCapabilities(state);
@@ -525,8 +614,15 @@ void SDLInputDriver::OnControllerDeviceRemovedLocked(const SDL_Event& event) {
   // Find the disconnected gamecontroller and close it.
   auto idx = GetControllerIndexFromInstanceID(event.cdevice.which);
   if (idx) {
-    SDL_CloseGamepad(controllers_.at(*idx).sdl);
-    controllers_.at(*idx) = {};
+    auto& state = controllers_.at(*idx);
+    if (state.motion.available_sensors & kMotionSensorAccelerometer) {
+      SDL_SetGamepadSensorEnabled(state.sdl, SDL_SENSOR_ACCEL, false);
+    }
+    if (state.motion.available_sensors & kMotionSensorGyroscope) {
+      SDL_SetGamepadSensorEnabled(state.sdl, SDL_SENSOR_GYRO, false);
+    }
+    SDL_CloseGamepad(state.sdl);
+    state = {};
     keystroke_states_.at(*idx) = {};
     REXLOG_INFO("SDL OnControllerDeviceRemoved: Removed at player index {}.", *idx);
   } else {
@@ -626,6 +722,44 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& even
   controller.state_changed = true;
 }
 
+void SDLInputDriver::OnControllerDeviceSensorUpdateLocked(const SDL_Event& event) {
+  auto idx = GetControllerIndexFromInstanceID(event.gsensor.which);
+  if (!idx) {
+    return;
+  }
+
+  auto& motion = controllers_.at(*idx).motion;
+  switch (event.gsensor.sensor) {
+    case SDL_SENSOR_ACCEL: {
+      const bool first_sample = !(motion.valid_samples & kMotionSensorAccelerometer);
+      std::copy_n(event.gsensor.data, motion.acceleration_m_s2.size(),
+                  motion.acceleration_m_s2.begin());
+      motion.accelerometer_host_timestamp_ns = event.gsensor.timestamp;
+      motion.accelerometer_sensor_timestamp_ns = event.gsensor.sensor_timestamp;
+      motion.valid_samples |= kMotionSensorAccelerometer;
+      if (first_sample) {
+        REXLOG_INFO("SDL HID: Received first accelerometer sample for player index {}.", *idx);
+      }
+      break;
+    }
+    case SDL_SENSOR_GYRO: {
+      const bool first_sample = !(motion.valid_samples & kMotionSensorGyroscope);
+      std::copy_n(event.gsensor.data, motion.angular_velocity_rad_s.size(),
+                  motion.angular_velocity_rad_s.begin());
+      motion.gyroscope_host_timestamp_ns = event.gsensor.timestamp;
+      motion.gyroscope_sensor_timestamp_ns = event.gsensor.sensor_timestamp;
+      motion.valid_samples |= kMotionSensorGyroscope;
+      if (first_sample) {
+        REXLOG_INFO("SDL HID: Received first gyroscope sample for player index {}.", *idx);
+      }
+      break;
+    }
+    default:
+      return;
+  }
+  ++motion.sequence;
+}
+
 std::optional<size_t> SDLInputDriver::GetControllerIndexFromInstanceID(SDL_JoystickID instance_id) {
   // Loop through our controllers and try to match the given ID.
   for (size_t i = 0; i < controllers_.size(); i++) {
@@ -705,6 +839,9 @@ void SDLInputDriver::UpdateXCapabilities(ControllerState& state) {
 }
 
 void SDLInputDriver::QueueControllerUpdate() {
+  if (!attached_window_) {
+    return;
+  }
   // Pump SDL events to ensure controller state is up to date.
   bool is_queued = false;
   sdl_pumpevents_queued_.compare_exchange_strong(is_queued, true);

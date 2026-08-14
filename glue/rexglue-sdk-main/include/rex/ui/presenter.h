@@ -212,7 +212,7 @@ class Presenter {
    public:
     enum class Effect {
       kBilinear,
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       kCas,
       // AMD FidelityFX Super Resolution upsampling, Contrast Adaptive
       // Sharpening otherwise.
@@ -228,7 +228,7 @@ class Presenter {
 #endif
     };
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     enum class FsrQualityMode {
       // Keep current behavior and use the guest output size as-is.
       kAuto,
@@ -260,7 +260,7 @@ class Presenter {
     static constexpr float kFsrSharpnessReductionDefault = 0.2f;
     static_assert(kFsrSharpnessReductionDefault >= kFsrSharpnessReductionMin &&
                   kFsrSharpnessReductionDefault <= kFsrSharpnessReductionMax);
-#endif  // defined(REX_HAS_FIDELITYFX_SDK)
+#endif  // defined(REX_HAS_FIDELITYFX_FSR1)
 
     // In the sharpness setters, min / max with a constant as the first argument
     // also drops NaNs.
@@ -273,7 +273,7 @@ class Presenter {
     Effect GetEffect() const { return effect_; }
     void SetEffect(Effect new_effect) { effect_ = new_effect; }
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     float GetCasAdditionalSharpness() const { return cas_additional_sharpness_; }
     void SetCasAdditionalSharpness(float new_cas_additional_sharpness) {
       cas_additional_sharpness_ =
@@ -299,7 +299,7 @@ class Presenter {
     void SetFsrQualityMode(FsrQualityMode new_fsr_quality_mode) {
       fsr_quality_mode_ = new_fsr_quality_mode;
     }
-#endif  // defined(REX_HAS_FIDELITYFX_SDK)
+#endif  // defined(REX_HAS_FIDELITYFX_FSR1)
 
     // Very tiny effect, but highly noticeable, for instance, on the sky in the
     // 4D5307E6 main menu (prominently in Custom Games, especially with FSR -
@@ -314,7 +314,7 @@ class Presenter {
     // original front buffer as possible.
     bool allow_overscan_cutoff_ = false;
     Effect effect_ = Effect::kBilinear;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     float cas_additional_sharpness_ = kCasAdditionalSharpnessDefault;
     uint32_t fsr_max_upsampling_passes_ = kFsrMaxUpscalingPassesMax;
     float fsr_sharpness_reduction_ = kFsrSharpnessReductionDefault;
@@ -427,7 +427,7 @@ class Presenter {
   enum class GuestOutputPaintEffect {
     kBilinear,
     kBilinearDither,
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     kCasSharpen,
     kCasSharpenDither,
     kCasResample,
@@ -446,7 +446,7 @@ class Presenter {
       // Dithering is never performed in intermediate passes because it may be
       // interpreted as features by the subsequent passes.
       case GuestOutputPaintEffect::kBilinearDither:
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kCasSharpenDither:
       case GuestOutputPaintEffect::kCasResampleDither:
       case GuestOutputPaintEffect::kFsrRcasDither:
@@ -461,7 +461,7 @@ class Presenter {
 
   static constexpr bool CanGuestOutputPaintEffectBeFinal(GuestOutputPaintEffect effect) {
     switch (effect) {
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kFsrEasu:
         return false;
 #endif
@@ -470,7 +470,7 @@ class Presenter {
     };
   }
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   // The longest path is kFsrMaxUpscalingPassesMax + optionally RCAS +
   // optionally bilinear, when upscaling by more than
   // 2^kFsrMaxUpscalingPassesMax along any direction.
@@ -548,7 +548,7 @@ class Presenter {
     }
   };
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   static constexpr float CalculateCasPostSetupSharpness(float sharpness) {
     // CasSetup const1.x.
     return -1.0f / (8.0f - 3.0f * sharpness);
@@ -615,7 +615,7 @@ class Presenter {
       sharpness_post_setup = CalculatePostSetupSharpness(config.GetFsrSharpnessReduction());
     }
   };
-#endif  // defined(REX_HAS_FIDELITYFX_SDK)
+#endif  // defined(REX_HAS_FIDELITYFX_FSR1)
 
   explicit Presenter(HostGpuLossCallback host_gpu_loss_callback)
       : host_gpu_loss_callback_(host_gpu_loss_callback) {}
@@ -718,6 +718,8 @@ class Presenter {
 
   // For calling from the painting implementations if requested.
   void ExecuteUIDrawersFromUIThread(UIDrawContext& ui_draw_context);
+
+  Window* connected_window() const { return window_; }
 
  private:
   enum class PaintMode {
@@ -905,10 +907,14 @@ class Presenter {
   SurfacePaintConnectionState surface_paint_connection_state_ =
       SurfacePaintConnectionState::kUnconnectedRetryAtStateChange;
   // If the surface connection was optimal at the last paint attempt, but now
-  // has become suboptimal, need to try to reconnect. But only in this case - if
-  // the connection has been suboptimal from the very beginning don't try to
-  // reconnect every frame.
+  // has become suboptimal, need to try to reconnect.
   bool surface_paint_connection_was_optimal_at_successful_paint_ = false;
+  // On macOS, an asynchronous fullscreen transition may make the first paint
+  // suboptimal before the CAMetalLayer reaches its final geometry. Allow one
+  // recovery reconnect for such a connection, but remember the attempt across
+  // that reconnect so a persistently suboptimal surface can't cause a recreate
+  // loop. Reset when the surface changes or an optimal paint succeeds.
+  bool surface_paint_connection_initial_suboptimal_retry_attempted_ = false;
 
   // Modifiable only by the UI thread (therefore can be accessed by the UI
   // thread regardless of the paint mode) while (re)connecting painting to the

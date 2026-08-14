@@ -35,6 +35,8 @@ import d3dx9_43;
 
 #define IDR_Blit_PS                              129
 
+#define IDR_AO_FX                                133
+
 #define IDR_SSDraw_PS_compiled                   2127
 #define IDR_SSPrepass_PS_compiled                2128
 #define IDR_SSAdd_PS_compiled                    2129
@@ -52,8 +54,11 @@ import d3dx9_43;
 
 std::optional<std::reference_wrapper<int32_t>> UsePostFxAA;
 
-class PostFxResource {
+class PostFxResource
+{
 public:
+
+    ID3DXEffect* AOEffect = nullptr;
 
     // --------- load --------- 
     IDirect3DTexture9* SMAA_areaTex = nullptr; // loaded from file
@@ -68,8 +73,8 @@ public:
 
     // IDirect3DTexture9* NormalTex = nullptr;
     IDirect3DTexture9* DiffuseTex = nullptr;
-    // IDirect3DTexture9* SpecularTex = nullptr;
-    // IDirect3DTexture9* DepthTex = nullptr;
+    IDirect3DTexture9* SpecularTex = nullptr;
+    IDirect3DTexture9* DepthTex = nullptr;
     // IDirect3DTexture9* StencilTex = nullptr;
     // IDirect3DTexture9* BloomTex = nullptr;
     // IDirect3DTexture9* CurrentLumTex = nullptr;
@@ -93,6 +98,14 @@ public:
     IDirect3DSurface9* renderTargetSurf = nullptr;
     IDirect3DSurface9* surfaceRead = nullptr;
 
+    rage::grcRenderTargetPC* AOCamDepthTex = nullptr;
+    rage::grcRenderTargetPC* AOTex = nullptr;
+    rage::grcRenderTargetPC* AOBlurTex = nullptr;
+    std::vector<IDirect3DSurface9*> AOCamDepthSurf = {};
+    IDirect3DSurface9* AOSurf = nullptr;
+    IDirect3DSurface9* AOBlurSurf = nullptr;
+    bool AOEnabled = true;
+
     // Pre alpha pass depth texture copy
     rage::grcRenderTargetPC* PreAlphaDepthCopyRT = nullptr;
 
@@ -105,8 +118,8 @@ public:
     // rage::grcRenderTargetPC* mSpecularAoRT = nullptr;
     // rage::grcRenderTargetPC* mNormalRT = nullptr;
     rage::grcRenderTargetPC* mDiffuseRT = nullptr;
-    // rage::grcRenderTargetPC* mSpecularRT = nullptr;
-    // rage::grcRenderTargetPC* mDepthRT = nullptr;
+    rage::grcRenderTargetPC* mSpecularRT = nullptr;
+    rage::grcRenderTargetPC* mDepthRT = nullptr;
     // rage::grcRenderTargetPC* mStencilRT = nullptr;
     rage::grcRenderTargetPC* mFullScreenRT = nullptr;
     // rage::grcRenderTargetPC* mFullScreenRT2 = nullptr;
@@ -130,6 +143,7 @@ public:
     //IDirect3DSurface9* pShadowBlurSurf2 = nullptr;
 
     IDirect3DSurface9* PreAlphaDepthSurface = nullptr;
+    IDirect3DSurface9* HDRFullScreenSurface = nullptr;
 
     // shaders
     IDirect3DPixelShader9* FxaaPS = nullptr;
@@ -179,6 +193,36 @@ public:
 
     bool bEnablePreAlphaDepth = false;
 
+    int nAmbientOcclusionSamples = 9;
+    int nAmbientOcclusionBlurPasses = 1;
+    int nAmbientOcclusionLogMaxOffset = 3;
+    int nAmbientOcclusionMaxMipLevel = 5;
+    float fAmbientOcclusionFarClip = 150.0f;
+
+    float fAmbientOcclusionRadius = 1.125f;
+    float fAmbientOcclusionBias = 0.03f;
+    float fAmbientOcclusionIntensity = 0.4f;
+    float fAmbientOcclusionBlurRadius = 2.0f;
+
+    struct
+    {
+        D3DXHANDLE AOTexture2D, AOCamDepthTexture2D, DepthTex2D;
+
+        D3DXHANDLE vec2InvViewportSize;
+        D3DXHANDLE fNearPlane;
+        D3DXHANDLE fFarPlane;
+        D3DXHANDLE fFarDivNear;
+        D3DXHANDLE fRadius;
+        D3DXHANDLE fBias;
+        D3DXHANDLE fIntensity;
+        D3DXHANDLE fProjScale;
+        D3DXHANDLE vec4ProjInfo;
+        D3DXHANDLE vec2BlurDirection;
+        D3DXHANDLE vec2PrevMipSize;
+        D3DXHANDLE vec2PrevMipTexel;
+        D3DXHANDLE iPreviousMip;
+    } AOEffectHandles = {};
+
     bool loadShaders(LPDIRECT3DDEVICE9 pDevice, HMODULE hm)
     {
         ID3DXBuffer* bf1 = nullptr;
@@ -186,7 +230,8 @@ public:
         ID3DXConstantTable* ppConstantTable = nullptr;
 
         // Lambda helper to load compiled shader bytecode from resource
-        auto loadCompiledShader = [&](int resourceID, auto& shader) -> bool {
+        auto loadCompiledShader = [&](int resourceID, auto& shader) -> bool
+        {
             HRSRC hRes = FindResourceW(hm, MAKEINTRESOURCEW(resourceID), RT_RCDATA);
             if (!hRes) return false;
             HGLOBAL hGlob = LoadResource(hm, hRes);
@@ -422,20 +467,63 @@ public:
             }
         }
 
+        if (!AOEffect)
+        {
+            ID3DXBuffer* errors = nullptr;
+            static std::string sampleCount = std::to_string(nAmbientOcclusionSamples);
+            static std::string logMaxOffset = std::to_string(nAmbientOcclusionLogMaxOffset);
+            static std::string maxMipLevel = std::to_string(nAmbientOcclusionMaxMipLevel);
+            static std::string farClip = std::to_string(fAmbientOcclusionFarClip);
+            D3DXMACRO defines[] = {
+                {"NUM_SAMPLES", sampleCount.c_str()},
+                {"LOG_MAX_OFFSET", logMaxOffset.c_str()},
+                {"MAX_MIP_LEVEL", maxMipLevel.c_str()},
+                {"FAR_CLIP", farClip.c_str()},
+                {} // last must be empty
+            };
+            if (D3DXCreateEffectFromResourceW(rage::grcDevice::GetD3DDevice(),
+                hm, MAKEINTRESOURCEW(IDR_AO_FX), defines, nullptr, 0, nullptr, &AOEffect, &errors) != S_OK)
+            {
+                if (errors)
+                    MessageBoxA(nullptr, (LPCSTR)errors->GetBufferPointer(), "Error building shader!", MB_OK);
+            }
+            else
+            {
+                AOEffectHandles.AOTexture2D = AOEffect->GetParameterByName(nullptr, "AOTexture2D");
+                AOEffectHandles.AOCamDepthTexture2D = AOEffect->GetParameterByName(nullptr, "AOCamDepthTexture2D");
+                AOEffectHandles.DepthTex2D = AOEffect->GetParameterByName(nullptr, "DepthTex2D");
+                AOEffectHandles.vec2InvViewportSize = AOEffect->GetParameterByName(nullptr, "vec2InvViewportSize");
+                AOEffectHandles.fNearPlane = AOEffect->GetParameterByName(nullptr, "fNearPlane");
+                AOEffectHandles.fFarPlane = AOEffect->GetParameterByName(nullptr, "fFarPlane");
+                AOEffectHandles.fFarDivNear = AOEffect->GetParameterByName(nullptr, "fFarDivNear");
+                AOEffectHandles.fRadius = AOEffect->GetParameterByName(nullptr, "fRadius");
+                AOEffectHandles.fBias = AOEffect->GetParameterByName(nullptr, "fBias");
+                AOEffectHandles.fIntensity = AOEffect->GetParameterByName(nullptr, "fIntensity");
+                AOEffectHandles.fProjScale = AOEffect->GetParameterByName(nullptr, "fProjScale");
+                AOEffectHandles.vec4ProjInfo = AOEffect->GetParameterByName(nullptr, "vec4ProjInfo");
+                AOEffectHandles.vec2BlurDirection = AOEffect->GetParameterByName(nullptr, "vec2BlurDirection");
+                AOEffectHandles.vec2PrevMipSize = AOEffect->GetParameterByName(nullptr, "vec2PrevMipSize");
+                AOEffectHandles.vec2PrevMipTexel = AOEffect->GetParameterByName(nullptr, "vec2PrevMipTexel");
+                AOEffectHandles.iPreviousMip = AOEffect->GetParameterByName(nullptr, "iPreviousMip");
+            }
+        }
+
         return ShadersFinishedLoading();
     }
 
-#define PostfxTextureCount 15
+    #define PostfxTextureCount 15
     IDirect3DBaseTexture9* prePostFx[PostfxTextureCount] = { 0 };
     DWORD Samplers[PostfxTextureCount] = { D3DTEXF_LINEAR };
 
-    bool resourcesFinishedLoading() {
+    bool resourcesFinishedLoading()
+    {
         return SMAA_EdgeDetection && SMAA_BlendingWeightsCalculation && SMAA_NeighborhoodBlending &&
             SMAA_EdgeDetectionVS && SMAA_BlendingWeightsCalculationVS && SMAA_NeighborhoodBlendingVS &&
             SMAA_areaTex && SMAA_searchTex && edgesTex && blendTex;
     }
 
-    void swapbuffers() {
+    void swapbuffers()
+    {
         auto temptex = renderTargetTex;
         renderTargetTex = textureRead;
         textureRead = temptex;
@@ -445,7 +533,8 @@ public:
         surfaceRead = tempsurf;
     };
 
-    void ReleaseTextures() {
+    void ReleaseTextures()
+    {
         // NormalTex = nullptr;
         DiffuseTex = nullptr;
         // SpecularTex = nullptr;
@@ -464,7 +553,7 @@ public:
             FullScreenTex_temp1->Destroy();
             FullScreenTex_temp1 = nullptr;
         }
-        
+
         if (FullScreenTex_temp2)
         {
             FullScreenTex_temp2->Destroy();
@@ -513,19 +602,21 @@ public:
         //}
     }
 
-    bool ShadersFinishedLoading() {
-        if(FxaaPS && dof_blur_ps && dof_coc_ps && depth_of_field_tent_ps && stipple_filter_ps
+    bool ShadersFinishedLoading()
+    {
+        if (FxaaPS && dof_blur_ps && dof_coc_ps && depth_of_field_tent_ps && stipple_filter_ps
            && SSDraw_PS && SSPrepass_PS && SSAdd_PS
            && SMAA_EdgeDetection && SMAA_BlendingWeightsCalculation && SMAA_NeighborhoodBlending
            && SMAA_EdgeDetectionVS && SMAA_BlendingWeightsCalculationVS && SMAA_NeighborhoodBlendingVS
-           && Blit_PS)
-           // DeferredShadowGen_ps && deferred_lighting_PS1 && deferred_lighting_PS2 && SSAO_gen_ps && SSAO_blend_ps && DeferredShadowBlurH_ps && DeferredShadowBlurV_ps && DeferredShadowBlurCircle_ps
+           && Blit_PS && AOEffect)
+            // DeferredShadowGen_ps && deferred_lighting_PS1 && deferred_lighting_PS2 && SSAO_gen_ps && SSAO_blend_ps && DeferredShadowBlurH_ps && DeferredShadowBlurV_ps && DeferredShadowBlurCircle_ps
             return true;
 
         return false;
     }
 
-    void Readini() {
+    void Readini()
+    {
         CIniReader iniReader("");
         EnablePostfx = iniReader.ReadInteger("SRF", "EnablePostfx", 1);
 
@@ -533,6 +624,29 @@ public:
 
         bEnablePreAlphaDepth = iniReader.ReadInteger("POSTFX", "EnablePreAlphaDepth", 1) != 0;
 
+        nAmbientOcclusionBlurPasses = iniReader.ReadInteger("POSTFX", "AmbientOcclusionBlurPasses", 1);
+        nAmbientOcclusionSamples = iniReader.ReadInteger("POSTFX", "AmbientOcclusionSamples", 9);
+        nAmbientOcclusionLogMaxOffset = iniReader.ReadInteger("POSTFX", "AmbientOcclusionLogMaxOffset", 3);
+        nAmbientOcclusionMaxMipLevel = iniReader.ReadInteger("POSTFX", "AmbientOcclusionMaxMipLevel", 5);
+        fAmbientOcclusionFarClip = iniReader.ReadFloat("POSTFX", "AmbientOcclusionFarClip", 150.0f);
+        fAmbientOcclusionBlurRadius = iniReader.ReadFloat("POSTFX", "AmbientOcclusionBlurRadius", 2.0f);
+
+        nAmbientOcclusionBlurPasses = std::max(0, nAmbientOcclusionBlurPasses);
+        nAmbientOcclusionSamples = std::clamp(nAmbientOcclusionSamples, 0, 128);
+        nAmbientOcclusionLogMaxOffset = std::max(0, nAmbientOcclusionLogMaxOffset);
+        nAmbientOcclusionMaxMipLevel = std::max(1, nAmbientOcclusionMaxMipLevel);
+        fAmbientOcclusionFarClip = std::max(1.0f, fAmbientOcclusionFarClip);
+        fAmbientOcclusionBlurRadius = std::max(0.0f, fAmbientOcclusionBlurRadius);
+
+        AOCamDepthSurf.resize(nAmbientOcclusionMaxMipLevel);
+
+        fAmbientOcclusionRadius = iniReader.ReadFloat("POSTFX", "AmbientOcclusionRadius", 1.125f);
+        fAmbientOcclusionBias = iniReader.ReadFloat("POSTFX", "AmbientOcclusionBias", 0.03f);
+        fAmbientOcclusionIntensity = iniReader.ReadFloat("POSTFX", "AmbientOcclusionIntensity", 0.4f);
+
+        fAmbientOcclusionRadius = std::max(fAmbientOcclusionRadius, 0.0f);
+        fAmbientOcclusionBias = std::max(fAmbientOcclusionBias, 0.0f);
+        fAmbientOcclusionIntensity = std::max(fAmbientOcclusionIntensity, 0.0f);
         // 0 off, 1 horizontal, 2 vertical, 3 horizontal e vertical.
         //useScreenSpaceShadowsBlur = iniReader.ReadInteger("SRF", "ScreenSpaceShadowsBlur", 0);
         //useHardwareBilinearSampling = iniReader.ReadInteger("SRF", "NewShadowAtlas", 0) != 0;
@@ -563,7 +677,7 @@ public:
         };
 
         FullScreenTex_temp1 = CreateEmptyRT("FullScreenTex_temp1", 3, Width, Height, 64, &desc);
-        
+
         desc.mFormat = rage::GRCFMT_A8R8G8B8;
         FullScreenTex_temp2 = CreateEmptyRT("FullScreenTex_temp2", 3, Width, Height, 32, &desc);
 
@@ -616,24 +730,28 @@ private:
     static inline UINT lastoffset = 0;
     static inline UINT laststride = 0;
 
-    static inline IDirect3DVertexBuffer9* last_VertexBuffer=0;
-    static inline IDirect3DVertexDeclaration9* last_VertexDecl=0;
+    static inline IDirect3DVertexBuffer9* last_VertexBuffer = 0;
+    static inline IDirect3DVertexDeclaration9* last_VertexDecl = 0;
 
     static inline IDirect3DBaseTexture9* prePostFx[PostfxTextureCount] = { 0 };
     static inline DWORD Samplers[PostfxTextureCount] = { D3DTEXF_LINEAR };
     static inline HMODULE hm = NULL;
 
-    static void saveRenderState() {
+    static void saveRenderState()
+    {
         IDirect3DDevice9* pDevice = rage::grcDevice::GetD3DDevice();
-        for(int i = 0; i < PostfxTextureCount; i++) {
+        for (int i = 0; i < PostfxTextureCount; i++)
+        {
             pDevice->GetTexture(i, &prePostFx[i]);
             pDevice->GetSamplerState(i, D3DSAMP_MAGFILTER, &Samplers[i]);
         }
     }
 
-    static void restoreRenderState() {
+    static void restoreRenderState()
+    {
         IDirect3DDevice9* pDevice = rage::grcDevice::GetD3DDevice();
-        for(int i = 0; i < PostfxTextureCount; i++) {
+        for (int i = 0; i < PostfxTextureCount; i++)
+        {
             pDevice->SetTexture(i, prePostFx[i]);
             pDevice->SetSamplerState(i, D3DSAMP_MAGFILTER, Samplers[i]);
             SAFE_RELEASE(prePostFx[i]);
@@ -645,13 +763,13 @@ private:
         PostFxResources.ReleaseTextures();
         // PostFxResources.mSpecularAoRT    =nullptr;
         // PostFxResources.mNormalRT        =nullptr;
-        PostFxResources.mDiffuseRT       =nullptr;
+        PostFxResources.mDiffuseRT = nullptr;
         // PostFxResources.mSpecularRT      =nullptr;
         // PostFxResources.mDepthRT         =nullptr;
         // PostFxResources.mStencilRT       =nullptr;
-        PostFxResources.mFullScreenRT    =nullptr;
+        PostFxResources.mFullScreenRT = nullptr;
         // PostFxResources.mFullScreenRT2   =nullptr;
-        PostFxResources.mHalfScreenRT    =nullptr;
+        PostFxResources.mHalfScreenRT = nullptr;
         // PostFxResources.mCascadeAtlasRT  =nullptr;
         // PostFxResources.mQuarterScreenRT =nullptr;
         // PostFxResources.mBloomRT         =nullptr;
@@ -668,20 +786,42 @@ private:
             mQuadVertexDecl->Release();
             mQuadVertexDecl = nullptr;
         }
+        if (PostFxResources.AOEffect)
+            PostFxResources.AOEffect->OnLostDevice();
 
+        for (auto i = 0; i < PostFxResources.nAmbientOcclusionMaxMipLevel; ++i)
+            SAFE_RELEASE(PostFxResources.AOCamDepthSurf[i]);
+        SAFE_RELEASE(PostFxResources.AOSurf);
+        SAFE_RELEASE(PostFxResources.AOBlurSurf);
+
+        if (PostFxResources.AOCamDepthTex)
+        {
+            PostFxResources.AOCamDepthTex->Destroy();
+            PostFxResources.AOCamDepthTex = nullptr;
+        }
+        if (PostFxResources.AOTex)
+        {
+            PostFxResources.AOTex->Destroy();
+            PostFxResources.AOTex = nullptr;
+        }
+        if (PostFxResources.AOBlurTex)
+        {
+            PostFxResources.AOBlurTex->Destroy();
+            PostFxResources.AOBlurTex = nullptr;
+        }
     }
 
     static void __fastcall OnDeviceReset()
     {
         // PostFxResources.mNormalRT       = rage::grcTextureFactoryPC::GetRTByName( "_DEFERRED_GBUFFER_1_"  );
-        PostFxResources.mDiffuseRT      = rage::grcTextureFactoryPC::GetRTByName( "_DEFERRED_GBUFFER_0_"  );
-        // PostFxResources.mSpecularRT     = rage::grcTextureFactoryPC::GetRTByName( "_DEFERRED_GBUFFER_2_"  );
-        // PostFxResources.mDepthRT        = rage::grcTextureFactoryPC::GetRTByName( "_DEFERRED_GBUFFER_3_"  );
+        PostFxResources.mDiffuseRT = rage::grcTextureFactoryPC::GetRTByName("_DEFERRED_GBUFFER_0_");
+        PostFxResources.mSpecularRT = rage::grcTextureFactoryPC::GetRTByName("_DEFERRED_GBUFFER_2_");
+        PostFxResources.mDepthRT = rage::grcTextureFactoryPC::GetRTByName("_DEFERRED_GBUFFER_3_");
         // PostFxResources.mStencilRT      = rage::grcTextureFactoryPC::GetRTByName( "_STENCIL_BUFFER_"      );
         // PostFxResources.mCascadeAtlasRT = rage::grcTextureFactoryPC::GetRTByName( "CASCADE_ATLAS"         );
-        PostFxResources.mFullScreenRT   = rage::grcTextureFactoryPC::GetRTByName( "FullScreenCopy"        );
+        PostFxResources.mFullScreenRT = rage::grcTextureFactoryPC::GetRTByName("FullScreenCopy");
         // PostFxResources.mFullScreenRT2  = rage::grcTextureFactoryPC::GetRTByName( "FullScreenCopy2"       );
-        PostFxResources.mHalfScreenRT   = rage::grcTextureFactoryPC::GetRTByName( "Quarter Screen 0"      );
+        PostFxResources.mHalfScreenRT = rage::grcTextureFactoryPC::GetRTByName("Quarter Screen 0");
         // PostFxResources.mQuarterScreenRT= rage::grcTextureFactoryPC::GetRTByName( "Blur Screen 0"         );
         // PostFxResources.mBloomRT        = rage::grcTextureFactoryPC::GetRTByName( "Blur Screen 2 Copy"    );
         // PostFxResources.mCurrentLum     = rage::grcTextureFactoryPC::GetRTByName( "Current Lum"           );
@@ -703,23 +843,84 @@ private:
         rage::grcDevice::GetD3DDevice()->CreateVertexBuffer(6 * sizeof(VertexFormat), 0, 0, D3DPOOL_DEFAULT, &mQuadVertexBuffer, NULL);
 
         VertexFormat* vertexData = 0;
-        D3DXVECTOR2 pixelSize =  D3DXVECTOR2(1.0f / width, 1.0f / height);
+        D3DXVECTOR2 pixelSize = D3DXVECTOR2(1.0f / width, 1.0f / height);
 
         mQuadVertexBuffer->Lock(0, 0, (void**)&vertexData, 0);
 
         vertexData[0] = { -1.0f - pixelSize.x, -1.0f + pixelSize.y, 0.0f, 0.0f, 1.0f };
         vertexData[1] = { -1.0f - pixelSize.x,  1.0f + pixelSize.y, 0.0f, 0.0f, 0.0f };
-        vertexData[2] = {  1.0f - pixelSize.x, -1.0f + pixelSize.y, 0.0f, 1.0f, 1.0f };
+        vertexData[2] = { 1.0f - pixelSize.x, -1.0f + pixelSize.y, 0.0f, 1.0f, 1.0f };
         vertexData[3] = { -1.0f - pixelSize.x,  1.0f + pixelSize.y, 0.0f, 0.0f, 0.0f };
-        vertexData[4] = {  1.0f - pixelSize.x,  1.0f + pixelSize.y, 0.0f, 1.0f, 0.0f };
-        vertexData[5] = {  1.0f - pixelSize.x, -1.0f + pixelSize.y, 0.0f, 1.0f, 1.0f };
+        vertexData[4] = { 1.0f - pixelSize.x,  1.0f + pixelSize.y, 0.0f, 1.0f, 0.0f };
+        vertexData[5] = { 1.0f - pixelSize.x, -1.0f + pixelSize.y, 0.0f, 1.0f, 1.0f };
 
         mQuadVertexBuffer->Unlock();
+
+        if (PostFxResources.AOEffect)
+            PostFxResources.AOEffect->OnResetDevice();
+
+        for (auto i = 0; i < PostFxResources.nAmbientOcclusionMaxMipLevel; ++i)
+            SAFE_RELEASE(PostFxResources.AOCamDepthSurf[i]);
+        SAFE_RELEASE(PostFxResources.AOSurf);
+        SAFE_RELEASE(PostFxResources.AOBlurSurf);
+
+        if (PostFxResources.AOCamDepthTex)
+        {
+            PostFxResources.AOCamDepthTex->Destroy();
+            PostFxResources.AOCamDepthTex = nullptr;
+        }
+        if (PostFxResources.AOTex)
+        {
+            PostFxResources.AOTex->Destroy();
+            PostFxResources.AOTex = nullptr;
+        }
+        if (PostFxResources.AOBlurTex)
+        {
+            PostFxResources.AOBlurTex->Destroy();
+            PostFxResources.AOBlurTex = nullptr;
+        }
+
+        auto pDevice = rage::grcDevice::GetD3DDevice();
+
+        rage::grcRenderTargetDesc aoDesc{};
+        aoDesc.mMultisampleCount = 0;
+        aoDesc.field_0 = 1;
+        aoDesc.field_12 = 1;
+        aoDesc.mDepthRT = nullptr;
+        aoDesc.field_8 = 1;
+        aoDesc.field_10 = 1;
+        aoDesc.field_11 = 1;
+        aoDesc.field_24 = false;
+
+        auto CreateEmptyRT = [](const char* name, int32_t a2, uint32_t w, uint32_t h, uint32_t bpp, rage::grcRenderTargetDesc* d) -> rage::grcRenderTargetPC*
+        {
+            auto rt = rage::grcTextureFactory::GetInstance()->CreateRenderTarget(name, a2, w, h, bpp, d);
+            rage::grcDevice::grcResolveFlags resolveFlags{};
+            rage::grcTextureFactoryPC::GetInstance()->LockRenderTarget(0, rt, nullptr);
+            rage::grcTextureFactoryPC::GetInstance()->UnlockRenderTarget(0, &resolveFlags);
+            return rt;
+        };
+
+        aoDesc.mFormat = rage::GRCFMT_R32F;
+        aoDesc.mLevels = PostFxResources.nAmbientOcclusionMaxMipLevel;
+        PostFxResources.AOCamDepthTex = CreateEmptyRT("AOCamDepthTex", 3, width, height, 32, &aoDesc);
+
+        aoDesc.mFormat = rage::GRCFMT_L8;
+        aoDesc.mLevels = 1;
+        PostFxResources.AOTex = CreateEmptyRT("AOTex", 3, width, height, 8, &aoDesc);
+        PostFxResources.AOBlurTex = CreateEmptyRT("AOBlurTex", 3, width, height, 8, &aoDesc);
+
+        for (auto i = 0; i < PostFxResources.nAmbientOcclusionMaxMipLevel; ++i)
+            PostFxResources.AOCamDepthTex->mD3DTexture->GetSurfaceLevel(i, &PostFxResources.AOCamDepthSurf[i]);
+
+        PostFxResources.AOTex->mD3DTexture->GetSurfaceLevel(0, &PostFxResources.AOSurf);
+        PostFxResources.AOBlurTex->mD3DTexture->GetSurfaceLevel(0, &PostFxResources.AOBlurSurf);
     }
 
-    static void Init() {
+    static void Init()
+    {
         static bool initialized = false;
-        if(initialized)
+        if (initialized)
             return;
 
         // none, fxaa, smaa, blend, edge
@@ -729,7 +930,7 @@ private:
         auto onResetCB = rage::grcDevice::Functor0(NULL, OnDeviceReset, NULL, 0);
         rage::grcDevice::RegisterDeviceCallbacks(onLostCB, onResetCB);
 
-        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR) &Init, &hm);
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&Init, &hm);
 
         PostFxResources.loadShaders(rage::grcDevice::GetD3DDevice(), hm);
 
@@ -738,16 +939,42 @@ private:
         initialized = true;
     }
 
-    static void NewFog() {
+    static void NewFog()
+    {
         IDirect3DDevice9* pDevice = rage::grcDevice::GetD3DDevice();
 
         IDirect3DSurface9* prevSurface = nullptr;
         IDirect3DSurface9* prevDepthStencilSurface = nullptr;
         IDirect3DPixelShader9* prevPS = nullptr;
 
+        IDirect3DBaseTexture9* prevTex[2] = { nullptr };
+
+        // Previous sampler/render states
+        DWORD prevMinFilter[2] = { D3DTEXF_NONE };
+        DWORD prevMagFilter[2] = { D3DTEXF_NONE };
+        DWORD prevMipFilter[2] = { D3DTEXF_NONE };
+        DWORD prevAddressU[2] = { D3DTADDRESS_WRAP };
+        DWORD prevAddressV[2] = { D3DTADDRESS_WRAP };
+
+        // Store previous sampler states, renderstates, surfaces, textures, shaders
+        pDevice->GetSamplerState(0, D3DSAMP_MINFILTER, &prevMinFilter[0]);
+        pDevice->GetSamplerState(0, D3DSAMP_MAGFILTER, &prevMagFilter[0]);
+        pDevice->GetSamplerState(0, D3DSAMP_MIPFILTER, &prevMipFilter[0]);
+        pDevice->GetSamplerState(0, D3DSAMP_ADDRESSU, &prevAddressU[0]);
+        pDevice->GetSamplerState(0, D3DSAMP_ADDRESSV, &prevAddressV[0]);
+
+        pDevice->GetSamplerState(1, D3DSAMP_MINFILTER, &prevMinFilter[1]);
+        pDevice->GetSamplerState(1, D3DSAMP_MAGFILTER, &prevMagFilter[1]);
+        pDevice->GetSamplerState(1, D3DSAMP_MIPFILTER, &prevMipFilter[1]);
+        pDevice->GetSamplerState(1, D3DSAMP_ADDRESSU, &prevAddressU[1]);
+        pDevice->GetSamplerState(1, D3DSAMP_ADDRESSV, &prevAddressV[1]);
+
         pDevice->GetRenderTarget(0, &prevSurface);
         pDevice->GetDepthStencilSurface(&prevDepthStencilSurface);
-        
+
+        pDevice->GetTexture(0, &prevTex[0]);
+        pDevice->GetTexture(1, &prevTex[1]);
+
         pDevice->GetPixelShader(&prevPS);
 
         {
@@ -772,6 +999,38 @@ private:
                 }
             }
 
+            if (PostFxResources.FullScreenTex_temp1)
+            {
+                // Get custom rendertarget D3D surfaces
+                PostFxResources.FullScreenTex_temp1->mD3DTexture->GetSurfaceLevel(0, &PostFxResources.HDRFullScreenSurface);
+
+                // Copy HDR fullscreen buffer at this stage to use it later in raindrop refraction shader
+                if (PostFxResources.HDRFullScreenSurface && PostFxResources.Blit_PS)
+                {
+                    pDevice->SetSamplerState(0, D3DSAMP_MINFILTER, prevMinFilter[1]);
+                    pDevice->SetSamplerState(0, D3DSAMP_MAGFILTER, prevMagFilter[1]);
+                    pDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, prevMipFilter[1]);
+                    pDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, prevAddressU[1]);
+                    pDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, prevAddressV[1]);
+
+                    pDevice->SetRenderTarget(0, PostFxResources.HDRFullScreenSurface);
+                    pDevice->SetDepthStencilSurface(nullptr);
+
+                    pDevice->SetTexture(0, prevTex[1]);
+
+                    pDevice->SetPixelShader(PostFxResources.Blit_PS);
+
+                    pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2);
+
+                    pDevice->SetSamplerState(0, D3DSAMP_MINFILTER, prevMinFilter[0]);
+                    pDevice->SetSamplerState(0, D3DSAMP_MAGFILTER, prevMagFilter[0]);
+                    pDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, prevMipFilter[0]);
+                    pDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, prevAddressU[0]);
+                    pDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, prevAddressV[0]);
+                    pDevice->SetTexture(0, prevTex[0]);
+                }
+            }
+
             // Restore fog pass
             if (prevPS)
             {
@@ -788,14 +1047,19 @@ private:
         }
 
         SAFE_RELEASE(PostFxResources.PreAlphaDepthSurface);
+        SAFE_RELEASE(PostFxResources.HDRFullScreenSurface);
 
         SAFE_RELEASE(prevSurface);
         SAFE_RELEASE(prevDepthStencilSurface);
 
+        SAFE_RELEASE(prevTex[0]);
+        SAFE_RELEASE(prevTex[1]);
+
         SAFE_RELEASE(prevPS);
     }
 
-    static void NewPostFX() {
+    static void NewPostFX()
+    {
         IDirect3DPixelShader9* oldps = 0;
         IDirect3DVertexShader9* oldvs = 0;
         IDirect3DDevice9* pDevice = rage::grcDevice::GetD3DDevice();
@@ -805,11 +1069,11 @@ private:
         //     return;
         // PostFxResources.NormalTex = PostFxResources.mNormalRT->mD3DTexture;
         PostFxResources.DiffuseTex = PostFxResources.mDiffuseRT->mD3DTexture;
-        // PostFxResources.SpecularTex = PostFxResources.mSpecularRT->mD3DTexture;
+        PostFxResources.SpecularTex = PostFxResources.mSpecularRT->mD3DTexture;
         // PostFxResources.StencilTex = PostFxResources.mStencilRT->mD3DTexture;
         // PostFxResources.BloomTex = PostFxResources.mBloomRT->mD3DTexture;
         // PostFxResources.CurrentLumTex = PostFxResources.mCurrentLum->mD3DTexture;
-        // PostFxResources.DepthTex = PostFxResources.mDepthRT->mD3DTexture;
+        PostFxResources.DepthTex = PostFxResources.mDepthRT->mD3DTexture;
         // if (PostFxResources.mCascadeAtlasRT)
         //     PostFxResources.CascadeAtlasTex = PostFxResources.mCascadeAtlasRT->mD3DTexture;
 
@@ -879,7 +1143,8 @@ private:
         PostFxResources.surfaceRead = nullptr;
     }
 
-    static HRESULT PostFx3(LPDIRECT3DDEVICE9 pDevice, IDirect3DPixelShader9* pShader, IDirect3DVertexShader9* vShader) {
+    static HRESULT PostFx3(LPDIRECT3DDEVICE9 pDevice, IDirect3DPixelShader9* pShader, IDirect3DVertexShader9* vShader)
+    {
         auto currGrcViewport = rage::GetCurrentViewport();
 
         HRESULT hr = S_FALSE;
@@ -891,14 +1156,16 @@ private:
         // in general each step expects the environment as the game 
         // leaves it at the time post processing is used, 
         // each step works individually from each other
-        for(int i = 0; i < PostfxTextureCount; i++) {
+        for (int i = 0; i < PostfxTextureCount; i++)
+        {
             pDevice->GetTexture(i, &PostFxResources.prePostFx[i]);
             pDevice->GetSamplerState(i, D3DSAMP_MAGFILTER, &PostFxResources.Samplers[i]);
         }
 
         // main postfx passes
         {
-            if(PostFxResources.FullScreenTex_temp1 && PostFxResources.FullScreenTex /*&& PostFxResources.aoTex*/) {
+            if (PostFxResources.FullScreenTex_temp1 && PostFxResources.FullScreenTex /*&& PostFxResources.aoTex*/)
+            {
                 PostFxResources.renderTargetTex = PostFxResources.FullScreenTex_temp1->mD3DTexture;
 
                 PostFxResources.textureRead = PostFxResources.FullScreenTex;
@@ -908,7 +1175,8 @@ private:
                 PostFxResources.renderTargetSurf = PostFxResources.FullScreenSurface_temp1;
 
                 // ready for new post processing?
-                if(PostFxResources.backBuffer && PostFxResources.renderTargetSurf && PostFxResources.surfaceRead) {
+                if (PostFxResources.backBuffer && PostFxResources.renderTargetSurf && PostFxResources.surfaceRead)
+                {
                     //if(PostFxResources.UseSSAO && PostFxResources.SSAO_gen_ps && PostFxResources.SSAO_blend_ps && PostFxResources.pShadowBlurSurf1 && PostFxResources.pShadowBlurSurf2) {
                     //
                     //    pDevice->SetPixelShader(PostFxResources.SSAO_gen_ps);
@@ -938,7 +1206,8 @@ private:
                     //    pDevice->SetPixelShader(pShader);
                     //}
 
-                    if(PostFxResources.useStippleFilter && PostFxResources.stipple_filter_ps) {
+                    if (PostFxResources.useStippleFilter && PostFxResources.stipple_filter_ps)
+                    {
                         pDevice->SetPixelShader(PostFxResources.stipple_filter_ps);
                         pDevice->SetRenderTarget(0, PostFxResources.renderTargetSurf);
                         pDevice->SetTexture(2, PostFxResources.textureRead);
@@ -948,9 +1217,12 @@ private:
                     }
 
                     static auto dof = FusionFixSettings.GetRef("PREF_TCYC_DOF");
-                    if(dof->get() > FusionFixSettings.DofText.eCutscenesOnly || (dof->get() == FusionFixSettings.DofText.eCutscenesOnly && CCutscenes::hasCutsceneFinished()) || shouldModifyMapMenuBackground()) {
-                        if(PostFxResources.dof_blur_ps && PostFxResources.depth_of_field_tent_ps && PostFxResources.dof_coc_ps) {
-                            if(PostFxResources.FullScreenDownsampleSurf && PostFxResources.FullScreenDownsampleSurf2) {
+                    if (dof->get() > FusionFixSettings.DofText.eCutscenesOnly || (dof->get() == FusionFixSettings.DofText.eCutscenesOnly && CCutscenes::hasCutsceneFinished()) || shouldModifyMapMenuBackground())
+                    {
+                        if (PostFxResources.dof_blur_ps && PostFxResources.depth_of_field_tent_ps && PostFxResources.dof_coc_ps)
+                        {
+                            if (PostFxResources.FullScreenDownsampleSurf && PostFxResources.FullScreenDownsampleSurf2)
+                            {
                                 pDevice->SetSamplerState(8, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
                                 pDevice->SetSamplerState(8, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
                                 pDevice->SetSamplerState(8, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -960,7 +1232,7 @@ private:
                                 pDevice->SetRenderTarget(0, PostFxResources.FullScreenDownsampleSurf);
                                 pDevice->SetTexture(8, PostFxResources.HalfScreenTex);
                                 pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2);
-                                
+
                                 pDevice->SetPixelShader(PostFxResources.depth_of_field_tent_ps);
                                 pDevice->SetRenderTarget(0, PostFxResources.FullScreenDownsampleSurf2);
                                 pDevice->SetTexture(8, PostFxResources.FullScreenDownsampleTex->mD3DTexture);
@@ -981,10 +1253,13 @@ private:
                     }
 
                     static auto refSunShafts = FusionFixSettings.GetRef("PREF_SUNSHAFTS");
-                    if(refSunShafts->get()) {
+                    if (refSunShafts->get())
+                    {
                         // 2 passes at half res
-                        if(PostFxResources.SSPrepass_PS && PostFxResources.SSDraw_PS) {
-                            if(PostFxResources.FullScreenDownsampleSurf && PostFxResources.FullScreenDownsampleSurf2) {
+                        if (PostFxResources.SSPrepass_PS && PostFxResources.SSDraw_PS)
+                        {
+                            if (PostFxResources.FullScreenDownsampleSurf && PostFxResources.FullScreenDownsampleSurf2)
+                            {
                                 pDevice->SetSamplerState(2, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
                                 pDevice->SetSamplerState(8, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
                                 pDevice->SetSamplerState(8, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
@@ -1033,12 +1308,13 @@ private:
 
                     // game postfx
                     {
-                        for(int i = 0; i < 4; i++) {
+                        for (int i = 0; i < 4; i++)
+                        {
                             pDevice->SetTexture(i, PostFxResources.prePostFx[i]);
                             pDevice->SetSamplerState(i, D3DSAMP_MAGFILTER, PostFxResources.Samplers[i]);
                         }
 
-                        if(UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF)
+                        if (UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF)
                             pDevice->SetRenderTarget(0, PostFxResources.FullScreenSurface_temp2);
                         else
                             pDevice->SetRenderTarget(0, PostFxResources.backBuffer);
@@ -1052,14 +1328,16 @@ private:
                         pDevice->SetVertexShader(vShader);
                         //hr = pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2);
                         hbDrawPrimitivePostFX.fun();
-                            // if(UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF)
-                            //     PostFxResources.swapbuffers();
+                        // if(UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF)
+                        //     PostFxResources.swapbuffers();
                     }
-                    
+
                     // Anti aliasing
-                    if(UsePostFxAA && UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF) {
+                    if (UsePostFxAA && UsePostFxAA->get() > FusionFixSettings.AntialiasingText.eMO_OFF)
+                    {
                         // FXAA
-                        if((UsePostFxAA->get() == FusionFixSettings.AntialiasingText.eFXAA) && PostFxResources.FxaaPS) {
+                        if ((UsePostFxAA->get() == FusionFixSettings.AntialiasingText.eFXAA) && PostFxResources.FxaaPS)
+                        {
                             pDevice->SetPixelShader(PostFxResources.FxaaPS);
 
                             // pDevice->SetRenderTarget(0, PostFxResources.renderTargetSurf);
@@ -1073,11 +1351,12 @@ private:
                         }
 
                         // SMAA
-                        if(UsePostFxAA->get() >= FusionFixSettings.AntialiasingText.eSMAA &&
+                        if (UsePostFxAA->get() >= FusionFixSettings.AntialiasingText.eSMAA &&
                            PostFxResources.SMAA_EdgeDetection && PostFxResources.SMAA_BlendingWeightsCalculation && PostFxResources.SMAA_NeighborhoodBlending &&
                            PostFxResources.SMAA_EdgeDetectionVS && PostFxResources.SMAA_BlendingWeightsCalculationVS && PostFxResources.SMAA_NeighborhoodBlendingVS &&
                            PostFxResources.SMAA_areaTex && PostFxResources.SMAA_searchTex && PostFxResources.edgesTex && PostFxResources.blendTex
-                           ) {
+                           )
+                        {
                             DWORD oldSample = 0;
 
                             for (int i = 0; i <= 4; ++i)
@@ -1188,7 +1467,8 @@ private:
                         }
                     }
 
-                    for(int i = 0; i < PostfxTextureCount; i++) {
+                    for (int i = 0; i < PostfxTextureCount; i++)
+                    {
                         pDevice->SetTexture(i, PostFxResources.prePostFx[i]);
                         pDevice->SetSamplerState(i, D3DSAMP_MAGFILTER, PostFxResources.Samplers[i]);
                         SAFE_RELEASE(PostFxResources.prePostFx[i]);
@@ -1196,7 +1476,8 @@ private:
                     return S_OK;
                 }
 
-                for(int i = 0; i < PostfxTextureCount; i++) {
+                for (int i = 0; i < PostfxTextureCount; i++)
+                {
                     pDevice->SetTexture(i, PostFxResources.prePostFx[i]);
                     pDevice->SetSamplerState(i, D3DSAMP_MAGFILTER, PostFxResources.Samplers[i]);
                     SAFE_RELEASE(PostFxResources.prePostFx[i]);
@@ -1205,7 +1486,8 @@ private:
             }
         }
 
-        for(int i = 0; i < PostfxTextureCount; i++) {
+        for (int i = 0; i < PostfxTextureCount; i++)
+        {
             pDevice->SetTexture(i, PostFxResources.prePostFx[i]);
             pDevice->SetSamplerState(i, D3DSAMP_MAGFILTER, PostFxResources.Samplers[i]);
             SAFE_RELEASE(PostFxResources.prePostFx[i]);
@@ -1213,9 +1495,187 @@ private:
         return S_FALSE;
     }
 
+    static void RenderAmbientOcclusion()
+    {
+        static auto AO = FusionFixSettings.GetRef("PREF_SAO");
+        if (PostFxResources.AOEffect && PostFxResources.AOEnabled && AO->get())
+        { // AO
+            IDirect3DDevice9* pDevice = rage::grcDevice::GetD3DDevice();
+
+            IDirect3DSurface9* rt0 = nullptr;
+            IDirect3DSurface9* ds = nullptr;
+            IDirect3DVertexDeclaration9* oldDecl = nullptr;
+            IDirect3DVertexBuffer9* oldVB = nullptr;
+            UINT oldOffset = 0;
+            UINT oldStride = 0;
+            DWORD oldFVF = 0;
+            D3DVIEWPORT9 oldViewport;
+
+            pDevice->GetFVF(&oldFVF);
+            pDevice->GetVertexDeclaration(&oldDecl);
+            pDevice->GetStreamSource(0, &oldVB, &oldOffset, &oldStride);
+            pDevice->GetRenderTarget(0, &rt0);
+            pDevice->GetDepthStencilSurface(&ds);
+            pDevice->GetViewport(&oldViewport);
+
+            pDevice->SetDepthStencilSurface(nullptr);
+            pDevice->SetStreamSource(0, nullptr, 0, 0);
+            pDevice->SetVertexDeclaration(nullptr);
+            pDevice->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1); // fullscreen fvf
+
+            PostFxResources.SpecularTex = PostFxResources.mSpecularRT->mD3DTexture;
+            PostFxResources.DepthTex = PostFxResources.mDepthRT->mD3DTexture;
+            IDirect3DSurface9* SpecularRT;
+            PostFxResources.SpecularTex->GetSurfaceLevel(0, &SpecularRT);
+
+            UINT passes = 0;
+            ID3DXEffect* effect = PostFxResources.AOEffect;
+            effect->Begin(&passes, 0); assert(passes == 5);
+            {
+                rage::grcViewport* currGrcViewport = rage::GetCurrentViewport();
+
+                IDirect3DTexture9* camDepthTex = PostFxResources.AOCamDepthTex->mD3DTexture;
+                IDirect3DTexture9* aoTex = PostFxResources.AOTex->mD3DTexture;
+                IDirect3DTexture9* aoBlurTex = PostFxResources.AOBlurTex->mD3DTexture;
+                auto& camDepthSurf = PostFxResources.AOCamDepthSurf;
+                IDirect3DSurface9* aoSurf = PostFxResources.AOSurf;
+                IDirect3DSurface9* aoBlurSurf = PostFxResources.AOBlurSurf;
+
+                float width = float(currGrcViewport->mWidth);
+                float height = float(currGrcViewport->mHeight);
+
+                D3DVIEWPORT9 vp = {};
+                vp.MaxZ = 1.0;
+                vp.Height = DWORD(height);
+                vp.Width = DWORD(width);
+                pDevice->SetViewport(&vp);
+
+                auto& h = PostFxResources.AOEffectHandles;
+
+                struct ScreenVertex { float x, y, z, rhw; float u, v; };
+                ScreenVertex screenVertices[4] =
+                {
+                    { -0.5f,         -0.5f,          0.0f, 1.0f, 0.0f, 0.0f },
+                    { -0.5f,          height - 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+                    { width - 0.5f, -0.5f,          0.0f, 1.0f, 1.0f, 0.0f },
+                    { width - 0.5f, height - 0.5f, 0.0f, 1.0f, 1.0f, 1.0f }
+                };
+
+                float invViewportSize[] = { 1.0f / width, 1.0f / height };
+
+                effect->SetTexture(h.DepthTex2D, PostFxResources.DepthTex);
+                effect->SetFloatArray(h.vec2InvViewportSize, invViewportSize, 2);
+                effect->SetFloat(h.fNearPlane, currGrcViewport->mNearClip);
+                effect->SetFloat(h.fFarPlane, currGrcViewport->mFarClip);
+                effect->SetFloat(h.fFarDivNear, currGrcViewport->mFarClip / currGrcViewport->mNearClip);
+
+                pDevice->SetRenderTarget(0, camDepthSurf[0]);
+                effect->BeginPass(0);
+                pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, screenVertices, sizeof(ScreenVertex));
+                effect->EndPass();
+
+                effect->SetTexture(h.AOCamDepthTexture2D, camDepthTex);
+                effect->BeginPass(1);
+                for (auto i = 1; i < PostFxResources.nAmbientOcclusionMaxMipLevel; ++i)
+                {
+                    float prevMipDimensions[] = { float((int)width >> (i - 1)), float((int)height >> (i - 1)) };
+                    float prevMipTexel[] = { float(1.0f / prevMipDimensions[0]), float(1.0f / prevMipDimensions[1]) };
+                    float curMipWidth = float(int(width) >> i);
+                    float curMipHeight = float(int(height) >> i);
+
+                    effect->SetFloatArray(h.vec2PrevMipSize, prevMipDimensions, 2);
+                    effect->SetFloatArray(h.vec2PrevMipTexel, prevMipTexel, 2);
+                    effect->SetInt(h.iPreviousMip, i - 1);
+
+                    ScreenVertex mipVertices[4] =
+                    {
+                        { -0.5f,         -0.5f,          0.0f, 1.0f, 0.0f, 0.0f },
+                        { -0.5f,          curMipHeight - 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+                        { curMipWidth - 0.5f, -0.5f,          0.0f, 1.0f, 1.0f, 0.0f },
+                        { curMipWidth - 0.5f, curMipHeight - 0.5f, 0.0f, 1.0f, 1.0f, 1.0f }
+                    };
+
+                    effect->CommitChanges();
+
+                    pDevice->SetRenderTarget(0, PostFxResources.AOCamDepthSurf[i]);
+                    pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, mipVertices, sizeof(ScreenVertex));
+                }
+                effect->EndPass();
+
+                pDevice->SetRenderTarget(0, aoSurf);
+                pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_COLORVALUE(1.0, 0.0, 0, 1.0), 1.0f, 0);
+
+                D3DMATRIX proj = *(D3DMATRIX*)currGrcViewport->mProjectionMatrix;
+
+                effect->SetFloat(h.fRadius, PostFxResources.fAmbientOcclusionRadius);
+                effect->SetFloat(h.fBias, PostFxResources.fAmbientOcclusionBias);
+                effect->SetFloat(h.fIntensity, PostFxResources.fAmbientOcclusionIntensity);
+                effect->SetFloat(h.fProjScale, proj._22 * 0.5f * height);
+
+                D3DXVECTOR4 projInfo;
+                projInfo.x = -2.0f / ((width)*proj._11);
+                projInfo.y = -2.0f / ((height)*proj._22);
+                projInfo.z = (1.0f - proj._31) / proj._11;
+                projInfo.w = (1.0f + proj._32) / proj._22;
+
+                effect->SetVector(h.vec4ProjInfo, &projInfo);
+
+                effect->CommitChanges();
+
+                effect->BeginPass(2);
+                pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, screenVertices, sizeof(ScreenVertex));
+                effect->EndPass();
+
+                float hor[2] = { invViewportSize[0] * PostFxResources.fAmbientOcclusionBlurRadius, 0.0 };
+                float ver[2] = { 0.0, invViewportSize[1] * PostFxResources.fAmbientOcclusionBlurRadius };
+                effect->BeginPass(3);
+                for (auto i = 0; i < PostFxResources.nAmbientOcclusionBlurPasses; ++i)
+                {
+                    pDevice->SetRenderTarget(0, aoBlurSurf);
+                    effect->SetTexture(h.AOTexture2D, aoTex); // blur pass 1
+                    effect->SetFloatArray(h.vec2BlurDirection, hor, 2);
+                    effect->CommitChanges();
+
+                    pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, screenVertices, sizeof(ScreenVertex));
+
+                    pDevice->SetRenderTarget(0, aoSurf);
+                    effect->SetTexture(h.AOTexture2D, aoBlurTex); // blur pass 2
+                    effect->SetFloatArray(h.vec2BlurDirection, ver, 2);
+                    effect->CommitChanges();
+
+                    pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, screenVertices, sizeof(ScreenVertex));
+                }
+                effect->EndPass();
+
+                // final output
+                pDevice->SetRenderTarget(0, SpecularRT);
+                effect->SetTexture(h.AOTexture2D, aoTex);
+
+                effect->BeginPass(4);
+                pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, screenVertices, sizeof(ScreenVertex));
+                effect->EndPass();
+            }
+            effect->End();
+
+            pDevice->SetRenderTarget(0, rt0);
+            pDevice->SetDepthStencilSurface(ds);
+            pDevice->SetFVF(oldFVF);
+            pDevice->SetVertexDeclaration(oldDecl);
+            pDevice->SetStreamSource(0, oldVB, oldOffset, oldStride);
+            pDevice->SetViewport(&oldViewport);
+
+            SAFE_RELEASE(SpecularRT);
+            SAFE_RELEASE(rt0);
+            SAFE_RELEASE(ds);
+            SAFE_RELEASE(oldDecl);
+            SAFE_RELEASE(oldVB);
+        }
+    }
+
     static inline thread_local bool bInsteadDrawPrimitiveFog = false;
     static inline injector::hook_back<void(__fastcall*)(void*, void*, int, int, int)> hbDrawCallFog;
-    static void __fastcall DrawCallFog(void* _this, void* edx, int a2, int a3, int a4) {
+    static void __fastcall DrawCallFog(void* _this, void* edx, int a2, int a3, int a4)
+    {
         bInsteadDrawPrimitiveFog = true;
         hbDrawCallFog.fun(_this, edx, a2, a3, a4);
         bInsteadDrawPrimitiveFog = false;
@@ -1223,14 +1683,16 @@ private:
 
     static inline thread_local bool bInsteadDrawPrimitivePostFX = false;
     static inline injector::hook_back<void(__fastcall*)(void*, void*, int, int, int)> hbDrawCallPostFX;
-    static void __fastcall DrawCallPostFX(void* _this, void* edx, int a2, int a3, int a4) {
+    static void __fastcall DrawCallPostFX(void* _this, void* edx, int a2, int a3, int a4)
+    {
         bInsteadDrawPrimitivePostFX = true;
         hbDrawCallPostFX.fun(_this, edx, a2, a3, a4);
         bInsteadDrawPrimitivePostFX = false;
     }
 
     static inline injector::hook_back<void(__stdcall*)()> hbDrawPrimitivePostFX;
-    static void __stdcall DrawPrimitivePostFX() {
+    static void __stdcall DrawPrimitivePostFX()
+    {
         if (bInsteadDrawPrimitiveFog)
         {
             bInsteadDrawPrimitiveFog = false;
@@ -1281,6 +1743,16 @@ private:
         return hbDrawSkyHook.fun(_this, edx, a2, a3, a4, a5, a6, a7);
     }
 
+    static inline SafetyHookInline RenderPedAndVehicleFakeShadowsInlineHook;
+    static DWORD __cdecl RenderPedAndVehicleFakeShadows(DWORD a1)
+    {
+        DWORD result = RenderPedAndVehicleFakeShadowsInlineHook.unsafe_ccall<DWORD>(a1);
+
+        RenderAmbientOcclusion();
+
+        return result;
+    }
+
 public:
     PostFX()
     {
@@ -1289,18 +1761,18 @@ public:
             if (GetD3DX9_43DLL())
             {
                 PostFxResources.Readini();
-            
+
                 //if(PostFxResources.EnablePostfx)
                 {
                     auto pattern = find_pattern("E8 ? ? ? ? 8B 4F 60 E8 ? ? ? ? 8B 4F 60", "E8 ? ? ? ? 8B 4F 60 E8 ? ? ? ? 8B 4F 60");
                     hbDrawPrimitivePostFX.fun = injector::MakeCALL(pattern.get_first(0), DrawPrimitivePostFX).get();
-            
+
                     pattern = find_pattern("E8 ? ? ? ? 8D 44 24 60 50 8B CF E8 ? ? ? ? 8D 84 24", "E8 ? ? ? ? 8D 44 24 40 50 8B CE E8 ? ? ? ? 8D 8C 24");
                     hbDrawSkyHook.fun = injector::MakeCALL(pattern.get_first(0), DrawSky).get();
-            
+
                     pattern = find_pattern("E8 ? ? ? ? 6A 0A FF B7", "E8 ? ? ? ? 8B 8E ? ? ? ? 8B 56 10");
                     hbDrawCallPostFX.fun = injector::MakeCALL(pattern.get_first(0), DrawCallPostFX).get();
-                    
+
                     if (PostFxResources.bEnablePreAlphaDepth)
                     {
                         pattern = hook::pattern("6A ? E8 ? ? ? ? 5E 8B E5 5D C3");
@@ -1313,6 +1785,8 @@ public:
                         }
                     }
 
+                    pattern = find_pattern("55 8B EC 83 E4 ? 8B 0D ? ? ? ? 8B 15 ? ? ? ? 8B 41", "55 8B EC 83 E4 ? 8B 0D ? ? ? ? 8B 41 ? 8B 15");
+                    RenderPedAndVehicleFakeShadowsInlineHook = safetyhook::create_inline(pattern.get_first(0), RenderPedAndVehicleFakeShadows);
                 }
             }
         };

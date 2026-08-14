@@ -76,6 +76,7 @@ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_
   }
 
   uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
+  auto requested_content_type = XContentType(uint32_t(content_type));
 
   auto e = make_object<XStaticEnumerator<XCONTENT_DATA>>(REX_KERNEL_STATE(), items_per_enumerate);
   auto result = e->Initialize(0xFF, 0xFE, 0x20005, 0x20007, 0);
@@ -84,22 +85,11 @@ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_
   }
 
   if (!device_info || device_info->device_id == DummyDeviceId::HDD) {
-    // Enumerate user-specific content
-    auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
-        static_cast<uint32_t>(DummyDeviceId::HDD), xuid, XContentType(uint32_t(content_type)));
+    auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContentForUser(
+        static_cast<uint32_t>(DummyDeviceId::HDD), xuid, requested_content_type);
     for (const auto& content_data : content_datas) {
       auto item = e->AppendItem();
       *item = content_data;
-    }
-
-    // Also enumerate common content (xuid=0)
-    if (xuid != 0) {
-      auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
-          static_cast<uint32_t>(DummyDeviceId::HDD), 0, XContentType(uint32_t(content_type)));
-      for (const auto& content_data : common_datas) {
-        auto item = e->AppendItem();
-        *item = content_data;
-      }
     }
   }
 
@@ -209,14 +199,14 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
     uint32_t content_license = 0;
     if (disposition == kDispositionState::Create) {
       result = content_manager->CreateContent(root_name, xuid, content_data);
-      if (XSUCCEEDED(result)) {
+      if (result == X_ERROR_SUCCESS) {
         content_manager->WriteContentHeaderFile(xuid, content_data);
       }
     } else if (disposition == kDispositionState::Open) {
       result = content_manager->OpenContent(root_name, xuid, content_data, content_license);
     }
 
-    if (license_mask_ptr && XSUCCEEDED(result)) {
+    if (license_mask_ptr && result == X_ERROR_SUCCESS) {
       *license_mask_ptr = content_license;
     }
 
@@ -340,7 +330,7 @@ u32 XamContentGetThumbnail_entry(u32 user_index, mapped_void content_data_ptr,
 
   *buffer_size_ptr = uint32_t(buffer.size());
 
-  if (XSUCCEEDED(result)) {
+  if (result == X_ERROR_SUCCESS) {
     // Write data, if we were given a pointer.
     // This may have just been a size query.
     if (buffer_ptr) {

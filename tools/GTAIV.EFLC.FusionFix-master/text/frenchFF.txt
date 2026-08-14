@@ -40,6 +40,18 @@ Toujours courir
 [Cover Centering]
 Centrage de la vue
 
+[PadLookSens]
+Sensibilité caméra
+
+[MO_SENS]
+Sensibilité visée
+
+[MO_MOUSE]
+Sensibilité caméra souris
+
+[MouseAimSens]
+Sensibilité visée souris
+
 [CenterDelayFoot]
 Délai de recentrage caméra à pied
 
@@ -115,6 +127,9 @@ Mappage tonal
 [Volumetric Fog]
 Brouillard volumétrique
 
+[AO]
+Occlusion ambiante
+
 [Zoomed Movement]
 Permettre le mouvement en zoomant
 
@@ -172,6 +187,18 @@ GTA IV doit être redémarré pour appliquer les paramètres.
 [Extended Sniper]
 Commande étendue du fusil de sniper
 
+[Bullet Traces]
+Toujours afficher les traces de balles
+
+[Wardrobe Fading]
+Désactiver la transition de garde-robe
+
+[Stop Taxi]
+Arrêt instantané du taxi
+
+[CP_6AXIS]
+Sauvegarde rapide
+
 [POLICE3]
 Police Buffalo
 
@@ -198,6 +225,27 @@ Police Buffalo
 
 [FF_WARN7]
 ~r~AVERTISSEMENT : Utilisez la synchronisation audio des cinématiques sur ON en cas de désynchronisation audio, sur OFF pour la fluidité de l'animation. Peut être changer en cinématique via ~PAD_UP~.
+
+[USJ_FRST_KMB]
+Lorsque la caméra passe en mode saut unique, utilise ~INPUT_MOUSE_WHEEL_UP~ et ~INPUT_MOUSE_WHEEL_DOWN~ pour modifier la vitesse du ralenti.
+
+[PARA_CLASSIC_PC]
+Utilise ~PAD_LSTICK_ALL~ pour déplacer le poids de ton corps. ~n~Utilise ~INPUT_MOUSE_LMB~ et ~INPUT_MOUSE_RMB~ pour utiliser les aérofreins de gauche et de droite.~n~Appuie sur ~INPUT_ENTER~ pour détacher le parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer de vue.
+
+[PARA_FALL_PC]
+Utilise ~PAD_LSTICK_ALL~ pour te déplacer dans les airs. ~n~Appuie sur ~INPUT_MOUSE_LMB~ pour ouvrir ton parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer d'angle de caméra.
+
+[PARA_FLOAT_PC]
+Utilise ~PAD_LSTICK_ALL~ pour déplacer le poids de ton corps. ~n~Utilise ~INPUT_MOUSE_LMB~ et ~INPUT_MOUSE_RMB~ pour utiliser les aérofreins gauche et droite. ~n~Appuie sur ~INPUT_ENTER~ pour détacher le parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer d'angle de caméra.
+
+[BJHELP_PC]
+Utilise ~PAD_LSTICK_ALL~ pour te déplacer dans les airs. ~n~Appuie sur ~INPUT_MOUSE_LMB~ pour ouvrir ton parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer d'angle de caméra.
+
+[PARAF2_PC]
+Utilise ~PAD_LSTICK_ALL~ pour te déplacer dans les airs. ~n~Appuie sur ~INPUT_MOUSE_LMB~ pour ouvrir ton parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer d'angle de caméra.
+
+[ESS_PARA1_PC]
+Dans les airs, utilise ~PAD_LSTICK_ALL~ pour te déplacer. En chute libre, appuie sur ~INPUT_MOUSE_LMB~ pour ouvrir ton parachute. ~n~Maintiens ~INPUT_VEH_CIN_CAM~ pour changer d'angle de caméra.
 
 [DUMMY_l11]
 Option fictive.

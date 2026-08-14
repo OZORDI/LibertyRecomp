@@ -11,7 +11,6 @@
 #include "decoded_binary.h"
 
 #include <algorithm>
-
 #include <rex/memory/utils.h>
 #include <rex/types.h>
 
@@ -46,7 +45,6 @@ void DecodedBinary::decode() {
       for (uint32_t offset = 0; offset < section.size; offset += 4) {
         uint32_t addr = section.baseAddress + offset;
         uint32_t raw = load_and_swap<uint32_t>(section.data + offset);
-
         auto insn = rex::codegen::ppc::decode_instruction(addr, raw);
         sec.instructions.push_back(insn);
       }

@@ -10,6 +10,8 @@ struct ShaderCacheEntry
     const uint32_t dxilSize;
     const uint32_t spirvOffset;
     const uint32_t spirvSize;
+    const uint32_t lateSpirvOffset;
+    const uint32_t lateSpirvSize;
     const uint32_t airOffset;
     const uint32_t airSize;
     const uint32_t specConstantsMask;

@@ -110,6 +110,25 @@ class VulkanRenderTargetCache final : public RenderTargetCache {
                VulkanTextureCache& texture_cache, uint32_t& written_address_out,
                uint32_t& written_length_out);
 
+  struct ResolveTelemetry {
+    uint64_t direct_attempts = 0;
+    uint64_t direct_successes = 0;
+    uint64_t direct_fallbacks = 0;
+    uint64_t dump_calls = 0;
+    uint64_t dump_empty = 0;
+    uint64_t dump_successes = 0;
+    uint64_t dump_failures = 0;
+    uint64_t dump_rectangles = 0;
+    uint64_t dump_dispatches = 0;
+  };
+  ResolveTelemetry GetResolveTelemetry() const {
+    return ResolveTelemetry{
+        direct_resolve_attempt_count_, direct_resolve_success_count_,
+        direct_resolve_fallback_count_, dump_call_count_, dump_empty_count_,
+        dump_success_count_, dump_failure_count_, dump_rectangle_count_,
+        dump_dispatch_count_};
+  }
+
   // Returns true if any downloads were submitted to the command processor.
   bool InitializeTraceSubmitDownloads();
   void InitializeTraceCompleteDownloads();
@@ -879,6 +898,12 @@ class VulkanRenderTargetCache final : public RenderTargetCache {
   uint64_t direct_resolve_attempt_count_ = 0;
   uint64_t direct_resolve_success_count_ = 0;
   uint64_t direct_resolve_fallback_count_ = 0;
+  uint64_t dump_call_count_ = 0;
+  uint64_t dump_empty_count_ = 0;
+  uint64_t dump_success_count_ = 0;
+  uint64_t dump_failure_count_ = 0;
+  uint64_t dump_rectangle_count_ = 0;
+  uint64_t dump_dispatch_count_ = 0;
 
   // For traces.
   VkBuffer edram_snapshot_download_buffer_ = VK_NULL_HANDLE;

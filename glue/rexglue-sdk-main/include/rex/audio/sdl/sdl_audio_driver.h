@@ -29,16 +29,21 @@ class SDLAudioDriver : public AudioDriver {
 
   bool Initialize();
   void SubmitFrame(uint32_t frame_ptr) override;
+  void Pause() override;
+  void Resume() override;
+  void Flush() override;
   void Shutdown();
 
  protected:
   static void SDLCallback(void* userdata, SDL_AudioStream* stream, int additional_amount,
                           int total_amount);
+  void FlushQueuedFrames();
 
   rex::thread::Semaphore* semaphore_ = nullptr;
 
   SDL_AudioStream* sdl_stream_ = nullptr;
   bool sdl_initialized_ = false;
+  bool silent_fallback_ = false;
   uint8_t sdl_device_channels_ = 0;
 
   static const uint32_t frame_frequency_ = 48000;
@@ -46,6 +51,7 @@ class SDLAudioDriver : public AudioDriver {
   static const uint32_t channel_samples_ = 256;
   static const uint32_t frame_samples_ = frame_channels_ * channel_samples_;
   static const uint32_t frame_size_ = sizeof(float) * frame_samples_;
+  static const uint32_t silent_frame_duration_microseconds_ = 5333;
   std::queue<float*> frames_queued_ = {};
   std::stack<float*> frames_unused_ = {};
   std::mutex frames_mutex_ = {};

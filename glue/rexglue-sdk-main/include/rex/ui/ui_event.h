@@ -112,6 +112,12 @@ class KeyEvent : public UIEvent {
 
 class MouseEvent : public UIEvent {
  public:
+  enum class MotionSource {
+    kGeneric,
+    kRawMouse,
+    kSystemAccelerated,
+  };
+
   enum class Button {
     kNone = 0,
     kLeft,
@@ -126,8 +132,19 @@ class MouseEvent : public UIEvent {
   static constexpr uint32_t kScrollPerDetent = 120;
 
   explicit MouseEvent(Window* target, Button button, int32_t x, int32_t y, int32_t scroll_x = 0,
-                      int32_t scroll_y = 0)
-      : UIEvent(target), button_(button), x_(x), y_(y), scroll_x_(scroll_x), scroll_y_(scroll_y) {}
+                      int32_t scroll_y = 0, float delta_x = 0.0f, float delta_y = 0.0f,
+                      bool has_relative_delta = false,
+                      MotionSource motion_source = MotionSource::kGeneric)
+      : UIEvent(target),
+        button_(button),
+        x_(x),
+        y_(y),
+        scroll_x_(scroll_x),
+        scroll_y_(scroll_y),
+        delta_x_(delta_x),
+        delta_y_(delta_y),
+        has_relative_delta_(has_relative_delta),
+        motion_source_(motion_source) {}
   ~MouseEvent() override = default;
 
   bool is_handled() const { return handled_; }
@@ -138,6 +155,10 @@ class MouseEvent : public UIEvent {
   int32_t y() const { return y_; }
   int32_t scroll_x() const { return scroll_x_; }
   int32_t scroll_y() const { return scroll_y_; }
+  float delta_x() const { return delta_x_; }
+  float delta_y() const { return delta_y_; }
+  bool has_relative_delta() const { return has_relative_delta_; }
+  MotionSource motion_source() const { return motion_source_; }
 
  private:
   bool handled_ = false;
@@ -147,6 +168,10 @@ class MouseEvent : public UIEvent {
   int32_t scroll_x_ = 0;
   // Positive is up (away from the user), negative is down (towards the user).
   int32_t scroll_y_ = 0;
+  float delta_x_ = 0.0f;
+  float delta_y_ = 0.0f;
+  bool has_relative_delta_ = false;
+  MotionSource motion_source_ = MotionSource::kGeneric;
 };
 
 class TouchEvent : public UIEvent {

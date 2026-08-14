@@ -70,6 +70,7 @@ if(WIN32)
     )
 elseif(APPLE)
     set(REXUI_PLATFORM_SOURCES
+        accelerated_pointer_mac.mm
         surface_mac.cpp
     )
 else()
@@ -112,13 +113,20 @@ target_link_libraries(rexui PUBLIC
     SDL3::SDL3
 )
 target_link_libraries(rexui PRIVATE utf8cpp)
+if(APPLE)
+    target_link_libraries(rexui PRIVATE "-framework AppKit")
+endif()
+
+# FSR 1 EASU/RCAS is implemented by checked-in shader bytecode and does not
+# require the optional FidelityFX temporal runtime. This definition is public
+# because it changes types declared by rex/ui/presenter.h.
+target_compile_definitions(rexui PUBLIC REX_HAS_FIDELITYFX_FSR1=1)
 
 if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include")
     target_include_directories(rexui PRIVATE
         "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include"
         "${REXGLUE_FIDELITYFX_SOURCE_DIR}/ffx-api/include"
     )
-    target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_SDK=1)
 endif()
 
 set(REXUI_HAS_FIDELITYFX_RUNTIME OFF)

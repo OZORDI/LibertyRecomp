@@ -95,6 +95,8 @@ class XSocket : public XObject {
 
   uint64_t native_handle() const { return native_handle_; }
   uint16_t bound_port() const { return bound_port_; }
+  Type socket_type() const { return type_; }
+  Protocol protocol() const { return proto_; }
 
   X_STATUS Initialize(AddressFamily af, Type type, Protocol proto);
   X_STATUS Close();
@@ -111,6 +113,8 @@ class XSocket : public XObject {
   int Recv(uint8_t* buf, uint32_t buf_len, uint32_t flags);
   int Send(const uint8_t* buf, uint32_t buf_len, uint32_t flags);
 
+  bool UsesPeerDatagramTransport() const;
+  bool HasPendingPeerDatagram() const;
   int RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
                uint32_t* from_len);
   int SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* to, uint32_t to_len);

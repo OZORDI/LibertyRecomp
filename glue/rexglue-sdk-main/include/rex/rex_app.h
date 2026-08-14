@@ -45,6 +45,8 @@ struct PathConfig {
   std::filesystem::path update_data_root;
   std::filesystem::path cache_root;
   std::filesystem::path metadata_root;
+  std::filesystem::path marketplace_content_root;
+  std::filesystem::path saved_game_root;
   std::filesystem::path config_path;
 };
 
@@ -154,6 +156,12 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   /// executing. The thread is suspended -- attach debuggers/monitors here.
   virtual void OnPostLaunchModule(system::XThread* thread) { (void)thread; }
 
+  /// Opts into synchronization with the host thread's initial suspended state
+  /// before releasing the main guest thread. Titles should override this only
+  /// for graphics modes that can reach module launch before asynchronous
+  /// graphics initialization has allowed the host thread to finish starting.
+  virtual bool RequiresSynchronizedInitialThreadResume() const { return false; }
+
   /// Called when the main guest thread exits. The runtime is still alive.
   /// Use for cleanup that depends on runtime resources.
   virtual void OnGuestThreadExit(system::XThread* thread) { (void)thread; }
@@ -249,6 +257,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   const std::filesystem::path& update_data_root() const { return update_data_root_; }
   const std::filesystem::path& cache_root() const { return cache_root_; }
   const std::filesystem::path& metadata_root() const { return metadata_root_; }
+  const std::filesystem::path& marketplace_content_root() const {
+    return marketplace_content_root_;
+  }
+  const std::filesystem::path& saved_game_root() const { return saved_game_root_; }
 
   /// Set a callback that provides guest frame stats to the debug overlay.
   void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
@@ -286,6 +298,8 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   std::filesystem::path update_data_root_;
   std::filesystem::path cache_root_;
   std::filesystem::path metadata_root_;
+  std::filesystem::path marketplace_content_root_;
+  std::filesystem::path saved_game_root_;
   std::unique_ptr<Runtime> runtime_;
   std::unique_ptr<ui::Window> window_;
   std::thread module_thread_;

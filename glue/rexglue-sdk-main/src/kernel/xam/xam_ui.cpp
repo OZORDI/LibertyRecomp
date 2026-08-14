@@ -275,10 +275,15 @@ u32 XamShowMessageBoxUI_entry(u32 user_index, mapped_wstring title_ptr, mapped_w
       result_ptr.guest_address(), overlapped.guest_address());
   std::string title;
   if (title_ptr) {
-    title = rex::string::to_utf8(title_ptr.value());
+    title = rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+        REX_KERNEL_MEMORY()->TranslateVirtual(title_ptr.guest_address())));
   } else {
     title = "";  // TODO(gibbed): default title based on flags?
   }
+  std::string text_str = text_ptr
+                             ? rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+                                   REX_KERNEL_MEMORY()->TranslateVirtual(text_ptr.guest_address())))
+                             : "";
 
   std::vector<std::string> buttons;
   for (uint32_t i = 0; i < button_count; ++i) {
@@ -320,9 +325,8 @@ u32 XamShowMessageBoxUI_entry(u32 user_index, mapped_wstring title_ptr, mapped_w
     ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
     if (imgui_drawer) {
       result = xeXamDispatchDialog<MessageBoxDialog>(
-          new MessageBoxDialog(imgui_drawer, title, rex::string::to_utf8(text_ptr.value()), buttons,
-                               active_button),
-          close, overlapped.guest_address());
+          new MessageBoxDialog(imgui_drawer, title, text_str, buttons, active_button), close,
+          overlapped.guest_address());
     } else {
       // Fallback to headless if no drawer available
       auto run = [result_ptr, active_button]() -> X_RESULT {

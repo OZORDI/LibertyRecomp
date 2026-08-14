@@ -86,6 +86,8 @@ TEST_CASE("TemplateRegistry: render with codegen data", "[TemplateRegistry]") {
     "code_size": "0x100000",
     "rexcrt_heap": 1,
     "config_flags": {},
+    "has_dll_modules": false,
+    "is_dll": false,
     "functions": [],
     "imports": []
   })";
@@ -93,6 +95,13 @@ TEST_CASE("TemplateRegistry: render with codegen data", "[TemplateRegistry]") {
   std::string result = registry.render("codegen/init_cpp", json);
   CHECK(result.find("PPCImageConfig") != std::string::npos);
   CHECK(result.find("test_proj") != std::string::npos);
+
+  std::string dll_result = registry.render("codegen/register_cpp", R"({
+    "project": "test_proj",
+    "is_dll": true,
+    "functions": []
+  })");
+  CHECK(dll_result.find("ReXModule_GetImageInfo") != std::string::npos);
 }
 
 TEST_CASE("TemplateRegistry: render unknown ID throws TemplateError", "[TemplateRegistry]") {

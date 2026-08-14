@@ -4,29 +4,6 @@
 // Pure observation, no fixes. Tracks which gate inside sub_82A50890 (the real
 // rage::grcDeviceDx::CreateDevice) returns 0, preventing the singleton at
 // *0x831C22A4 from being populated.
-//
-// Background: The full init chain is
-//   sub_821B3CE8 (hooked by host_gpu_init.cpp, grmSetup ctor)
-//     -> sub_828C5928
-//       -> sub_828C0B48
-//         -> sub_82A416B8 (creator dispatch, 2 call sites)
-//           -> sub_82A50890 (the real CreateDevice)
-//
-// sub_82A50890 has 6 known failure gates that each send r3=0 back to the
-// caller at loc_82A508D8:
-//   sub_82A507A8    -> returns 0 => "setup state bad"
-//   ExGetXConfigSetting < 0 -> returns => "video mode config"
-//   sub_82A49D08    -> returns nonzero => "device setup failed"
-//   sub_82A4F560    -> returns 0 => "texture heap setup failed"
-//   sub_82A42020    -> returns 0 => "subsystem init failed"
-//   sub_82A503C8    -> returns 0 => "final subsystem init failed"
-//
-// All 6 are pure PPC (no kernel imports). Rexglue 0.7.5 implements all kernel
-// imports this function uses (RtlInitializeCriticalSection, ExGetXConfigSetting,
-// VdIsHSIOTrainingSucceeded). So failure must be in the PPC gates above.
-//
-// This file wraps each gate with ENTER/EXIT logging so we can tell which one
-// returns a bad status. Rate-limited to 8 hits per gate.
 // =============================================================================
 
 #include <api/Liberty.h>
@@ -51,9 +28,6 @@ GateCounter g_cnt_416B8;
 
 }  // namespace
 
-// ============================================================================
-// OUTER: sub_82A50890 — the real CreateDevice body
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A50890);
 PPC_FUNC_HOOK(sub_82A50890) {
     uint32_t n = g_cnt_50890.enter.fetch_add(1, std::memory_order_relaxed);
@@ -71,9 +45,6 @@ PPC_FUNC_HOOK(sub_82A50890) {
     }
 }
 
-// ============================================================================
-// GATE 1: sub_82A507A8 — 78-byte setup-state check. Returns 0 on failure.
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A507A8);
 PPC_FUNC_HOOK(sub_82A507A8) {
     uint32_t n = g_cnt_507A8.enter.fetch_add(1, std::memory_order_relaxed);
@@ -91,9 +62,6 @@ PPC_FUNC_HOOK(sub_82A507A8) {
     }
 }
 
-// ============================================================================
-// GATE 2: sub_82A49D08 — 1064-byte device-setup subroutine. Returns nonzero on failure.
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A49D08);
 PPC_FUNC_HOOK(sub_82A49D08) {
     uint32_t n = g_cnt_49D08.enter.fetch_add(1, std::memory_order_relaxed);
@@ -110,9 +78,6 @@ PPC_FUNC_HOOK(sub_82A49D08) {
     }
 }
 
-// ============================================================================
-// GATE 3: sub_82A4F560 — 336-byte texture-heap setup. Returns 0 on failure.
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A4F560);
 PPC_FUNC_HOOK(sub_82A4F560) {
     uint32_t n = g_cnt_4F560.enter.fetch_add(1, std::memory_order_relaxed);
@@ -129,9 +94,6 @@ PPC_FUNC_HOOK(sub_82A4F560) {
     }
 }
 
-// ============================================================================
-// GATE 4: sub_82A42020 — 312-byte subsystem init. Returns 0 on failure.
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A42020);
 PPC_FUNC_HOOK(sub_82A42020) {
     uint32_t n = g_cnt_42020.enter.fetch_add(1, std::memory_order_relaxed);
@@ -148,9 +110,6 @@ PPC_FUNC_HOOK(sub_82A42020) {
     }
 }
 
-// ============================================================================
-// GATE 5: sub_82A503C8 — final subsystem init. Returns 0 on failure.
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A503C8);
 PPC_FUNC_HOOK(sub_82A503C8) {
     uint32_t n = g_cnt_503C8.enter.fetch_add(1, std::memory_order_relaxed);
@@ -167,32 +126,22 @@ PPC_FUNC_HOOK(sub_82A503C8) {
     }
 }
 
-// ============================================================================
-// rage::free tracer: sub_821B3560
-// Fires whenever rage's allocator frees a block. If the freed ptr matches
-// *0x831C22A4 (grcDeviceDx singleton), log the call-site so we know who
-// destroys the device after successful CreateDevice.
-// ============================================================================
 static std::atomic<uint32_t> g_free_device_hits{0};
 
 PPC_FUNC_IMPL(__imp__sub_821B3560);
 PPC_FUNC_HOOK(sub_821B3560) {
-    uint32_t ptr = ctx.r4.u32;   // rage::free(allocator*, ptr) — r3=allocator, r4=ptr
+    uint32_t ptr = ctx.r4.u32;
     uint32_t device = PPC_LOAD_U32(0x831C22A4);
     if (ptr != 0 && ptr == device) {
         uint32_t n = g_free_device_hits.fetch_add(1, std::memory_order_relaxed);
         if (n < 16) {
-            LOGF_WARNING("[DIAG-FREE seq={}] rage::free called with device ptr=0x{:08X} "
-                         "lr=0x{:08X} r3(allocator)=0x{:08X}",
+            LOGF_WARNING("[DIAG-FREE seq={}] rage::free called with device ptr=0x{:08X} lr=0x{:08X} r3(allocator)=0x{:08X}",
                          n, ptr, (uint32_t)ctx.lr, ctx.r3.u32);
         }
     }
     __imp__sub_821B3560(ctx, base);
 }
 
-// ============================================================================
-// PARENT DISPATCHER: sub_82A416B8 — creator dispatch (2 call sites in sub_828C0B48)
-// ============================================================================
 PPC_FUNC_IMPL(__imp__sub_82A416B8);
 PPC_FUNC_HOOK(sub_82A416B8) {
     uint32_t n = g_cnt_416B8.enter.fetch_add(1, std::memory_order_relaxed);
@@ -204,7 +153,6 @@ PPC_FUNC_HOOK(sub_82A416B8) {
     __imp__sub_82A416B8(ctx, base);
     uint32_t m = g_cnt_416B8.exit.fetch_add(1, std::memory_order_relaxed);
     if (m < 8) {
-        LOGF_WARNING("[DIAG-CD P-416B8 seq={}] EXIT ret=0x{:08X}",
-                     m, ctx.r3.u32);
+        LOGF_WARNING("[DIAG-CD P-416B8 seq={}] EXIT ret=0x{:08X}", m, ctx.r3.u32);
     }
 }

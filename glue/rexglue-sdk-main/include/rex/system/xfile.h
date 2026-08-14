@@ -127,6 +127,8 @@ class XFile : public XObject {
  private:
   XFile();
 
+  bool IsIoTraceEnabled() const;
+
   X_STATUS ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_length, uint64_t byte_offset,
                         uint32_t* out_bytes_read, uint32_t apc_context, bool notify_completion);
 

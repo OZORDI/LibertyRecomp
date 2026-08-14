@@ -64,6 +64,7 @@ struct StfsFileEntry {
     std::string name;
     uint32_t size;
     uint32_t startBlock;
+    uint32_t allocatedBlockCount;
     bool isDirectory;
     bool isContiguous;
 };
@@ -113,8 +114,9 @@ public:
     bool ExtractFileToDisk(const std::string& fileName, const std::filesystem::path& outPath);
 
 private:
-    static const uint32_t kBlockSize = 0x1000;
-    static const uint32_t kHashesPerBlock = 170;
+    static constexpr uint32_t kBlockSize = 0x1000;
+    static constexpr uint32_t kHashesPerBlock = 170;
+    static constexpr uint32_t kEndOfChain = 0xFFFFFF;
     
     // Read helpers
     uint32_t ReadUInt32BE(uint64_t offset);
@@ -123,9 +125,10 @@ private:
     void ReadBytes(uint64_t offset, void* buffer, size_t size);
     
     // Block navigation
-    uint64_t BlockToOffset(uint32_t blockNum);
+    uint64_t BlockToOffset(uint32_t blockNum) const;
+    uint32_t BlockToHashBlockNumber(uint32_t blockNum, uint32_t hashLevel) const;
+    uint64_t BlockToHashBlockOffset(uint32_t blockNum, uint32_t hashLevel) const;
     uint32_t GetNextBlock(uint32_t blockNum);
-    uint32_t ComputeHashTableBlockNumber(uint32_t blockNum);
     
     // Parse functions
     bool ParseHeader();
@@ -134,6 +137,7 @@ private:
     std::ifstream m_file;
     std::filesystem::path m_path;
     bool m_isOpen;
+    bool m_readFailed;
     
     // Package info
     StfsPackageType m_packageType;
@@ -150,6 +154,7 @@ private:
     uint32_t m_fileTableBlockCount;
     uint32_t m_totalBlockCount;
     bool m_readOnlyFormat;
+    bool m_rootActiveIndex;
     
     // File entries
     std::vector<StfsFileEntry> m_files;

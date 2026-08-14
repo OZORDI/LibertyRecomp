@@ -9,10 +9,13 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <bit>
+
 #include <rex/audio/xma/context.h>
 #include <rex/audio/xma/decoder.h>
 #include <rex/cvar.h>
 #include <rex/dbg.h>
+#include <rex/diagnostics/gta4_transition.h>
 #include <rex/logging.h>
 #include <rex/perf/counter.h>
 #include <rex/math.h>
@@ -139,16 +142,41 @@ X_STATUS XmaDecoder::Setup(system::KernelState* kernel_state) {
 
 void XmaDecoder::WorkerThreadMain() {
   while (worker_running_) {
-    // Okay, let's loop through XMA contexts to find ones we need to decode!
-    bool did_work = false;
-    for (uint32_t n = 0; n < kContextCount && worker_running_; n++) {
-      XmaContext& context = contexts_[n];
-      bool worked = context.Work();
-      if (worked) {
-        context.SignalWorkDone();
-        PROFILE_XMA_FRAME_DECODED();
+    // Process only contexts made ready by a kick instead of scanning all 320
+    // hardware slots. Work disables the context after servicing the kick, so
+    // a later decode is scheduled only by the guest's next kick.
+    for (uint32_t word_index = 0; word_index < kKickRegisterCount && worker_running_;
+         ++word_index) {
+      uint32_t ready = ready_context_words_[word_index].exchange(0, std::memory_order_acq_rel);
+      if (ready) {
+        diagnostics::gta4_transition::Record(
+            diagnostics::gta4_transition::EventSource::kXma,
+            diagnostics::gta4_transition::EventType::kXmaWorkerBegin, 0, 0, 0,
+            diagnostics::gta4_transition::kFlagBefore, word_index, ready);
       }
-      did_work = did_work || worked;
+      while (ready && worker_running_) {
+        const uint32_t bit_index = static_cast<uint32_t>(std::countr_zero(ready));
+        const uint32_t bit = uint32_t{1} << bit_index;
+        ready &= ~bit;
+        const uint32_t context_index = word_index * kContextsPerKickRegister + bit_index;
+        XmaContext& context = contexts_[context_index];
+        diagnostics::gta4_transition::Record(
+            diagnostics::gta4_transition::EventSource::kXma,
+            diagnostics::gta4_transition::EventType::kXmaContextBegin, 0, 0,
+            0, diagnostics::gta4_transition::kFlagBefore, context_index,
+            context.guest_ptr(), word_index);
+        const bool worked = context.Work();
+        if (worked) {
+          context.SignalWorkDone();
+          PROFILE_XMA_FRAME_DECODED();
+        }
+        diagnostics::gta4_transition::Record(
+            diagnostics::gta4_transition::EventSource::kXma,
+            diagnostics::gta4_transition::EventType::kXmaContextEnd, 0, 0,
+            0, worked ? diagnostics::gta4_transition::kFlagAfter
+                      : diagnostics::gta4_transition::kFlagError,
+            context_index, context.guest_ptr(), word_index);
+      }
     }
 
     if (paused_) {
@@ -156,10 +184,7 @@ void XmaDecoder::WorkerThreadMain() {
       resume_fence_.Wait();
     }
 
-    if (did_work) {
-      continue;
-    }
-    // No work done this iteration, block until signaled.
+    // Block until another context kick, pause, or shutdown signal.
     rex::thread::Wait(work_event_.get(), false);
   }
 }
@@ -293,6 +318,13 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
         context.Enable();
       }
     }
+    const uint32_t ready_word = r - XmaRegister::Context0Kick;
+    diagnostics::gta4_transition::Record(
+        diagnostics::gta4_transition::EventSource::kXma,
+        diagnostics::gta4_transition::EventType::kXmaKick, 0, 0, 0,
+        diagnostics::gta4_transition::kFlagBefore, ready_word, kicked_value,
+        base_context_id);
+    ready_context_words_[ready_word].fetch_or(kicked_value, std::memory_order_release);
     // Signal the decoder thread to start processing.
     work_event_->Set();
     // Block until the worker finishes, so the game sees updated context data.
@@ -302,11 +334,23 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
         contexts_[context_id].WaitForWorkDone();
       }
     }
+    diagnostics::gta4_transition::Record(
+        diagnostics::gta4_transition::EventSource::kXma,
+        diagnostics::gta4_transition::EventType::kXmaKickComplete, 0, 0, 0,
+        diagnostics::gta4_transition::kFlagAfter, ready_word,
+        register_file_[r], base_context_id);
   } else if (r >= XmaRegister::Context0Lock && r <= XmaRegister::Context9Lock) {
     // Context lock command.
     // This requests a lock by flagging the context.
     // XMADisableContext
     uint32_t base_context_id = (r - XmaRegister::Context0Lock) * 32;
+    diagnostics::gta4_transition::Record(
+        diagnostics::gta4_transition::EventSource::kXma,
+        diagnostics::gta4_transition::EventType::kXmaLock, 0, 0, 0,
+        diagnostics::gta4_transition::kFlagBefore,
+        r - XmaRegister::Context0Lock, value, base_context_id);
+    ready_context_words_[r - XmaRegister::Context0Lock].fetch_and(~value,
+                                                                  std::memory_order_acq_rel);
     for (int i = 0; value && i < 32; ++i, value >>= 1) {
       if (value & 1) {
         uint32_t context_id = base_context_id + i;
@@ -325,6 +369,13 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
     // Context clear command.
     // This will reset the given hardware contexts.
     uint32_t base_context_id = (r - XmaRegister::Context0Clear) * 32;
+    diagnostics::gta4_transition::Record(
+        diagnostics::gta4_transition::EventSource::kXma,
+        diagnostics::gta4_transition::EventType::kXmaClear, 0, 0, 0,
+        diagnostics::gta4_transition::kFlagBefore,
+        r - XmaRegister::Context0Clear, value, base_context_id);
+    ready_context_words_[r - XmaRegister::Context0Clear].fetch_and(~value,
+                                                                   std::memory_order_acq_rel);
     for (int i = 0; value && i < 32; ++i, value >>= 1) {
       if (value & 1) {
         uint32_t context_id = base_context_id + i;

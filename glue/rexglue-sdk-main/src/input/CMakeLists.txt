@@ -4,6 +4,7 @@
 add_library(rexinput OBJECT
     input_system.cpp
     mnk/mnk_input_driver.cpp
+    mnk/pointer_motion.cpp
     nop/nop_input_driver.cpp
 )
 add_library(rex::input ALIAS rexinput)

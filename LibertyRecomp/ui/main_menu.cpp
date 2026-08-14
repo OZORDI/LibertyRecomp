@@ -945,11 +945,12 @@ void MainMenu::DrawSoundSettings(float contentX, float contentY, float contentWi
 
 // Multiplayer backend option names
 static const char* g_multiplayerBackendOptions[] = {
-    "Community",    // Default - uses community-hosted session tracker
-    "Firebase",     // Self-hosted Firebase for private communities
-    "LAN"           // LAN only - no internet matchmaking
+    "Community",    // HTTPS/WSS directory with GameNetworkingSockets transport
+    "Firebase",     // Visible but unavailable during the LAN-first milestone
+    "LAN",          // LAN only - no internet matchmaking
+    "Offline"       // Single-player only
 };
-static const int g_multiplayerBackendCount = 3;
+static const int g_multiplayerBackendCount = std::size(g_multiplayerBackendOptions);
 
 // Flag to track if current setting is a dropdown (so left/right adjust value instead of changing tab)
 static bool g_settingsIsDropdown = false;
@@ -999,13 +1000,16 @@ void MainMenu::DrawNetworkSettings(float contentX, float contentY, float content
         switch ((EMultiplayerBackend)backendIndex)
         {
             case EMultiplayerBackend::Community:
-                description = "Uses community-hosted servers for online matchmaking";
+                description = "Internet sessions - requires a compatible community service";
                 break;
             case EMultiplayerBackend::Firebase:
-                description = "Use your own Firebase backend for private communities";
+                description = "Unavailable - deferred until LAN and Community validation";
                 break;
             case EMultiplayerBackend::LAN:
                 description = "Local network only - no internet required";
+                break;
+            case EMultiplayerBackend::Offline:
+                description = "Disable multiplayer compatibility services";
                 break;
         }
         drawList->AddText(g_pFntRodin, Scale(12.0f), {contentX + Scale(20.0f), y + Scale(28.0f)}, 
@@ -1340,4 +1344,3 @@ bool MainMenu::Run()
     // Return true if game should start, false if exit was selected
     return (s_selectedMainOption == 0); // Start Game was selected
 }
-

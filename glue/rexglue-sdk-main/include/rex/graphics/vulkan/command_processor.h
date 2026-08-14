@@ -271,6 +271,12 @@ class VulkanCommandProcessor : public CommandProcessor {
                  IndexBufferInfo* index_buffer_info, bool major_mode_explicit) override;
   bool IssueCopy() override;
 
+  // Derived compatibility command processors may consume the same immutable
+  // resource invalidations and resolve decoder as the Vulkan backend without
+  // gaining access to backend-owned cache objects.
+  SharedMemory* shared_memory_for_derived() const { return shared_memory_.get(); }
+  bool GetCurrentResolveInfo(draw_util::ResolveInfo& resolve_info_out);
+
   void InitializeTrace() override;
 
  private:
@@ -541,6 +547,42 @@ class VulkanCommandProcessor : public CommandProcessor {
   // Tracks whether any draw in the current frame used an async placeholder
   // graphics pipeline and may have produced incomplete output.
   bool frame_used_async_placeholder_pipeline_ = false;
+  // Passive GPU-thread-local telemetry. These counters never submit work or
+  // participate in rendering decisions.
+  uint64_t frame_flow_swap_count_ = 0;
+  uint64_t frame_flow_draw_calls_ = 0;
+  uint64_t frame_flow_draw_submitted_ = 0;
+  uint64_t frame_flow_draw_placeholders_ = 0;
+  uint64_t frame_flow_rasterizing_draws_ = 0;
+  uint64_t frame_flow_color_draws_ = 0;
+  uint64_t frame_flow_color_target_draws_[4] = {};
+  uint64_t frame_flow_depth_only_draws_ = 0;
+  uint64_t frame_flow_textured_draws_ = 0;
+  uint64_t frame_flow_no_effect_draws_ = 0;
+  uint64_t frame_flow_converted_index_draws_ = 0;
+  uint64_t frame_flow_strip_restart_draws_ = 0;
+  uint64_t frame_flow_copy_calls_ = 0;
+  uint64_t frame_flow_copy_successes_ = 0;
+  uint64_t frame_flow_copy_failures_ = 0;
+  uint64_t frame_flow_resolve_direct_attempts_ = 0;
+  uint64_t frame_flow_resolve_direct_successes_ = 0;
+  uint64_t frame_flow_resolve_direct_fallbacks_ = 0;
+  uint64_t frame_flow_resolve_dump_calls_ = 0;
+  uint64_t frame_flow_resolve_dump_empty_ = 0;
+  uint64_t frame_flow_resolve_dump_successes_ = 0;
+  uint64_t frame_flow_resolve_dump_failures_ = 0;
+  uint64_t frame_flow_resolve_dump_rectangles_ = 0;
+  uint64_t frame_flow_resolve_dump_dispatches_ = 0;
+  uint32_t frame_flow_resolve_address_ = 0;
+  uint32_t frame_flow_resolve_length_ = 0;
+  uint32_t frame_flow_resolve_source_ = 0;
+  uint32_t frame_flow_resolve_source_base_ = 0;
+  uint32_t frame_flow_resolve_source_format_ = 0;
+  uint32_t frame_flow_resolve_dest_format_ = 0;
+  uint32_t frame_flow_last_packet_width_ = 0;
+  uint32_t frame_flow_last_packet_height_ = 0;
+  uint8_t frame_flow_last_outcome_ = 0;
+  bool frame_flow_have_previous_swap_ = false;
   // Guest frame index, since some transient resources can be reused across
   // submissions. Values updated in the beginning of a frame.
   uint64_t frame_current_ = 1;

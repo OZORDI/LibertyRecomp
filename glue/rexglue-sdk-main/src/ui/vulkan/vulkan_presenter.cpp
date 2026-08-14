@@ -14,8 +14,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <functional>
+#include <fstream>
+#include <limits>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -24,6 +30,7 @@
 #include <rex/logging.h>
 #include <rex/math.h>
 #include <rex/platform.h>
+#include <rex/ui/window.h>
 #include <rex/ui/vulkan/presenter.h>
 #include <rex/ui/vulkan/util.h>
 
@@ -58,9 +65,39 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
 REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
                     "Allow FIFO relaxed present mode");
 
+static constexpr bool kVulkanHDRDefault = false;
+REXCVAR_DEFINE_BOOL(vulkan_hdr, kVulkanHDRDefault, "UI/Vulkan",
+                    "Use an FP16 extended-linear HDR swapchain when supported");
+
 namespace rex {
 namespace ui {
 namespace vulkan {
+
+namespace {
+
+float IEEEHalfToFloat(uint16_t value) {
+  const uint32_t sign = uint32_t(value >> 15);
+  const uint32_t exponent = uint32_t(value >> 10) & 0x1F;
+  const uint32_t fraction = uint32_t(value) & 0x3FF;
+  float magnitude;
+  if (!exponent) {
+    magnitude = std::ldexp(float(fraction), -24);
+  } else if (exponent == 0x1F) {
+    magnitude = fraction ? std::numeric_limits<float>::quiet_NaN()
+                         : std::numeric_limits<float>::infinity();
+  } else {
+    magnitude = std::ldexp(1.0f + float(fraction) / 1024.0f, int(exponent) - 15);
+  }
+  return sign ? -magnitude : magnitude;
+}
+
+float LinearToSRGB(float value) {
+  value = std::clamp(value, 0.0f, 1.0f);
+  return value <= 0.0031308f ? value * 12.92f
+                            : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+}
+
+}  // namespace
 
 #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
 namespace {
@@ -109,7 +146,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL FfxVkGetDeviceProcAddrCompat(VkDevice d
 namespace shaders {
 #include "../shaders/vulkan_spirv/guest_output_bilinear_dither_ps.h"
 #include "../shaders/vulkan_spirv/guest_output_bilinear_ps.h"
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
 #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_dither_ps.h"
 #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_ps.h"
 #include "../shaders/vulkan_spirv/guest_output_ffx_cas_sharpen_dither_ps.h"
@@ -466,13 +503,19 @@ bool VulkanPresenter::CaptureGuestOutput(RawImage& image_out) {
     // Incremented the reference count of the guest output image - safe to leave
     // the consumer critical section now.
   }
+  return CaptureGuestOutputImage(guest_output_image, image_out);
+}
+
+bool VulkanPresenter::CaptureGuestOutputImage(
+    const std::shared_ptr<GuestOutputImage>& guest_output_image, RawImage& image_out) {
   if (!guest_output_image) {
     return false;
   }
 
   VkExtent2D image_extent = guest_output_image->extent();
   size_t pixel_count = size_t(image_extent.width) * image_extent.height;
-  VkDeviceSize buffer_size = VkDeviceSize(sizeof(uint32_t) * pixel_count);
+  using FP16Pixel = std::array<uint16_t, 4>;
+  VkDeviceSize buffer_size = VkDeviceSize(sizeof(FP16Pixel) * pixel_count);
   VkBuffer buffer;
   VkDeviceMemory buffer_memory;
   if (!util::CreateDedicatedAllocationBuffer(
@@ -646,10 +689,20 @@ bool VulkanPresenter::CaptureGuestOutput(RawImage& image_out) {
   image_out.width = image_extent.width;
   image_out.height = image_extent.height;
   image_out.stride = sizeof(uint32_t) * image_extent.width;
-  image_out.data.resize(size_t(buffer_size));
-  uint32_t* image_out_pixels = reinterpret_cast<uint32_t*>(image_out.data.data());
+  image_out.data.resize(image_out.stride * image_out.height);
+  const FP16Pixel* source_pixels = static_cast<const FP16Pixel*>(mapping);
+  const bool source_is_linear_hdr = paint_context_.swapchain_is_hdr;
   for (size_t i = 0; i < pixel_count; ++i) {
-    image_out_pixels[i] = Packed10bpcRGBTo8bpcBytes(reinterpret_cast<const uint32_t*>(mapping)[i]);
+    uint8_t* destination = image_out.data.data() + i * sizeof(uint32_t);
+    for (size_t component = 0; component < 3; ++component) {
+      float value = IEEEHalfToFloat(source_pixels[i][component]);
+      if (!std::isfinite(value)) {
+        value = value > 0.0f ? 1.0f : 0.0f;
+      }
+      value = source_is_linear_hdr ? LinearToSRGB(value) : std::clamp(value, 0.0f, 1.0f);
+      destination[component] = uint8_t(std::lround(value * 255.0f));
+    }
+    destination[3] = UINT8_MAX;
   }
 
   // Unmapping will be done by freeing.
@@ -751,6 +804,9 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
   const VkDevice device = vulkan_device_->device();
 
   VkFormat new_swapchain_format;
+  VkColorSpaceKHR new_swapchain_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  bool new_swapchain_is_hdr = false;
+  const bool new_swapchain_hdr_requested = REXCVAR_GET(vulkan_hdr);
 
   // ConnectOrReconnectToSurfaceFromUIThread may be called only for the
   // ui::Surface of the current swapchain or when the old swapchain and
@@ -765,8 +821,10 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
     bool surface_unusable;
     paint_context_.swapchain = PaintContext::CreateSwapchainForVulkanSurface(
         vulkan_device_, paint_context_.vulkan_surface, new_surface_width, new_surface_height,
-        old_swapchain, paint_context_.present_queue_family, new_swapchain_format,
-        paint_context_.swapchain_extent, paint_context_.swapchain_is_fifo, surface_unusable);
+        old_swapchain, new_swapchain_hdr_requested, paint_context_.present_queue_family,
+        new_swapchain_format,
+        new_swapchain_color_space, paint_context_.swapchain_extent,
+        paint_context_.swapchain_is_fifo, new_swapchain_is_hdr, surface_unusable);
     // Destroy the old swapchain that may be retired now.
     if (old_swapchain != VK_NULL_HANDLE) {
       dfn.vkDestroySwapchainKHR(device, old_swapchain, nullptr);
@@ -858,8 +916,9 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
     bool surface_unusable;
     paint_context_.swapchain = PaintContext::CreateSwapchainForVulkanSurface(
         vulkan_device_, paint_context_.vulkan_surface, new_surface_width, new_surface_height,
-        VK_NULL_HANDLE, paint_context_.present_queue_family, new_swapchain_format,
-        paint_context_.swapchain_extent, paint_context_.swapchain_is_fifo, surface_unusable);
+        VK_NULL_HANDLE, new_swapchain_hdr_requested, paint_context_.present_queue_family,
+        new_swapchain_format, new_swapchain_color_space, paint_context_.swapchain_extent,
+        paint_context_.swapchain_is_fifo, new_swapchain_is_hdr, surface_unusable);
     if (paint_context_.swapchain == VK_NULL_HANDLE) {
       // Failed to create the swapchain for the new Vulkan surface - destroy the
       // Vulkan surface.
@@ -874,6 +933,10 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
   // From now on, in case of failure,
   // paint_context_.DestroySwapchainAndVulkanSurface must be called before
   // returning.
+
+  paint_context_.swapchain_color_space = new_swapchain_color_space;
+  paint_context_.swapchain_is_hdr = new_swapchain_is_hdr;
+  paint_context_.swapchain_hdr_requested = new_swapchain_hdr_requested;
 
   // Update the render pass to the new format.
   if (paint_context_.swapchain_render_pass_format != new_swapchain_format) {
@@ -1059,9 +1122,20 @@ bool VulkanPresenter::RefreshGuestOutputImpl(
     image_instance.SetToNewImage(std::move(new_image), guest_output_image_next_version_++);
   }
 
-  VulkanGuestOutputRefreshContext context(is_8bpc_out_ref, image_instance.image->image(),
-                                          image_instance.image->view(), image_instance.version,
-                                          image_instance.ever_successfully_refreshed);
+  // The transfer function is a property of the swapchain color space, not of
+  // the display's momentary EDR headroom. An extended-linear swapchain must
+  // always receive linear values, even while the reported headroom is 1.0.
+  bool hdr_output = paint_context_.swapchain_is_hdr;
+  float hdr_headroom = 1.0f;
+  float sdr_white_level = 1.0f;
+  if (Window* window = connected_window()) {
+    hdr_headroom = std::max(1.0f, window->GetHDRHeadroom());
+    sdr_white_level = std::max(1.0f, window->GetSDRWhiteLevel());
+  }
+  VulkanGuestOutputRefreshContext context(
+      is_8bpc_out_ref, image_instance.image->image(), image_instance.image->view(),
+      image_instance.version, image_instance.ever_successfully_refreshed, hdr_output,
+      hdr_headroom, sdr_white_level);
   bool refresher_succeeded = refresher(context);
   if (refresher_succeeded) {
     image_instance.ever_successfully_refreshed = true;
@@ -1094,9 +1168,12 @@ bool VulkanPresenter::RefreshGuestOutputImpl(
 
 VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
     const VulkanDevice* vulkan_device, VkSurfaceKHR surface, uint32_t width, uint32_t height,
-    VkSwapchainKHR old_swapchain, uint32_t& present_queue_family_out, VkFormat& image_format_out,
-    VkExtent2D& image_extent_out, bool& is_fifo_out, bool& ui_surface_unusable_out) {
+    VkSwapchainKHR old_swapchain, bool hdr_requested, uint32_t& present_queue_family_out,
+    VkFormat& image_format_out, VkColorSpaceKHR& image_color_space_out,
+    VkExtent2D& image_extent_out, bool& is_fifo_out, bool& is_hdr_out,
+    bool& ui_surface_unusable_out) {
   ui_surface_unusable_out = false;
+  is_hdr_out = false;
 
   const VulkanInstance::Functions& ifn = vulkan_device->vulkan_instance()->functions();
   const VkPhysicalDevice physical_device = vulkan_device->physical_device();
@@ -1111,6 +1188,12 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
     // Some strange error, try again later.
     return VK_NULL_HANDLE;
   }
+  REXLOG_INFO(
+      "[SwapchainCapabilities] requested={}x{} current={}x{} min={}x{} max={}x{}",
+      width, height, surface_capabilities.currentExtent.width,
+      surface_capabilities.currentExtent.height, surface_capabilities.minImageExtent.width,
+      surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.width,
+      surface_capabilities.maxImageExtent.height);
 
   // First, check if the surface is not zero-area because in this case, the rest
   // of the fields in theory may not be informative as the surface doesn't need
@@ -1217,7 +1300,20 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
   static const VkFormat kFormat8888Secondary = VK_FORMAT_R8G8B8A8_UNORM;
 #endif
   VkSurfaceFormatKHR image_format;
-  if (surface_formats.empty() ||
+  hdr_requested = hdr_requested &&
+                  vulkan_device->vulkan_instance()->extensions().ext_EXT_swapchain_colorspace;
+  auto hdr_format_it = surface_formats.cend();
+  if (hdr_requested) {
+    hdr_format_it = std::find_if(
+        surface_formats.cbegin(), surface_formats.cend(), [](const VkSurfaceFormatKHR& candidate) {
+          return candidate.format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                 candidate.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+        });
+  }
+  if (hdr_format_it != surface_formats.cend()) {
+    image_format = *hdr_format_it;
+    is_hdr_out = true;
+  } else if (surface_formats.empty() ||
       (surface_formats.size() == 1 || surface_formats[0].format == VK_FORMAT_UNDEFINED)) {
     // Can choose any format if the implementation specifies only UNDEFINED.
     image_format.format = kFormat8888Primary;
@@ -1274,6 +1370,10 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
       // Just pick any format.
       image_format = surface_formats.front();
     }
+  }
+  if (hdr_requested && !is_hdr_out) {
+    REXLOG_WARN(
+        "VulkanPresenter: FP16 extended-linear HDR swapchain unavailable; using SDR fallback");
   }
 
   // Get presentation modes.
@@ -1405,6 +1505,7 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
 
   present_queue_family_out = queue_family_index_present;
   image_format_out = swapchain_create_info.imageFormat;
+  image_color_space_out = swapchain_create_info.imageColorSpace;
   image_extent_out = swapchain_create_info.imageExtent;
   is_fifo_out = swapchain_create_info.presentMode == VK_PRESENT_MODE_FIFO_KHR ||
                 swapchain_create_info.presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
@@ -1425,6 +1526,9 @@ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
   swapchain_images.clear();
   swapchain_extent.width = 0;
   swapchain_extent.height = 0;
+  swapchain_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  swapchain_is_hdr = false;
+  swapchain_hdr_requested = false;
   // The old swapchain must be destroyed externally.
   VkSwapchainKHR old_swapchain = swapchain;
   swapchain = nullptr;
@@ -1474,8 +1578,9 @@ bool VulkanPresenter::GuestOutputImage::Initialize() {
   image_create_info.arrayLayers = 1;
   image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
   image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-  image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+  image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                            VK_IMAGE_USAGE_STORAGE_BIT;
   image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_create_info.queueFamilyIndexCount = 0;
   image_create_info.pQueueFamilyIndices = nullptr;
@@ -1515,6 +1620,15 @@ bool VulkanPresenter::GuestOutputImage::Initialize() {
 }
 
 Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_drawers) {
+  // HDR selection changes both the swapchain format and its color-space
+  // contract. Reconnect immediately instead of only changing shader behavior
+  // while an incompatible swapchain remains alive.
+  if (paint_context_.swapchain_hdr_requested != REXCVAR_GET(vulkan_hdr)) {
+    REXLOG_INFO("VulkanPresenter: HDR setting changed to {}; recreating swapchain",
+                REXCVAR_GET(vulkan_hdr));
+    return PaintResult::kNotPresentedConnectionOutdated;
+  }
+
   // Begin the submission in place of the one not currently potentially used on
   // the GPU.
   uint64_t current_paint_submission_index =
@@ -1614,11 +1728,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
 
   bool swapchain_image_pass_begun = false;
 
-  GuestOutputProperties guest_output_properties;
+  GuestOutputProperties guest_output_properties = {};
   GuestOutputPaintConfig guest_output_paint_config;
   std::shared_ptr<GuestOutputImage> guest_output_image;
+  uint32_t guest_output_mailbox_index = UINT32_MAX;
+  size_t guest_output_effect_count = 0;
   {
-    uint32_t guest_output_mailbox_index;
     std::unique_lock<std::mutex> guest_output_consumer_lock(ConsumeGuestOutput(
         guest_output_mailbox_index, &guest_output_properties, &guest_output_paint_config));
     if (guest_output_mailbox_index != UINT32_MAX) {
@@ -1632,12 +1747,25 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
   }
 
   if (guest_output_image) {
+#if defined(REX_HAS_FIDELITYFX_FSR1)
+    if (paint_context_.swapchain_is_hdr &&
+        guest_output_paint_config.GetEffect() == GuestOutputPaintConfig::Effect::kFsr) {
+      static std::atomic<bool> logged_fsr1_hdr_fallback{false};
+      if (!logged_fsr1_hdr_fallback.exchange(true)) {
+        REXLOG_WARN(
+            "VulkanPresenter: FSR 1 expects normalized perceptual input; "
+            "using bilinear presentation for the extended-linear HDR swapchain");
+      }
+      guest_output_paint_config.SetEffect(GuestOutputPaintConfig::Effect::kBilinear);
+    }
+#endif
     VkExtent2D max_framebuffer_extent =
         util::GetMax2DFramebufferExtent(vulkan_device_->properties());
     GuestOutputPaintFlow guest_output_flow = GetGuestOutputPaintFlow(
         guest_output_properties, paint_context_.swapchain_extent.width,
         paint_context_.swapchain_extent.height, max_framebuffer_extent.width,
         max_framebuffer_extent.height, guest_output_paint_config);
+    guest_output_effect_count = guest_output_flow.effect_count;
     if (guest_output_flow.effect_count) {
       // Store the main target reference to the guest output image so it's not
       // destroyed while it's still potentially in use by main target painting
@@ -2013,7 +2141,7 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
           uint32_t effect_constants_size = 0;
           union {
             BilinearConstants bilinear;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
             CasSharpenConstants cas_sharpen;
             CasResampleConstants cas_resample;
             FsrEasuConstants fsr_easu;
@@ -2025,7 +2153,7 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
               effect_constants_size = sizeof(effect_constants.bilinear);
               effect_constants.bilinear.Initialize(guest_output_flow, i);
             } break;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
             case kGuestOutputPaintPipelineLayoutIndexCasSharpen: {
               effect_constants_size = sizeof(effect_constants.cas_sharpen);
               effect_constants.cas_sharpen.Initialize(guest_output_flow, i,
@@ -2228,9 +2356,121 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
   }
+
+  static uint64_t vulkan_paint_flow_count = 0;
+  static bool vulkan_paint_flow_have_previous = false;
+  static bool vulkan_paint_flow_last_guest_image = false;
+  static size_t vulkan_paint_flow_last_effect_count = 0;
+  static VkResult vulkan_paint_flow_last_acquire_result = VK_SUCCESS;
+  static VkResult vulkan_paint_flow_last_present_result = VK_SUCCESS;
+  static uint32_t vulkan_paint_flow_last_swapchain_width = 0;
+  static uint32_t vulkan_paint_flow_last_swapchain_height = 0;
+  ++vulkan_paint_flow_count;
+  bool has_guest_image = guest_output_image != nullptr;
+  bool vulkan_paint_state_changed =
+      !vulkan_paint_flow_have_previous ||
+      vulkan_paint_flow_last_guest_image != has_guest_image ||
+      vulkan_paint_flow_last_effect_count != guest_output_effect_count ||
+      vulkan_paint_flow_last_acquire_result != acquire_result ||
+      vulkan_paint_flow_last_present_result != present_result ||
+      vulkan_paint_flow_last_swapchain_width != paint_context_.swapchain_extent.width ||
+      vulkan_paint_flow_last_swapchain_height != paint_context_.swapchain_extent.height;
+  bool vulkan_paint_flow_milestone =
+      vulkan_paint_flow_count <= 8 || vulkan_paint_flow_count == 16 ||
+      vulkan_paint_flow_count == 32 || vulkan_paint_flow_count == 64 ||
+      vulkan_paint_flow_count == 128 || vulkan_paint_flow_count == 256 ||
+      vulkan_paint_flow_count == 512 || vulkan_paint_flow_count == 1024;
+  if (vulkan_paint_flow_milestone || vulkan_paint_state_changed) {
+    REXLOG_INFO(
+        "[VulkanPaintFlow] paint={} mailbox={} guest_image={} guest={}x{} display_aspect={}x{} "
+        "effects={} swapchain={}x{} image_index={} acquire={} present={}",
+        vulkan_paint_flow_count,
+        guest_output_mailbox_index == UINT32_MAX ? -1 : int32_t(guest_output_mailbox_index),
+        has_guest_image, guest_output_properties.frontbuffer_width,
+        guest_output_properties.frontbuffer_height,
+        guest_output_properties.display_aspect_ratio_x,
+        guest_output_properties.display_aspect_ratio_y, guest_output_effect_count,
+        paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height,
+        swapchain_image_index, int32_t(acquire_result), int32_t(present_result));
+  }
+
+  const bool guest_output_pixel_milestone =
+      vulkan_paint_flow_count == 128 || vulkan_paint_flow_count == 1024 ||
+      (vulkan_paint_flow_count >= 2048 && !(vulkan_paint_flow_count % 2048));
+  if (guest_output_pixel_milestone) {
+    RawImage captured_image;
+    if (CaptureGuestOutputImage(guest_output_image, captured_image)) {
+      uint64_t red_sum = 0;
+      uint64_t green_sum = 0;
+      uint64_t blue_sum = 0;
+      uint64_t rgb_pixels = 0;
+      uint64_t rgb_nonzero_pixels = 0;
+      for (size_t pixel_offset = 0; pixel_offset + 2 < captured_image.data.size();
+           pixel_offset += 4) {
+        uint8_t red = captured_image.data[pixel_offset];
+        uint8_t green = captured_image.data[pixel_offset + 1];
+        uint8_t blue = captured_image.data[pixel_offset + 2];
+        red_sum += red;
+        green_sum += green;
+        blue_sum += blue;
+        ++rgb_pixels;
+        rgb_nonzero_pixels += uint64_t(red != 0 || green != 0 || blue != 0);
+      }
+      REXLOG_INFO(
+          "[GuestOutputPixels] paint={} mailbox={} version={} capture=ok size={}x{} bytes={} "
+          "hash=0x{:016X} rgb_nonzero={}/{} verdict={} rgb_sum={}/{}/{}",
+          vulkan_paint_flow_count,
+          guest_output_mailbox_index == UINT32_MAX ? -1 : int32_t(guest_output_mailbox_index),
+          guest_output_mailbox_index == UINT32_MAX
+              ? UINT64_MAX
+              : guest_output_images_[guest_output_mailbox_index].version,
+          captured_image.width, captured_image.height,
+          captured_image.data.size(),
+          std::hash<std::string_view>{}(std::string_view(
+              reinterpret_cast<const char*>(captured_image.data.data()),
+              captured_image.data.size())),
+          rgb_nonzero_pixels, rgb_pixels,
+          rgb_nonzero_pixels ? "rgb-present" : "black",
+          red_sum, green_sum, blue_sum);
+      std::fprintf(
+          stderr,
+          "[GuestOutputPixels] paint=%llu size=%ux%u rgb_nonzero=%llu/%llu "
+          "verdict=%s rgb_sum=%llu/%llu/%llu\n",
+          static_cast<unsigned long long>(vulkan_paint_flow_count),
+          captured_image.width, captured_image.height,
+          static_cast<unsigned long long>(rgb_nonzero_pixels),
+          static_cast<unsigned long long>(rgb_pixels),
+          rgb_nonzero_pixels ? "rgb-present" : "black",
+          static_cast<unsigned long long>(red_sum),
+          static_cast<unsigned long long>(green_sum),
+          static_cast<unsigned long long>(blue_sum));
+      std::fflush(stderr);
+      std::string capture_path =
+          "/tmp/liberty_guest_output_" + std::to_string(vulkan_paint_flow_count) + ".rgba";
+      std::ofstream capture_file(capture_path, std::ios::binary);
+      capture_file.write(reinterpret_cast<const char*>(captured_image.data.data()),
+                         std::streamsize(captured_image.data.size()));
+      REXLOG_INFO("[GuestOutputPixels] paint={} raw={}", vulkan_paint_flow_count,
+                  capture_file ? capture_path : "write_failed");
+    } else {
+      REXLOG_INFO("[GuestOutputPixels] paint={} capture=failed", vulkan_paint_flow_count);
+    }
+  }
+  vulkan_paint_flow_have_previous = true;
+  vulkan_paint_flow_last_guest_image = has_guest_image;
+  vulkan_paint_flow_last_effect_count = guest_output_effect_count;
+  vulkan_paint_flow_last_acquire_result = acquire_result;
+  vulkan_paint_flow_last_present_result = present_result;
+  vulkan_paint_flow_last_swapchain_width = paint_context_.swapchain_extent.width;
+  vulkan_paint_flow_last_swapchain_height = paint_context_.swapchain_extent.height;
+
   switch (present_result) {
     case VK_SUCCESS:
-      return PaintResult::kPresented;
+      // VK_SUBOPTIMAL_KHR from acquisition has the same surface-compatibility
+      // meaning as it does from presentation. Preserve that signal even if the
+      // eventual queue present succeeds so the presenter can recover.
+      return acquire_result == VK_SUBOPTIMAL_KHR ? PaintResult::kPresentedSuboptimal
+                                                 : PaintResult::kPresented;
     case VK_SUBOPTIMAL_KHR:
       return PaintResult::kPresentedSuboptimal;
     case VK_ERROR_DEVICE_LOST:
@@ -2320,7 +2560,7 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
       case kGuestOutputPaintPipelineLayoutIndexBilinear:
         guest_output_paint_push_constant_range_ffx.size = sizeof(BilinearConstants);
         break;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case kGuestOutputPaintPipelineLayoutIndexCasSharpen:
         guest_output_paint_push_constant_range_ffx.size = sizeof(CasSharpenConstants);
         break;
@@ -2375,7 +2615,7 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
         shader_module_create_info.codeSize = sizeof(shaders::guest_output_bilinear_dither_ps);
         shader_module_create_info.pCode = shaders::guest_output_bilinear_dither_ps;
         break;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kCasSharpen:
         shader_module_create_info.codeSize = sizeof(shaders::guest_output_ffx_cas_sharpen_ps);
         shader_module_create_info.pCode = shaders::guest_output_ffx_cas_sharpen_ps;

@@ -68,7 +68,10 @@ class VulkanPresenter final : public Presenter {
   // invocation), to avoid recreation of dependent objects every frame.
   static constexpr size_t kMaxActiveGuestOutputImageVersions = kGuestOutputMailboxSize;
 
-  static constexpr VkFormat kGuestOutputFormat = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+  // Keep guest output in FP16 storage. HDR frames contain extended-linear sRGB;
+  // SDR frames contain the game's already encoded sRGB output so the ordinary
+  // presenter shaders preserve the game's original color values.
+  static constexpr VkFormat kGuestOutputFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
   // The guest output is expected to be acquired and released in this state by
   // the refresher. The exception is the first write to the current guest output
   // image - in this case, a barrier is only needed from
@@ -86,12 +89,16 @@ class VulkanPresenter final : public Presenter {
   class VulkanGuestOutputRefreshContext final : public GuestOutputRefreshContext {
    public:
     VulkanGuestOutputRefreshContext(bool& is_8bpc_out_ref, VkImage image, VkImageView image_view,
-                                    uint64_t image_version, bool image_ever_written_previously)
+                                    uint64_t image_version, bool image_ever_written_previously,
+                                    bool hdr_output, float hdr_headroom, float sdr_white_level)
         : GuestOutputRefreshContext(is_8bpc_out_ref),
           image_(image),
           image_view_(image_view),
           image_version_(image_version),
-          image_ever_written_previously_(image_ever_written_previously) {}
+          image_ever_written_previously_(image_ever_written_previously),
+          hdr_output_(hdr_output),
+          hdr_headroom_(hdr_headroom),
+          sdr_white_level_(sdr_white_level) {}
 
     // The format is kGuestOutputFormat.
     // Supports usage as a color attachment and as a sampled image, as well as
@@ -101,12 +108,21 @@ class VulkanPresenter final : public Presenter {
     uint64_t image_version() const { return image_version_; }
     // Whether a proper barrier must be done to acquire the image.
     bool image_ever_written_previously() const { return image_ever_written_previously_; }
+    // HDR output uses the extended-linear sRGB EDR swapchain color space. In
+    // that space, 1.0 is SDR white and hdr_headroom() is the current maximum
+    // displayable linear component relative to SDR white.
+    bool hdr_output() const { return hdr_output_; }
+    float hdr_headroom() const { return hdr_headroom_; }
+    float sdr_white_level() const { return sdr_white_level_; }
 
    private:
     VkImage image_;
     VkImageView image_view_;
     uint64_t image_version_;
     bool image_ever_written_previously_;
+    bool hdr_output_;
+    float hdr_headroom_;
+    float sdr_white_level_;
   };
 
   static std::unique_ptr<VulkanPresenter> Create(HostGpuLossCallback host_gpu_loss_callback,
@@ -192,6 +208,9 @@ class VulkanPresenter final : public Presenter {
     VkImageView view_ = VK_NULL_HANDLE;
   };
 
+  bool CaptureGuestOutputImage(const std::shared_ptr<GuestOutputImage>& guest_output_image,
+                               RawImage& image_out);
+
   struct GuestOutputImageInstance {
     // Refresher-side reference (painting has its own references for the purpose
     // of destruction only after painting is done on the GPU).
@@ -230,7 +249,7 @@ class VulkanPresenter final : public Presenter {
 
   enum GuestOutputPaintPipelineLayoutIndex : size_t {
     kGuestOutputPaintPipelineLayoutIndexBilinear,
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     kGuestOutputPaintPipelineLayoutIndexCasSharpen,
     kGuestOutputPaintPipelineLayoutIndexCasResample,
     kGuestOutputPaintPipelineLayoutIndexFsrEasu,
@@ -246,7 +265,7 @@ class VulkanPresenter final : public Presenter {
       case GuestOutputPaintEffect::kBilinear:
       case GuestOutputPaintEffect::kBilinearDither:
         return kGuestOutputPaintPipelineLayoutIndexBilinear;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kCasSharpen:
       case GuestOutputPaintEffect::kCasSharpenDither:
         return kGuestOutputPaintPipelineLayoutIndexCasSharpen;
@@ -351,8 +370,9 @@ class VulkanPresenter final : public Presenter {
     // be destroyed externally no matter what the result is.
     static VkSwapchainKHR CreateSwapchainForVulkanSurface(
         const VulkanDevice* vulkan_device, VkSurfaceKHR surface, uint32_t width, uint32_t height,
-        VkSwapchainKHR old_swapchain, uint32_t& present_queue_family_out,
-        VkFormat& image_format_out, VkExtent2D& image_extent_out, bool& is_fifo_out,
+        VkSwapchainKHR old_swapchain, bool hdr_requested, uint32_t& present_queue_family_out,
+        VkFormat& image_format_out, VkColorSpaceKHR& image_color_space_out,
+        VkExtent2D& image_extent_out, bool& is_fifo_out, bool& is_hdr_out,
         bool& ui_surface_unusable_out);
 
     // Destroys the swapchain and its derivatives, nulls `swapchain` and returns
@@ -414,6 +434,9 @@ class VulkanPresenter final : public Presenter {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkExtent2D swapchain_extent = {};
     bool swapchain_is_fifo = false;
+    VkColorSpaceKHR swapchain_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    bool swapchain_is_hdr = false;
+    bool swapchain_hdr_requested = false;
     std::vector<VkImage> swapchain_images;
     std::vector<SwapchainFramebuffer> swapchain_framebuffers;
   };

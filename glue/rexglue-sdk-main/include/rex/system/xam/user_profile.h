@@ -218,8 +218,10 @@ class UserProfile {
 
   uint64_t xuid() const { return xuid_; }
   std::string name() const { return name_; }
-  uint32_t signin_state() const { return 1; }
+  std::string storage_id() const;
+  uint32_t signin_state() const;
   uint32_t type() const { return 1 | 2; /* local | online profile? */ }
+  void SetIdentity(uint64_t xuid, std::string name);
 
   void set_kernel_state(KernelState* ks) { kernel_state_ = ks; }
 

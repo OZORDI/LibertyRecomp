@@ -75,14 +75,8 @@ std::filesystem::path GetExecutableFolder() {
 }
 
 std::filesystem::path GetUserFolder() {
-  // get preferred data home
-  char* home = std::getenv("XDG_DATA_HOME");
-  if (home) {
-    return std::string(home);
-  }
-
-  // if XDG_DATA_HOME not set, fallback to HOME directory
-  home = std::getenv("HOME");
+  // macOS application data belongs under ~/Library/Application Support.
+  char* home = std::getenv("HOME");
 
   // if HOME not set, fall back to this
   if (home == NULL) {
@@ -94,7 +88,7 @@ std::filesystem::path GetUserFolder() {
     home = pw->pw_dir;
   }
 
-  return std::filesystem::path(home) / ".local" / "share";
+  return std::filesystem::path(home) / "Library" / "Application Support";
 }
 
 FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {

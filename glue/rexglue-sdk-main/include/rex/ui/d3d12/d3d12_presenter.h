@@ -132,7 +132,7 @@ class D3D12Presenter final : public Presenter {
 
   enum GuestOutputPaintRootSignatureIndex : size_t {
     kGuestOutputPaintRootSignatureIndexBilinear,
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
     kGuestOutputPaintRootSignatureIndexCasSharpen,
     kGuestOutputPaintRootSignatureIndexCasResample,
     kGuestOutputPaintRootSignatureIndexFsrEasu,
@@ -148,7 +148,7 @@ class D3D12Presenter final : public Presenter {
       case GuestOutputPaintEffect::kBilinear:
       case GuestOutputPaintEffect::kBilinearDither:
         return kGuestOutputPaintRootSignatureIndexBilinear;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kCasSharpen:
       case GuestOutputPaintEffect::kCasSharpenDither:
         return kGuestOutputPaintRootSignatureIndexCasSharpen;

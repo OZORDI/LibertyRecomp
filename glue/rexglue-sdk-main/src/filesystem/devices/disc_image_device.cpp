@@ -12,6 +12,8 @@
 #include <rex/filesystem/devices/disc_image_device.h>
 #include <rex/filesystem/devices/disc_image_entry.h>
 
+#include <limits>
+
 #include <rex/literals.h>
 #include <rex/logging.h>
 #include <rex/math.h>
@@ -22,6 +24,27 @@ namespace rex::filesystem {
 using namespace rex::literals;
 
 const size_t kXESectorSize = 2_KiB;
+constexpr size_t kVolumeDescriptorSector = 32;
+constexpr size_t kVolumeDescriptorSize = 28;
+constexpr size_t kMagicSize = 20;
+constexpr size_t kDirectoryEntryAlignment = 4;
+constexpr size_t kDirectoryEntryHeaderSize = 14;
+constexpr size_t kMinimumRootDirectorySize = 13;
+constexpr size_t kMaximumRootDirectorySize = 32_MiB;
+constexpr size_t kMaximumDirectoryDepth = 1024;
+constexpr size_t kMaximumDirectoryEntries = 500000;
+
+bool CheckedSectorOffset(size_t game_offset, size_t sector, size_t& result) {
+  if (sector > (std::numeric_limits<size_t>::max() - game_offset) / kXESectorSize) {
+    return false;
+  }
+  result = game_offset + sector * kXESectorSize;
+  return true;
+}
+
+bool RangeWithin(size_t offset, size_t length, size_t size) {
+  return offset <= size && length <= size - offset;
+}
 
 DiscImageDevice::DiscImageDevice(const std::string_view mount_path,
                                  const std::filesystem::path& host_path)
@@ -78,7 +101,9 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
   bool magic_found = false;
   for (size_t n = 0; n < rex::countof(likely_offsets); n++) {
     state->game_offset = likely_offsets[n];
-    if (VerifyMagic(state, state->game_offset + (32 * kXESectorSize))) {
+    size_t descriptor_offset = 0;
+    if (CheckedSectorOffset(state->game_offset, kVolumeDescriptorSector, descriptor_offset) &&
+        VerifyMagic(state, descriptor_offset)) {
       magic_found = true;
       break;
     }
@@ -89,14 +114,18 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
   }
 
   // Read sector 32 to get FS state.
-  if (state->size < state->game_offset + (32 * kXESectorSize)) {
+  size_t descriptor_offset = 0;
+  if (!CheckedSectorOffset(state->game_offset, kVolumeDescriptorSector, descriptor_offset) ||
+      !RangeWithin(descriptor_offset, kVolumeDescriptorSize, state->size)) {
     return Error::kErrorReadError;
   }
-  uint8_t* fs_ptr = state->ptr + state->game_offset + (32 * kXESectorSize);
+  uint8_t* fs_ptr = state->ptr + descriptor_offset;
   state->root_sector = memory::load<uint32_t>(fs_ptr + 20);
   state->root_size = memory::load<uint32_t>(fs_ptr + 24);
-  state->root_offset = state->game_offset + (state->root_sector * kXESectorSize);
-  if (state->root_size < 13 || state->root_size > 32_MiB) {
+  if (state->root_size < kMinimumRootDirectorySize ||
+      state->root_size > kMaximumRootDirectorySize ||
+      !CheckedSectorOffset(state->game_offset, state->root_sector, state->root_offset) ||
+      !RangeWithin(state->root_offset, state->root_size, state->size)) {
     return Error::kErrorDamagedFile;
   }
 
@@ -109,12 +138,12 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
 }
 
 bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
-  if (offset >= state->size) {
+  if (!RangeWithin(offset, kMagicSize, state->size)) {
     return false;
   }
 
   // Simple check to see if the given offset contains the magic value.
-  return std::memcmp(state->ptr + offset, "MICROSOFT*XBOX*MEDIA", 20) == 0;
+  return std::memcmp(state->ptr + offset, "MICROSOFT*XBOX*MEDIA", kMagicSize) == 0;
 }
 
 DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
@@ -123,16 +152,36 @@ DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
   root_entry->attributes_ = kFileAttributeDirectory;
   root_entry_ = std::unique_ptr<Entry>(root_entry);
 
-  if (!ReadEntry(state, root_buffer, 0, root_entry)) {
-    return Error::kErrorOutOfMemory;
+  std::unordered_set<uint16_t> active_ordinals;
+  std::unordered_set<uint16_t> visited_ordinals;
+  if (!ReadEntry(state, root_buffer, state->root_size, 0, root_entry, active_ordinals,
+                 visited_ordinals, 0)) {
+    return Error::kErrorDamagedFile;
   }
 
   return Error::kSuccess;
 }
 
-bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
-                                DiscImageEntry* parent) {
-  const uint8_t* p = buffer + (entry_ordinal * 4);
+bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, size_t buffer_size,
+                                uint16_t entry_ordinal, DiscImageEntry* parent,
+                                std::unordered_set<uint16_t>& active_ordinals,
+                                std::unordered_set<uint16_t>& visited_ordinals, size_t depth) {
+  if (depth > kMaximumDirectoryDepth || state->visited_entries >= kMaximumDirectoryEntries ||
+      !active_ordinals.insert(entry_ordinal).second ||
+      !visited_ordinals.insert(entry_ordinal).second) {
+    return false;
+  }
+  ++state->visited_entries;
+
+  const size_t ordinal = entry_ordinal;
+  if (ordinal > std::numeric_limits<size_t>::max() / kDirectoryEntryAlignment) {
+    return false;
+  }
+  const size_t entry_offset = ordinal * kDirectoryEntryAlignment;
+  if (!RangeWithin(entry_offset, kDirectoryEntryHeaderSize, buffer_size)) {
+    return false;
+  }
+  const uint8_t* p = buffer + entry_offset;
 
   uint16_t node_l = memory::load<uint16_t>(p + 0);
   uint16_t node_r = memory::load<uint16_t>(p + 2);
@@ -140,9 +189,14 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
   size_t length = memory::load<uint32_t>(p + 8);
   uint8_t attributes = memory::load<uint8_t>(p + 12);
   uint8_t name_length = memory::load<uint8_t>(p + 13);
+  if (name_length == 0 ||
+      !RangeWithin(entry_offset, kDirectoryEntryHeaderSize + size_t(name_length), buffer_size)) {
+    return false;
+  }
   auto name_buffer = reinterpret_cast<const char*>(p + 14);
 
-  if (node_l && !ReadEntry(state, buffer, node_l, parent)) {
+  if (node_l && !ReadEntry(state, buffer, buffer_size, node_l, parent, active_ordinals,
+                           visited_ordinals, depth + 1)) {
     return false;
   }
 
@@ -163,20 +217,27 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
     entry->data_offset_ = 0;
     entry->data_size_ = 0;
     if (length) {
-      // Not a leaf - read in children.
-      if (state->size < state->game_offset + (sector * kXESectorSize)) {
-        // Out of bounds read.
+      size_t folder_offset = 0;
+      if (!CheckedSectorOffset(state->game_offset, sector, folder_offset) ||
+          !RangeWithin(folder_offset, length, state->size)) {
         return false;
       }
-      // Read child list.
-      uint8_t* folder_ptr = state->ptr + state->game_offset + (sector * kXESectorSize);
-      if (!ReadEntry(state, folder_ptr, 0, entry.get())) {
+      uint8_t* folder_ptr = state->ptr + folder_offset;
+      std::unordered_set<uint16_t> child_active_ordinals;
+      std::unordered_set<uint16_t> child_visited_ordinals;
+      if (!ReadEntry(state, folder_ptr, length, 0, entry.get(), child_active_ordinals,
+                     child_visited_ordinals, depth + 1)) {
         return false;
       }
     }
   } else {
     // File.
-    entry->data_offset_ = state->game_offset + (sector * kXESectorSize);
+    size_t file_offset = 0;
+    if (!CheckedSectorOffset(state->game_offset, sector, file_offset) ||
+        !RangeWithin(file_offset, length, state->size)) {
+      return false;
+    }
+    entry->data_offset_ = file_offset;
     entry->data_size_ = length;
     ++file_count_;
     total_file_size_ += length;
@@ -186,7 +247,9 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
   parent->children_.emplace_back(std::move(entry));
 
   // Read next file in the list.
-  if (node_r && !ReadEntry(state, buffer, node_r, parent)) {
+  active_ordinals.erase(entry_ordinal);
+  if (node_r && !ReadEntry(state, buffer, buffer_size, node_r, parent, active_ordinals,
+                           visited_ordinals, depth + 1)) {
     return false;
   }
 

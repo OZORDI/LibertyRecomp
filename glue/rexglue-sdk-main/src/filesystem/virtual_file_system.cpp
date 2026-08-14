@@ -73,13 +73,17 @@ bool VirtualFileSystem::UnregisterSymbolicLink(const std::string_view path) {
 }
 
 bool VirtualFileSystem::FindSymbolicLink(const std::string_view path, std::string& target) {
-  auto it = std::find_if(symlinks_.cbegin(), symlinks_.cend(), [&](const auto& s) {
-    return rex::string::utf8_starts_with_case(path, s.first);
-  });
-  if (it == symlinks_.cend()) {
+  auto best = symlinks_.cend();
+  for (auto it = symlinks_.cbegin(); it != symlinks_.cend(); ++it) {
+    if (rex::string::utf8_starts_with_case(path, it->first) &&
+        (best == symlinks_.cend() || it->first.size() > best->first.size())) {
+      best = it;
+    }
+  }
+  if (best == symlinks_.cend()) {
     return false;
   }
-  target = (*it).second;
+  target = best->second;
   return true;
 }
 
@@ -87,15 +91,19 @@ bool VirtualFileSystem::ResolveSymbolicLink(const std::string_view path, std::st
   result = path;
   bool was_resolved = false;
   while (true) {
-    auto it = std::find_if(symlinks_.cbegin(), symlinks_.cend(), [&](const auto& s) {
-      return rex::string::utf8_starts_with_case(result, s.first);
-    });
-    if (it == symlinks_.cend()) {
+    auto best = symlinks_.cend();
+    for (auto it = symlinks_.cbegin(); it != symlinks_.cend(); ++it) {
+      if (rex::string::utf8_starts_with_case(result, it->first) &&
+          (best == symlinks_.cend() || it->first.size() > best->first.size())) {
+        best = it;
+      }
+    }
+    if (best == symlinks_.cend()) {
       break;
     }
     // Found symlink!
-    auto target_path = (*it).second;
-    auto relative_path = result.substr((*it).first.size());
+    auto target_path = best->second;
+    auto relative_path = result.substr(best->first.size());
     result = target_path + relative_path;
     was_resolved = true;
   }
@@ -215,18 +223,30 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view p
   Entry* parent_entry = nullptr;
   Entry* entry = nullptr;
 
-  auto base_path = rex::string::utf8_find_base_guest_path(path);
-  if (!base_path.empty()) {
-    parent_entry = !root_entry ? ResolvePath(base_path) : root_entry->ResolvePath(base_path);
-    if (!parent_entry) {
-      *out_action = FileAction::kDoesNotExist;
-      return X_STATUS_NO_SUCH_FILE;
+  // Resolve absolute paths as a whole before splitting them into a parent and
+  // child. This preserves file-level symbolic links; resolving only the parent
+  // would bypass an override such as game:\xbox360.rpf.
+  if (!root_entry) {
+    entry = ResolvePath(path);
+    if (entry) {
+      parent_entry = entry->parent();
     }
+  }
 
-    auto file_name = rex::string::utf8_find_name_from_guest_path(path);
-    entry = parent_entry->GetChild(file_name);
-  } else {
-    entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
+  if (!entry) {
+    auto base_path = rex::string::utf8_find_base_guest_path(path);
+    if (!base_path.empty()) {
+      parent_entry = !root_entry ? ResolvePath(base_path) : root_entry->ResolvePath(base_path);
+      if (!parent_entry) {
+        *out_action = FileAction::kDoesNotExist;
+        return X_STATUS_NO_SUCH_FILE;
+      }
+
+      auto file_name = rex::string::utf8_find_name_from_guest_path(path);
+      entry = parent_entry->GetChild(file_name);
+    } else {
+      entry = root_entry ? root_entry->GetChild(path) : nullptr;
+    }
   }
 
   if (entry) {

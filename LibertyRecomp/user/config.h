@@ -292,9 +292,17 @@ enum class EPlayerCharacter : uint32_t
 
 enum class EMultiplayerBackend : uint32_t
 {
-    Community,  // Default - uses community-hosted session tracker
-    Firebase,   // Self-hosted Firebase for private communities
-    LAN         // LAN only - no internet matchmaking
+    Community,  // Reserved until the authenticated community service is implemented
+    Firebase,   // Reserved; deliberately disabled during the LAN-first milestone
+    LAN,        // LAN only - no internet matchmaking
+    Offline     // No compatibility services; single-player remains unchanged
+};
+
+enum class EMultiplayerRelayPolicy : uint32_t
+{
+    Auto,
+    DirectOnly,
+    RelayOnly
 };
 
 template<typename T, bool isHidden = false>

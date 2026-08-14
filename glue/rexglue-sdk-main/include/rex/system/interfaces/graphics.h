@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 
@@ -69,6 +70,32 @@ class IGraphicsSystem {
   virtual void EnableReadPointerWriteBack(uint32_t ptr, uint32_t block_size_log2) {
     (void)ptr;
     (void)block_size_log2;
+  }
+
+  // Optional synchronous bridge for title-specific native renderers. The
+  // caller owns the command storage only for the duration of this call. A
+  // renderer accepting a command must copy every value needed by its worker.
+  virtual uint32_t GetTitleCommandAbi(uint32_t title_id) const {
+    (void)title_id;
+    return 0;
+  }
+  virtual bool SubmitTitleCommand(uint32_t title_id, uint32_t abi_version, const void* command,
+                                  size_t command_size) {
+    (void)title_id;
+    (void)abi_version;
+    (void)command;
+    (void)command_size;
+    return false;
+  }
+  virtual bool ExecuteTitleCommand(uint32_t title_id, uint32_t abi_version, const void* command,
+                                   size_t command_size, void* result, size_t result_size) {
+    (void)title_id;
+    (void)abi_version;
+    (void)command;
+    (void)command_size;
+    (void)result;
+    (void)result_size;
+    return false;
   }
 
   // Persistent shader/pipeline storage under the cache root. Default: none.

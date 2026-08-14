@@ -2288,6 +2288,60 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
   vertex_buffers_in_sync_[0] = 0;
   vertex_buffers_in_sync_[1] = 0;
 
+  constexpr uint8_t kFrameFlowOutcomePlaceholderSkipped = 1;
+  constexpr uint8_t kFrameFlowOutcomeNoSwapSource = 2;
+  constexpr uint8_t kFrameFlowOutcomePublished = 3;
+  constexpr uint8_t kFrameFlowOutcomeRefreshFailed = 4;
+  ++frame_flow_swap_count_;
+  const bool frame_flow_milestone =
+      frame_flow_swap_count_ <= 8 || frame_flow_swap_count_ == 16 ||
+      frame_flow_swap_count_ == 32 || frame_flow_swap_count_ == 64 ||
+      frame_flow_swap_count_ == 128 || frame_flow_swap_count_ == 256 ||
+      frame_flow_swap_count_ == 512 || frame_flow_swap_count_ == 1024;
+  auto should_log_frame_flow = [this, frontbuffer_width, frontbuffer_height,
+                                frame_flow_milestone](uint8_t outcome) {
+    return frame_flow_milestone || !frame_flow_have_previous_swap_ ||
+           frame_flow_last_outcome_ != outcome ||
+           frame_flow_last_packet_width_ != frontbuffer_width ||
+           frame_flow_last_packet_height_ != frontbuffer_height;
+  };
+  auto finish_frame_flow = [this, frontbuffer_width, frontbuffer_height](uint8_t outcome) {
+    frame_flow_have_previous_swap_ = true;
+    frame_flow_last_outcome_ = outcome;
+    frame_flow_last_packet_width_ = frontbuffer_width;
+    frame_flow_last_packet_height_ = frontbuffer_height;
+    frame_flow_draw_calls_ = 0;
+    frame_flow_draw_submitted_ = 0;
+    frame_flow_draw_placeholders_ = 0;
+    frame_flow_rasterizing_draws_ = 0;
+    frame_flow_color_draws_ = 0;
+    std::fill(std::begin(frame_flow_color_target_draws_),
+              std::end(frame_flow_color_target_draws_), 0);
+    frame_flow_depth_only_draws_ = 0;
+    frame_flow_textured_draws_ = 0;
+    frame_flow_no_effect_draws_ = 0;
+    frame_flow_converted_index_draws_ = 0;
+    frame_flow_strip_restart_draws_ = 0;
+    frame_flow_copy_calls_ = 0;
+    frame_flow_copy_successes_ = 0;
+    frame_flow_copy_failures_ = 0;
+    frame_flow_resolve_direct_attempts_ = 0;
+    frame_flow_resolve_direct_successes_ = 0;
+    frame_flow_resolve_direct_fallbacks_ = 0;
+    frame_flow_resolve_dump_calls_ = 0;
+    frame_flow_resolve_dump_empty_ = 0;
+    frame_flow_resolve_dump_successes_ = 0;
+    frame_flow_resolve_dump_failures_ = 0;
+    frame_flow_resolve_dump_rectangles_ = 0;
+    frame_flow_resolve_dump_dispatches_ = 0;
+    frame_flow_resolve_address_ = 0;
+    frame_flow_resolve_length_ = 0;
+    frame_flow_resolve_source_ = 0;
+    frame_flow_resolve_source_base_ = 0;
+    frame_flow_resolve_source_format_ = 0;
+    frame_flow_resolve_dest_format_ = 0;
+  };
+
   if (!graphics_system_)
     return;
   ui::Presenter* presenter = graphics_system_->presenter();
@@ -2306,6 +2360,32 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
                                             REXCVAR_GET(vulkan_async_skip_incomplete_frames) &&
                                             frame_used_async_placeholder_pipeline_;
   if (skip_present_due_async_placeholder) {
+    if (should_log_frame_flow(kFrameFlowOutcomePlaceholderSkipped)) {
+      REXGPU_INFO(
+          "[FrameFlow] swap={} outcome=placeholder_skip frame={} fb=0x{:08X} packet={}x{} "
+          "draws={} submitted={} placeholders={} raster={} color={} depth_only={} textured={} "
+          "rt_draws={}/{}/{}/{} no_effect={} converted={} strip_restart={} copies={} "
+          "copy_ok={}/{} resolve=0x{:08X}+0x{:X} resolve_src={}@0x{:X} "
+          "resolve_fmt={}->{} direct={}/{}/{} dump={}/{}/{}/{} dump_work={}/{} "
+          "pipelines_creating={}",
+          frame_flow_swap_count_, frame_current_, frontbuffer_ptr, frontbuffer_width,
+          frontbuffer_height, frame_flow_draw_calls_, frame_flow_draw_submitted_,
+          frame_flow_draw_placeholders_, frame_flow_rasterizing_draws_, frame_flow_color_draws_,
+          frame_flow_depth_only_draws_, frame_flow_textured_draws_,
+          frame_flow_color_target_draws_[0], frame_flow_color_target_draws_[1],
+          frame_flow_color_target_draws_[2], frame_flow_color_target_draws_[3],
+          frame_flow_no_effect_draws_,
+          frame_flow_converted_index_draws_, frame_flow_strip_restart_draws_,
+          frame_flow_copy_calls_, frame_flow_copy_successes_, frame_flow_copy_failures_,
+          frame_flow_resolve_address_, frame_flow_resolve_length_, frame_flow_resolve_source_,
+          frame_flow_resolve_source_base_, frame_flow_resolve_source_format_,
+          frame_flow_resolve_dest_format_, frame_flow_resolve_direct_attempts_,
+          frame_flow_resolve_direct_successes_, frame_flow_resolve_direct_fallbacks_,
+          frame_flow_resolve_dump_calls_, frame_flow_resolve_dump_empty_,
+          frame_flow_resolve_dump_successes_, frame_flow_resolve_dump_failures_,
+          frame_flow_resolve_dump_rectangles_, frame_flow_resolve_dump_dispatches_,
+          pipeline_cache_->IsCreatingPipelines());
+    }
     static bool skipped_incomplete_frame_logged = false;
     if (!skipped_incomplete_frame_logged) {
       skipped_incomplete_frame_logged = true;
@@ -2313,6 +2393,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
           "Skipping Vulkan frame presentation due to async placeholder draw "
           "usage in this frame");
     }
+    finish_frame_flow(kFrameFlowOutcomePlaceholderSkipped);
     EndSubmission(true);
     return;
   }
@@ -2328,7 +2409,49 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
   VkImageView swap_texture_view = texture_cache_->RequestSwapTexture(
       frontbuffer_width_scaled, frontbuffer_height_scaled, frontbuffer_format,
       &frontbuffer_width_unscaled, &frontbuffer_height_unscaled, &swap_source_needs_rb_swap);
+  if (frame_flow_swap_count_ == 128 || frame_flow_swap_count_ == 1024 ||
+      frame_flow_swap_count_ == 2048) {
+    xenos::xe_gpu_texture_fetch_t fetch = register_file_->GetTextureFetch(0);
+    uint32_t fetch_base_page = fetch.base_address;
+    uint32_t fetch_width = fetch.size_2d.width + 1;
+    uint32_t fetch_height = fetch.size_2d.height + 1;
+    uint32_t fetch_format = uint32_t(fetch.format);
+    uint32_t fetch_type = uint32_t(fetch.type);
+    REXGPU_INFO(
+        "[SwapSource] swap={} packet_fb=0x{:08X} fetch_base_page=0x{:05X} "
+        "fetch_size={}x{} fetch_format={} fetch_type={} view={:p}",
+        frame_flow_swap_count_, frontbuffer_ptr, fetch_base_page, fetch_width, fetch_height,
+        fetch_format, fetch_type,
+        static_cast<void*>(swap_texture_view));
+  }
   if (swap_texture_view == VK_NULL_HANDLE) {
+    if (should_log_frame_flow(kFrameFlowOutcomeNoSwapSource)) {
+      REXGPU_INFO(
+          "[FrameFlow] swap={} outcome=no_swap_source frame={} fb=0x{:08X} packet={}x{} "
+          "draws={} submitted={} placeholders={} raster={} color={} depth_only={} textured={} "
+          "rt_draws={}/{}/{}/{} no_effect={} converted={} strip_restart={} copies={} "
+          "copy_ok={}/{} resolve=0x{:08X}+0x{:X} resolve_src={}@0x{:X} "
+          "resolve_fmt={}->{} direct={}/{}/{} dump={}/{}/{}/{} dump_work={}/{} "
+          "pipelines_creating={}",
+          frame_flow_swap_count_, frame_current_, frontbuffer_ptr, frontbuffer_width,
+          frontbuffer_height, frame_flow_draw_calls_, frame_flow_draw_submitted_,
+          frame_flow_draw_placeholders_, frame_flow_rasterizing_draws_, frame_flow_color_draws_,
+          frame_flow_depth_only_draws_, frame_flow_textured_draws_,
+          frame_flow_color_target_draws_[0], frame_flow_color_target_draws_[1],
+          frame_flow_color_target_draws_[2], frame_flow_color_target_draws_[3],
+          frame_flow_no_effect_draws_,
+          frame_flow_converted_index_draws_, frame_flow_strip_restart_draws_,
+          frame_flow_copy_calls_, frame_flow_copy_successes_, frame_flow_copy_failures_,
+          frame_flow_resolve_address_, frame_flow_resolve_length_, frame_flow_resolve_source_,
+          frame_flow_resolve_source_base_, frame_flow_resolve_source_format_,
+          frame_flow_resolve_dest_format_, frame_flow_resolve_direct_attempts_,
+          frame_flow_resolve_direct_successes_, frame_flow_resolve_direct_fallbacks_,
+          frame_flow_resolve_dump_calls_, frame_flow_resolve_dump_empty_,
+          frame_flow_resolve_dump_successes_, frame_flow_resolve_dump_failures_,
+          frame_flow_resolve_dump_rectangles_, frame_flow_resolve_dump_dispatches_,
+          pipeline_cache_->IsCreatingPipelines());
+    }
+    finish_frame_flow(kFrameFlowOutcomeNoSwapSource);
     REXGPU_ERROR("XELOG_GPU PRESENT: swap_texture_view=NULL");
     return;
   }
@@ -2421,7 +2544,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
   uint32_t display_width = std::max(uint32_t(1), uint32_t(video_mode.display_width));
   uint32_t display_height = std::max(uint32_t(1), uint32_t(video_mode.display_height));
 
-  presenter->RefreshGuestOutput(
+  bool guest_output_refreshed = presenter->RefreshGuestOutput(
       guest_output_width, guest_output_height, display_width, display_height,
       [this, guest_output_width, guest_output_height, frontbuffer_format, swap_texture_view,
        swap_post_effect,
@@ -2525,14 +2648,34 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
           }
         }
         bool use_compute_gamma = swap_apply_gamma_compute_pipeline != VK_NULL_HANDLE;
+        uint32_t& gamma_ramp_frame_index_ref = use_pwl_gamma_ramp
+                                                   ? gamma_ramp_pwl_current_frame_
+                                                   : gamma_ramp_256_entry_table_current_frame_;
+
+        if (frame_flow_swap_count_ == 128 || frame_flow_swap_count_ == 1024 ||
+            frame_flow_swap_count_ == 2048) {
+          const reg::DC_LUT_30_COLOR* gamma_table = gamma_ramp_256_entry_table();
+          const void* gamma_data = use_pwl_gamma_ramp
+                                       ? static_cast<const void*>(gamma_ramp_pwl_rgb())
+                                       : static_cast<const void*>(gamma_table);
+          size_t gamma_data_size = use_pwl_gamma_ramp ? size_t(1536) : size_t(1024);
+          uint64_t gamma_hash = std::hash<std::string_view>{}(std::string_view(
+              static_cast<const char*>(gamma_data), gamma_data_size));
+          REXGPU_INFO(
+              "[SwapGamma] swap={} format={} mode={} path={} fxaa={} rb_swap={} "
+              "ramp_frame={} hash=0x{:016X} table={:08X}/{:08X}/{:08X}/{:08X}/{:08X}",
+              frame_flow_swap_count_, static_cast<uint32_t>(frontbuffer_format),
+              use_pwl_gamma_ramp ? "pwl" : "table",
+              use_compute_gamma ? "compute" : "graphics", use_fxaa,
+              swap_source_requires_compute_rb_swap, gamma_ramp_frame_index_ref, gamma_hash,
+              gamma_table[0].value, gamma_table[64].value, gamma_table[128].value,
+              gamma_table[192].value, gamma_table[255].value);
+        }
 
         // TODO(Triang3l): FXAA can result in more than 8 bits of precision.
         context.SetIs8bpc(!use_pwl_gamma_ramp && !use_fxaa);
 
         // Update the gamma ramp if it's out of date.
-        uint32_t& gamma_ramp_frame_index_ref = use_pwl_gamma_ramp
-                                                   ? gamma_ramp_pwl_current_frame_
-                                                   : gamma_ramp_256_entry_table_current_frame_;
         if (gamma_ramp_frame_index_ref == UINT32_MAX) {
           constexpr uint32_t kGammaRampSize256EntryTable = sizeof(uint32_t) * 256;
           constexpr uint32_t kGammaRampSizePWL = sizeof(uint16_t) * 2 * 3 * 128;
@@ -2936,6 +3079,40 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
         EndSubmission(true);
         return true;
       });
+
+  uint8_t frame_flow_outcome =
+      guest_output_refreshed ? kFrameFlowOutcomePublished : kFrameFlowOutcomeRefreshFailed;
+  if (should_log_frame_flow(frame_flow_outcome)) {
+    REXGPU_INFO(
+        "[FrameFlow] swap={} outcome={} frame={} fb=0x{:08X} packet={}x{} source={}x{} "
+        "source_unscaled={}x{} output={}x{} format={} draws={} submitted={} "
+        "placeholders={} raster={} color={} depth_only={} textured={} no_effect={} "
+        "rt_draws={}/{}/{}/{} converted={} strip_restart={} copies={} copy_ok={}/{} "
+        "resolve=0x{:08X}+0x{:X} resolve_src={}@0x{:X} resolve_fmt={}->{} "
+        "direct={}/{}/{} dump={}/{}/{}/{} dump_work={}/{} pipelines_creating={} refresh={}",
+        frame_flow_swap_count_, guest_output_refreshed ? "published" : "refresh_failed",
+        frame_current_, frontbuffer_ptr, frontbuffer_width, frontbuffer_height,
+        frontbuffer_width_scaled, frontbuffer_height_scaled, frontbuffer_width_unscaled,
+        frontbuffer_height_unscaled, guest_output_width, guest_output_height,
+        static_cast<uint32_t>(frontbuffer_format), frame_flow_draw_calls_,
+        frame_flow_draw_submitted_, frame_flow_draw_placeholders_,
+        frame_flow_rasterizing_draws_, frame_flow_color_draws_, frame_flow_depth_only_draws_,
+        frame_flow_textured_draws_, frame_flow_no_effect_draws_,
+        frame_flow_color_target_draws_[0], frame_flow_color_target_draws_[1],
+        frame_flow_color_target_draws_[2], frame_flow_color_target_draws_[3],
+        frame_flow_converted_index_draws_, frame_flow_strip_restart_draws_,
+        frame_flow_copy_calls_, frame_flow_copy_successes_, frame_flow_copy_failures_,
+        frame_flow_resolve_address_, frame_flow_resolve_length_,
+        frame_flow_resolve_source_, frame_flow_resolve_source_base_,
+        frame_flow_resolve_source_format_, frame_flow_resolve_dest_format_,
+        frame_flow_resolve_direct_attempts_, frame_flow_resolve_direct_successes_,
+        frame_flow_resolve_direct_fallbacks_, frame_flow_resolve_dump_calls_,
+        frame_flow_resolve_dump_empty_, frame_flow_resolve_dump_successes_,
+        frame_flow_resolve_dump_failures_, frame_flow_resolve_dump_rectangles_,
+        frame_flow_resolve_dump_dispatches_, pipeline_cache_->IsCreatingPipelines(),
+        guest_output_refreshed);
+  }
+  finish_frame_flow(frame_flow_outcome);
 
   // End the frame even if did not present for any reason (the image refresher
   // was not called), to prevent leaking per-frame resources.
@@ -3607,6 +3784,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 
+  ++frame_flow_draw_calls_;
   const RegisterFile& regs = *register_file_;
   (void)index_buffer_info;
   auto draw_fail = [&](const char* stage) {
@@ -3626,7 +3804,14 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   xenos::EdramMode edram_mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
   if (edram_mode == xenos::EdramMode::kCopy) {
     // Special copy handling.
-    return IssueCopy();
+    ++frame_flow_copy_calls_;
+    bool copy_succeeded = IssueCopy();
+    if (copy_succeeded) {
+      ++frame_flow_copy_successes_;
+    } else {
+      ++frame_flow_copy_failures_;
+    }
+    return copy_succeeded;
   }
 
   bool surface_pitch_is_zero = regs.Get<reg::RB_SURFACE_INFO>().surface_pitch == 0;
@@ -3659,6 +3844,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   if (surface_pitch_is_zero && is_rasterization_done) {
     // Doesn't actually draw.
     // Unlikely that zero would even really be legal though.
+    ++frame_flow_no_effect_draws_;
     return true;
   }
   VulkanShader* pixel_shader = nullptr;
@@ -3679,6 +3865,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
     // cache.
     if (!memexport_used_vertex) {
       // This draw has no effect.
+      ++frame_flow_no_effect_draws_;
       return true;
     }
   }
@@ -3841,6 +4028,27 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   uint32_t normalized_color_mask =
       pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
                    : 0;
+  if (is_rasterization_done) {
+    ++frame_flow_rasterizing_draws_;
+    if (normalized_color_mask) {
+      ++frame_flow_color_draws_;
+      frame_flow_color_target_draws_[0] += uint64_t(bool(normalized_color_mask & 0x000F));
+      frame_flow_color_target_draws_[1] += uint64_t(bool(normalized_color_mask & 0x00F0));
+      frame_flow_color_target_draws_[2] += uint64_t(bool(normalized_color_mask & 0x0F00));
+      frame_flow_color_target_draws_[3] += uint64_t(bool(normalized_color_mask & 0xF000));
+    } else {
+      ++frame_flow_depth_only_draws_;
+    }
+  }
+  if (primitive_processing_result.index_buffer_type ==
+      PrimitiveProcessor::ProcessedIndexBufferType::kHostConverted) {
+    ++frame_flow_converted_index_draws_;
+  }
+  if (primitive_processing_result.host_primitive_reset_enabled &&
+      (primitive_processing_result.host_primitive_type == xenos::PrimitiveType::kLineStrip ||
+       primitive_processing_result.host_primitive_type == xenos::PrimitiveType::kTriangleStrip)) {
+    ++frame_flow_strip_restart_draws_;
+  }
 
   // Update the textures before most other work in the submission because
   // samplers depend on this (and in case of sampler overflow in a submission,
@@ -3848,6 +4056,9 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   uint32_t used_texture_mask =
       vertex_shader->GetUsedTextureMaskAfterTranslation() |
       (pixel_shader != nullptr ? pixel_shader->GetUsedTextureMaskAfterTranslation() : 0);
+  if (used_texture_mask) {
+    ++frame_flow_textured_draws_;
+  }
   texture_cache_->RequestTextures(used_texture_mask);
 
   const VulkanPipelineCache::PipelineLayoutProvider* pipeline_layout_provider;
@@ -3876,6 +4087,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
                                                 &pipeline_is_placeholder);
   if (REXCVAR_GET(async_shader_compilation) && pipeline_is_placeholder) {
     frame_used_async_placeholder_pipeline_ = true;
+    ++frame_flow_draw_placeholders_;
     return true;
   }
   if (pipeline == VK_NULL_HANDLE || pipeline_layout_provider == nullptr) {
@@ -4129,6 +4341,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
       render_target_cache_->last_update_framebuffer());
 
   // Draw.
+  ++frame_flow_draw_submitted_;
   if (primitive_processing_result.index_buffer_type ==
           PrimitiveProcessor::ProcessedIndexBufferType::kNone ||
       shader_32bit_index_dma) {
@@ -4399,18 +4612,70 @@ bool VulkanCommandProcessor::IssueCopy() {
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 
+  frame_flow_resolve_address_ = 0;
+  frame_flow_resolve_length_ = 0;
+  auto rb_copy_control = register_file_->Get<reg::RB_COPY_CONTROL>();
+  frame_flow_resolve_source_ = rb_copy_control.copy_src_select;
+  if (rb_copy_control.copy_src_select < xenos::kMaxColorRenderTargets) {
+    auto color_info = register_file_->Get<reg::RB_COLOR_INFO>(
+        reg::RB_COLOR_INFO::rt_register_indices[rb_copy_control.copy_src_select]);
+    frame_flow_resolve_source_base_ = color_info.color_base;
+    frame_flow_resolve_source_format_ = uint32_t(color_info.color_format);
+  } else {
+    auto depth_info = register_file_->Get<reg::RB_DEPTH_INFO>();
+    frame_flow_resolve_source_base_ = depth_info.depth_base;
+    frame_flow_resolve_source_format_ = uint32_t(depth_info.depth_format);
+  }
+  frame_flow_resolve_dest_format_ =
+      uint32_t(register_file_->Get<reg::RB_COPY_DEST_INFO>().copy_dest_format);
   if (!BeginSubmission(true)) {
     return false;
   }
 
+  VulkanRenderTargetCache::ResolveTelemetry resolve_telemetry_before =
+      render_target_cache_->GetResolveTelemetry();
   ReadbackResolveMode readback_mode = GetReadbackResolveMode(REXCVAR_GET(vulkan_readback_resolve));
+  bool resolve_succeeded;
   if (readback_mode == ReadbackResolveMode::kDisabled) {
     uint32_t written_address, written_length;
-    return render_target_cache_->Resolve(*memory_, *shared_memory_, *texture_cache_,
-                                         written_address, written_length);
+    resolve_succeeded = render_target_cache_->Resolve(
+        *memory_, *shared_memory_, *texture_cache_, written_address, written_length);
+    frame_flow_resolve_address_ = written_address;
+    frame_flow_resolve_length_ = written_length;
+  } else {
+    resolve_succeeded = IssueCopy_ReadbackResolvePath();
   }
 
-  return IssueCopy_ReadbackResolvePath();
+  VulkanRenderTargetCache::ResolveTelemetry resolve_telemetry_after =
+      render_target_cache_->GetResolveTelemetry();
+  frame_flow_resolve_direct_attempts_ +=
+      resolve_telemetry_after.direct_attempts - resolve_telemetry_before.direct_attempts;
+  frame_flow_resolve_direct_successes_ +=
+      resolve_telemetry_after.direct_successes - resolve_telemetry_before.direct_successes;
+  frame_flow_resolve_direct_fallbacks_ +=
+      resolve_telemetry_after.direct_fallbacks - resolve_telemetry_before.direct_fallbacks;
+  frame_flow_resolve_dump_calls_ +=
+      resolve_telemetry_after.dump_calls - resolve_telemetry_before.dump_calls;
+  frame_flow_resolve_dump_empty_ +=
+      resolve_telemetry_after.dump_empty - resolve_telemetry_before.dump_empty;
+  frame_flow_resolve_dump_successes_ +=
+      resolve_telemetry_after.dump_successes - resolve_telemetry_before.dump_successes;
+  frame_flow_resolve_dump_failures_ +=
+      resolve_telemetry_after.dump_failures - resolve_telemetry_before.dump_failures;
+  frame_flow_resolve_dump_rectangles_ +=
+      resolve_telemetry_after.dump_rectangles - resolve_telemetry_before.dump_rectangles;
+  frame_flow_resolve_dump_dispatches_ +=
+      resolve_telemetry_after.dump_dispatches - resolve_telemetry_before.dump_dispatches;
+  return resolve_succeeded;
+}
+
+bool VulkanCommandProcessor::GetCurrentResolveInfo(
+    draw_util::ResolveInfo& resolve_info_out) {
+  return draw_util::GetResolveInfo(
+      *register_file_, *memory_, trace_writer_, texture_cache_->draw_resolution_scale_x(),
+      texture_cache_->draw_resolution_scale_y(),
+      render_target_cache_->IsFixedRG16TruncatedToMinus1To1(),
+      render_target_cache_->IsFixedRGBA16TruncatedToMinus1To1(), resolve_info_out);
 }
 
 bool VulkanCommandProcessor::IssueCopy_ReadbackResolvePath() {
@@ -4423,6 +4688,8 @@ bool VulkanCommandProcessor::IssueCopy_ReadbackResolvePath() {
                                      written_length)) {
     return false;
   }
+  frame_flow_resolve_address_ = written_address;
+  frame_flow_resolve_length_ = written_length;
 
   if (!written_length) {
     return true;

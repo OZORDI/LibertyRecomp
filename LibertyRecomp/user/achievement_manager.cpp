@@ -1,16 +1,7 @@
 #include "achievement_manager.h"
-#include <rex/platform.h>
 #include <os/logger.h>
 #include <ui/achievement_overlay.h>
 #include <user/config.h>
-
-#ifdef LIBERTY_RECOMP_GAMECENTER
-#include <os/gamecenter/achievement_bridge_gc.h>
-#endif
-
-#if REX_PLATFORM_ANDROID
-#include <os/android/achievement_bridge_android.h>
-#endif
 
 #define NUM_RECORDS sizeof(AchievementManager::Data.Records) / sizeof(AchievementData::AchRecord)
 
@@ -74,11 +65,6 @@ void AchievementManager::Unlock(uint16_t id)
 
     if (Config::AchievementNotifications)
         AchievementOverlay::Open(id);
-
-#if REX_PLATFORM_ANDROID
-    // Mirror the Xbox unlock into Google Play Games.
-    LibertyAndroidOnXboxAchievementUnlocked(static_cast<uint32_t>(id));
-#endif
 }
 
 void AchievementManager::UnlockAll()
@@ -102,9 +88,6 @@ void AchievementManager::Reset()
 
 void AchievementManager::Load()
 {
-#ifdef LIBERTY_RECOMP_GAMECENTER
-    LibertyGCInit();  // authenticate GKLocalPlayer (dispatch_once guarded)
-#endif
     AchievementManager::Reset();
 
     Status = EAchStatus::Success;

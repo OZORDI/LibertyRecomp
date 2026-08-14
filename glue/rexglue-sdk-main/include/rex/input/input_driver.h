@@ -14,6 +14,7 @@
 #include <functional>
 
 #include <rex/input/input.h>
+#include <rex/input/motion.h>
 #include <rex/kernel.h>
 #include <rex/ui/window.h>
 
@@ -37,6 +38,12 @@ class InputDriver {
   virtual X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) = 0;
   virtual X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                                 X_INPUT_KEYSTROKE* out_keystroke) = 0;
+
+  // Motion is a host-only extension. Drivers without sensors remain source
+  // compatible and simply report no motion state.
+  virtual bool TryGetMotionState(uint32_t /*user_index*/, MotionState* /*out_state*/) {
+    return false;
+  }
 
   virtual void OnWindowAvailable(rex::ui::Window* /*window*/) {}
 

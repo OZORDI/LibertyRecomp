@@ -10,6 +10,8 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <cstdint>
+
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/app_manager.h>
 
@@ -17,6 +19,10 @@ namespace rex {
 namespace kernel {
 namespace xam {
 namespace apps {
+
+using AchievementUnlockCallback = void (*)(uint32_t xbox_id);
+
+void SetAchievementUnlockCallback(AchievementUnlockCallback callback);
 
 class XgiApp : public system::xam::App {
  public:

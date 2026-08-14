@@ -159,6 +159,25 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
   return any_connected ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
 }
 
+bool InputSystem::TryGetMotionState(uint32_t user_index, MotionState* out_state) {
+  if (!out_state) {
+    return false;
+  }
+
+  // Motion samples from different physical controllers are not composable.
+  // Select the first sensor-capable driver instead of merging vectors as if
+  // they were ordinary XInput axes.
+  for (auto& driver : drivers_) {
+    MotionState state = {};
+    if (driver->TryGetMotionState(user_index, &state)) {
+      *out_state = state;
+      return true;
+    }
+  }
+  *out_state = {};
+  return false;
+}
+
 std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
   auto input = std::make_unique<InputSystem>(nullptr);
 

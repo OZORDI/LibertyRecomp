@@ -24,8 +24,10 @@
 #include <rex/graphics/command_processor.h>
 #include <rex/graphics/flags.h>
 #include <rex/graphics/graphics_system.h>
+#include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/graphics/pipeline/texture/info.h>
 #include <rex/graphics/sampler_info.h>
+#include <rex/hash.h>
 #include <rex/graphics/xenos.h>
 #include <rex/logging.h>
 #include <rex/math.h>
@@ -79,6 +81,19 @@ REXCVAR_DEFINE_BOOL(async_shader_compilation, true, "GPU",
                     "threads. This reduces stutter but may cause brief visual artifacts while "
                     "pipelines are being prepared.")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(native_renderer_oracle_capture, false, "GPU/Research",
+                    "Capture one complete Xenos-emulated frame as an XTR plus bounded semantic "
+                    "draw records for GTA IV native-renderer development")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload)
+    .debug_only();
+
+REXCVAR_DEFINE_UINT32(native_renderer_oracle_draw_limit, 4096, "GPU/Research",
+                      "Maximum semantic draw records emitted by one native-renderer oracle "
+                      "capture; the XTR remains complete")
+    .range(1, 100000)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload)
+    .debug_only();
 
 namespace rex::graphics {
 
@@ -688,8 +703,103 @@ void CommandProcessor::PrepareForWait() {
 
 void CommandProcessor::ReturnFromWait() {}
 
+void CommandProcessor::ArmNativeRendererOracleCapture() {
+  if (!REXCVAR_GET(native_renderer_oracle_capture) || native_renderer_oracle_requested_ ||
+      native_renderer_oracle_active_) {
+    return;
+  }
+
+  native_renderer_oracle_requested_ = true;
+  if (trace_state_ == TraceState::kDisabled) {
+    RequestFrameTrace(REXCVAR_GET(trace_gpu_prefix));
+  }
+  REXGPU_INFO(
+      "[NativeOracle] armed: the next complete emulated frame will be indexed; "
+      "XTR tracing is {}",
+      trace_state_ == TraceState::kStreaming ? "already streaming" : "requested");
+}
+
+void CommandProcessor::FinishNativeRendererOracleFrame() {
+  REXGPU_INFO(
+      "[NativeOracleFrame] frame={} draws={} logged={} omitted={} copies={} "
+      "backend_failures={} register_and_memory_truth=XTR",
+      native_renderer_oracle_frame_, native_renderer_oracle_draws_,
+      native_renderer_oracle_logged_draws_, native_renderer_oracle_omitted_draws_,
+      native_renderer_oracle_copy_draws_, native_renderer_oracle_backend_failures_);
+  native_renderer_oracle_active_ = false;
+  native_renderer_oracle_requested_ = false;
+  REXCVAR_SET(native_renderer_oracle_capture, false);
+}
+
+void CommandProcessor::LogNativeRendererOracleDraw(
+    const char* opcode_name, const reg::VGT_DRAW_INITIATOR& draw_initiator,
+    uint32_t viz_query_condition, bool is_indexed, const IndexBufferInfo& index_buffer_info,
+    bool major_mode_explicit, const char* outcome) {
+  if (!native_renderer_oracle_active_) {
+    return;
+  }
+
+  ++native_renderer_oracle_draws_;
+  if (register_file_->Get<reg::RB_MODECONTROL>().edram_mode == xenos::EdramMode::kCopy) {
+    ++native_renderer_oracle_copy_draws_;
+  }
+  if (native_renderer_oracle_logged_draws_ >=
+      REXCVAR_GET(native_renderer_oracle_draw_limit)) {
+    ++native_renderer_oracle_omitted_draws_;
+    return;
+  }
+  ++native_renderer_oracle_logged_draws_;
+
+  const uint64_t register_hash =
+      XXH3_64bits(register_file_->values, sizeof(register_file_->values));
+  const uint32_t fetch_first = XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+  const uint32_t fetch_count =
+      XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5 - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + 1;
+  const uint64_t fetch_hash = XXH3_64bits(&register_file_->values[fetch_first],
+                                         sizeof(uint32_t) * fetch_count);
+  const uint64_t vertex_shader_hash =
+      active_vertex_shader_ ? active_vertex_shader_->ucode_data_hash() : 0;
+  const uint64_t pixel_shader_hash =
+      active_pixel_shader_ ? active_pixel_shader_->ucode_data_hash() : 0;
+  const auto surface = register_file_->Get<reg::RB_SURFACE_INFO>();
+  const auto mode = register_file_->Get<reg::RB_MODECONTROL>();
+  const auto program = register_file_->Get<reg::SQ_PROGRAM_CNTL>();
+  const auto scissor_tl = register_file_->Get<reg::PA_SC_WINDOW_SCISSOR_TL>();
+  const auto scissor_br = register_file_->Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
+  const auto depth = register_file_->Get<reg::RB_DEPTH_INFO>();
+  const auto color0 = register_file_->Get<reg::RB_COLOR_INFO>(
+      reg::RB_COLOR_INFO::rt_register_indices[0]);
+  const auto color1 = register_file_->Get<reg::RB_COLOR_INFO>(
+      reg::RB_COLOR_INFO::rt_register_indices[1]);
+  const auto color2 = register_file_->Get<reg::RB_COLOR_INFO>(
+      reg::RB_COLOR_INFO::rt_register_indices[2]);
+  const auto color3 = register_file_->Get<reg::RB_COLOR_INFO>(
+      reg::RB_COLOR_INFO::rt_register_indices[3]);
+
+  REXGPU_INFO(
+      "[NativeOracleDraw] frame={} draw={} opcode={} outcome={} prim={} indices={} "
+      "source={} major={} explicit_major={} viz=0x{:08X} indexed={} "
+      "ib=0x{:08X}+0x{:X} ib_count={} ib_format={} ib_endian={} "
+      "vs={:016X} ps={:016X} regs={:016X} fetch={:016X} "
+      "edram={} surface=0x{:08X} program=0x{:08X} scissor=0x{:08X}/0x{:08X} "
+      "color=0x{:08X}/0x{:08X}/0x{:08X}/0x{:08X} depth=0x{:08X} "
+      "bin_mask={:016X} bin_select={:016X}",
+      native_renderer_oracle_frame_, native_renderer_oracle_draws_, opcode_name, outcome,
+      uint32_t(draw_initiator.prim_type), draw_initiator.num_indices,
+      uint32_t(draw_initiator.source_select), uint32_t(draw_initiator.major_mode),
+      uint32_t(major_mode_explicit), viz_query_condition, uint32_t(is_indexed),
+      index_buffer_info.guest_base, uint32_t(index_buffer_info.length), index_buffer_info.count,
+      uint32_t(index_buffer_info.format), uint32_t(index_buffer_info.endianness),
+      vertex_shader_hash, pixel_shader_hash, register_hash, fetch_hash,
+      uint32_t(mode.edram_mode), surface.value, program.value, scissor_tl.value,
+      scissor_br.value, color0.value, color1.value, color2.value, color3.value, depth.value,
+      bin_mask_, bin_select_);
+}
+
 uint32_t CommandProcessor::ExecutePrimaryBuffer(uint32_t read_index, uint32_t write_index) {
   SCOPE_profile_cpu_f("gpu");
+
+  ArmNativeRendererOracleCapture();
 
   // If we have a pending trace stream open it now. That way we ensure we get
   // all commands.
@@ -864,6 +974,21 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
   if (packet & 1) {
     bool any_pass = (bin_select_ & bin_mask_) != 0;
     if (!any_pass || opcode == PM4_XE_SWAP) {
+      if (native_renderer_oracle_active_ &&
+          (opcode == PM4_DRAW_INDX || opcode == PM4_DRAW_INDX_2)) {
+        ++native_renderer_oracle_draws_;
+        if (native_renderer_oracle_logged_draws_ <
+            REXCVAR_GET(native_renderer_oracle_draw_limit)) {
+          ++native_renderer_oracle_logged_draws_;
+          REXGPU_INFO(
+              "[NativeOracleDraw] frame={} draw={} opcode=0x{:02X} "
+              "outcome=predicate_skip bin_mask={:016X} bin_select={:016X}",
+              native_renderer_oracle_frame_, native_renderer_oracle_draws_, opcode, bin_mask_,
+              bin_select_);
+        } else {
+          ++native_renderer_oracle_omitted_draws_;
+        }
+      }
       reader->AdvanceRead(count * sizeof(uint32_t));
       trace_writer_.WritePacketEnd();
       return true;
@@ -1021,6 +1146,22 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
       auto path = trace_frame_path_ / file_name;
       trace_writer_.Open(path, title_id);
       InitializeTrace();
+    }
+
+    if (native_renderer_oracle_active_) {
+      FinishNativeRendererOracleFrame();
+    } else if (native_renderer_oracle_requested_) {
+      native_renderer_oracle_active_ = true;
+      // Match the frame identifier used in the XTR filename opened above.
+      native_renderer_oracle_frame_ = counter_ - 1;
+      native_renderer_oracle_draws_ = 0;
+      native_renderer_oracle_logged_draws_ = 0;
+      native_renderer_oracle_omitted_draws_ = 0;
+      native_renderer_oracle_copy_draws_ = 0;
+      native_renderer_oracle_backend_failures_ = 0;
+      REXGPU_INFO(
+          "[NativeOracleFrame] frame={} begin; semantic records are bounded, XTR is complete",
+          native_renderer_oracle_frame_);
     }
   }
 
@@ -1515,17 +1656,25 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
 
   if (draw_succeeded) {
     auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+    bool major_mode_explicit =
+        xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
     if (!(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
       // TODO(Triang3l): Don't drop the draw call completely if the vertex
       // shader has memexport.
       // TODO(Triang3l || JoelLinn): Handle this properly in the render
       // backends.
 
-      bool major_mode_explicit =
-          xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
+      LogNativeRendererOracleDraw(opcode_name, vgt_draw_initiator, viz_query_condition,
+                                  is_indexed, index_buffer_info, major_mode_explicit,
+                                  "pre_backend");
       draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
                                  is_indexed ? &index_buffer_info : nullptr, major_mode_explicit);
       if (!draw_succeeded) {
+        if (native_renderer_oracle_active_) {
+          ++native_renderer_oracle_backend_failures_;
+          REXGPU_INFO("[NativeOracleBackend] frame={} draw={} outcome=failed",
+                      native_renderer_oracle_frame_, native_renderer_oracle_draws_);
+        }
         auto vgt_output_path_cntl = register_file_->Get<reg::VGT_OUTPUT_PATH_CNTL>();
         auto vgt_hos_cntl = register_file_->Get<reg::VGT_HOS_CNTL>();
         auto rb_modecontrol = register_file_->Get<reg::RB_MODECONTROL>();
@@ -1538,6 +1687,9 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
             uint32_t(vgt_output_path_cntl.path_select), uint32_t(vgt_hos_cntl.tess_mode),
             uint32_t(rb_modecontrol.edram_mode));
       }
+    } else {
+      LogNativeRendererOracleDraw(opcode_name, vgt_draw_initiator, viz_query_condition,
+                                  is_indexed, index_buffer_info, major_mode_explicit, "viz_kill");
     }
   }
 

@@ -60,8 +60,11 @@ set(INJA_TEMPLATE_FILES
     ${TEMPLATE_SOURCE_DIR}/init/rexglue_cmake.inja
     ${TEMPLATE_SOURCE_DIR}/init/manifest_toml.inja
     ${TEMPLATE_SOURCE_DIR}/codegen/_indirect_call.inja
+    ${TEMPLATE_SOURCE_DIR}/codegen/dll_targets_cmake.inja
     ${TEMPLATE_SOURCE_DIR}/codegen/init_cpp.inja
     ${TEMPLATE_SOURCE_DIR}/codegen/init_h.inja
+    ${TEMPLATE_SOURCE_DIR}/codegen/module_registry_cpp.inja
+    ${TEMPLATE_SOURCE_DIR}/codegen/register_cpp.inja
     ${TEMPLATE_SOURCE_DIR}/codegen/sources_cmake.inja
     ${TEMPLATE_SOURCE_DIR}/test/ppc_test_cases_cpp.inja
     ${TEMPLATE_SOURCE_DIR}/test/ppc_test_decls_h.inja
@@ -117,7 +120,6 @@ target_include_directories(rexcodegen
 
 target_link_libraries(rexcodegen
     PUBLIC
-        rexcore
         rexruntime
         fmt::fmt
         spdlog::spdlog
@@ -127,4 +129,3 @@ target_link_libraries(rexcodegen
         xxHash::xxhash
         simde
 )
-

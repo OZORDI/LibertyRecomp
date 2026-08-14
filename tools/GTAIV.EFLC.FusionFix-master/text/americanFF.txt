@@ -40,6 +40,18 @@ Always Run
 [Cover Centering]
 Cover Centering
 
+[PadLookSens]
+Look-Around Sensitivity
+
+[MO_SENS]
+Aiming Sensitivity
+
+[MO_MOUSE]
+Mouse Look Sensitivity
+
+[MouseAimSens]
+Mouse Aim Sensitivity
+
 [CenterDelayFoot]
 On Foot Camera Centering Delay
 
@@ -115,6 +127,9 @@ Tone Mapping
 [Volumetric Fog]
 Volumetric Fog
 
+[AO]
+Ambient Occlusion
+
 [Zoomed Movement]
 Allow Movement When Zoomed
 
@@ -175,6 +190,15 @@ Extended Sniper Controls
 [Bullet Traces]
 Always Show Bullet Traces
 
+[Wardrobe Fading]
+Disable Wardrobe Transition
+
+[Stop Taxi]
+Instant Stop Taxi
+
+[CP_6AXIS]
+Quick Save
+
 [POLICE3]
 Police Buffalo
 
@@ -201,6 +225,27 @@ Police Buffalo
 
 [FF_WARN7]
 ~r~WARNING: Set Cutscene Audio Sync ON if you have audio desynchronization, OFF for animation smoothness. It can be toggled in a cutscene via ~PAD_UP~
+
+[USJ_FRST_KMB]
+During the stunt camera mode use ~INPUT_MOUSE_WHEEL_UP~ and ~INPUT_MOUSE_WHEEL_DOWN~ to control the slow motion speed.
+
+[PARA_CLASSIC_PC]
+Use ~PAD_LSTICK_ALL~ to shift body weight. ~n~Use ~INPUT_MOUSE_LMB~ and ~INPUT_MOUSE_RMB~ to apply left and right air brakes. ~n~Press ~INPUT_ENTER~ to detach the parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
+
+[PARA_FALL_PC]
+Use ~PAD_LSTICK_ALL~ to move in the air. ~n~Press ~INPUT_MOUSE_LMB~ to activate parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
+
+[PARA_FLOAT_PC]
+Use ~PAD_LSTICK_ALL~ to shift body weight. ~n~Use ~INPUT_MOUSE_LMB~ and ~INPUT_MOUSE_RMB~ to apply left and right air brakes. ~n~Press ~INPUT_ENTER~ to detach the parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
+
+[BJHELP_PC]
+Use ~PAD_LSTICK_ALL~ to move in the air. ~n~Press ~INPUT_MOUSE_LMB~ to activate parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
+
+[PARAF2_PC]
+Use ~PAD_LSTICK_ALL~ to move in the air. ~n~Press ~INPUT_MOUSE_LMB~ to activate parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
+
+[ESS_PARA1_PC]
+When airborne use ~PAD_LSTICK_ALL~ to move. In freefall press ~INPUT_MOUSE_LMB~ to activate parachute. ~n~Hold ~INPUT_VEH_CIN_CAM~ to view different cameras.
 
 [DUMMY_l11]
 Dummy label.

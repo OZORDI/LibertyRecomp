@@ -25,7 +25,9 @@ class VulkanDevice {
   static std::unique_ptr<VulkanDevice> CreateIfSupported(const VulkanInstance* vulkan_instance,
                                                          VkPhysicalDevice physical_device,
                                                          bool with_gpu_emulation,
-                                                         bool with_swapchain);
+                                                         bool with_swapchain,
+                                                         bool with_native_shader_support = false,
+                                                         bool with_dynamic_rendering = false);
 
   VulkanDevice(const VulkanDevice&) = delete;
   VulkanDevice& operator=(const VulkanDevice&) = delete;
@@ -110,6 +112,12 @@ class VulkanDevice {
     bool shaderCullDistance = false;
     bool sparseBinding = false;
     bool sparseResidencyBuffer = false;
+    bool shaderInt64 = false;
+
+    // Vulkan 1.2 features used by Liberty's precompiled native shader cache.
+    bool runtimeDescriptorArray = false;
+    bool descriptorBindingPartiallyBound = false;
+    bool bufferDeviceAddress = false;
 
     // VK_KHR_sampler_mirror_clamp_to_edge (#15, promoted to 1.2)
 
@@ -214,6 +222,8 @@ class VulkanDevice {
 #include <rex/ui/vulkan/functions/device_khr_swapchain.inc>
     // VK_KHR_get_memory_requirements2 (#147, promoted to 1.1)
 #include <rex/ui/vulkan/functions/device_1_1_khr_get_memory_requirements2.inc>
+    // Vulkan 1.2 core.
+#include <rex/ui/vulkan/functions/device_1_2.inc>
     // VK_KHR_bind_memory2 (#158, promoted to 1.1)
 #include <rex/ui/vulkan/functions/device_1_1_khr_bind_memory2.inc>
     // VK_KHR_maintenance4 (#414, promoted to 1.3)

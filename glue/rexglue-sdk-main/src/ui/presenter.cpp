@@ -40,10 +40,10 @@ REXCVAR_DEFINE_INT32(present_safe_area_y, 90, "UI/Presenter",
                      "Vertical safe area percentage (0-100)")
     .range(0, 100);
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
 REXCVAR_DEFINE_STRING(present_effect, "bilinear", "UI/Presenter",
-                      "Guest output effect: bilinear, cas, fsr, fsr2, fsr3")
-    .allowed({"bilinear", "cas", "fsr", "fsr2", "fsr3"})
+                      "Guest output effect: bilinear, cas, or FSR 1")
+    .allowed({"bilinear", "cas", "fsr"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_DOUBLE(present_cas_additional_sharpness,
@@ -88,11 +88,16 @@ REXCVAR_DEFINE_BOOL(present_allow_overscan_cutoff, false, "UI/Presenter",
 namespace {
 using GuestOutputPaintConfig = rex::ui::Presenter::GuestOutputPaintConfig;
 
+bool IsPresenterFlowLogMilestone(uint64_t count) {
+  return count <= 8 || count == 16 || count == 32 || count == 64 || count == 128 ||
+         count == 256 || count == 512 || count == 1024;
+}
+
 GuestOutputPaintConfig::Effect ParsePresentEffect(const std::string& effect_name) {
   std::string lowered = effect_name;
   std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                  [](unsigned char c) { return char(std::tolower(c)); });
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   if (lowered == "cas") {
     return GuestOutputPaintConfig::Effect::kCas;
   }
@@ -109,7 +114,7 @@ GuestOutputPaintConfig::Effect ParsePresentEffect(const std::string& effect_name
   return GuestOutputPaintConfig::Effect::kBilinear;
 }
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
 bool IsTemporalFsrCompatibilityEffect(GuestOutputPaintConfig::Effect effect) {
   return effect == GuestOutputPaintConfig::Effect::kFsr2 ||
          effect == GuestOutputPaintConfig::Effect::kFsr3;
@@ -249,19 +254,19 @@ void LogTemporalFsrQualityModeInputLimitOnce() {
         "guest output; using guest output size");
   }
 }
-#endif  // defined(REX_HAS_FIDELITYFX_SDK)
+#endif  // defined(REX_HAS_FIDELITYFX_FSR1)
 
 GuestOutputPaintConfig BuildGuestOutputPaintConfigFromCVar() {
   GuestOutputPaintConfig config;
   GuestOutputPaintConfig::Effect parsed_effect = ParsePresentEffect(REXCVAR_GET(present_effect));
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   if (IsTemporalFsrCompatibilityEffect(parsed_effect)) {
     LogTemporalFsrCompatibilityPathOnce();
   }
 #endif
   config.SetAllowOverscanCutoff(REXCVAR_GET(present_allow_overscan_cutoff));
   config.SetEffect(parsed_effect);
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   config.SetCasAdditionalSharpness(float(REXCVAR_GET(present_cas_additional_sharpness)));
   config.SetFsrMaxUpsamplingPasses(
       uint32_t(std::max(int32_t(1), REXCVAR_GET(present_fsr_max_upsampling_passes))));
@@ -463,9 +468,12 @@ void Presenter::PaintFromUIThread(bool force_paint) {
     if (paint_mode_ == PaintMode::kGuestOutputThreadImmediately) {
       SetPaintModeFromUIThread(PaintMode::kUIThreadOnRequest);
     }
-    // Try to recover from the connection becoming outdated in the previous
-    // paint.
-    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
+    // Try to establish or recover the connection. The initial surface may have
+    // been zero-area while the window was entering fullscreen, in which case
+    // SetWindowSurfaceFromUIThread leaves it pending until a later UI paint.
+    if (surface_paint_connection_state_ ==
+            SurfacePaintConnectionState::kUnconnectedRetryAtStateChange ||
+        surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
       UpdateSurfacePaintConnectionFromUIThread(nullptr, false);
     }
     // If still paintable or recovered successfully, paint.
@@ -582,6 +590,7 @@ bool Presenter::RefreshGuestOutput(
   // after switching from UI thread painting to doing it in the guest output
   // thread, will immediately recover to having the latest frame always sent to
   // the host present call on the CPU and all frames reaching a present call).
+  uint32_t published_mailbox_index = guest_output_mailbox_writable_;
   uint32_t last_acquired_and_ready =
       guest_output_mailbox_acquired_and_ready_.load(std::memory_order_relaxed);
   // Desired acquired = current acquired (changed only by the consumers).
@@ -615,26 +624,138 @@ bool Presenter::RefreshGuestOutput(
 
   // Trigger the presentation on the host.
   PaintResult paint_result = PaintResult::kNotPresented;
+  PaintMode paint_mode_snapshot = PaintMode::kNone;
+  SurfacePaintConnectionState connection_state_before =
+      SurfacePaintConnectionState::kUnconnectedRetryAtStateChange;
+  SurfacePaintConnectionState connection_state_after = connection_state_before;
+  enum class RefreshPaintAction : uint8_t {
+    kNone,
+    kUIThreadRequested,
+    kGuestThreadPresented,
+    kGuestThreadNotPaintable,
+  };
+  RefreshPaintAction paint_action = RefreshPaintAction::kNone;
   {
     std::lock_guard<std::mutex> paint_mode_mutex_lock(paint_mode_mutex_);
+    paint_mode_snapshot = paint_mode_;
+    connection_state_before = surface_paint_connection_state_;
     switch (paint_mode_) {
       case PaintMode::kNone:
-        // Neither painting nor window paint requesting is accessible.
+        // Painting is unavailable, but a surface whose initial connection was
+        // deferred still needs a UI-thread paint request to retry it.
+        if (window_ && surface_ &&
+            surface_paint_connection_state_ ==
+                SurfacePaintConnectionState::kUnconnectedRetryAtStateChange) {
+          RequestPaintOrConnectionRecoveryViaWindow(true);
+          paint_action = RefreshPaintAction::kUIThreadRequested;
+        }
         break;
       case PaintMode::kUIThreadOnRequest:
         // Only window paint requesting is accessible.
         RequestPaintOrConnectionRecoveryViaWindow(true);
+        paint_action = RefreshPaintAction::kUIThreadRequested;
         break;
       case PaintMode::kGuestOutputThreadImmediately:
         // Both painting and window paint requesting are accessible.
         if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable) {
           paint_result = PaintAndPresent(false);
+          paint_action = RefreshPaintAction::kGuestThreadPresented;
           if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
             RequestPaintOrConnectionRecoveryViaWindow(true);
           }
+        } else {
+          paint_action = RefreshPaintAction::kGuestThreadNotPaintable;
         }
         break;
     }
+    connection_state_after = surface_paint_connection_state_;
+  }
+
+  static std::atomic<uint64_t> refresh_flow_count{0};
+  static std::atomic<uint8_t> refresh_flow_last_mode{UINT8_MAX};
+  static std::atomic<uint8_t> refresh_flow_last_connection{UINT8_MAX};
+  static std::atomic<uint8_t> refresh_flow_last_action{UINT8_MAX};
+  static std::atomic<uint8_t> refresh_flow_last_result{UINT8_MAX};
+  uint64_t refresh_count = refresh_flow_count.fetch_add(1, std::memory_order_relaxed) + 1;
+  uint8_t paint_mode_value = uint8_t(paint_mode_snapshot);
+  uint8_t connection_value = uint8_t(connection_state_after);
+  uint8_t action_value = uint8_t(paint_action);
+  uint8_t result_value = uint8_t(paint_result);
+  bool paint_mode_changed =
+      refresh_flow_last_mode.exchange(paint_mode_value, std::memory_order_relaxed) !=
+      paint_mode_value;
+  bool connection_changed =
+      refresh_flow_last_connection.exchange(connection_value, std::memory_order_relaxed) !=
+      connection_value;
+  bool action_changed =
+      refresh_flow_last_action.exchange(action_value, std::memory_order_relaxed) != action_value;
+  bool result_changed =
+      refresh_flow_last_result.exchange(result_value, std::memory_order_relaxed) != result_value;
+  bool refresh_state_changed =
+      paint_mode_changed || connection_changed || action_changed || result_changed;
+  if (IsPresenterFlowLogMilestone(refresh_count) || refresh_state_changed) {
+    auto paint_mode_name = [](PaintMode mode) {
+      switch (mode) {
+        case PaintMode::kNone:
+          return "none";
+        case PaintMode::kUIThreadOnRequest:
+          return "ui_request";
+        case PaintMode::kGuestOutputThreadImmediately:
+          return "guest_immediate";
+      }
+      return "unknown";
+    };
+    auto connection_name = [](SurfacePaintConnectionState state) {
+      switch (state) {
+        case SurfacePaintConnectionState::kUnconnectedRetryAtStateChange:
+          return "unconnected_retry";
+        case SurfacePaintConnectionState::kUnconnectedSurfaceReportedUnusable:
+          return "unconnected_unusable";
+        case SurfacePaintConnectionState::kConnectedPaintable:
+          return "paintable";
+        case SurfacePaintConnectionState::kConnectedOutdated:
+          return "outdated";
+      }
+      return "unknown";
+    };
+    auto action_name = [](RefreshPaintAction action) {
+      switch (action) {
+        case RefreshPaintAction::kNone:
+          return "none";
+        case RefreshPaintAction::kUIThreadRequested:
+          return "ui_requested";
+        case RefreshPaintAction::kGuestThreadPresented:
+          return "guest_presented";
+        case RefreshPaintAction::kGuestThreadNotPaintable:
+          return "guest_not_paintable";
+      }
+      return "unknown";
+    };
+    auto paint_result_name = [](PaintResult result) {
+      switch (result) {
+        case PaintResult::kPresented:
+          return "presented";
+        case PaintResult::kPresentedSuboptimal:
+          return "presented_suboptimal";
+        case PaintResult::kNotPresented:
+          return "not_presented";
+        case PaintResult::kNotPresentedConnectionOutdated:
+          return "connection_outdated";
+        case PaintResult::kGpuLostExternally:
+          return "gpu_lost_external";
+        case PaintResult::kGpuLostResponsible:
+          return "gpu_lost_responsible";
+      }
+      return "unknown";
+    };
+    REXLOG_INFO(
+        "[PresenterFlow] refresh={} active={} size={}x{} mailbox_ready={} mailbox_next={} "
+        "mode={} connection_before={} connection_after={} action={} paint_result={}",
+        refresh_count, is_active, frontbuffer_width, frontbuffer_height,
+        published_mailbox_index, guest_output_mailbox_writable_,
+        paint_mode_name(paint_mode_snapshot), connection_name(connection_state_before),
+        connection_name(connection_state_after), action_name(paint_action),
+        paint_result_name(paint_result));
   }
   // Handle GPU loss when not in the middle of the function anymore, and
   // lifecycle management from the GPU loss callback is fine on the UI thread.
@@ -659,7 +780,7 @@ void Presenter::SetGuestOutputPaintConfigFromUIThread(const GuestOutputPaintConf
     modified = true;
     request_repaint = true;
   }
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   if (guest_output_paint_config_.GetFsrSharpnessReduction() !=
       new_config.GetFsrSharpnessReduction()) {
     modified = true;
@@ -684,7 +805,7 @@ void Presenter::SetGuestOutputPaintConfigFromUIThread(const GuestOutputPaintConf
     modified = true;
     request_repaint = true;
   }
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   if (guest_output_paint_config_.GetFsrQualityMode() != new_config.GetFsrQualityMode()) {
     modified = true;
     if (new_config.GetEffect() == GuestOutputPaintConfig::Effect::kFsr2 ||
@@ -1030,7 +1151,7 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
   uint32_t output_width_clamped = std::min(output_width, max_rt_width);
   uint32_t output_height_clamped = std::min(output_height, max_rt_height);
 
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
   if (config.GetEffect() == GuestOutputPaintConfig::Effect::kCas ||
       config.GetEffect() == GuestOutputPaintConfig::Effect::kFsr ||
       config.GetEffect() == GuestOutputPaintConfig::Effect::kFsr2 ||
@@ -1145,7 +1266,7 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
                                               : GuestOutputPaintEffect::kCasResample;
     }
   }
-#endif  // defined(REX_HAS_FIDELITYFX_SDK)
+#endif  // defined(REX_HAS_FIDELITYFX_FSR1)
 
   std::pair<uint32_t, uint32_t>* last_pre_bilinear_effect_size =
       flow.effect_count ? &flow.effect_output_sizes[flow.effect_count - 1] : nullptr;
@@ -1156,7 +1277,7 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
     // Clamp the output size of the last effect to the maximum render target
     // size because it will go to an intermediate image now.
     if (last_pre_bilinear_effect_size) {
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       // RCAS only works for 1:1, clamping must be done explicitly for FSR.
       assert_false(flow.effects[flow.effect_count - 1] == GuestOutputPaintEffect::kFsrRcas &&
                    (last_pre_bilinear_effect_size->first > max_rt_width ||
@@ -1188,7 +1309,7 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
           last_effect = GuestOutputPaintEffect::kBilinearDither;
         }
         break;
-#if defined(REX_HAS_FIDELITYFX_SDK)
+#if defined(REX_HAS_FIDELITYFX_FSR1)
       case GuestOutputPaintEffect::kCasSharpen:
         last_effect = GuestOutputPaintEffect::kCasSharpenDither;
         break;
@@ -1334,6 +1455,7 @@ void Presenter::DisconnectPaintingFromSurfaceFromUIThread(SurfacePaintConnection
     DisconnectPaintingFromSurfaceFromUIThreadImpl();
   }
   surface_paint_connection_state_ = new_state;
+  surface_paint_connection_initial_suboptimal_retry_attempted_ = false;
   surface_paint_connection_has_implicit_vsync_ = false;
   surface_width_in_paint_connection_ = 0;
   surface_height_in_paint_connection_ = 0;
@@ -1352,6 +1474,17 @@ void Presenter::UpdateSurfacePaintConnectionFromUIThread(bool* repaint_needed_ou
   if (repaint_needed_out) {
     *repaint_needed_out = false;
   }
+
+#if REX_PLATFORM_MAC
+  // A connection update requested while the old connection is still paintable
+  // comes from an external surface state change, such as an SDL pixel-size
+  // event. Let the new geometry receive its own bounded initial-suboptimal
+  // recovery attempt. Recovery of an already-outdated connection deliberately
+  // keeps the guard set to avoid a swapchain recreation loop.
+  if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable) {
+    surface_paint_connection_initial_suboptimal_retry_attempted_ = false;
+  }
+#endif
 
   // If the connection state is kUnconnectedSurfaceReportedUnusable, the
   // implementation has reported that the surface is not usable by the presenter
@@ -1497,25 +1630,96 @@ bool Presenter::InSurfaceOnMonitorFromUIThread() const {
 Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
   assert_false(execute_ui_drawers && !is_in_ui_thread_paint_);
   assert_true(surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable);
+  SurfacePaintConnectionState connection_state_before = surface_paint_connection_state_;
   PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
   switch (result) {
     case PaintResult::kPresented:
       surface_paint_connection_was_optimal_at_successful_paint_ = true;
+      surface_paint_connection_initial_suboptimal_retry_attempted_ = false;
       break;
-    case PaintResult::kPresentedSuboptimal:
-      // Make outdated if previously optimal, now suboptimal, but don't cause
-      // the connection to become outdated if it has been suboptimal from the
-      // very beginning.
-      if (surface_paint_connection_was_optimal_at_successful_paint_) {
+    case PaintResult::kPresentedSuboptimal: {
+      // Normally reconnect when a previously optimal surface becomes
+      // suboptimal. MoltenVK may also report the very first paint as
+      // suboptimal while an asynchronous fullscreen transition is settling;
+      // retry that case once without allowing an endless recreate loop.
+      bool reconnect_suboptimal = surface_paint_connection_was_optimal_at_successful_paint_;
+#if REX_PLATFORM_MAC
+      if (!reconnect_suboptimal &&
+          !surface_paint_connection_initial_suboptimal_retry_attempted_) {
+        surface_paint_connection_initial_suboptimal_retry_attempted_ = true;
+        reconnect_suboptimal = true;
+        REXLOG_INFO(
+            "Presenter: Initial macOS surface paint was suboptimal; scheduling one recovery "
+            "reconnect");
+      }
+#endif
+      if (reconnect_suboptimal) {
         surface_paint_connection_state_ = SurfacePaintConnectionState::kConnectedOutdated;
       }
       break;
+    }
     case PaintResult::kNotPresentedConnectionOutdated:
       surface_paint_connection_state_ = SurfacePaintConnectionState::kConnectedOutdated;
       break;
     default:
       // Another issue not directly related to the surface connection.
       break;
+  }
+
+  static std::atomic<uint64_t> paint_flow_count{0};
+  static std::atomic<uint8_t> paint_flow_last_result{UINT8_MAX};
+  static std::atomic<uint8_t> paint_flow_last_connection{UINT8_MAX};
+  static std::atomic<bool> paint_flow_last_ui{false};
+  static std::atomic<bool> paint_flow_have_previous{false};
+  uint64_t paint_count = paint_flow_count.fetch_add(1, std::memory_order_relaxed) + 1;
+  uint8_t result_value = uint8_t(result);
+  uint8_t connection_value = uint8_t(surface_paint_connection_state_);
+  bool had_previous = paint_flow_have_previous.exchange(true, std::memory_order_relaxed);
+  bool result_changed =
+      paint_flow_last_result.exchange(result_value, std::memory_order_relaxed) != result_value;
+  bool connection_changed =
+      paint_flow_last_connection.exchange(connection_value, std::memory_order_relaxed) !=
+      connection_value;
+  bool ui_changed =
+      paint_flow_last_ui.exchange(execute_ui_drawers, std::memory_order_relaxed) !=
+      execute_ui_drawers;
+  bool paint_state_changed = !had_previous || result_changed || connection_changed || ui_changed;
+  if (IsPresenterFlowLogMilestone(paint_count) || paint_state_changed) {
+    auto paint_result_name = [](PaintResult paint_result) {
+      switch (paint_result) {
+        case PaintResult::kPresented:
+          return "presented";
+        case PaintResult::kPresentedSuboptimal:
+          return "presented_suboptimal";
+        case PaintResult::kNotPresented:
+          return "not_presented";
+        case PaintResult::kNotPresentedConnectionOutdated:
+          return "connection_outdated";
+        case PaintResult::kGpuLostExternally:
+          return "gpu_lost_external";
+        case PaintResult::kGpuLostResponsible:
+          return "gpu_lost_responsible";
+      }
+      return "unknown";
+    };
+    auto connection_name = [](SurfacePaintConnectionState state) {
+      switch (state) {
+        case SurfacePaintConnectionState::kUnconnectedRetryAtStateChange:
+          return "unconnected_retry";
+        case SurfacePaintConnectionState::kUnconnectedSurfaceReportedUnusable:
+          return "unconnected_unusable";
+        case SurfacePaintConnectionState::kConnectedPaintable:
+          return "paintable";
+        case SurfacePaintConnectionState::kConnectedOutdated:
+          return "outdated";
+      }
+      return "unknown";
+    };
+    REXLOG_INFO(
+        "[PresenterFlow] paint={} ui={} result={} connection_before={} connection_after={}",
+        paint_count, execute_ui_drawers, paint_result_name(result),
+        connection_name(connection_state_before),
+        connection_name(surface_paint_connection_state_));
   }
   return result;
 }

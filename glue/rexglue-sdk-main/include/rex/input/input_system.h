@@ -15,6 +15,7 @@
 
 #include <rex/input/input.h>
 #include <rex/input/input_driver.h>
+#include <rex/input/motion.h>
 #include <rex/system/interfaces/input.h>
 
 namespace rex::ui {
@@ -41,6 +42,7 @@ class InputSystem : public system::IInputSystem {
   X_RESULT GetState(uint32_t user_index, X_INPUT_STATE* out_state);
   X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration);
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags, X_INPUT_KEYSTROKE* out_keystroke);
+  bool TryGetMotionState(uint32_t user_index, MotionState* out_state);
 
  private:
   rex::ui::Window* window_ = nullptr;

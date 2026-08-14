@@ -100,8 +100,6 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
 
   auto content_type_enum = XContentType(uint32_t(content_type));
 
-  uint64_t userxuid = REX_KERNEL_STATE()->user_profile()->xuid();
-
   if (!device_info || device_info->device_type == DeviceType::HDD) {
     // Fetch any alternate title IDs defined in the XEX header
     // (used by games to load saves from other titles, etc)
@@ -113,27 +111,13 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
     }
 
     for (auto& title_id : title_ids) {
-      // Get user-specific content
-      auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+      auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContentForUser(
           static_cast<uint32_t>(DummyDeviceId::HDD), xuid, content_type_enum, title_id);
       for (const auto& content_data : content_datas) {
         auto item = e->AppendItem();
         assert_not_null(item);
         if (item) {
           *item = content_data;
-        }
-      }
-
-      // Also get common content (xuid=0)
-      if (userxuid != 0) {
-        auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
-            static_cast<uint32_t>(DummyDeviceId::HDD), 0, content_type_enum, title_id);
-        for (const auto& content_data : common_datas) {
-          auto item = e->AppendItem();
-          assert_not_null(item);
-          if (item) {
-            *item = content_data;
-          }
         }
       }
     }

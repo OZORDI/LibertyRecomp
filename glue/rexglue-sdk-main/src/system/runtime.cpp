@@ -11,6 +11,7 @@
 
 #include <rex/chrono/clock.h>
 #include <rex/cvar.h>
+#include <rex/diagnostics/gta4_transition.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/filesystem/devices/null_device.h>
 #include <rex/filesystem/vfs.h>
@@ -33,6 +34,8 @@ REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
 REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
 REXCVAR_DEFINE_STRING(cache_root, "", "Runtime", "Override shader cache path");
 REXCVAR_DEFINE_STRING(metadata_root, "", "Runtime", "Override metadata path");
+REXCVAR_DEFINE_STRING(saved_game_root, "", "Runtime", "Override loose saved-game path")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace rex {
 
@@ -47,12 +50,16 @@ Runtime::Runtime(const std::filesystem::path& game_data_root,
                  const std::filesystem::path& user_data_root,
                  const std::filesystem::path& update_data_root,
                  const std::filesystem::path& cache_root,
-                 const std::filesystem::path& metadata_root)
+                 const std::filesystem::path& metadata_root,
+                 const std::filesystem::path& marketplace_content_root,
+                 const std::filesystem::path& saved_game_root)
     : game_data_root_(game_data_root),
       user_data_root_(user_data_root.empty() ? game_data_root : user_data_root),
       update_data_root_(update_data_root),
       cache_root_(cache_root),
-      metadata_root_(metadata_root) {}
+      metadata_root_(metadata_root),
+      marketplace_content_root_(marketplace_content_root),
+      saved_game_root_(saved_game_root) {}
 
 Runtime::~Runtime() {
   Shutdown();
@@ -111,11 +118,13 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
   chrono::Clock::set_guest_tick_frequency(50000000);
   chrono::Clock::set_guest_system_time_base(chrono::Clock::QueryHostSystemTime());
   chrono::Clock::set_guest_time_scalar(1.0);
+  diagnostics::gta4_transition::Initialize();
 
   // Enable threading affinity configuration
   thread::EnableAffinityConfiguration();
 
   tool_mode_ = config.tool_mode;
+  live_config_ = config.live;
 
   // Create memory system first
   memory_ = std::make_unique<memory::Memory>();
@@ -258,6 +267,8 @@ void Runtime::Shutdown() {
   if (instance_ == this) {
     instance_ = nullptr;
   }
+
+  diagnostics::gta4_transition::Shutdown();
 
   if (graphics_system_) {
     graphics_system_->Shutdown();

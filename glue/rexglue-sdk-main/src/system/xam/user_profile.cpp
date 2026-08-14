@@ -93,6 +93,29 @@ UserProfile::UserProfile() {
   AddSetting(std::make_unique<BinarySetting>(0x63E83FFD));
 }
 
+uint32_t UserProfile::signin_state() const {
+  return kernel_state_ && kernel_state_->live_compatibility() &&
+                 kernel_state_->live_compatibility()->available()
+             ? 2
+             : 1;
+}
+
+void UserProfile::SetIdentity(uint64_t xuid, std::string name) {
+  if (xuid) {
+    xuid_ = xuid;
+  }
+  if (!name.empty()) {
+    name_ = std::move(name);
+  }
+}
+
+std::string UserProfile::storage_id() const {
+  // Multiplayer display names are user-editable and must not select the
+  // title-specific profile directory. XUID is the stable local identity that
+  // already owns this XAM profile.
+  return fmt::format("{:016X}", xuid_);
+}
+
 void UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
   Setting* previous_setting = setting.get();
   std::swap(settings_[setting->setting_id], previous_setting);

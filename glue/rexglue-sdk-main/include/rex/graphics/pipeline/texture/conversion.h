@@ -24,7 +24,9 @@ typedef std::function<void(xenos::Endian, void*, const void*, size_t)> CopyBlock
 
 void CopySwapBlock(xenos::Endian endian, void* output, const void* input, size_t length);
 void ConvertTexelCTX1ToR8G8(xenos::Endian endian, void* output, const void* input, size_t length);
+void ConvertTexelDXNToR8G8(xenos::Endian endian, void* output, const void* input, size_t length);
 void ConvertTexelDXT3AToDXT3(xenos::Endian endian, void* output, const void* input, size_t length);
+void ConvertTexelDXT5AToR8(xenos::Endian endian, void* output, const void* input, size_t length);
 
 typedef std::function<void(void*, const void*, size_t)> UntileCopyBlockCallback;
 

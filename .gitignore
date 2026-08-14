@@ -628,6 +628,8 @@ crash_log.txt
 Claude_export_*.jsonl
 gemini-env/
 review/
+!LibertyRecompLib/font_atlases/review/
+!LibertyRecompLib/font_atlases/review/**
 buttons_360.xtd
 
 # RexGlue SDK generated files and assets
@@ -667,6 +669,10 @@ build-codegen/
 # Root-level scripts and logs (local dev only)
 *.sh
 *.py
+!tools/generate_mouse_input_constants.py
+!tools/xtd_tools/button_prompt_roundtrip.py
+!LibertyRecompLib/font_atlases/tools/*.py
+!glue/rexglue-sdk-main/gta4-recomp/tools/verify_physics_trace_sites.py
 *.pid
 chat_summary*.txt
 liberty_exec_log.txt

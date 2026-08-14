@@ -209,6 +209,12 @@ void UnregisterBind(std::string_view name) {
 }
 
 bool ProcessKeyEvent(KeyEvent& e) {
+  // System binds are one-shot actions such as toggling an overlay. Repeated
+  // key-down events must not toggle them again while the key is still held.
+  if (e.prev_state()) {
+    return false;
+  }
+
   std::lock_guard lock(g_binds_mutex);
   for (auto& entry : g_binds) {
     if (!entry.callback)

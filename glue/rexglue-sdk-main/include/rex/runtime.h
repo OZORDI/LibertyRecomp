@@ -28,6 +28,7 @@
 #include <rex/system/interfaces/graphics.h>
 #include <rex/system/interfaces/input.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/xam/live_compatibility.h>
 #include <rex/system/xobject.h>  // object_ref
 
 // Forward declaration for function mapping (defined in rex/ppc/context.h)
@@ -40,6 +41,7 @@ REXCVAR_DECLARE(std::string, user_data_root);
 REXCVAR_DECLARE(std::string, update_data_root);
 REXCVAR_DECLARE(std::string, cache_root);
 REXCVAR_DECLARE(std::string, metadata_root);
+REXCVAR_DECLARE(std::string, saved_game_root);
 
 namespace rex {
 
@@ -71,6 +73,7 @@ struct RuntimeConfig {
   std::function<std::unique_ptr<system::IAudioSystem>(runtime::FunctionDispatcher*)> audio_factory;
   std::function<std::unique_ptr<system::IInputSystem>(bool tool_mode)> input_factory;
   std::function<void(Runtime*, system::KernelState*)> kernel_init;
+  system::xam::LiveConfig live;
   bool tool_mode = false;
 };
 
@@ -103,7 +106,9 @@ class Runtime {
                    const std::filesystem::path& user_data_root = {},
                    const std::filesystem::path& update_data_root = {},
                    const std::filesystem::path& cache_root = {},
-                   const std::filesystem::path& metadata_root = {});
+                   const std::filesystem::path& metadata_root = {},
+                   const std::filesystem::path& marketplace_content_root = {},
+                   const std::filesystem::path& saved_game_root = {});
   ~Runtime();
 
   // Non-copyable
@@ -132,6 +137,15 @@ class Runtime {
   const std::filesystem::path& update_data_root() const { return update_data_root_; }
   const std::filesystem::path& cache_root() const { return cache_root_; }
   const std::filesystem::path& metadata_root() const { return metadata_root_; }
+  // Optional directory containing marketplace packages directly. When empty,
+  // ContentManager keeps the standard Xbox hierarchy under user_data_root.
+  const std::filesystem::path& marketplace_content_root() const {
+    return marketplace_content_root_;
+  }
+  // Optional host root for loose XContentType::kSavedGame packages. Empty
+  // preserves the standard Xbox hierarchy beneath user_data_root.
+  const std::filesystem::path& saved_game_root() const { return saved_game_root_; }
+  const system::xam::LiveConfig& live_config() const { return live_config_; }
 
   // Finds a metadata file or directory. An explicit metadata_root disables
   // legacy discovery; otherwise existing project layouts remain supported.
@@ -185,6 +199,9 @@ class Runtime {
   std::filesystem::path update_data_root_;
   std::filesystem::path cache_root_;
   std::filesystem::path metadata_root_;
+  std::filesystem::path marketplace_content_root_;
+  std::filesystem::path saved_game_root_;
+  system::xam::LiveConfig live_config_;
 
   ui::WindowedAppContext* app_context_ = nullptr;
   ui::Window* display_window_ = nullptr;

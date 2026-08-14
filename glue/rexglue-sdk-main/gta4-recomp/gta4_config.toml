@@ -48,6 +48,7 @@ memmove = 0x82A02230              # 40 xrefs — native rexcrt_memmove in memory
 "0x82A77E28" = {}   # tail-call thunk: b sub_82812248
 "0x8219E410" = {}   # branch target from sub_821A2EDC
 "0x8219ACA0" = {}   # vtable slot +0x20 target in the original GTA IV .rdata tables
+"0x82194840" = {}   # address-taken vtable thunk: addi r3,r3,-4; b sub_82194590
 "0x828944C8" = {}   # address-taken vtable slot +0x50 callback thunk
 "0x828944D8" = {}   # address-taken vtable slot +0x34 callback thunk
 

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <mutex>
 #include <queue>
@@ -82,8 +83,11 @@ class XmaDecoder {
   XmaRegisterFile register_file_;
 
   static const uint32_t kContextCount = 320;
+  static const uint32_t kContextsPerKickRegister = 32;
+  static const uint32_t kKickRegisterCount = kContextCount / kContextsPerKickRegister;
   XmaContext contexts_[kContextCount];
   bit::BitMap context_bitmap_;
+  std::array<std::atomic<uint32_t>, kKickRegisterCount> ready_context_words_{};
 
   uint32_t context_data_first_ptr_ = 0;
   uint32_t context_data_last_ptr_ = 0;

@@ -32,6 +32,7 @@
 #elif REX_PLATFORM_MAC
 #include <SDL3/SDL_metal.h>
 #include <rex/ui/surface_mac.h>
+#include "accelerated_pointer_mac.h"
 #else
 #include <X11/Xlib-xcb.h>
 #include <rex/ui/surface_gnulinux.h>
@@ -189,13 +190,11 @@ bool WindowSDL::OpenImpl() {
     return false;
   }
 
-  // Fullscreen transitions may be asynchronous. The presenter is attached
-  // immediately after OpenImpl returns, so its surface must not be created
-  // from intermediate native-window and Metal-layer geometry.
+  // Fullscreen transitions may be asynchronous. Synchronize when possible so
+  // the first surface observes final geometry, but a timeout only means the
+  // transition is still pending. SDL window events will update the surface.
   if (IsFullscreen() && !SDL_SyncWindow(sdl_window_)) {
-    REXLOG_ERROR("SDL_SyncWindow timed out while entering fullscreen: {}", SDL_GetError());
-    DestroySDLWindow();
-    return false;
+    REXLOG_WARN("SDL_SyncWindow timed out while entering fullscreen; continuing asynchronously");
   }
 
   // Actualize state for the common Window code. Listener dispatch is handled
@@ -234,6 +233,10 @@ void WindowSDL::DestroySDLWindow() {
     cursor_hide_timer_ = 0;
   }
 #if REX_PLATFORM_MAC
+  if (accelerated_pointer_monitor_) {
+    RemoveAcceleratedPointerMonitor(accelerated_pointer_monitor_);
+    accelerated_pointer_monitor_ = nullptr;
+  }
   DestroyMetalView();
 #endif
   if (sdl_window_) {
@@ -287,6 +290,30 @@ void* WindowSDL::GetNativeWindowHandle() const {
 #endif
 }
 
+bool WindowSDL::IsHDREnabled() const {
+  if (!sdl_window_) {
+    return false;
+  }
+  return SDL_GetBooleanProperty(SDL_GetWindowProperties(sdl_window_),
+                                SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+}
+
+float WindowSDL::GetSDRWhiteLevel() const {
+  if (!sdl_window_) {
+    return 1.0f;
+  }
+  return SDL_GetFloatProperty(SDL_GetWindowProperties(sdl_window_),
+                              SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f);
+}
+
+float WindowSDL::GetHDRHeadroom() const {
+  if (!sdl_window_) {
+    return 1.0f;
+  }
+  return SDL_GetFloatProperty(SDL_GetWindowProperties(sdl_window_),
+                              SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f);
+}
+
 uint32_t WindowSDL::GetLatestDpiImpl() const {
   float scale = sdl_window_ ? SDL_GetWindowDisplayScale(sdl_window_)
                             : SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -316,6 +343,44 @@ void WindowSDL::ApplyNewMouseCapture() {
 
 void WindowSDL::ApplyNewMouseRelease() {
   SDL_CaptureMouse(false);
+}
+
+bool WindowSDL::SetRelativeMouseMode(bool enabled) {
+  bool success = false;
+  if (!app_context().CallInUIThreadSynchronous([this, enabled, &success] {
+        if (!sdl_window_) {
+          return;
+        }
+
+#if REX_PLATFORM_MAC
+        if (!enabled && accelerated_pointer_monitor_) {
+          RemoveAcceleratedPointerMonitor(accelerated_pointer_monitor_);
+          accelerated_pointer_monitor_ = nullptr;
+        }
+#endif
+
+        if (!SDL_SetWindowRelativeMouseMode(sdl_window_, enabled)) {
+          REXLOG_ERROR("SDL_SetWindowRelativeMouseMode({}) failed: {}", enabled,
+                       SDL_GetError());
+          return;
+        }
+
+#if REX_PLATFORM_MAC
+        if (enabled && !accelerated_pointer_monitor_) {
+          accelerated_pointer_monitor_ = InstallAcceleratedPointerMonitor(
+              GetNativeWindowHandle(), &WindowSDL::AcceleratedPointerCallbackThunk, this);
+          if (!accelerated_pointer_monitor_) {
+            REXLOG_ERROR("Failed to install the macOS accelerated pointer monitor");
+            SDL_SetWindowRelativeMouseMode(sdl_window_, false);
+            return;
+          }
+        }
+#endif
+        success = true;
+      })) {
+    REXLOG_ERROR("Unable to dispatch relative mouse mode change to the UI thread");
+  }
+  return success;
 }
 
 void WindowSDL::ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) {
@@ -353,7 +418,7 @@ void WindowSDL::RearmCursorAutoHideTimer() {
     SDL_RemoveTimer(cursor_hide_timer_);
   }
   cursor_hide_timer_ =
-      SDL_AddTimer(kDefaultCursorAutoHideMilliseconds, CursorAutoHideTimerCallback, this);
+      SDL_AddTimer(GetCursorAutoHideDelayMs(), CursorAutoHideTimerCallback, this);
 }
 
 void WindowSDL::FocusImpl() {
@@ -518,6 +583,19 @@ void WindowSDL::HandleTextInputEvent(SDL_Event& event) {
   }
 }
 
+#if REX_PLATFORM_MAC
+void WindowSDL::AcceleratedPointerCallbackThunk(void* userdata, float delta_x, float delta_y) {
+  static_cast<WindowSDL*>(userdata)->HandleAcceleratedPointerMotion(delta_x, delta_y);
+}
+
+void WindowSDL::HandleAcceleratedPointerMotion(float delta_x, float delta_y) {
+  WindowDestructionReceiver destruction_receiver(this);
+  MouseEvent e(this, MouseEvent::Button::kNone, 0, 0, 0, 0, delta_x, delta_y, true,
+               MouseEvent::MotionSource::kSystemAccelerated);
+  OnMouseMove(e, destruction_receiver);
+}
+#endif
+
 void WindowSDL::HandleMouseEvent(SDL_Event& event) {
   // SDL3 reports float window coordinates; listeners expect physical pixels.
   float density = sdl_window_ ? SDL_GetWindowPixelDensity(sdl_window_) : 1.0f;
@@ -531,8 +609,24 @@ void WindowSDL::HandleMouseEvent(SDL_Event& event) {
         SDL_ShowCursor();
         RearmCursorAutoHideTimer();
       }
+
+      MouseEvent::MotionSource motion_source = MouseEvent::MotionSource::kGeneric;
+#if REX_PLATFORM_MAC
+      // The AppKit monitor supplies the default accelerated NSEvent stream.
+      // SDL's nonzero GCMouse IDs identify raw physical-mouse motion. Ignore
+      // SDL's default stream while the monitor is installed to avoid counting
+      // the same accelerated event twice on systems without a GCMouse.
+      if (event.motion.which == 0 && accelerated_pointer_monitor_) {
+        break;
+      }
+      if (event.motion.which != 0 && event.motion.which != SDL_TOUCH_MOUSEID &&
+          event.motion.which != SDL_PEN_MOUSEID) {
+        motion_source = MouseEvent::MotionSource::kRawMouse;
+      }
+#endif
       MouseEvent e(this, MouseEvent::Button::kNone, int32_t(event.motion.x * density),
-                   int32_t(event.motion.y * density));
+                   int32_t(event.motion.y * density), 0, 0,
+                   event.motion.xrel, event.motion.yrel, true, motion_source);
       OnMouseMove(e, destruction_receiver);
       break;
     }

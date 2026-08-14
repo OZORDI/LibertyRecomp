@@ -26,7 +26,11 @@
 #include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/overlay/settings_overlay.h>
 #include <rex/audio/audio_system.h>
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+#include <rex/audio/coreaudio/coreaudio_audio_system.h>
+#else
 #include <rex/audio/sdl/sdl_audio_system.h>
+#endif
 #include <rex/input/input_system.h>
 #include <rex/kernel/init.h>
 #include <rex/system.h>
@@ -46,8 +50,8 @@
 #include <string_view>
 
 REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
-                      "GPU emulation plugin to load at startup (e.g. 'xenos'); empty disables "
-                      "GPU emulation")
+                      "Graphics plugin to load at startup (for example, 'xenos'); empty lets "
+                      "the title choose")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace rex {
@@ -141,14 +145,30 @@ bool ReXApp::SetupEnvironment() {
     metadata_dir = metadata_root_cvar;
   }
 
-  PathConfig path_config{game_dir,  user_dir,     update_dir,
-                         cache_dir, metadata_dir, exe_dir / (std::string(GetName()) + ".toml")};
+  std::filesystem::path saved_game_dir;
+  std::string saved_game_root_cvar = REXCVAR_GET(saved_game_root);
+  if (!saved_game_root_cvar.empty()) {
+    saved_game_dir = saved_game_root_cvar;
+  }
+
+  PathConfig path_config{
+      .game_data_root = game_dir,
+      .user_data_root = user_dir,
+      .update_data_root = update_dir,
+      .cache_root = cache_dir,
+      .metadata_root = metadata_dir,
+      .marketplace_content_root = {},
+      .saved_game_root = saved_game_dir,
+      .config_path = exe_dir / (std::string(GetName()) + ".toml"),
+  };
   OnConfigurePaths(path_config);
   game_data_root_ = path_config.game_data_root;
   user_data_root_ = path_config.user_data_root;
   update_data_root_ = path_config.update_data_root;
   cache_root_ = path_config.cache_root;
   metadata_root_ = path_config.metadata_root;
+  marketplace_content_root_ = path_config.marketplace_content_root;
+  saved_game_root_ = path_config.saved_game_root;
   config_path_ = path_config.config_path;
   resolved_defaults_ = std::move(path_config);
 
@@ -195,6 +215,12 @@ bool ReXApp::SetupEnvironment() {
   if (!metadata_root_.empty()) {
     REXLOG_INFO("  Metadata root:  {}", metadata_root_.string());
   }
+  if (!marketplace_content_root_.empty()) {
+    REXLOG_INFO("  Marketplace:    {}", marketplace_content_root_.string());
+  }
+  if (!saved_game_root_.empty()) {
+    REXLOG_INFO("  Saved games:    {}", saved_game_root_.string());
+  }
 
   return true;
 }
@@ -218,10 +244,12 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
   update_data_root_ = paths.update_data_root;
   cache_root_ = paths.cache_root;
   metadata_root_ = paths.metadata_root;
+  marketplace_content_root_ = paths.marketplace_content_root;
+  saved_game_root_ = paths.saved_game_root;
 
-  runtime_ =
-      std::make_unique<rex::Runtime>(paths.game_data_root, paths.user_data_root,
-                                     paths.update_data_root, paths.cache_root, paths.metadata_root);
+  runtime_ = std::make_unique<rex::Runtime>(
+      paths.game_data_root, paths.user_data_root, paths.update_data_root, paths.cache_root,
+      paths.metadata_root, paths.marketplace_content_root, paths.saved_game_root);
   runtime_->set_app_context(&app_context());
 
   // Window and ImGui drawer already exist from SetupPresentation; publish them
@@ -306,7 +334,11 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
 
 bool ReXApp::SetupPresentation() {
   config_.gpu_plugin = REXCVAR_GET(gpu_plugin);
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
+  config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::coreaudio::CoreAudioAudioSystem);
+#else
   config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
+#endif
   config_.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
   config_.kernel_init = rex::kernel::InitializeKernel;
 
@@ -349,7 +381,10 @@ bool ReXApp::SetupPresentation() {
   if (REXCVAR_GET(fullscreen)) {
     window_->SetFullscreen(true);
   }
-  window_->Open();
+  if (!window_->Open()) {
+    REXLOG_ERROR("Failed to open the main window");
+    return false;
+  }
 
   auto* graphics_system = config_.graphics.get();
   if (graphics_system && graphics_system->presenter()) {
@@ -457,7 +492,14 @@ void ReXApp::LaunchModule() {
     }
 
     OnPostLaunchModule(main_thread.get());
-    main_thread->Resume();
+    const X_STATUS resume_status = RequiresSynchronizedInitialThreadResume()
+                                       ? main_thread->ResumeFromInitialSuspension()
+                                       : main_thread->Resume();
+    if (XFAILED(resume_status)) {
+      REXLOG_ERROR("Failed to resume the main guest thread: {:08X}", resume_status);
+      app_context().QuitFromUIThread();
+      return;
+    }
 
     module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
       main_thread->Wait(0, 0, 0, nullptr);

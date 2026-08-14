@@ -97,6 +97,10 @@ struct XCONTENT_AGGREGATE_DATA : XCONTENT_DATA {
   be<uint32_t> title_id;
 
   XCONTENT_AGGREGATE_DATA() = default;
+  XCONTENT_AGGREGATE_DATA(const XCONTENT_AGGREGATE_DATA&) = default;
+  XCONTENT_AGGREGATE_DATA(XCONTENT_AGGREGATE_DATA&&) noexcept = default;
+  XCONTENT_AGGREGATE_DATA& operator=(const XCONTENT_AGGREGATE_DATA&) = default;
+  XCONTENT_AGGREGATE_DATA& operator=(XCONTENT_AGGREGATE_DATA&&) noexcept = default;
   XCONTENT_AGGREGATE_DATA(const XCONTENT_DATA& other) {
     device_id = other.device_id;
     content_type = other.content_type;
@@ -141,12 +145,21 @@ class ContentPackage {
 
 class ContentManager {
  public:
-  ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path);
+  ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path,
+                 const std::filesystem::path& marketplace_content_root = {},
+                 const std::filesystem::path& saved_game_root = {});
   ~ContentManager();
 
   std::vector<XCONTENT_AGGREGATE_DATA> ListContent(uint32_t device_id, uint64_t xuid,
                                                    XContentType content_type,
                                                    uint32_t title_id = -1);
+
+  // Returns the content visible to a signed-in user. Marketplace content is
+  // console-wide, so it is enumerated from the common (xuid=0) store exactly
+  // once. Other content includes both the user's store and the common store.
+  std::vector<XCONTENT_AGGREGATE_DATA> ListContentForUser(
+      uint32_t device_id, uint64_t xuid, XContentType content_type,
+      uint32_t title_id = -1);
 
   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, uint64_t xuid,
                                                  const XCONTENT_AGGREGATE_DATA& data);
@@ -177,9 +190,9 @@ class ContentManager {
   // Returns the host filesystem path for an open content package, or empty.
   std::filesystem::path GetOpenPackagePath(const std::string_view root_name) const;
 
-  // Installs an STFS content package from an arbitrary host path.
-  // Extracts the package into root_path_/0000000000000000/{title_id}/00000002/{filename}/
-  // and writes a .header file for XAM enumeration.
+  // Installs an STFS content package from an arbitrary host path and writes a
+  // .header file for XAM enumeration. If a dedicated marketplace root was
+  // supplied, packages are installed directly beneath it.
   X_RESULT InstallContent(const std::filesystem::path& package_path);
 
  private:
@@ -198,6 +211,8 @@ class ContentManager {
 
   KernelState* kernel_state_;
   std::filesystem::path root_path_;
+  std::filesystem::path marketplace_content_root_;
+  std::filesystem::path saved_game_root_;
 
   // TODO(benvanik): remove use of global lock, it's bad here!
   rex::thread::global_critical_region global_critical_region_;

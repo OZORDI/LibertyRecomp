@@ -6,8 +6,8 @@ export module fixes;
 
 import common;
 import comvars;
-import settings;
 import natives;
+import settings;
 import shaders;
 
 class Fixes
@@ -18,7 +18,7 @@ public:
 
     static inline bool* bIsPhoneShowing = nullptr;
     static inline injector::hook_back<int32_t(__cdecl*)()> hbsub_B2CE30;
-    static int32_t sub_B2CE30() 
+    static int32_t sub_B2CE30()
     {
         if ((bIsPhoneShowing && *bIsPhoneShowing))
             return 1;
@@ -27,7 +27,7 @@ public:
     }
 
     static inline injector::hook_back<void(__fastcall*)(int32_t, int32_t)> hbsub_B07600;
-    static void __fastcall sub_B07600(int32_t _this, int32_t) 
+    static void __fastcall sub_B07600(int32_t _this, int32_t)
     {
         hbsub_B07600.fun(_this, 0);
 
@@ -37,7 +37,8 @@ public:
 
     static char sub_8D0A90()
     {
-        if (bMenuNeedsUpdate2 > 0) {
+        if (bMenuNeedsUpdate2 > 0)
+        {
             bMenuNeedsUpdate2--;
             return 0;
         }
@@ -142,6 +143,13 @@ public:
             return true; // Return true to zoom out.
         }
 
+        // Reset EndTime to 0 if game reloads any save, or radar will zoom out automatically and keep this state after that.
+        if (zoomOutEndTime - currentTime >= nRadarZoomDelay)
+        {
+            zoomOutEndTime = 0;
+            return false;
+        }
+
         // The key is not pressed. Check if we are within the 3-second delay period.
         if (currentTime < zoomOutEndTime)
         {
@@ -238,7 +246,7 @@ public:
             int nMenuAccessDelayOnStartup = std::clamp(iniReader.ReadInteger("MISC", "MenuAccessDelayOnStartup", 0), 300, 3000);
             nRadarZoomDelay = std::clamp(iniReader.ReadInteger("MISC", "RadarZoomDelay", 3000), 0, 60000);
 
-            //fix for zoom flag in tbogt
+            // Fix for zoom flag in TBoGT
             if (nAimingZoomFix)
             {
                 auto pattern = find_pattern("8A C1 32 05 ? ? ? ? 24 01 32 C1", "8A D0 32 15");
@@ -259,7 +267,8 @@ public:
                 };
                 if (!pattern.empty())
                     injector::MakeInline<AimZoomHook1>(pattern.get_first(0), pattern.get_first(7));
-                else {
+                else
+                {
                     pattern = find_pattern("08 9E ? ? ? ? E9");
                     injector::MakeInline<AimZoomHook1>(pattern.get_first(0), pattern.get_first(6));
                 }
@@ -275,21 +284,23 @@ public:
                 };
                 if (!pattern.empty())
                     injector::MakeInline<AimZoomHook2>(pattern.get_first(2), pattern.get_first(9));
-                else {
+                else
+                {
                     pattern = find_pattern("80 A6 ? ? ? ? ? EB 25");
                     injector::MakeInline<AimZoomHook2>(pattern.get_first(0), pattern.get_first(7));
                 }
 
-                //let's default to 0 as well
+                // Let's default to 0 as well
                 pattern = hook::pattern("C6 05 ? ? ? ? ? 74 12 83 3D");
                 if (!pattern.empty())
                     injector::WriteMemory<uint8_t>(pattern.get_first(6), 0, true);
-                else {
+                else
+                {
                     pattern = hook::pattern("88 1D ? ? ? ? 74 10");
                     injector::WriteMemory<uint8_t>(pattern.get_first(1), 0x25, true); //mov ah
                 }
 
-                //gamepad handler
+                // Gamepad handler
                 pattern = find_pattern("88 8E ? ? ? ? 84 DB");
                 if (!pattern.empty())
                 {
@@ -358,24 +369,25 @@ public:
                 }
             }
 
-            // reverse lights fix
+            // Reverse lights fix
             {
                 auto pattern = find_pattern("8B 40 64 FF D0 F3 0F 10 40 ? 8D 44 24 40 50", "8B 42 64 8B CE FF D0 F3 0F 10 40");
                 injector::WriteMemory<uint8_t>(pattern.get_first(2), 0x60, true);
             }
 
-            // animation fix for phone interaction on bikes
+            // Animation fix for phone interaction on bikes
             {
                 auto pattern = hook::pattern("83 3D ? ? ? ? 01 0F 8C 18 01 00 00");
                 if (!pattern.empty())
                     injector::MakeNOP(pattern.get(0).get<int>(0), 13, true);
-                else {
+                else
+                {
                     pattern = hook::pattern("80 BE 18 02 00 00 00 0F 85 36 01 00 00 80 BE");
                     injector::MakeNOP(pattern.get(0).get<int>(0x21), 6, true);
                 }
             }
 
-            //fix for lods appearing inside normal models, unless the graphics menu was opened once (draw distances aren't set properly?)
+            // Fix for lods appearing inside normal models, unless the graphics menu was opened once (draw distances aren't set properly?)
             {
                 auto pattern = find_pattern("E8 ? ? ? ? 8D 4C 24 10 F3 0F 11 05 ? ? ? ? E8 ? ? ? ? 8B F0 E8 ? ? ? ? DF 2D", "E8 ? ? ? ? 8D 44 24 10 83 C4 04 50");
                 auto sub_477300 = injector::GetBranchDestination(pattern.get_first(0));
@@ -406,11 +418,12 @@ public:
                 injector::WriteMemory(pattern.get_first(2), &_dwTimeOffset, true);
                 pattern = find_pattern("2B 05 ? ? ? ? 3B C8 75 6C 83 3D", "2B 0D ? ? ? ? 3B C1 75 33 E8");
                 injector::WriteMemory(pattern.get_first(2), &_dwTimeOffset, true);
-                // Removing episode id check that resulted in flickering LOD lights at certain camera angles in TBOGT
+                // Removing episode id check that resulted in flickering LOD lights at certain camera angles in TBoGT
                 pattern = hook::pattern("83 3D ? ? ? ? ? 0F 85 ? ? ? ? F3 0F 10 05 ? ? ? ? F3 0F 10 8C 24");
                 if (!pattern.empty())
                     injector::WriteMemory<uint16_t>(pattern.get_first(7), 0xE990, true); // jnz -> jmp
-                else {
+                else
+                {
                     pattern = hook::pattern("83 3D ? ? ? ? ? 75 68 F3 0F 10 05");
                     injector::WriteMemory<uint8_t>(pattern.get_first(7), 0xEB, true); // jnz -> jmp
                 }
@@ -421,7 +434,7 @@ public:
                 static auto reg = *pattern.get_first<uint8_t>(5);
                 static auto nTimeToWaitBeforeCenteringCameraOnFootKB = FusionFixSettings.GetRef("PREF_KBCAMCENTERDELAY");
                 static auto nTimeToWaitBeforeCenteringCameraOnFootPad = FusionFixSettings.GetRef("PREF_PADCAMCENTERDELAY");
-                struct OnFootCamCenteringHook 
+                struct OnFootCamCenteringHook
                 {
                     void operator()(injector::reg_pack& regs)
                     {
@@ -436,7 +449,7 @@ public:
                         int32_t x = 0;
                         int32_t y = 0;
 
-                        if (pad) 
+                        if (pad)
                         {
                             Natives::GetPadState(0, 2, &x);
                             Natives::GetPadState(0, 3, &y);
@@ -456,7 +469,7 @@ public:
                             posX = 0.0f;
                     }
                 };
-                
+
                 if (reg != 0x48)
                     injector::MakeInline<OnFootCamCenteringHook>(pattern.get_first(0), pattern.get_first(6));
                 else
@@ -558,7 +571,8 @@ public:
                 pattern = find_pattern("E8 ? ? ? ? 84 C0 74 12 80 3D ? ? ? ? ? 0F B6 DB", "E8 ? ? ? ? 84 C0 74 0A 38 1D");
                 injector::MakeCALL(pattern.get_first(0), sub_8D0A90, true);
 
-                FusionFixSettings.SetCallback("PREF_CUSTOMFOV", [](int32_t value) {
+                FusionFixSettings.SetCallback("PREF_CUSTOMFOV", [](int32_t value)
+                {
                     bMenuNeedsUpdate = 2;
                     bMenuNeedsUpdate2 = 2;
                 });
@@ -613,19 +627,32 @@ public:
                 }
             }
 
-            // Restored a small detail regarding pedprops from the console versions that was changed on PC. Regular cops & fat cops will now spawn with their hat prop disabled when in a vehicle.
+            // Fix pause menu map crosshair lines scale
+            {
+                auto pattern = hook::pattern("F3 0F 10 15 ? ? ? ? F3 0F 10 5C 24 ? 0F B6 C0");
+                if (!pattern.empty())
+                {
+                    static auto RenderMapCrosshairHook = safetyhook::create_mid(pattern.get_first(0), [](SafetyHookContext& regs)
+                    {
+                        float aspectratio = ((float)*rage::grcDevice::ms_nActiveWidth / (float)*rage::grcDevice::ms_nActiveHeight);
+                        *(float*)(regs.esp + 0x64 - 0x30) /= (aspectratio * 0.75f);
+                    });
+                }
+            }
+
+            // Restored a small detail regarding pedprops from the console versions that was changed on PC. Regular cops & fat cops will now spawn with their hat prop disabled when in a vehicle
             {
                 auto pattern = find_pattern("3B 05 ? ? ? ? 74 6C 3B 05 ? ? ? ? 74 64 3B 05 ? ? ? ?", "3B 05 ? ? ? ? 74 6E 3B 05 ? ? ? ? 74 66 3B 05");
                 injector::MakeNOP(pattern.get_first(0), 16, true);
             }
 
-            // Remove free cam boundary limits in the video editor.
+            // Remove free cam boundary limits in the video editor
             {
                 auto pattern = hook::pattern("73 5C 56 6A 00 6A 01 E8 ? ? ? ? 83 C4 0C 84 C0 74 4B");
                 if (!pattern.empty())
                 {
                     injector::WriteMemory<uint8_t>(pattern.get_first(0), 0xEB, true);
-             
+
                     pattern = hook::pattern("0F 86 ? ? ? ? 0F 2E FA 9F F6 C4 44 7A 05");
                     if (!pattern.empty())
                     {
@@ -653,7 +680,7 @@ public:
 
             // Glass shards color fix
             {
-                static auto veh_glass_red   = "veh_glass_red";
+                static auto veh_glass_red = "veh_glass_red";
                 static auto veh_glass_amber = "veh_glass_amber";
 
                 auto pattern = find_pattern("68 ? ? ? ? EB E2 6A 00 68", "68 ? ? ? ? EB 07 6A 00 68 ? ? ? ? E8 ? ? ? ? 83 C4 08");
@@ -672,7 +699,7 @@ public:
                     hbsub_B64D60.fun = injector::MakeCALL(pattern.get_first(0), sub_B64D60).get();
             }
 
-            // Disable Z-write for emmissive shaders. Fixes visual bugs e.g. strobe lights in Bahama Mamas (TBoGT) and more.
+            // Disable Z-write for emissive shaders. Fixes visual bugs e.g. strobe lights in Bahama Mamas (TBoGT) and more
             {
                 static uint32_t* dwEFB1B8 = *hook::pattern("6A 01 6A 10 89 3D").get_first<uint32_t*>(6);
                 auto pattern = find_pattern("83 FF 05 74 05 83 FF 04 75 26 6A 00 6A 0C E8 ? ? ? ? 83 C4 08 85 C0 74 0B 6A 01 8B C8 E8", "83 FF 05 74 05");
@@ -681,7 +708,7 @@ public:
                 {
                     void operator()(injector::reg_pack& regs)
                     {
-                        // Fix for visual bugs in QUB3D that will occur with this fix. Only enable z-write for emissives shaders when the camera/player height is 3000 or higher.
+                        // Fix for visual bugs in QUB3D that will occur with this fix. Only enable Z-write for emissive shaders when the camera/player height is 3000 or higher.
                         // This height check was present in patch 1.0.4.0 and was removed in patch 1.0.6.0+, in addition Z-write for emissive shaders was enabled permanently.
                         const bool isEmissiveShader = regs.edi == 5 || regs.edi == 4;
                         const float cameraHeight = *(float*)(*dwEFB1B8 + 296);
@@ -784,7 +811,7 @@ public:
                 }
             }
 
-            // Always display the ped health on the reticle with free-aim while on foot, used to be a gamepad + multiplayer only feature (PC is always free-aim unless it's melee combat).
+            // Always display the ped health on the reticle with free-aim while on foot, used to be a gamepad + multiplayer only feature (PC is always free-aim unless it's melee combat)
             if (bAlwaysDisplayHealthOnReticle)
             {
                 auto pattern = hook::pattern("80 BB ? ? ? ? ? 74 61 56 57 E8");
@@ -826,13 +853,6 @@ public:
                 auto pattern = find_pattern("74 ? 85 C9 75 ? 32 C0 50", "74 16 85 C0 75 12 D9 EE");
                 if (!pattern.empty())
                     injector::WriteMemory<uint8_t>(pattern.get_first(0), 0xEB, true); // jz -> jmp
-            }
-
-            // Radar zoom (T hotkey) 30fps cap fix
-            {
-                auto pattern = find_pattern("83 F9 ? 0F 86 ? ? ? ? F3 0F 10 15", "83 F8 1E 0F 86 ? ? ? ? F3 0F 10 0D ? ? ? ? 0F 2E C1");
-                if (!pattern.empty())
-                    injector::WriteMemory<uint8_t>(pattern.get_first(2), 15, true);
             }
 
             // Radar zoom stays for a bit
@@ -900,7 +920,8 @@ public:
                     pattern = find_pattern("72 ? 8B 56 ? 52");
                     static auto loc_B5D8D8 = resolve_displacement(pattern.get_first(0)).value();
                     injector::MakeNOP(pattern.get_first(0), 5);
-                    static auto BulletTracesHook = safetyhook::create_mid(pattern.get_first(0), [](SafetyHookContext& regs) {
+                    static auto BulletTracesHook = safetyhook::create_mid(pattern.get_first(0), [](SafetyHookContext& regs)
+                    {
                         static auto esc = FusionFixSettings.GetRef("PREF_BULLETTRACES");
                         if (esc->get())
                         {
@@ -923,7 +944,7 @@ public:
                     injector::WriteMemory<uint8_t>(pattern.get_first(0), 0xEB, true); // jnz -> jmp
             }
 
-            // Enable the "first person" reticle (Annihilator, Buzzard) on gamepads as well, this used to be a keyboard & mouse only feature.
+            // Enable the "first person" reticle (Annihilator, Buzzard) on gamepads as well, this used to be a keyboard & mouse only feature
             {
                 auto pattern = find_pattern("0F 84 ? ? ? ? 85 C9 0F 84 ? ? ? ? 8B 89", "0F 84 ? ? ? ? 85 C0 0F 84 ? ? ? ? 8B 88");
                 if (!pattern.empty())
@@ -1023,6 +1044,83 @@ public:
 
                     return_to(loc_927DE0);
                 });
+            }
+
+            // Console pause menu info spacing
+            {
+                // These also had a %s at the start on console but the sprintf call on PC doesn't support it and replacing it is too much for such a little thing
+                static auto a02d02d_0 = "  /  %02d:%02d";
+                static auto a02d02d_1 = "  /  %02d:%02d  /  %d$";
+                static auto a02d02d_2 = "  /  %02d:%02d  /  $%d";
+
+                auto pattern = find_pattern("68 ? ? ? ? 64 A1 ? ? ? ? 8B 00 05 ? ? ? ? 50 E8 ? ? ? ? 83 C4 ? 64 A1", "68 ? ? ? ? 81 C1 ? ? ? ? 51 E8 ? ? ? ? 83 C4");
+                injector::WriteMemory(pattern.get_first(1), a02d02d_0, true);
+
+                pattern = find_pattern("68 ? ? ? ? EB ? 83 3D ? ? ? ? ? 8B 0D ? ? ? ? 0F 45 0D ? ? ? ? 83 3D ? ? ? ? ? 51", "68 ? ? ? ? 81 C2 ? ? ? ? 52 EB ? E8");
+                injector::WriteMemory(pattern.get_first(1), a02d02d_0, true);
+
+                pattern = find_pattern("68 ? ? ? ? 64 A1 ? ? ? ? 8B 00 05 ? ? ? ? 50 E8 ? ? ? ? 83 C4 ? E9", "68 ? ? ? ? 50 E8 ? ? ? ? 83 C4 ? EB ? A1");
+                injector::WriteMemory(pattern.get_first(1), a02d02d_1, true);
+
+                pattern = find_pattern("68 ? ? ? ? EB ? 83 3D ? ? ? ? ? 8B 0D ? ? ? ? 0F 45 0D ? ? ? ? 83 3D ? ? ? ? ? 56", "68 ? ? ? ? 51 E8 ? ? ? ? 83 C4 ? E9 ? ? ? ? 56");
+                injector::WriteMemory(pattern.get_first(1), a02d02d_2, true);
+            }
+
+            // Fix NPCs lane swerving due to trains above/below them, kind of hacky probably but it works (clippy95)
+            {
+                constexpr float MaxCenterZDeltaForWeave_trains = 2.5f;
+                auto pattern = hook::pattern("0F 2F C8 76 ? 3B F1");
+                if (!pattern.empty())
+                {
+                    static auto CCarAI_WeaveThroughCarsSectorListHook = safetyhook::create_mid(pattern.get_first(), [](SafetyHookContext& regs)
+                    {
+                        auto other_car = regs.esi;
+                        auto m_nVehicleType = *(uint32_t*)(other_car + 0x1304);
+                        if (m_nVehicleType == VEHICLETYPE_TRAIN)
+                        {
+                            // the delta height check is always 8.f
+                            regs.xmm1.f32[0] = MaxCenterZDeltaForWeave_trains;
+                        }
+                    });
+                }
+                else
+                {
+                    pattern = hook::pattern("0F 2F C8 76 ? 3B F7");
+                    if (!pattern.empty())
+                    {
+                        static auto CCarAI_WeaveThroughCarsSectorListHook = safetyhook::create_mid(pattern.get_first(), [](SafetyHookContext& regs)
+                        {
+                            auto other_car = regs.esi;
+                            auto m_nVehicleType = *(uint32_t*)(other_car + 0x1354);
+                            if (m_nVehicleType == VEHICLETYPE_TRAIN)
+                            {
+                                // the delta height check is always 8.f
+                                regs.xmm1.f32[0] = MaxCenterZDeltaForWeave_trains;
+                            }
+                        });
+                    }
+                }
+            }
+
+            // Fix for time going backwards when dying or being busted between 12pm and 11pm, and respraying between 9pm and 11:59pm (https://github.com/GTAmodding/GTAIV-Issues-List/issues/164)
+            {
+                auto pattern = find_pattern("6A ? 56 53 55 E8 ? ? ? ? 69 FF", "6A ? 53 55 56");
+
+                uint8_t* ptr = (uint8_t*)pattern.get_first(0);
+                injector::scoped_unprotect protect{ptr, 3};
+                // push day register
+                ptr[0] = ptr[2];
+                // push 0xFF
+                ptr[1] = 0x6A;
+                ptr[2] = 0xFF;
+            }
+
+            // Fix for lack of background radio in Romnan's cab depot during cutscenes
+            {
+                auto pattern = find_pattern("75 19 80 3D ? ? ? ? ? 74 10 F3 0F 10 05");
+                if (!pattern.empty())
+                    injector::WriteMemory<uint8_t>(pattern.get_first(0), 0xEB, true); // jnz -> jmp
+
             }
         };
     }

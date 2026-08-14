@@ -32,6 +32,16 @@ SDLWindowedAppContext::~SDLWindowedAppContext() {
 }
 
 bool SDLWindowedAppContext::Initialize() {
+#if REX_PLATFORM_MAC
+  // Games need held keys to repeat. SDL's macOS default enables the system
+  // accent/character chooser while text input is active, so override it before
+  // initializing video (when SDL registers its Cocoa application defaults).
+  if (!SDL_SetHintWithPriority(SDL_HINT_MAC_PRESS_AND_HOLD, "0", SDL_HINT_OVERRIDE)) {
+    REXLOG_ERROR("Failed to disable the macOS press-and-hold character chooser: {}",
+                 SDL_GetError());
+    return false;
+  }
+#endif
 #if REX_PLATFORM_GNU_LINUX
   // The Linux surface type the presenters consume is XcbWindow, so force X11
   // and keep SDL off Wayland where no surface shim exists yet.

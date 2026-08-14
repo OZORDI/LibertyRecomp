@@ -13,6 +13,8 @@
 #include <rex/logging.h>
 #include <rex/thread.h>
 
+#include <cstring>
+
 namespace rex {
 namespace kernel {
 namespace xam {
@@ -21,6 +23,24 @@ using namespace rex::system::xam;
 namespace apps {
 using namespace rex::system;
 
+namespace {
+
+struct XCONTENT_MARKETPLACE_COUNTS_REQUEST {
+  rex::be<uint32_t> user_index;
+  rex::be<uint32_t> title_id;
+  rex::be<uint32_t> content_categories;
+  rex::be<uint32_t> result_ptr;
+};
+static_assert_size(XCONTENT_MARKETPLACE_COUNTS_REQUEST, 0x10);
+
+struct XCONTENT_MARKETPLACE_COUNTS_RESULT {
+  rex::be<uint32_t> new_offers;
+  rex::be<uint32_t> total_offers;
+};
+static_assert_size(XCONTENT_MARKETPLACE_COUNTS_RESULT, 0x8);
+
+}  // namespace
+
 XLiveBaseApp::XLiveBaseApp(KernelState* kernel_state) : App(kernel_state, 0xFC) {}
 
 // http://mb.mirage.org/bugzilla/xliveless/main.c
@@ -28,19 +48,26 @@ XLiveBaseApp::XLiveBaseApp(KernelState* kernel_state) : App(kernel_state, 0xFC) 
 X_HRESULT XLiveBaseApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                                             uint32_t buffer_length) {
   // NOTE: buffer_length may be zero or valid.
-  auto buffer = memory_->TranslateVirtual(buffer_ptr);
+  auto buffer = buffer_ptr ? memory_->TranslateVirtual(buffer_ptr) : nullptr;
   switch (message) {
     case 0x00058004: {
       // Called on startup, seems to just return a bool in the buffer.
-      assert_true(!buffer_length || buffer_length == 4);
+      if (!buffer || (buffer_length && buffer_length != 4)) {
+        return X_E_INVALIDARG;
+      }
       REXKRNL_DEBUG("XLiveBaseGetLogonId({:08X})", buffer_ptr);
-      memory::store_and_swap<uint32_t>(buffer + 0, 1);  // ?
+      const auto* live = kernel_state_->live_compatibility();
+      memory::store_and_swap<uint32_t>(buffer + 0, live && live->available() ? 1 : 0);
       return X_E_SUCCESS;
     }
     case 0x00058006: {
-      assert_true(!buffer_length || buffer_length == 4);
+      if (!buffer || (buffer_length && buffer_length != 4)) {
+        return X_E_INVALIDARG;
+      }
       REXKRNL_DEBUG("XLiveBaseGetNatType({:08X})", buffer_ptr);
-      memory::store_and_swap<uint32_t>(buffer + 0, 1);  // XONLINE_NAT_OPEN
+      const auto* live = kernel_state_->live_compatibility();
+      memory::store_and_swap<uint32_t>(buffer + 0,
+                                       live && live->available() ? 1 : 0);
       return X_E_SUCCESS;
     }
     case 0x00058007: {
@@ -48,7 +75,28 @@ X_HRESULT XLiveBaseApp::DispatchMessageSync(uint32_t message, uint32_t buffer_pt
       // and pServiceInfo. pServiceInfo should contain pointer to
       // XONLINE_SERVICE_INFO structure.
       REXKRNL_DEBUG("CXLiveLogon::GetServiceInfo({:08X}, {:08X})", buffer_ptr, buffer_length);
-      return 0x80151802;  // ERROR_CONNECTION_INVALID
+      return kernel_state_->live_compatibility() &&
+                     kernel_state_->live_compatibility()->available()
+                 ? X_E_SUCCESS
+                 : 0x80151802;  // ERROR_CONNECTION_INVALID
+    }
+    case 0x00058009: {
+      if (!buffer || (buffer_length &&
+                      buffer_length != sizeof(XCONTENT_MARKETPLACE_COUNTS_REQUEST))) {
+        return X_E_INVALIDARG;
+      }
+      const auto& request =
+          *reinterpret_cast<const XCONTENT_MARKETPLACE_COUNTS_REQUEST*>(buffer);
+      if (request.user_index != 0 || !request.result_ptr) {
+        return X_E_INVALIDARG;
+      }
+      auto* result = memory_->TranslateVirtual<XCONTENT_MARKETPLACE_COUNTS_RESULT*>(
+          request.result_ptr);
+      std::memset(result, 0, sizeof(*result));
+      REXKRNL_DEBUG("XContentGetMarketplaceCounts(title={:08X}, categories={:08X}) -> 0",
+                    static_cast<uint32_t>(request.title_id),
+                    static_cast<uint32_t>(request.content_categories));
+      return X_E_SUCCESS;
     }
     case 0x00058020: {
       // 0x00058004 is called right before this.
@@ -71,6 +119,10 @@ X_HRESULT XLiveBaseApp::DispatchMessageSync(uint32_t message, uint32_t buffer_pt
       // Doesn't seem to set anything in the given buffer, probably only takes
       // input
       REXKRNL_DEBUG("XLiveBaseUnk58046({:08X}, {:08X}) unimplemented", buffer_ptr, buffer_length);
+      return X_E_SUCCESS;
+    }
+    case 0x00058037: {
+      REXKRNL_DEBUG("XPresenceInitialize({:08X}, {:08X})", buffer_ptr, buffer_length);
       return X_E_SUCCESS;
     }
   }
