@@ -34,6 +34,7 @@ extracted/
 
 # Development Notes - Private
 NOTES.md
+/.research/
 
 # Documentation - Ignore all except build/dump/install/multiplayer guides
 docs/*.md

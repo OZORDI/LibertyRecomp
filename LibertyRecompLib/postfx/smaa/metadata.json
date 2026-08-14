@@ -1,0 +1,21 @@
+{
+  "upstream": "https://github.com/iryoku/smaa",
+  "commit": "71c806a838bdd7d517df19192a20f0c61b3ca29d",
+  "license": "MIT",
+  "copyright": [
+    "Copyright (C) 2013 Jorge Jimenez",
+    "Copyright (C) 2013 Jose I. Echevarria",
+    "Copyright (C) 2013 Belen Masia",
+    "Copyright (C) 2013 Fernando Navarro",
+    "Copyright (C) 2013 Diego Gutierrez"
+  ],
+  "files": {
+    "SMAA.hlsl": "4db53d92ef0b45661f8450303589ffabce93c352cae4282a6f32dd2b80efbeb9",
+    "AreaTex.h": "1933bf43ce86ba71f7ed5f0fa94b148610c634dc3395b9bc67a817d51ee73af2",
+    "SearchTex.h": "1fac315ab5f87b60083c9b8387af17f056204d3d1bf21500f2acc5b3e8c1a37a"
+  },
+  "formats": {
+    "AreaTex.h": "VK_FORMAT_R8G8_UNORM, 160x560, linear clamp",
+    "SearchTex.h": "VK_FORMAT_R8_UNORM, packed 64x16, nearest clamp"
+  }
+}
