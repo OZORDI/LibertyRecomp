@@ -670,7 +670,7 @@ build-codegen/
 # Root-level scripts and logs (local dev only)
 *.sh
 *.py
-!tools/generate_mouse_input_constants.py
+/tools/*.py
 !tools/xtd_tools/button_prompt_roundtrip.py
 !LibertyRecompLib/font_atlases/tools/*.py
 !glue/rexglue-sdk-main/gta4-recomp/tools/verify_physics_trace_sites.py
