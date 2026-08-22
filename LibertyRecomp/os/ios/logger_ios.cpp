@@ -12,6 +12,7 @@
 #include <os/log.h>
 
 #include <rex/logging.h>
+#include <rex/diagnostics/policy.h>
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/details/log_msg.h>
 
@@ -55,12 +56,16 @@ namespace
 
 void os::logger::Init()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     if (!g_log)
         g_log = os_log_create("com.libertyrecomp.app", "general");
 }
 
 void os::logger::PlatformInitSinks()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     Init();
     auto sink = std::make_shared<os_log_sink_mt>();
     rex::logging::AddSink(sink);

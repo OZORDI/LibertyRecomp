@@ -40,6 +40,7 @@
 
 #include <rex/math.h>
 #include <rex/memory/utils.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/platform.h>
 #include <rex/string.h>
 
@@ -203,7 +204,8 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     // over-budget request (e.g. guest wants 4.5 GB, only 4 GB free) still
     // succeeds with a reduced footprint. We log the reduction once.
     static bool s_warned = false;
-    if (!s_warned) {
+    if (diagnostics::IsEnabled(diagnostics::Category::kLogging) &&
+        !s_warned) {
       s_warned = true;
       std::fprintf(stderr,
                    "[memory_ps4] AllocateDirectMemory(%zu) failed "
@@ -221,9 +223,11 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
                                           kOrbisDirectAlign,
                                           SCE_KERNEL_WB_ONION, &dmem_offset);
       if (res >= 0) {
-        std::fprintf(stderr,
-                     "[memory_ps4] Reduced reservation: requested=%zu got=%zu\n",
-                     aligned_length, fb);
+        if (diagnostics::IsEnabled(diagnostics::Category::kLogging)) {
+          std::fprintf(stderr,
+                       "[memory_ps4] Reduced reservation: requested=%zu got=%zu\n",
+                       aligned_length, fb);
+        }
         effective_len = fb;
         break;
       }
@@ -362,7 +366,7 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out) {
   // TODO(ps4): wire up sceKernelQueryMemoryProtection if a caller starts
   // relying on out_old_access beyond "non-null / null".
   static bool s_warned = false;
-  if (!s_warned) {
+  if (diagnostics::IsEnabled(diagnostics::Category::kLogging) && !s_warned) {
     s_warned = true;
     std::fprintf(stderr,
                  "[memory_ps4] QueryProtect is a stub on PS4; returning "

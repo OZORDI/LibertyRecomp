@@ -289,7 +289,7 @@ class CoreAudioOutput {
   std::atomic<uint64_t> signal_clipped_samples_{0};
   std::atomic<uint64_t> signal_nonfinite_samples_{0};
   std::atomic<uint64_t> signal_diagnostics_dropped_{0};
-  std::atomic<bool> signal_diagnostics_enabled_{true};
+  std::atomic<bool> signal_diagnostics_enabled_{false};
   std::atomic<float> signal_loud_threshold_{0.95f};
   std::atomic<uint32_t> signal_log_interval_blocks_{32};
   CoreAudioSignalDiagnosticQueue output_signal_diagnostics_;

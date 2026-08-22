@@ -12,6 +12,7 @@
 
 #include <rex/chrono/clock.h>
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/thread.h>
 
@@ -727,7 +728,11 @@ Mode GetMode() {
   return Mode::kOff;
 }
 
-bool IsEnabled() { return GetMode() != Mode::kOff; }
+bool IsEnabled() {
+  return ::rex::diagnostics::IsEnabled(
+             ::rex::diagnostics::Category::kTransition) &&
+         GetMode() != Mode::kOff;
+}
 
 void Initialize() {
   if (!IsEnabled()) {

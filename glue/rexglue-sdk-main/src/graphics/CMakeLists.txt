@@ -156,7 +156,7 @@ if(REXGLUE_USE_VULKAN)
     set(GTA4_NATIVE_SHADER_OVERRIDE_MANIFEST
         "${GTA4_NATIVE_SHADER_OVERRIDE_ROOT}/manifest.json")
     set(GTA4_NATIVE_SHADER_OVERRIDE_COMPILER
-        "${CMAKE_SOURCE_DIR}/tools/XenosRecomp/shader_override_compiler.py")
+        "${REXGLUE_ROOT}/tools/gta4_shader_override_compiler.py")
     set(GTA4_NATIVE_SHADER_OVERRIDE_CPP
         "${CMAKE_CURRENT_BINARY_DIR}/generated/gta4_native/shader_override_cache.cpp")
     set(GTA4_NATIVE_SHADER_OVERRIDE_DEPFILE
@@ -242,6 +242,7 @@ if(REXGLUE_USE_VULKAN)
 
     add_library(rexgpu-gta4-native SHARED
         gta4_native/graphics_system.cpp
+        gta4_native/native_performance_samples.cpp
         gta4_native/postfx_resource_pool.cpp
         gta4_native/smaa_pipeline.cpp
         gta4_native/split_postfx_pass.cpp

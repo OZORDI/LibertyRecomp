@@ -5,6 +5,7 @@
 #include <kernel/memory.h>
 #include <os/process.h>
 #include <os/logger.h>
+#include <os/diag.h>
 #include <patches/patches.h>
 #include <ui/game_window.h>
 #include <user/config.h>
@@ -29,8 +30,7 @@ void App::Restart(std::vector<std::string> restartArgs)
 
 void App::Exit()
 {
-    printf("[APP-EXIT] App::Exit() called!\n");
-    fflush(stdout);
+    DIAG_EMIT("[APP-EXIT] App::Exit() called!\n");
     Config::Save();
 
 #ifdef _WIN32
@@ -118,4 +118,3 @@ void LogFileLoad(const char* filePath)
     }
 }
 #endif
-

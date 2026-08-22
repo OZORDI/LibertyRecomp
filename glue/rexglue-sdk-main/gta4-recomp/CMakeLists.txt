@@ -71,10 +71,19 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
                 "Resources/font_atlases/${LIBERTY_VECTOR_FONT_EPISODE}")
     endforeach()
 
-    set(LIBERTY_RPF_AES_KEY
+    set(LIBERTY_RPF_AES_KEY_SOURCE
         "${CMAKE_SOURCE_DIR}/LibertyRecompLib/aes_key.bin")
-    set_source_files_properties("${LIBERTY_RPF_AES_KEY}" PROPERTIES
-        MACOSX_PACKAGE_LOCATION "Resources")
+    set(LIBERTY_RPF_AES_KEY_RESOURCES)
+    if(EXISTS "${LIBERTY_RPF_AES_KEY_SOURCE}")
+        list(APPEND LIBERTY_RPF_AES_KEY_RESOURCES
+            "${LIBERTY_RPF_AES_KEY_SOURCE}")
+        set_source_files_properties("${LIBERTY_RPF_AES_KEY_SOURCE}" PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources")
+    else()
+        message(STATUS
+            "LibertyRecompLib/aes_key.bin is not present; the app will build "
+            "without the optional game-install key resource")
+    endif()
 
     add_executable(LibertyRecomp MACOSX_BUNDLE
         src/main.cpp
@@ -99,7 +108,7 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
         "${LIBERTY_GC_MACOS_ENTITLEMENTS}"
         ${LIBERTY_BUTTON_PROMPT_RESOURCES}
         ${LIBERTY_VECTOR_FONT_RESOURCES}
-        "${LIBERTY_RPF_AES_KEY}"
+        ${LIBERTY_RPF_AES_KEY_RESOURCES}
         ${GENERATED_SOURCES}
     )
 
@@ -119,7 +128,7 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
     target_compile_definitions(LibertyRecomp PRIVATE
         GTA4_RECOMP_ASSET_XEX="${CMAKE_CURRENT_SOURCE_DIR}/assets/default_v8.xex"
         GTA4_BUTTON_PROMPT_ASSET_ROOT="${LIBERTY_BUTTON_PROMPT_SOURCE}"
-        GTA4_RPF_AES_KEY_SOURCE="${LIBERTY_RPF_AES_KEY}"
+        GTA4_RPF_AES_KEY_SOURCE="${LIBERTY_RPF_AES_KEY_SOURCE}"
     )
 
     target_link_libraries(LibertyRecomp PRIVATE

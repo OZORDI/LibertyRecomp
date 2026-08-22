@@ -37,17 +37,16 @@ static constexpr uint32_t ADDR_RPF_MODE_FLAG         = 0x831B59F8;
 PPC_FUNC_IMPL(__imp__sub_828C8D78);
 PPC_FUNC_HOOK(sub_828C8D78)
 {
-    // Log the path being set
-    uint32_t pathAddr = ctx.r3.u32;
-    char pathStr[64] = {};
-    if (pathAddr) {
-        for (int i = 0; i < 63; i++) {
-            char c = static_cast<char>(PPC_LOAD_U8(pathAddr + i));
-            if (c == 0) break;
-            pathStr[i] = c;
-        }
-    }
     if (::os::diag::ShouldEmit()) {
+        const uint32_t pathAddr = ctx.r3.u32;
+        char pathStr[64] = {};
+        if (pathAddr) {
+            for (int i = 0; i < 63; i++) {
+                char c = static_cast<char>(PPC_LOAD_U8(pathAddr + i));
+                if (c == 0) break;
+                pathStr[i] = c;
+            }
+        }
         fprintf(stderr, "[SHADER-DIAG] setShaderBasePath('%s') addr=0x%08X\n", pathStr, pathAddr);
         fflush(stderr);
     }
@@ -66,22 +65,22 @@ PPC_FUNC_HOOK(sub_828CAA60)
     uint32_t objAddr = ctx.r3.u32;
     uint32_t nameAddr = ctx.r4.u32;
     uint32_t flags = ctx.r5.u32;
-    int n = s_shaderLoadCount++;
-
-    // Read name string
+    const bool diagnostics = ::os::diag::ShouldEmit();
+    const int n = diagnostics ? s_shaderLoadCount++ : 0;
     char name[64] = {};
-    if (nameAddr) {
-        for (int i = 0; i < 63; i++) {
-            char c = static_cast<char>(PPC_LOAD_U8(nameAddr + i));
-            if (c == 0) break;
-            name[i] = c;
+    uint32_t pathBefore = 0;
+    if (diagnostics) {
+        if (nameAddr) {
+            for (int i = 0; i < 63; i++) {
+                char c = static_cast<char>(PPC_LOAD_U8(nameAddr + i));
+                if (c == 0) break;
+                name[i] = c;
+            }
         }
+        pathBefore = objAddr != 0 ? PPC_LOAD_U32(objAddr + 32) : 0;
     }
 
-    // Read obj+32 (the path field) BEFORE the call
-    uint32_t pathBefore = (objAddr != 0) ? PPC_LOAD_U32(objAddr + 32) : 0;
-
-    if (n < 20 && ::os::diag::ShouldEmit()) {
+    if (diagnostics && n < 20) {
         fprintf(stderr, "[SHADER-DIAG] sub_828CAA60 #%d obj=0x%08X name='%s'(0x%08X) flags=%u path_before=0x%08X\n",
                 n, objAddr, name, nameAddr, flags, pathBefore);
         fflush(stderr);
@@ -111,7 +110,7 @@ PPC_FUNC_HOOK(sub_828CAA60)
         ctx.r3.u64 = STR_COMMON_SHADERS;
         __imp__sub_828C8D78(ctx, base);
         ctx = save_ctx;
-        if (n < 20) {
+        if (diagnostics && n < 20) {
             fprintf(stderr, "[SHADER-FIX ] sub_828CAA60 #%d primed aTuneShadersLib with 'common:/shaders' "
                             "before first loader call\n", n);
             fflush(stderr);
@@ -120,11 +119,9 @@ PPC_FUNC_HOOK(sub_828CAA60)
 
     __imp__sub_828CAA60(ctx, base);
 
-    // Read obj+32 AFTER the call
-    uint32_t pathAfter = (objAddr != 0) ? PPC_LOAD_U32(objAddr + 32) : 0;
-    uint32_t result = ctx.r3.u32;
-
-    if (n < 20 && ::os::diag::ShouldEmit()) {
+    if (diagnostics && n < 20) {
+        const uint32_t pathAfter = objAddr != 0 ? PPC_LOAD_U32(objAddr + 32) : 0;
+        const uint32_t result = ctx.r3.u32;
         fprintf(stderr, "[SHADER-DIAG] sub_828CAA60 #%d result=%u path_after=0x%08X\n",
                 n, result, pathAfter);
         fflush(stderr);

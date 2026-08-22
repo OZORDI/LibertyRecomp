@@ -10,6 +10,7 @@
 #include <kernel/function.h>
 #include <kernel/heap.h>
 #include <kernel/memory.h>
+#include <rex/diagnostics/policy.h>
 #include <runtime/rex_thread_state.h>
 #include <stdafx.h>
 
@@ -133,13 +134,19 @@ static void *GuestThreadFunc(GuestThreadHandle *hThread) {
   std::atomic_thread_fence(std::memory_order_acquire);
 
   bool wasSuspended = hThread->suspended.load(std::memory_order_acquire);
-  fprintf(stderr,
-          "[GuestThreadFunc] Thread starting, suspended=%d, waiting...\n",
-          wasSuspended ? 1 : 0);
+  const bool thread_diagnostics =
+      rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks);
+  if (thread_diagnostics) {
+    fprintf(stderr,
+            "[GuestThreadFunc] Thread starting, suspended=%d, waiting...\n",
+            wasSuspended ? 1 : 0);
+  }
   if (wasSuspended) {
     hThread->suspended.wait(true, std::memory_order_acquire);
-    fprintf(stderr, "[GuestThreadFunc] Thread RESUMED after wait\n");
-  } else {
+    if (thread_diagnostics) {
+      fprintf(stderr, "[GuestThreadFunc] Thread RESUMED after wait\n");
+    }
+  } else if (thread_diagnostics) {
     fprintf(stderr,
             "[GuestThreadFunc] Thread NOT suspended, running immediately\n");
   }
@@ -158,11 +165,12 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams &params)
     : params(params), suspended((params.flags & 0x1) != 0)
 #ifdef USE_PTHREAD
 {
-  // Debug: verify flags and suspended state before creating thread
-  bool shouldBeSuspended = (params.flags & 0x1) != 0;
-  fprintf(stderr,
-          "[GuestThreadHandle] CTOR flags=0x%X shouldSuspend=%d suspended=%d\n",
-          params.flags, shouldBeSuspended ? 1 : 0, suspended.load() ? 1 : 0);
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks)) {
+    const bool shouldBeSuspended = (params.flags & 0x1) != 0;
+    fprintf(stderr,
+            "[GuestThreadHandle] CTOR flags=0x%X shouldSuspend=%d suspended=%d\n",
+            params.flags, shouldBeSuspended ? 1 : 0, suspended.load() ? 1 : 0);
+  }
 
   pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -255,8 +263,12 @@ uint32_t GuestThread::Start(const GuestThreadParams &params) {
   // Bind AdapterThreadState for RexGlue-compatible thread-local access
   rex::adapter::AdapterThreadState threadState(ctx);
 
-  printf("[GuestThread] Starting guest code at 0x%08X\n", params.function);
-  fflush(stdout);
+  const bool thread_diagnostics =
+      rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks);
+  if (thread_diagnostics) {
+    printf("[GuestThread] Starting guest code at 0x%08X\n", params.function);
+    fflush(stdout);
+  }
 
   auto func = g_memory.FindFunction(params.function);
   if (func == nullptr) {
@@ -266,13 +278,17 @@ uint32_t GuestThread::Start(const GuestThreadParams &params) {
     return 0;
   }
 
-  printf("[GuestThread] Calling function...\n");
-  fflush(stdout);
+  if (thread_diagnostics) {
+    printf("[GuestThread] Calling function...\n");
+    fflush(stdout);
+  }
 
   func(ctx.ppcContext, g_memory.base);
 
-  printf("[GuestThread] Guest code returned\n");
-  fflush(stdout);
+  if (thread_diagnostics) {
+    printf("[GuestThread] Guest code returned\n");
+    fflush(stdout);
+  }
 
   return ctx.ppcContext.r3.u32;
 }

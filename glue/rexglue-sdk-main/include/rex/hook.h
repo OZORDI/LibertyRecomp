@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <rex/logging.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
 #include <rex/system/kernel_state.h>
@@ -35,7 +36,9 @@
 #include <tracy/Tracy.hpp>
 #define REX_HOOK(subroutine, function)                  \
   extern "C" REX_FUNC(subroutine) {                     \
-    ZoneNamedN(___tracy_hook_zone, #subroutine, true);  \
+    ZoneNamedN(___tracy_hook_zone, #subroutine,         \
+               ::rex::diagnostics::IsEnabled(           \
+                   ::rex::diagnostics::Category::kNativeProfiler)); \
     rex::ppc::HostToGuestFunction<function>(ctx, base); \
   }
 #else

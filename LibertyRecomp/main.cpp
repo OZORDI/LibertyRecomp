@@ -62,6 +62,7 @@
 #include <debugger.h>
 
 #include <rex/exception_handler.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/platform/exceptions.h>  // rex::SehException
 #include <rex/logging.h>
 #include <atomic>
@@ -242,8 +243,7 @@ static void InstallRexGlueExceptionHandlers() {
     // would override ExceptionHandlerCallback, preventing the MMIOHandler
     // → AccessViolationCallback → stack guard expansion chain from working.
     rex::arch::ExceptionHandler::Install(RexFallbackCrashHandler, nullptr);
-    fprintf(stderr, "[RexGlue] Fallback exception handler installed (signal handlers active)\n");
-    fflush(stderr);
+    DIAG_EMIT("[RexGlue] Fallback exception handler installed (signal handlers active)\n");
 }
 
 // ============================================================================
@@ -261,7 +261,7 @@ static void ShowVideoBackendErrorAndExit()
         fprintf(stderr, "[Main] Video backend initialization failed (no window available for message box).\n");
         fflush(stderr);
     }
-    printf("[EXIT-TRACE] main.cpp:203 calling _Exit\n"); fflush(stdout);
+    DIAG_EMIT("[EXIT-TRACE] main.cpp:203 calling _Exit\n");
     std::_Exit(1);
 }
 
@@ -336,6 +336,8 @@ static void LibertyWatchdogLoop()
 
 static void StartLibertyWatchdog()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kWatchdog)) return;
     if (g_libertyWatchdogRunning.exchange(true)) return;
     g_libertyWatchdogThread = std::thread(LibertyWatchdogLoop);
 }
@@ -356,14 +358,14 @@ void KiSystemStartup()
 {
     // Initialize main thread ID for SDL event safety
     InitKernelMainThread();
-    
+
     if (g_memory.base == nullptr)
     {
 #if !REX_PLATFORM_CONSOLE
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
 #endif
         fprintf(stderr, "[Main] Memory allocation failed\n"); fflush(stderr);
-        printf("[EXIT-TRACE] main.cpp:230 calling _Exit\n"); fflush(stdout);
+        DIAG_EMIT("[EXIT-TRACE] main.cpp:230 calling _Exit\n");
         std::_Exit(1);
     }
 
@@ -451,7 +453,7 @@ void init()
         MessageBoxA(nullptr, "Your CPU does not meet the minimum system requirements.", "Liberty Recompiled", MB_ICONERROR);
 #endif
 
-        printf("[EXIT-TRACE] main.cpp:318 calling _Exit\n"); fflush(stdout);
+        DIAG_EMIT("[EXIT-TRACE] main.cpp:318 calling _Exit\n");
         std::_Exit(1);
     }
 }
@@ -472,31 +474,19 @@ static void LibertyOnXboxAchievementUnlocked(uint32_t xbox_id)
 
 int main(int argc, char *argv[])
 {
-    // Install RexGlue's signal handlers + fallback crash handler early.
-    // MMIOHandler is installed later after g_memory.base is valid.
-    InstallRexGlueExceptionHandlers();
-    
-#ifdef _WIN32
-    timeBeginPeriod(1);
-#endif
-
-    os::process::CheckConsole();
-
-    if (!os::registry::Init())
-        LOGN("OS does not support registry.");
-
-    os::logger::Init();
-
-    // preload_executable.cpp removed — was Windows-only, NOP elsewhere.
-
     bool forceInstaller = false;
     bool forceDLCInstaller = false;
     bool useDefaultWorkingDirectory = false;
     bool forceInstallationCheck = false;
     bool graphicsApiRetry = false;
+    bool diagnostics = false;
     const char *sdlVideoDriver = nullptr;
     std::string sdlVideoDriverStr;
+    std::string diagnosticsCategories;
 
+    // Parse the command-line diagnostics policy before installing log sinks,
+    // starting diagnostic threads, or creating the graphics plugin. The
+    // process policy is immutable after this point.
     {
         CLI::App cli{"Liberty Recompiled \u2014 GTA IV PPC recompilation"};
         cli.allow_extras();
@@ -508,14 +498,44 @@ int main(int argc, char *argv[])
         cli.add_flag("--graphics-api-retry",   graphicsApiRetry,           "Retry with an alternative graphics API on failure");
         cli.add_flag("--skip-logos",           skipLogos,                  "Skip publisher/developer logos at startup");
         cli.add_option("--sdl-video-driver",   sdlVideoDriverStr,          "Override the SDL video driver");
+        cli.add_flag("--diagnostics", diagnostics,
+                     "Enable diagnostic logging and instrumentation");
+        cli.add_option("--diagnostics-categories", diagnosticsCategories,
+                       "Comma-separated diagnostic categories (default: all; logging controls "
+                       "general application logs independently of diagnostic artifacts)");
 
         try { cli.parse(argc, argv); }
         catch (const CLI::ParseError &e) { return cli.exit(e); }
+
+        std::string diagnosticsError;
+        if (!rex::diagnostics::Configure(diagnostics, diagnosticsCategories,
+                                         &diagnosticsError)) {
+            std::fprintf(stderr, "Liberty Recompiled: %s\n", diagnosticsError.c_str());
+            return CLI::ExitCodes::ValidationError;
+        }
 
         App::s_isSkipLogos = App::s_isSkipLogos || skipLogos;
         if (!sdlVideoDriverStr.empty())
             sdlVideoDriver = sdlVideoDriverStr.c_str();
     }
+
+    // Install RexGlue's signal handlers + fallback crash handler early.
+    // MMIOHandler is installed later after g_memory.base is valid.
+    InstallRexGlueExceptionHandlers();
+
+#ifdef _WIN32
+    timeBeginPeriod(1);
+#endif
+
+    os::process::CheckConsole();
+
+    if (!os::registry::Init())
+        LOGN("OS does not support registry.");
+
+    if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kLogging))
+        os::logger::Init();
+
+    // preload_executable.cpp removed — was Windows-only, NOP elsewhere.
 
     if (!useDefaultWorkingDirectory)
     {
@@ -542,12 +562,12 @@ int main(int argc, char *argv[])
     // content_root = game directory so RexGlue's VFS handles all file I/O.
     // RexGlue mounts this as \Device\Harddisk0\Partition1 with game: and d: symlinks.
     // GTA IV-specific symlinks (common:, platform:, audio:) are added after Setup().
-    fprintf(stderr, "[Main] Getting game path...\n");
+    DIAG_EMIT("[Main] Getting game path...\n");
     const auto gamePath = GetGamePath();
-    fprintf(stderr, "[Main] Game path: %s\n", gamePath.string().c_str());
+    DIAG_EMIT("[Main] Game path: %s\n", gamePath.string().c_str());
     const auto rexContentRoot = gamePath / "game";
-    fprintf(stderr, "[Main] Content root: %s\n", rexContentRoot.string().c_str());
-    fprintf(stderr, "[Main] Content root exists: %d\n", (int)std::filesystem::exists(rexContentRoot));
+    DIAG_EMIT("[Main] Content root: %s\n", rexContentRoot.string().c_str());
+    DIAG_EMIT("[Main] Content root exists: %d\n", (int)std::filesystem::exists(rexContentRoot));
 
     // Extract title update files BEFORE VFS init — HostPathDevice snapshots the
     // directory at mount time, so default.xexp must exist before rex::Runtime::Setup().
@@ -555,7 +575,7 @@ int main(int argc, char *argv[])
     {
         AutoInstallResult aiResult = AutoInstaller::Run(gamePath);
         if (!aiResult.errorMessage.empty())
-            fprintf(stderr, "[AutoInstall] Warning: %s\n", aiResult.errorMessage.c_str());
+            DIAG_EMIT("[AutoInstall] Warning: %s\n", aiResult.errorMessage.c_str());
     }
 #endif
 
@@ -582,10 +602,10 @@ int main(int argc, char *argv[])
                 std::filesystem::copy_options::recursive |
                 std::filesystem::copy_options::skip_existing, ec);
             if (!ec) {
-                fprintf(stderr, "[Main] Copied audio config: %s -> %s\n",
-                        srcPath.string().c_str(), destPath.string().c_str());
+                DIAG_EMIT("[Main] Copied audio config: %s -> %s\n",
+                          srcPath.string().c_str(), destPath.string().c_str());
             } else {
-                fprintf(stderr, "[Main] WARN: Could not copy audio config: %s\n", ec.message().c_str());
+                DIAG_EMIT("[Main] WARN: Could not copy audio config: %s\n", ec.message().c_str());
             }
         }
     }
@@ -612,19 +632,19 @@ int main(int argc, char *argv[])
             auto linkPath  = rexContentRoot / mapping.gameDirName;
             bool srcExists = std::filesystem::is_directory(actualDlc, ec);
             bool dstExists = std::filesystem::exists(linkPath, ec);
-            fprintf(stderr, "[Main] DLC %s: src=%s exists=%d, dst=%s exists=%d\n",
-                    mapping.gameDirName, actualDlc.string().c_str(), (int)srcExists,
-                    linkPath.string().c_str(), (int)dstExists);
+            DIAG_EMIT("[Main] DLC %s: src=%s exists=%d, dst=%s exists=%d\n",
+                      mapping.gameDirName, actualDlc.string().c_str(), (int)srcExists,
+                      linkPath.string().c_str(), (int)dstExists);
             if (srcExists && !dstExists) {
                 std::filesystem::copy(actualDlc, linkPath,
                     std::filesystem::copy_options::recursive |
                     std::filesystem::copy_options::skip_existing, ec);
                 if (!ec) {
-                    fprintf(stderr, "[Main] DLC game bridge copy: %s -> %s\n",
-                            actualDlc.string().c_str(), linkPath.string().c_str());
+                    DIAG_EMIT("[Main] DLC game bridge copy: %s -> %s\n",
+                              actualDlc.string().c_str(), linkPath.string().c_str());
                 } else {
-                    fprintf(stderr, "[Main] WARN: DLC game bridge copy failed for %s: %s\n",
-                            mapping.gameDirName, ec.message().c_str());
+                    DIAG_EMIT("[Main] WARN: DLC game bridge copy failed for %s: %s\n",
+                              mapping.gameDirName, ec.message().c_str());
                 }
             }
         }
@@ -642,10 +662,10 @@ int main(int argc, char *argv[])
                     rexSaveRoot.string().c_str(), pathError.message().c_str());
             return 1;
         }
-        fprintf(stderr, "[Main] Save root: %s\n", rexSaveRoot.string().c_str());
-        fprintf(stderr, "[Main] Marketplace content root: %s\n",
-                rexMarketplaceRoot.string().c_str());
-        fprintf(stderr, "[Main] Constructing rex::Runtime...\n");
+        DIAG_EMIT("[Main] Save root: %s\n", rexSaveRoot.string().c_str());
+        DIAG_EMIT("[Main] Marketplace content root: %s\n",
+                  rexMarketplaceRoot.string().c_str());
+        DIAG_EMIT("[Main] Constructing rex::Runtime...\n");
         s_rexRuntime = std::make_unique<rex::Runtime>(
             rexContentRoot,                    // game_data_root
             rexSaveRoot,                       // user_data_root
@@ -654,7 +674,7 @@ int main(int argc, char *argv[])
             std::filesystem::path{},           // metadata_root
             rexMarketplaceRoot,                // marketplace_content_root
             rexSaveRoot);                      // saved_game_root
-        fprintf(stderr, "[Main] Runtime constructed, calling Setup() with func mappings...\n");
+        DIAG_EMIT("[Main] Runtime constructed, calling Setup() with func mappings...\n");
 
         // Let guest::initialize() (called inside Setup) install its SEH
         // signal handler normally.  After Setup(), we re-install
@@ -721,7 +741,7 @@ int main(int argc, char *argv[])
             static_cast<uint32_t>(PPC_IMAGE_SIZE),
             PPCFuncMappings,
             std::move(rexConfig));
-        fprintf(stderr, "[Main] Setup() returned 0x%08X\n", rt_status);
+        DIAG_EMIT("[Main] Setup() returned 0x%08X\n", rt_status);
 
         // Xbox 360 timebase = exactly 50 MHz. Must be explicit because Liberty
         // drives rex::Runtime directly (not via rex::ReXApp), so ReXApp's
@@ -731,7 +751,7 @@ int main(int argc, char *argv[])
 
         if (rt_status != 0 /* X_STATUS_SUCCESS */) {
             fprintf(stderr, "[Main] FATAL: rex::Runtime::Setup() failed with 0x%08X\n", rt_status);
-            printf("[EXIT-TRACE] main.cpp:478 calling _Exit\n"); fflush(stdout);
+            DIAG_EMIT("[EXIT-TRACE] main.cpp:478 calling _Exit\n");
             std::_Exit(1);
         }
 
@@ -748,8 +768,8 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[Main] FATAL: rexcrt heap init failed\n");
             std::_Exit(1);
         }
-        // DIAG: verify xstart is registered after Setup().
-        // Gated by LIBERTY_VERBOSE_DIAG env var — silent in normal runs.
+        // DIAG: verify xstart is registered after Setup(). This is subordinate
+        // to the immutable command-line logging category.
         if (::os::diag::ShouldEmit()) {
             auto* p = s_rexRuntime->function_dispatcher();
             PPCFunc* xsf = p->GetFunction(0x82A11290);
@@ -772,12 +792,12 @@ int main(int argc, char *argv[])
         // SDK v0.2.1: set_instance() is automatic after Setup().
         // Get memory base from the Runtime's internally-managed Memory object.
         g_memory.base = s_rexRuntime->virtual_membase();
-        fprintf(stderr, "[Main] RexGlue memory: base=%p\n", (void*)g_memory.base);
+        DIAG_EMIT("[Main] RexGlue memory: base=%p\n", (void*)g_memory.base);
         // Set base pointer for rexcrt memset watchpoint diagnostic
         // Populate vtables and install function stubs into guest memory.
         g_memory.PopulateFunctionTableAndVtables();
-        printf("[Main] rex::Runtime created (kernel_state=%p)\n",
-               (void*)s_rexRuntime->kernel_state()); fflush(stdout);
+        DIAG_EMIT("[Main] rex::Runtime created (kernel_state=%p)\n",
+                  (void*)s_rexRuntime->kernel_state());
 
         // Register GTA IV-specific symbolic links in RexGlue's VFS.
         // RexGlue already registered game: and d: -> \Device\Harddisk0\Partition1
@@ -814,11 +834,11 @@ int main(int argc, char *argv[])
                 if (saveDevice->Initialize()) {
                     fs->RegisterDevice(std::move(saveDevice));
                     fs->RegisterSymbolicLink("save:", "\\Device\\SavePartition");
-                    printf("[Main] Registered save: device at %s\n",
-                           g_ps4SaveMountPoint.c_str());
+                    DIAG_EMIT("[Main] Registered save: device at %s\n",
+                              g_ps4SaveMountPoint.c_str());
                 } else {
-                    printf("[Main] WARNING: Failed to initialize save device at %s\n",
-                           g_ps4SaveMountPoint.c_str());
+                    DIAG_EMIT("[Main] WARNING: Failed to initialize save device at %s\n",
+                              g_ps4SaveMountPoint.c_str());
                 }
             }
 #endif
@@ -828,8 +848,7 @@ int main(int argc, char *argv[])
             // content root name directly to GetGamePath()/dlc/ on the host filesystem.
             // No VFS HostPathDevice mounts are needed.
 
-                        printf("[Main] Registered GTA IV VFS symlinks: common:, platform:, audio:, xbox360:, x:, update:, cache:, cache1:\n");
-            fflush(stdout);
+            DIAG_EMIT("[Main] Registered GTA IV VFS symlinks: common:, platform:, audio:, xbox360:, x:, update:, cache:, cache1:\n");
         }
 
     }
@@ -886,7 +905,7 @@ int main(int argc, char *argv[])
             ? SDL_MESSAGEBOX_INFORMATION : SDL_MESSAGEBOX_ERROR;
         SDL_ShowSimpleMessageBox(messageBoxStyle, GameWindow::GetTitle(), resultText, GameWindow::s_pWindow);
 #endif
-        printf("[EXIT-TRACE] main.cpp:637 calling _Exit\n"); fflush(stdout);
+        DIAG_EMIT("[EXIT-TRACE] main.cpp:637 calling _Exit\n");
         std::_Exit(int(journal.lastResult));
 #endif // !PS4 && !NX
     }
@@ -899,7 +918,7 @@ int main(int argc, char *argv[])
             char text[512];
             snprintf(text, sizeof(text), Localise("System_Win32_MissingDLLs").c_str(), dll.data());
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), text, GameWindow::s_pWindow);
-            printf("[EXIT-TRACE] main.cpp:648 calling _Exit\n"); fflush(stdout);
+            DIAG_EMIT("[EXIT-TRACE] main.cpp:648 calling _Exit\n");
             std::_Exit(1);
         }
     }
@@ -966,8 +985,8 @@ int main(int argc, char *argv[])
         fflush(stdout);
         std::_Exit(1);
     }
-    printf("[Main] Embedded build — game root: %s\n",
-           EmbeddedAssets::GetGameRoot().string().c_str()); fflush(stdout);
+    DIAG_EMIT("[Main] Embedded build — game root: %s\n",
+              EmbeddedAssets::GetGameRoot().string().c_str());
 
     // Video device is still needed for rendering.
     if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
@@ -988,7 +1007,7 @@ int main(int argc, char *argv[])
 
         if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
         {
-            printf("[EXIT-TRACE] main.cpp:675 calling _Exit\n"); fflush(stdout);
+            DIAG_EMIT("[EXIT-TRACE] main.cpp:675 calling _Exit\n");
             std::_Exit(0);
         }
     }
@@ -1011,7 +1030,7 @@ int main(int argc, char *argv[])
         if (!MainMenu::Run())
         {
             MainMenu::Shutdown();
-            printf("[EXIT-TRACE] main.cpp:707 calling _Exit\n"); fflush(stdout);
+            DIAG_EMIT("[EXIT-TRACE] main.cpp:707 calling _Exit\n");
             std::_Exit(0);
         }
         MainMenu::Shutdown();
@@ -1019,10 +1038,10 @@ int main(int argc, char *argv[])
 
     if (!runInstallerWizard && !showMainMenu)
     {
-        printf("[Main] Creating video device...\n"); fflush(stdout);
+        DIAG_EMIT("[Main] Creating video device...\n");
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
             ShowVideoBackendErrorAndExit();
-        printf("[Main] Video device created\n"); fflush(stdout);
+        DIAG_EMIT("[Main] Video device created\n");
     }
 #endif // LIBERTY_RECOMP_EMBEDDED_ASSETS
 
@@ -1031,13 +1050,13 @@ int main(int argc, char *argv[])
     // KiSystemStartup copies xex_header_data (function pointers, delegate
     // table) and zeroes BSS.  This sets up Liberty's expected layout.
     // ------------------------------------------------------------------
-    printf("[Main] Calling KiSystemStartup...\n"); fflush(stdout);
+    DIAG_EMIT("[Main] Calling KiSystemStartup...\n");
     KiSystemStartup();
-    printf("[Main] KiSystemStartup done\n"); fflush(stdout);
+    DIAG_EMIT("[Main] KiSystemStartup done\n");
 
-    printf("[Main] Loading module (Liberty): %s\n", modulePath.string().c_str()); fflush(stdout);
+    DIAG_EMIT("[Main] Loading module (Liberty): %s\n", modulePath.string().c_str());
     LdrLoadModule(modulePath);
-    printf("[Main] Liberty module prep done\n"); fflush(stdout);
+    DIAG_EMIT("[Main] Liberty module prep done\n");
 
     // ------------------------------------------------------------------
     // Step 2: Load the XEX through RexGlue.
@@ -1058,7 +1077,7 @@ int main(int argc, char *argv[])
         if (xst != 0) {
             printf("[Main] FATAL: LoadXexImage failed: 0x%08X\n", xst);
             fflush(stdout);
-            printf("[EXIT-TRACE] main.cpp:766 calling _Exit\n"); fflush(stdout);
+            DIAG_EMIT("[EXIT-TRACE] main.cpp:766 calling _Exit\n");
             std::_Exit(1);
         }
 
@@ -1068,8 +1087,7 @@ int main(int argc, char *argv[])
             heap->Protect(PPC_IMAGE_BASE, PPC_IMAGE_SIZE,
                           rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
         }
-        printf("[Main] XEX loaded — PE data sections now authoritative\n");
-        fflush(stdout);
+        DIAG_EMIT("[Main] XEX loaded — PE data sections now authoritative\n");
     }
 
     // xex_header_data diff removed — was a diagnostic for an overlay
@@ -1083,12 +1101,11 @@ int main(int argc, char *argv[])
         if (currentGOT != GPU_CONTEXT_GLOBAL) {
             uint32_t* gotEntry = reinterpret_cast<uint32_t*>(g_memory.base + GOT_GPU_CONTEXT);
             *gotEntry = __builtin_bswap32(GPU_CONTEXT_GLOBAL);
-            printf("[Main] GPU GOT 0x%08X -> 0x%08X (was 0x%08X)\n",
-                   GOT_GPU_CONTEXT, GPU_CONTEXT_GLOBAL, currentGOT);
+            DIAG_EMIT("[Main] GPU GOT 0x%08X -> 0x%08X (was 0x%08X)\n",
+                      GOT_GPU_CONTEXT, GPU_CONTEXT_GLOBAL, currentGOT);
         } else {
-            printf("[Main] GPU GOT already correct (0x%08X)\n", GPU_CONTEXT_GLOBAL);
+            DIAG_EMIT("[Main] GPU GOT already correct (0x%08X)\n", GPU_CONTEXT_GLOBAL);
         }
-        fflush(stdout);
     }
 
 #ifndef LIBERTY_RECOMP_NO_CURL
@@ -1126,7 +1143,10 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[TERMINATE] no current exception\n");
         }
         fflush(stderr);
-        printf("[EXIT-TRACE] main.cpp:860 calling _Exit\n"); fflush(stdout);
+        // This is the emergency terminate path. Keep the exception report
+        // above unconditional, but suppress the redundant healthy-path trace
+        // marker unless launch diagnostics were explicitly enabled.
+        DIAG_EMIT("[EXIT-TRACE] main.cpp:860 calling _Exit\n");
         std::_Exit(99);
     });
 
@@ -1151,7 +1171,7 @@ int main(int argc, char *argv[])
     if (!main_xthread) {
         printf("[Main] FATAL: LaunchModule() returned null\n");
         fflush(stdout);
-        printf("[EXIT-TRACE] main.cpp:884 calling _Exit\n"); fflush(stdout);
+        DIAG_EMIT("[EXIT-TRACE] main.cpp:884 calling _Exit\n");
         std::_Exit(1);
     }
     StartLibertyWatchdog();
@@ -1169,13 +1189,12 @@ int main(int argc, char *argv[])
         usleep(1000);
 #endif
         if (i == 100 || i == 1000 || i == 3000) {
-            printf("[Main] Still waiting for XThread (i=%d, running=%d)\n",
-                   i, (int)main_xthread->is_running()); fflush(stdout);
+            DIAG_EMIT("[Main] Still waiting for XThread (i=%d, running=%d)\n",
+                      i, (int)main_xthread->is_running());
         }
     }
     if (!main_xthread->is_running()) {
-        printf("[Main] WARNING: XThread did not start within 5 seconds\n");
-        fflush(stdout);
+        DIAG_EMIT("[Main] WARNING: XThread did not start within 5 seconds\n");
     }
 
     // Main thread: pump SDL events while game runs on XThread.
@@ -1209,8 +1228,7 @@ int main(int argc, char *argv[])
     }
 
     StopLibertyWatchdog();
-    printf("[Main] Main XThread finished\n");
-    fflush(stdout);
+    DIAG_EMIT("[Main] Main XThread finished\n");
 #if defined(LIBERTY_RECOMP_DISCORD_RPC)
     os::discord::Shutdown();
 #endif

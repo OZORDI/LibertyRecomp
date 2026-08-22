@@ -11,6 +11,7 @@
 #include <switch.h>
 
 #include <rex/logging.h>
+#include <rex/diagnostics/policy.h>
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/details/log_msg.h>
 
@@ -43,12 +44,16 @@ namespace
 
 void os::logger::Init()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     const char kInitMsg[] = "LibertyRecomp: logger init\n";
     svcOutputDebugString(kInitMsg, sizeof(kInitMsg) - 1);
 }
 
 void os::logger::PlatformInitSinks()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     Init();
     auto sink = std::make_shared<switch_debug_sink_mt>();
     rex::logging::AddSink(sink);

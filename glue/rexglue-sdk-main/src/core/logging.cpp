@@ -23,6 +23,7 @@
 #include <toml++/toml.hpp>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/platform/env.h>
@@ -144,6 +145,8 @@ std::shared_ptr<spdlog::logger> CreateCategoryLogger(const std::string& name) {
 }  // namespace
 
 void InitLoggingEarly() {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging))
+    return;
   std::lock_guard lock(g_mutex);
   if (g_early_initialized || g_initialized)
     return;
@@ -176,6 +179,8 @@ void InitLoggingEarly() {
 }
 
 void InitLogging(const LogConfig& config) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging))
+    return;
   std::lock_guard lock(g_mutex);
 
   if (g_initialized) {
@@ -357,6 +362,8 @@ std::span<const LogCategoryEntry> GetAllCategories() {
 }
 
 spdlog::logger* GetLoggerRaw(LogCategoryId category) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging))
+    return nullptr;
   if (!g_initialized && !g_early_initialized)
     InitLoggingEarly();
   if (category.id < g_registry.size()) {
@@ -366,6 +373,8 @@ spdlog::logger* GetLoggerRaw(LogCategoryId category) {
 }
 
 std::shared_ptr<spdlog::logger> GetLogger(LogCategoryId category) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging))
+    return nullptr;
   if (!g_initialized && !g_early_initialized)
     InitLoggingEarly();
   if (category.id < g_registry.size()) {

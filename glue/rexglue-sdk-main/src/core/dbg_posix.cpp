@@ -54,6 +54,9 @@ void Break() {
 
 namespace detail {
 void DebugPrint(const char* s) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging)) {
+    return;
+  }
   std::clog << s << std::endl;
 }
 }  // namespace detail

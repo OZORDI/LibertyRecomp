@@ -21,3 +21,22 @@ test_vpkuwus_2:
   #_ REGISTER_OUT v4 [FFFFFFFF, 00010002, FFFFFFFE, 00000010]
   # {65535, 65535, 2, 3, 65535, 65535, 65535, 16}
   #_ REGISTER_OUT v5 [FFFFFFFF, 00020003, FFFFFFFF, FFFF0010]
+
+# Destination aliases the first source. This is used by GTA IV's AxisSweep3
+# AABB quantization and must read every source word before writing v3.
+test_vpkuwus_3:
+  #_ REGISTER_IN v3 [00000000, 00010000, 00000001, 00010001]
+  #_ REGISTER_IN v4 [00000002, 00010002, 00000003, 00010003]
+  vpkuwus v3, v3, v4
+  blr
+  #_ REGISTER_OUT v3 [0000FFFF, 0001FFFF, 0002FFFF, 0003FFFF]
+  #_ REGISTER_OUT v4 [00000002, 00010002, 00000003, 00010003]
+
+# Destination aliases the second source as well.
+test_vpkuwus_4:
+  #_ REGISTER_IN v3 [00000000, 00010000, 00000001, 00010001]
+  #_ REGISTER_IN v4 [00000002, 00010002, 00000003, 00010003]
+  vpkuwus v4, v3, v4
+  blr
+  #_ REGISTER_OUT v3 [00000000, 00010000, 00000001, 00010001]
+  #_ REGISTER_OUT v4 [0000FFFF, 0001FFFF, 0002FFFF, 0003FFFF]

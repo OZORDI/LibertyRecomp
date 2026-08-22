@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/vulkan/instance.h>
@@ -474,7 +475,9 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
 
   // Create the debug messenger if requested and available.
 
-  if (vulkan_instance->extensions_.ext_EXT_debug_utils && REXCVAR_GET(vulkan_log_debug_messages)) {
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kVulkan) &&
+      vulkan_instance->extensions_.ext_EXT_debug_utils &&
+      REXCVAR_GET(vulkan_log_debug_messages)) {
     VkDebugUtilsMessengerCreateInfoEXT debug_utils_messenger_create_info = {
         VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
     auto gpu_logger = rex::GetLogger(rex::log::gpu());

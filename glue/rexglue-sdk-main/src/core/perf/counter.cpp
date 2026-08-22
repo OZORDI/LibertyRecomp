@@ -11,6 +11,7 @@
 #include <rex/perf/counter.h>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
 
@@ -90,18 +91,26 @@ const char* CounterName(CounterId id) {
 }
 
 void SetCounter(CounterId id, int64_t value) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return;
   g_counters[static_cast<size_t>(id)].store(value, std::memory_order_relaxed);
 }
 
 void IncrementCounter(CounterId id, int64_t delta) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return;
   g_counters[static_cast<size_t>(id)].fetch_add(delta, std::memory_order_relaxed);
 }
 
 int64_t GetCounter(CounterId id) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return 0;
   return g_counters[static_cast<size_t>(id)].load(std::memory_order_relaxed);
 }
 
 void ResetFrameCounters() {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return;
   for (size_t i = 0; i < kNumCounters; ++i) {
     if (kIsGauge[i]) {
       // Gauges: snapshot the current value, don't zero
@@ -115,10 +124,14 @@ void ResetFrameCounters() {
 }
 
 int64_t GetSnapshotCounter(CounterId id) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return 0;
   return g_snapshot[static_cast<size_t>(id)].load(std::memory_order_relaxed);
 }
 
 void Init() {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return;
   for (auto& c : g_counters)
     c.store(0, std::memory_order_relaxed);
   for (auto& s : g_snapshot)
@@ -126,6 +139,8 @@ void Init() {
 }
 
 void SetCsvLogPath(const std::string& path) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler))
+    return;
   if (g_csv_file) {
     std::fflush(g_csv_file);
     std::fclose(g_csv_file);
@@ -154,7 +169,8 @@ void SetCsvLogPath(const std::string& path) {
 }
 
 void WriteCsvFrame() {
-  if (!g_csv_file)
+  if (!diagnostics::IsEnabled(diagnostics::Category::kNativeProfiler) ||
+      !g_csv_file)
     return;
 
   for (size_t i = 0; i < kNumCounters; ++i) {

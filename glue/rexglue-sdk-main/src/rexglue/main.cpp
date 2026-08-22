@@ -20,6 +20,7 @@
 #include <fmt/format.h>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/platform/console.h>
 #include <rex/platform/env.h>
@@ -56,6 +57,10 @@ void ConfigureLogging(const std::string& level, const std::string& log_file, boo
 }  // namespace
 
 int main(int argc, char** argv) {
+  // The developer CLI is itself an explicit logging-oriented command-line
+  // process. Configure its immutable policy before the early console logger;
+  // game executables must instead opt in through their --diagnostics flags.
+  rex::diagnostics::Configure(true, "logging");
   CLI::App app{TitleString(), "rexglue"};
   app.set_version_flag("--version", REXGLUE_VERSION_STRING);
   app.require_subcommand(1);

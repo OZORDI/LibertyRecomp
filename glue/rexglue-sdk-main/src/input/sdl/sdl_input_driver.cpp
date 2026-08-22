@@ -697,7 +697,7 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& even
   static_assert(SDL_GAMEPAD_BUTTON_SOUTH == 0);
   static_assert(SDL_GAMEPAD_BUTTON_DPAD_RIGHT == 14);
 
-  auto idx = GetControllerIndexFromInstanceID(event.gdevice.which);
+  auto idx = GetControllerIndexFromInstanceID(event.gbutton.which);
   assert(idx);
   auto& controller = controllers_.at(*idx);
 

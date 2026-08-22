@@ -10,6 +10,8 @@
  */
 #pragma once
 
+#include <rex/diagnostics/policy.h>
+
 #include <cstdint>
 #include <string>
 
@@ -86,11 +88,19 @@ class Profiler {
   // Call once at runtime startup to enable Tracy's network threads.
   // CLI tools should skip this to avoid socket listeners entirely.
   static void Startup() {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeProfiler)) {
+      return;
+    }
 #ifdef REXGLUE_ENABLE_PROFILING
     tracy::StartupProfiler();
 #endif
   }
   static void OnThreadEnter(const char* name = nullptr) {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeProfiler)) {
+      return;
+    }
 #ifdef REXGLUE_ENABLE_PROFILING
     if (name)
       tracy::SetThreadName(name);
@@ -102,6 +112,10 @@ class Profiler {
   static void ThreadEnter(const char* name = nullptr) { OnThreadEnter(name); }
   static void ThreadExit() {}
   static void Flip() {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeProfiler)) {
+      return;
+    }
 #ifdef REXGLUE_ENABLE_PROFILING
     FrameMark;
 #endif
@@ -112,6 +126,10 @@ class Profiler {
   }
   static void Flush() {}
   static void Shutdown() {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeProfiler)) {
+      return;
+    }
 #ifdef REXGLUE_ENABLE_PROFILING
     tracy::ShutdownProfiler();
 #endif
@@ -120,6 +138,10 @@ class Profiler {
 #endif
   }
   static bool is_enabled() {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeProfiler)) {
+      return false;
+    }
 #ifdef REXGLUE_ENABLE_PROFILING
     return tracy::IsProfilerStarted();
 #else
@@ -134,9 +156,27 @@ class Profiler {
 #ifdef REXGLUE_ENABLE_PERF_COUNTERS
 
 // Generic helpers for easily adding new counters
-#define PERF_counter_set(id, value) rex::perf::SetCounter(rex::perf::CounterId::id, value)
-#define PERF_counter_inc(id) rex::perf::IncrementCounter(rex::perf::CounterId::id)
-#define PERF_counter_add(id, delta) rex::perf::IncrementCounter(rex::perf::CounterId::id, delta)
+#define PERF_counter_set(id, value)                                              \
+  do {                                                                           \
+    if (::rex::diagnostics::IsEnabled(                                           \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                    \
+      ::rex::perf::SetCounter(::rex::perf::CounterId::id, (value));              \
+    }                                                                            \
+  } while (0)
+#define PERF_counter_inc(id)                                                     \
+  do {                                                                           \
+    if (::rex::diagnostics::IsEnabled(                                           \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                    \
+      ::rex::perf::IncrementCounter(::rex::perf::CounterId::id);                 \
+    }                                                                            \
+  } while (0)
+#define PERF_counter_add(id, delta)                                              \
+  do {                                                                           \
+    if (::rex::diagnostics::IsEnabled(                                           \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                    \
+      ::rex::perf::IncrementCounter(::rex::perf::CounterId::id, (delta));        \
+    }                                                                            \
+  } while (0)
 
 // Purpose-specific macros so callsites stay clean
 #define PROFILE_FRAME_TIME_US(value) PERF_counter_set(kFrameTimeUs, value)

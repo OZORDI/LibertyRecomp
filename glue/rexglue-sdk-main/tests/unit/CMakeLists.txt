@@ -4,6 +4,7 @@ add_executable(unit_tests
     memory/heap_allocation_test.cpp
     kernel/object_table_test.cpp
     core/cvar_test.cpp
+    core/diagnostics_policy_test.cpp
     core/fiber_test.cpp
     core/gta4_transition_test.cpp
     core/sha256_test.cpp
@@ -14,9 +15,15 @@ add_executable(unit_tests
     audio/audio_ring_test.cpp
     audio/audio_clock_test.cpp
     graphics/postfx_resource_pool_test.cpp
+    graphics/depth_handoff_util_test.cpp
+    graphics/native_frame_scheduling_test.cpp
+    graphics/native_msaa_policy_test.cpp
+    graphics/native_reflection_registry_test.cpp
     graphics/gta4_native_surface_view_test.cpp
+    graphics/native_performance_samples_test.cpp
     graphics/pipeline_cache_file_test.cpp
     graphics/primitive_restart_test.cpp
+    input/encoded_action_test.cpp
     input/pointer_motion_test.cpp
     codegen/config_test.cpp
     codegen/template_registry_test.cpp
@@ -52,6 +59,7 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 endif()
 
 target_sources(unit_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/graphics/gta4_native/native_performance_samples.cpp
     ${PROJECT_SOURCE_DIR}/src/rexglue/commands/migration_scan.cpp
     ${PROJECT_SOURCE_DIR}/src/rexglue/ui/ui.cpp
     ${PROJECT_SOURCE_DIR}/src/rexglue/ui/progress.cpp
@@ -107,3 +115,11 @@ catch_discover_tests(unit_tests
         LABELS "unit"
         TIMEOUT 60
 )
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(
+    NAME unit.diagnostics-source-audit
+    COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/check_diagnostics_gates.py
+)
+set_tests_properties(unit.diagnostics-source-audit PROPERTIES LABELS "unit" TIMEOUT 60)

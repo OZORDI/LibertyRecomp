@@ -10,6 +10,7 @@
 #include <system_error>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 
 #include "gta4_init.h"
@@ -163,6 +164,13 @@ uint64_t g_menu_trace_sequence = 0;
 uint32_t g_menu_trace_label_calls = 0;
 uint32_t g_menu_trace_value_calls = 0;
 
+bool FrontendDiagnosticsEnabled() noexcept {
+  return rex::diagnostics::IsEnabled(
+             rex::diagnostics::Category::kGuestHooks) &&
+         rex::diagnostics::IsEnabled(
+             rex::diagnostics::Category::kLogging);
+}
+
 struct AdjustmentContext {
   bool active = false;
   uint32_t frontend_channel = 0;
@@ -209,6 +217,9 @@ const char* TraceScreenName(uint32_t screen) {
 }
 
 void TraceScreenRows(uint8_t* base, std::string_view point, uint32_t screen) {
+  if (!FrontendDiagnosticsEnabled()) {
+    return;
+  }
   const uint32_t vector = ScreenOptionsAddress(screen);
   const uint32_t rows = REX_LOAD_U32(vector);
   const uint16_t count = REX_LOAD_U16(vector + 4);
@@ -530,47 +541,54 @@ extern "C" void sub_82157F90(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_8221FD88(PPCContext& ctx, uint8_t* base) {
+  const bool diagnostics = FrontendDiagnosticsEnabled();
   const uint32_t destination = ctx.r3.u32;
   const uint32_t key_address = ctx.r4.u32;
   const uint32_t caller = ctx.lr;
-  const uint32_t screen = REX_LOAD_U32(kCurrentScreenAddress);
-  const std::string key = ReadGuestString(base, key_address, kMenuTraceStringCapacity);
+  const uint32_t screen = diagnostics ? REX_LOAD_U32(kCurrentScreenAddress) : 0;
   if (g_string_pool_address != 0) {
     if (const Setting* setting = FindSettingByKey(base, ctx.r4.u32)) {
       ctx.r3.u64 = g_string_pool_address + setting->label_offset;
-      REXLOG_INFO(
-          "GTA4MenuTrace seq={} point=label-resolve-custom screen={}({}) caller={:08X} "
-          "destination={:08X} key-address={:08X} key='{}' result={:08X} text='{}'",
-          ++g_menu_trace_sequence, screen, TraceScreenName(screen), caller, destination,
-          key_address, key, ctx.r3.u32,
-          ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      if (diagnostics) {
+        REXLOG_INFO(
+            "GTA4MenuTrace seq={} point=label-resolve-custom screen={}({}) caller={:08X} "
+            "destination={:08X} key-address={:08X} key='{}' result={:08X} text='{}'",
+            ++g_menu_trace_sequence, screen, TraceScreenName(screen), caller, destination,
+            key_address, ReadGuestString(base, key_address, kMenuTraceStringCapacity),
+            ctx.r3.u32,
+            ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      }
       return;
     }
     if (GuestStringEquals(base, ctx.r4.u32, kSaveKey, kOptionLabelCapacity)) {
       ctx.r3.u64 = g_string_pool_address + kSaveLabelOffset;
-      REXLOG_INFO(
-          "GTA4MenuTrace seq={} point=label-resolve-custom screen={}({}) caller={:08X} "
-          "destination={:08X} key-address={:08X} key='{}' result={:08X} text='{}'",
-          ++g_menu_trace_sequence, screen, TraceScreenName(screen), caller, destination,
-          key_address, key, ctx.r3.u32,
-          ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      if (diagnostics) {
+        REXLOG_INFO(
+            "GTA4MenuTrace seq={} point=label-resolve-custom screen={}({}) caller={:08X} "
+            "destination={:08X} key-address={:08X} key='{}' result={:08X} text='{}'",
+            ++g_menu_trace_sequence, screen, TraceScreenName(screen), caller, destination,
+            key_address, ReadGuestString(base, key_address, kMenuTraceStringCapacity),
+            ctx.r3.u32,
+            ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      }
       return;
     }
   }
   __imp__sub_8221FD88(ctx, base);
-  if ((screen == kAudioScreen || screen == kDisplayScreen) &&
+  if (diagnostics && (screen == kAudioScreen || screen == kDisplayScreen) &&
       g_menu_trace_label_calls < kMenuTraceCallLimit) {
     ++g_menu_trace_label_calls;
     REXLOG_INFO(
         "GTA4MenuTrace seq={} point=label-resolve-stock screen={}({}) caller={:08X} "
         "destination={:08X} key-address={:08X} key='{}' result={:08X} text='{}'",
         ++g_menu_trace_sequence, screen, TraceScreenName(screen), caller, destination,
-        key_address, key, ctx.r3.u32,
+        key_address, ReadGuestString(base, key_address, kMenuTraceStringCapacity), ctx.r3.u32,
         ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
   }
 }
 
 extern "C" void sub_82252A98(PPCContext& ctx, uint8_t* base) {
+  const bool diagnostics = FrontendDiagnosticsEnabled();
   const uint32_t frontend_channel = ctx.r3.u32;
   const uint32_t screen = ctx.r4.u32;
   const uint32_t selected_value = ctx.r5.u32;
@@ -578,17 +596,19 @@ extern "C" void sub_82252A98(PPCContext& ctx, uint8_t* base) {
   if (ctx.r4.u32 == kDisplayScreen && g_string_pool_address != 0) {
     if (const Setting* setting = FindSettingByRow(base, ctx.r6.s32)) {
       ctx.r3.u64 = g_string_pool_address + CurrentChoice(*setting).text_offset;
-      REXLOG_INFO(
-          "GTA4MenuTrace seq={} point=value-resolve-custom channel={} screen={} row={} "
-          "selected-value={} key='{}' result={:08X} text='{}'",
-          ++g_menu_trace_sequence, frontend_channel, screen, row_index, selected_value,
-          setting->key, ctx.r3.u32,
-          ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      if (diagnostics) {
+        REXLOG_INFO(
+            "GTA4MenuTrace seq={} point=value-resolve-custom channel={} screen={} row={} "
+            "selected-value={} key='{}' result={:08X} text='{}'",
+            ++g_menu_trace_sequence, frontend_channel, screen, row_index, selected_value,
+            setting->key, ctx.r3.u32,
+            ReadGuestString(base, ctx.r3.u32, kMenuTraceStringCapacity));
+      }
       return;
     }
   }
   __imp__sub_82252A98(ctx, base);
-  if ((screen == kAudioScreen || screen == kDisplayScreen) &&
+  if (diagnostics && (screen == kAudioScreen || screen == kDisplayScreen) &&
       g_menu_trace_value_calls < kMenuTraceCallLimit) {
     ++g_menu_trace_value_calls;
     REXLOG_INFO(
@@ -600,6 +620,10 @@ extern "C" void sub_82252A98(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_82255D00(PPCContext& ctx, uint8_t* base) {
+  if (!FrontendDiagnosticsEnabled()) {
+    __imp__sub_82255D00(ctx, base);
+    return;
+  }
   const uint32_t frontend_channel = ctx.r3.u32;
   const uint32_t screen = REX_LOAD_U32(kCurrentScreenAddress);
   const uint32_t vector = ScreenOptionsAddress(screen);

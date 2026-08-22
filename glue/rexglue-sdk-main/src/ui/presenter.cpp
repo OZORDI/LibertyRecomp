@@ -16,6 +16,7 @@
 
 #include <rex/assert.h>
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/presenter.h>
@@ -671,6 +672,8 @@ bool Presenter::RefreshGuestOutput(
     connection_state_after = surface_paint_connection_state_;
   }
 
+  if (rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kPresenter)) {
   static std::atomic<uint64_t> refresh_flow_count{0};
   static std::atomic<uint8_t> refresh_flow_last_mode{UINT8_MAX};
   static std::atomic<uint8_t> refresh_flow_last_connection{UINT8_MAX};
@@ -756,6 +759,7 @@ bool Presenter::RefreshGuestOutput(
         paint_mode_name(paint_mode_snapshot), connection_name(connection_state_before),
         connection_name(connection_state_after), action_name(paint_action),
         paint_result_name(paint_result));
+  }
   }
   // Handle GPU loss when not in the middle of the function anymore, and
   // lifecycle management from the GPU loss callback is fine on the UI thread.
@@ -1666,6 +1670,8 @@ Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
       break;
   }
 
+  if (rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kPresenter)) {
   static std::atomic<uint64_t> paint_flow_count{0};
   static std::atomic<uint8_t> paint_flow_last_result{UINT8_MAX};
   static std::atomic<uint8_t> paint_flow_last_connection{UINT8_MAX};
@@ -1720,6 +1726,7 @@ Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
         paint_count, execute_ui_drawers, paint_result_name(result),
         connection_name(connection_state_before),
         connection_name(surface_paint_connection_state_));
+  }
   }
   return result;
 }

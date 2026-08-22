@@ -1,12 +1,36 @@
-[submodule "tools/XenonRecomp"]
-	path = tools/XenonRecomp
-	url = https://github.com/sonicnext-dev/XenonRecomp.git
 [submodule "thirdparty/ddspp"]
 	path = thirdparty/ddspp
 	url = https://github.com/redorav/ddspp.git
 [submodule "tools/XenosRecomp"]
 	path = tools/XenosRecomp
 	url = https://github.com/sonicnext-dev/XenosRecomp.git
+[submodule "tools/DLSS"]
+	path = tools/DLSS
+	url = https://github.com/NVIDIA/DLSS.git
+[submodule "tools/FidelityFX-SDK"]
+	path = tools/FidelityFX-SDK
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git
+[submodule "tools/fsr1"]
+	path = tools/fsr1
+	url = https://github.com/GPUOpen-Effects/FidelityFX-FSR.git
+[submodule "tools/smaa"]
+	path = tools/smaa
+	url = https://github.com/iryoku/smaa.git
+[submodule "tools/extract-xiso"]
+	path = tools/extract-xiso
+	url = https://github.com/XboxDev/extract-xiso.git
+[submodule "tools/XexToolGUI"]
+	path = tools/XexToolGUI
+	url = https://github.com/XboxChef/XexToolGUI.git
+[submodule "tools/OpenOrbis-PS4-Toolchain"]
+	path = tools/OpenOrbis-PS4-Toolchain
+	url = https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain.git
+[submodule "tools/libnx"]
+	path = tools/libnx
+	url = https://github.com/switchbrew/libnx.git
+[submodule "tools/llvm-project-libcxx"]
+	path = tools/llvm-project-libcxx
+	url = https://github.com/llvm/llvm-project.git
 [submodule "thirdparty/msdf-atlas-gen"]
 	path = thirdparty/msdf-atlas-gen
 	url = https://github.com/Chlumsky/msdf-atlas-gen.git
@@ -59,12 +83,6 @@
 [submodule "thirdparty/ffmpeg-core"]
 	path = thirdparty/ffmpeg-core
 	url = https://github.com/sonicnext-dev/ffmpeg-core
-[submodule "tools/xenia"]
-	path = tools/xenia
-	url = https://github.com/xenia-project/xenia.git
-[submodule "tools/nebula/src"]
-	path = tools/nebula/src
-	url = https://github.com/slackhq/nebula.git
 [submodule "thirdparty/GameNetworkingSockets"]
 	path = thirdparty/GameNetworkingSockets
 	url = https://github.com/ValveSoftware/GameNetworkingSockets.git

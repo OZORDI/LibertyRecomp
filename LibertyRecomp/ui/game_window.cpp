@@ -1,5 +1,7 @@
 #include "game_window.h"
 
+#include <os/diag.h>
+
 #if !REX_PLATFORM_CONSOLE
 
 #include <gpu/video.h>
@@ -46,8 +48,8 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
             if (App::s_isSaving)
                 break;
 
-            printf("[SDL_QUIT] App::Exit() triggered from Window_OnSDLEvent! timestamp=%llu\n", (unsigned long long)event->quit.timestamp);
-            fflush(stdout);
+            DIAG_EMIT("[SDL_QUIT] App::Exit() triggered from Window_OnSDLEvent! timestamp=%llu\n",
+                      (unsigned long long)event->quit.timestamp);
             App::Exit();
 
             break;
@@ -863,8 +865,8 @@ bool GameWindow::Init(const char* /*sdlVideoDriver*/)
     s_isFullscreenCursorVisible = false;
     s_isChangingDisplay = false;
 
-    std::printf("[PS4][GameWindow] video out opened: handle=%d resolution=%dx%d\n",
-                g_videoOutHandle, s_width, s_height);
+    DIAG_EMIT("[PS4][GameWindow] video out opened: handle=%d resolution=%dx%d\n",
+              g_videoOutHandle, s_width, s_height);
     return true;
 }
 
@@ -925,7 +927,7 @@ bool GameWindow::Init(const char* /*sdlVideoDriver*/)
 
     if (!g_nwindow || !nwindowIsValid(g_nwindow))
     {
-        std::printf("[NX][GameWindow] default NWindow unavailable, creating vi layer manually\n");
+        DIAG_EMIT("[NX][GameWindow] default NWindow unavailable, creating vi layer manually\n");
 
         Result rc = viInitialize(ViServiceType_Application);
         if (R_FAILED(rc))
@@ -996,9 +998,9 @@ bool GameWindow::Init(const char* /*sdlVideoDriver*/)
     s_isFullscreenCursorVisible = false;
     s_isChangingDisplay = false;
 
-    std::printf("[NX][GameWindow] NWindow ready: %dx%d (%s)\n",
-                w, h,
-                appletGetOperationMode() == AppletOperationMode_Console ? "docked" : "handheld");
+    DIAG_EMIT("[NX][GameWindow] NWindow ready: %dx%d (%s)\n",
+              w, h,
+              appletGetOperationMode() == AppletOperationMode_Console ? "docked" : "handheld");
     return true;
 }
 
@@ -1017,7 +1019,7 @@ void GameWindow::Update()
         s_height = h;
         nwindowSetDimensions(g_nwindow, static_cast<u32>(w), static_cast<u32>(h));
         s_isChangingDisplay = true;
-        std::printf("[NX][GameWindow] operation mode changed -> %dx%d\n", w, h);
+        DIAG_EMIT("[NX][GameWindow] operation mode changed -> %dx%d\n", w, h);
     }
 }
 

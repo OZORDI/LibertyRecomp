@@ -3,6 +3,7 @@
 #include <user/config.h>
 #include <hid/hid.h>
 #include <os/logger.h>
+#include <os/diag.h>
 #include <decompressor.h>
 #include <zstd.h>
 #include <fstream>
@@ -230,9 +231,8 @@ namespace ButtonPrompts
         s_cachedXtdPath = outputPath;
         s_cachedPlatform = platform;
         
-        printf("[ButtonPrompts] Cached %s button prompts (%zu bytes) to %s\n", 
-               platform.c_str(), xtd.uncompressedSize, outputPath.string().c_str());
-        fflush(stdout);
+        DIAG_EMIT("[ButtonPrompts] Cached %s button prompts (%zu bytes) to %s\n",
+                  platform.c_str(), xtd.uncompressedSize, outputPath.string().c_str());
         
         return true;
     }

@@ -1123,17 +1123,19 @@ bool build_vpkuwum(BuilderContext& ctx) {
 
 bool build_vpkuwus(BuilderContext& ctx) {
   // Vector Pack Unsigned Word Unsigned Saturate
-
-  // NOTE(tomc): _mm_packus_epi32 treats inputs as signed, so we need custom saturation for unsigned
-  // Saturate each u32 to [0, 0xFFFF], then pack to u16
-  for (size_t i = 0; i < 4; i++) {
-    ctx.println("\t{}.u16[{}] = {}.u32[{}] > 0xFFFF ? 0xFFFF : (uint16_t){}.u32[{}];",
-                ctx.v(ctx.insn.operands[0]), 7 - i, ctx.v(ctx.insn.operands[1]), 3 - i,
-                ctx.v(ctx.insn.operands[1]), 3 - i);
-    ctx.println("\t{}.u16[{}] = {}.u32[{}] > 0xFFFF ? 0xFFFF : (uint16_t){}.u32[{}];",
-                ctx.v(ctx.insn.operands[0]), 3 - i, ctx.v(ctx.insn.operands[2]), 3 - i,
-                ctx.v(ctx.insn.operands[2]), 3 - i);
-  }
+  // Clamp to the signed pack instruction's non-negative range first. Keeping
+  // the operation in one expression is required because vD may legally alias
+  // vA or vB; scalar stores into vD would otherwise corrupt a source lane that
+  // has not been read yet.
+  ctx.println(
+      "\tsimde_mm_store_si128((simde__m128i*){}.u16, "
+      "simde_mm_packus_epi32("
+      "simde_mm_min_epu32(simde_mm_load_si128((simde__m128i*){}.u32), "
+      "simde_mm_set1_epi32(0xFFFF)), "
+      "simde_mm_min_epu32(simde_mm_load_si128((simde__m128i*){}.u32), "
+      "simde_mm_set1_epi32(0xFFFF))));",
+      ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[2]),
+      ctx.v(ctx.insn.operands[1]));
   return true;
 }
 

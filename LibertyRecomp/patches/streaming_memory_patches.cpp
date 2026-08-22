@@ -41,6 +41,7 @@
 #include <kernel/function.h>
 #include <kernel/memory.h>
 #include <os/logger.h>
+#include <rex/diagnostics/policy.h>
 #include <cstring>
 #include <atomic>
 
@@ -80,6 +81,14 @@ static std::atomic<uint32_t> g_defragPhysicalCalls{0};
 static std::atomic<uint32_t> g_defragPhysicalSkips{0};
 static std::atomic<uint32_t> g_virtualBudgetSet{0};
 static std::atomic<uint32_t> g_physicalBudgetSet{0};
+
+static bool StreamingDiagnosticsEnabled() noexcept
+{
+    return rex::diagnostics::IsEnabled(
+               rex::diagnostics::Category::kGuestHooks) &&
+           rex::diagnostics::IsEnabled(
+               rex::diagnostics::Category::kLogging);
+}
 
 // =============================================================================
 // sub_821CFD10 - Budget parser (reads platform:/stream.ini)
@@ -144,19 +153,23 @@ PPC_FUNC_HOOK(sub_82511C50)
                                             : static_cast<uint32_t>(wide);
     }
 
-    g_virtualBudgetSet.store(scaled, std::memory_order_relaxed);
+    const bool diagnostics = StreamingDiagnosticsEnabled();
+    if (diagnostics)
+        g_virtualBudgetSet.store(scaled, std::memory_order_relaxed);
 
     ctx.r3.u32 = mgr;
     ctx.r4.u32 = scaled;
     __imp__sub_82511C50(ctx, base);
 
-    // Read back what was actually written (may have been clamped by heap capacity)
-    uint32_t actual = PPC_LOAD_U32(mgr + 32);
-
-    if (actual != scaled) {
+    // Readback is diagnostic-only; normal execution does not perform the
+    // extra guest load or maintain diagnostic counters.
+    if (diagnostics) {
+        const uint32_t actual = PPC_LOAD_U32(mgr + 32);
+        if (actual != scaled) {
         LOGF_INFO("StreamingMemory: virtual budget clamped by heap: "
                   "requested={}MB, actual={}MB",
                   scaled / (1024 * 1024), actual / (1024 * 1024));
+        }
     }
 }
 
@@ -177,18 +190,21 @@ PPC_FUNC_HOOK(sub_82511CD8)
                                              : static_cast<uint32_t>(wide);
     }
 
-    g_physicalBudgetSet.store(scaled, std::memory_order_relaxed);
+    const bool diagnostics = StreamingDiagnosticsEnabled();
+    if (diagnostics)
+        g_physicalBudgetSet.store(scaled, std::memory_order_relaxed);
 
     ctx.r3.u32 = mgr;
     ctx.r4.u32 = scaled;
     __imp__sub_82511CD8(ctx, base);
 
-    uint32_t actual = PPC_LOAD_U32(mgr + 44);
-
-    if (actual != scaled) {
+    if (diagnostics) {
+        const uint32_t actual = PPC_LOAD_U32(mgr + 44);
+        if (actual != scaled) {
         LOGF_INFO("StreamingMemory: physical budget clamped by heap: "
                   "requested={}MB, actual={}MB",
                   scaled / (1024 * 1024), actual / (1024 * 1024));
+        }
     }
 }
 
@@ -211,11 +227,14 @@ static uint32_t g_defragVirtualCounter = 0;
 
 PPC_FUNC_HOOK(sub_821C6890)
 {
-    g_defragVirtualCalls.fetch_add(1, std::memory_order_relaxed);
+    const bool diagnostics = StreamingDiagnosticsEnabled();
+    if (diagnostics)
+        g_defragVirtualCalls.fetch_add(1, std::memory_order_relaxed);
 
     if (g_defragVirtualCounter < DEFRAG_SKIP_COUNT) {
         g_defragVirtualCounter++;
-        g_defragVirtualSkips.fetch_add(1, std::memory_order_relaxed);
+        if (diagnostics)
+            g_defragVirtualSkips.fetch_add(1, std::memory_order_relaxed);
         // Return the same value the original would: r28 = *(a2+8)
         // The caller (indirect dispatch) doesn't use the return value
         // in a meaningful way, but we mirror the original for safety.
@@ -238,11 +257,14 @@ static uint32_t g_defragPhysicalCounter = 0;
 
 PPC_FUNC_HOOK(sub_821C69B0)
 {
-    g_defragPhysicalCalls.fetch_add(1, std::memory_order_relaxed);
+    const bool diagnostics = StreamingDiagnosticsEnabled();
+    if (diagnostics)
+        g_defragPhysicalCalls.fetch_add(1, std::memory_order_relaxed);
 
     if (g_defragPhysicalCounter < DEFRAG_SKIP_COUNT) {
         g_defragPhysicalCounter++;
-        g_defragPhysicalSkips.fetch_add(1, std::memory_order_relaxed);
+        if (diagnostics)
+            g_defragPhysicalSkips.fetch_add(1, std::memory_order_relaxed);
         ctx.r3.u64 = PPC_LOAD_U32(ctx.r4.u32 + 8);
         return;
     }
@@ -260,7 +282,7 @@ PPC_FUNC_HOOK(sub_821C69B0)
 
 void StreamingMemory_FrameTick()
 {
-    if (DIAG_LOG_INTERVAL == 0)
+    if (!StreamingDiagnosticsEnabled() || DIAG_LOG_INTERVAL == 0)
         return;
 
     uint32_t frame = g_diagFrameCounter.fetch_add(1, std::memory_order_relaxed);

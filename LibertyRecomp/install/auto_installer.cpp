@@ -22,6 +22,7 @@
 #include "xbox360/title_update_manager.h"
 
 #include <user/config.h>
+#include <os/diag.h>
 
 #include <fstream>
 #include <filesystem>
@@ -78,7 +79,7 @@ static void DLCWorker(std::filesystem::path dlcSourceDir, std::filesystem::path 
 
     if (!tladMissing && !tbogtMissing)
     {
-        fprintf(stderr, "[AutoInstall] Both DLC packs already installed.\n");
+        DIAG_EMIT("[AutoInstall] Both DLC packs already installed.\n");
         return;
     }
 
@@ -92,13 +93,13 @@ static void DLCWorker(std::filesystem::path dlcSourceDir, std::filesystem::path 
 
     if (dlcSources.empty())
     {
-        fprintf(stderr, "[AutoInstall] No matching DLC source zips found in: %s\n",
-                dlcSourceDir.string().c_str());
+        DIAG_EMIT("[AutoInstall] No matching DLC source zips found in: %s\n",
+                  dlcSourceDir.string().c_str());
         return;
     }
 
-    fprintf(stderr, "[AutoInstall] Background DLC install starting (%zu pack(s))...\n",
-            dlcSources.size());
+    DIAG_EMIT("[AutoInstall] Background DLC install starting (%zu pack(s))...\n",
+              dlcSources.size());
 
     Installer::Input input;
     input.dlcSources = dlcSources;
@@ -107,23 +108,23 @@ static void DLCWorker(std::filesystem::path dlcSourceDir, std::filesystem::path 
     Installer::Sources sources;
     if (!Installer::parseSources(input, journal, sources))
     {
-        fprintf(stderr, "[AutoInstall] DLC parse failed: %s\n",
-                journal.lastErrorMessage.c_str());
+        DIAG_EMIT("[AutoInstall] DLC parse failed: %s\n",
+                  journal.lastErrorMessage.c_str());
         return;
     }
 
     if (!Installer::install(sources, gamePath, /*skipHashChecks=*/true, journal,
                             std::chrono::seconds(0), []() { return true; }))
     {
-        fprintf(stderr, "[AutoInstall] DLC install failed: %s\n",
-                journal.lastErrorMessage.c_str());
+        DIAG_EMIT("[AutoInstall] DLC install failed: %s\n",
+                  journal.lastErrorMessage.c_str());
         return;
     }
 
     bool tladOk  = Installer::checkDLCInstall(gamePath, DLC::TheLostAndDamned);
     bool tbogtOk = Installer::checkDLCInstall(gamePath, DLC::TheBalladOfGayTony);
-    fprintf(stderr, "[AutoInstall] Background DLC install done — TLAD=%d TBOGT=%d\n",
-            (int)tladOk, (int)tbogtOk);
+    DIAG_EMIT("[AutoInstall] Background DLC install done — TLAD=%d TBOGT=%d\n",
+              (int)tladOk, (int)tbogtOk);
 }
 
 // --------------------------------------------------------------------------
@@ -147,7 +148,7 @@ static void ApplyLatestUpdate(
     std::filesystem::path marker = gamePath / "game" / ".update_applied";
     if (std::filesystem::exists(marker))
     {
-        fprintf(stderr, "[AutoInstall] Title update already extracted, skipping.\n");
+        DIAG_EMIT("[AutoInstall] Title update already extracted, skipping.\n");
         return;
     }
 
@@ -186,8 +187,8 @@ static void ApplyLatestUpdate(
     auto sel = mgr.GetSelectedUpdate();
     if (!sel) return;
 
-    fprintf(stderr, "[AutoInstall] Extracting title update v%u from STFS...\n",
-            sel->info.version);
+    DIAG_EMIT("[AutoInstall] Extracting title update v%u from STFS...\n",
+              sel->info.version);
 
     // Open the STFS package and extract all files to the game directory.
     // RexGlue will find default.xexp at game/default.xexp and apply the
@@ -195,7 +196,7 @@ static void ApplyLatestUpdate(
     liberty::install::StfsParser parser;
     if (!parser.Open(sel->path))
     {
-        fprintf(stderr, "[AutoInstall] Failed to open STFS package.\n");
+        DIAG_EMIT("[AutoInstall] Failed to open STFS package.\n");
         return;
     }
 
@@ -211,10 +212,10 @@ static void ApplyLatestUpdate(
         if (parser.ExtractFileToDisk(file.name, outPath))
             extracted++;
         else
-            fprintf(stderr, "[AutoInstall]   WARN: failed to extract %s\n", file.name.c_str());
+            DIAG_EMIT("[AutoInstall]   WARN: failed to extract %s\n", file.name.c_str());
     }
 
-    fprintf(stderr, "[AutoInstall] Extracted %d files from title update.\n", extracted);
+    DIAG_EMIT("[AutoInstall] Extracted %d files from title update.\n", extracted);
     WriteMarker(marker, std::to_string(sel->info.version));
 }
 
@@ -229,7 +230,7 @@ AutoInstallResult AutoInstaller::Run(const std::filesystem::path& gamePath)
     std::filesystem::path modulePath;
     if (!Installer::checkGameInstall(gamePath, modulePath))
     {
-        fprintf(stderr, "[AutoInstall] Game not installed, skipping.\n");
+        DIAG_EMIT("[AutoInstall] Game not installed, skipping.\n");
         return result;
     }
 
@@ -248,7 +249,7 @@ AutoInstallResult AutoInstaller::Run(const std::filesystem::path& gamePath)
         (!Installer::checkDLCInstall(gamePath, DLC::TheLostAndDamned) ||
          !Installer::checkDLCInstall(gamePath, DLC::TheBalladOfGayTony)))
     {
-        fprintf(stderr, "[AutoInstall] Spawning background DLC install thread.\n");
+        DIAG_EMIT("[AutoInstall] Spawning background DLC install thread.\n");
         std::thread(DLCWorker, dlcDir, gamePath).detach();
         result.tladInstalled  = false; // not yet — happens in background
         result.tbogtInstalled = false;

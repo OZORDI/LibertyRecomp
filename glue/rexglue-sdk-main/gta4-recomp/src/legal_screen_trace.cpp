@@ -5,6 +5,7 @@
 #include <xxhash.h>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 
 #include "gta4_init.h"
@@ -72,7 +73,8 @@ uint32_t CurrentFrame(uint8_t* base, uint32_t device) {
 }  // namespace
 
 extern "C" void sub_82144800(PPCContext& ctx, uint8_t* base) {
-  if (!REXCVAR_GET(gta4_trace_legal_screen)) {
+  if (!rex::diagnostics::IsEnabled(rex::diagnostics::Category::kLegal) ||
+      !REXCVAR_GET(gta4_trace_legal_screen)) {
     __imp__sub_82144800(ctx, base);
     return;
   }
@@ -106,7 +108,8 @@ extern "C" void sub_82144800(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_821F6E38(PPCContext& ctx, uint8_t* base) {
-  if (REXCVAR_GET(gta4_trace_legal_screen) && g_legal_trace_depth) {
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kLegal) &&
+      REXCVAR_GET(gta4_trace_legal_screen) && g_legal_trace_depth) {
     ++g_legal_text_submits;
     const uint32_t device = CurrentDevice(base);
     const GuestTextFingerprint text = FingerprintGuestText(base, ctx.r5.u32);

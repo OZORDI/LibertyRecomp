@@ -11,12 +11,15 @@
 
 #pragma once
 
+#include <rex/diagnostics/policy.h>
 #include <rex/logging/api.h>
 
 /* Implementation macro - do not call directly. Uses raw pointer for zero
    ref-count overhead and gates on should_log() to skip format evaluation. */
 #define REX_LOG_IMPL(cat, lvl, ...)                                                              \
   do {                                                                                           \
+    if (!::rex::diagnostics::IsEnabled(::rex::diagnostics::Category::kLogging))                  \
+      break;                                                                                     \
     auto* rex_log_ptr_ = ::rex::GetLoggerRaw(cat);                                               \
     if (rex_log_ptr_ && rex_log_ptr_->should_log(lvl))                                           \
       rex_log_ptr_->log(spdlog::source_loc{__FILE__, __LINE__, __FUNCTION__}, lvl, __VA_ARGS__); \
@@ -24,6 +27,8 @@
 
 #define REX_LOG_NOISY_IMPL(cat, lvl, ...) \
   do {                                    \
+    if (!::rex::diagnostics::IsEnabled(::rex::diagnostics::Category::kLogging)) \
+      break;                              \
     if (!REXCVAR_GET(log_noisy))          \
       break;                              \
     REX_LOG_IMPL(cat, lvl, __VA_ARGS__);  \

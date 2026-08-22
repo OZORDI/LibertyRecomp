@@ -5,6 +5,7 @@
 
 #include <rex/system/xmemory.h>
 #include <rex/logging.h>
+#include <os/diag.h>
 
 // vtable_prepopulate.h removed — PrePopulateVtables wrote 3,809 vtable
 // entries BEFORE rexglue's LoadXexImage, which then overwrote them all
@@ -45,7 +46,7 @@ void Memory::InitializeFromRexGlue()
     }
 
     base = rex_memory_->virtual_membase();
-    fprintf(stderr, "[Memory] RexGlue memory initialized: base=%p\n", (void*)base);
+    DIAG_EMIT("[Memory] RexGlue memory initialized: base=%p\n", (void*)base);
 
     // Initialize the function table in guest memory for PPC_LOOKUP_FUNC
     if (!rex_memory_->InitializeFunctionTable(PPC_CODE_BASE, PPC_CODE_SIZE,
@@ -66,12 +67,13 @@ void Memory::InitializeFromRexGlue()
             count++;
         }
     }
-    fprintf(stderr, "[Memory] Registered %d recompiled functions via RexGlue\n", count);
+    DIAG_EMIT("[Memory] Registered %d recompiled functions via RexGlue\n", count);
 
     // Shared init: manual stubs, vtable pre-population
     PopulateFunctionTableAndVtables();
 
-    fprintf(stderr, "[DIAG] Post-Populate GetFunction(0x82A692C8)=%p\n", (void*)rex_memory_->GetFunction(0x82A692C8));
+    DIAG_EMIT("[DIAG] Post-Populate GetFunction(0x82A692C8)=%p\n",
+              (void*)rex_memory_->GetFunction(0x82A692C8));
 }
 
 void Memory::PopulateFunctionTableAndVtables()

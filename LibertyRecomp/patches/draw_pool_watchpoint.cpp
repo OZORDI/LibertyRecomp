@@ -25,6 +25,7 @@
 #include <kernel/function.h>
 #include <kernel/memory.h>
 #include <os/logger.h>
+#include <rex/diagnostics/policy.h>
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -44,6 +45,13 @@ inline uint32_t ReadGuestU32(uint32_t guest_addr) {
 std::atomic<uint64_t> g_event_seq{0};
 std::atomic<bool>     g_poller_started{false};
 std::atomic<bool>     g_poller_stop{false};
+
+bool WatchDiagnosticsEnabled() noexcept {
+    return rex::diagnostics::IsEnabled(
+               rex::diagnostics::Category::kGuestHooks) &&
+           rex::diagnostics::IsEnabled(
+               rex::diagnostics::Category::kLogging);
+}
 
 const char* PoisonTag(uint32_t v) {
     if (v == POISON)        return " *** POISON ***";
@@ -70,6 +78,9 @@ void PollerLoop() {
 }
 
 void EnsurePollerStarted() {
+    if (!WatchDiagnosticsEnabled()) {
+        return;
+    }
     bool expected = false;
     if (g_poller_started.compare_exchange_strong(expected, true)) {
         std::thread(PollerLoop).detach();
@@ -86,6 +97,10 @@ void EnsurePollerStarted() {
 // ============================================================================
 PPC_FUNC_IMPL(__imp__sub_828BF270);
 PPC_FUNC_HOOK(sub_828BF270) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_828BF270(ctx, base);
+        return;
+    }
     EnsurePollerStarted();
     uint32_t value = ReadGuestU32(WATCH_ADDR);
     uint64_t seq   = g_event_seq.fetch_add(1, std::memory_order_relaxed);
@@ -100,6 +115,10 @@ PPC_FUNC_HOOK(sub_828BF270) {
 // ============================================================================
 PPC_FUNC_IMPL(__imp__sub_828C01E0);
 PPC_FUNC_HOOK(sub_828C01E0) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_828C01E0(ctx, base);
+        return;
+    }
     EnsurePollerStarted();
     uint32_t before_dst = ReadGuestU32(WATCH_ADDR);
     uint32_t before_src = ReadGuestU32(SRC1_ADDR);
@@ -123,6 +142,10 @@ PPC_FUNC_HOOK(sub_828C01E0) {
 // ============================================================================
 PPC_FUNC_IMPL(__imp__sub_828C0338);
 PPC_FUNC_HOOK(sub_828C0338) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_828C0338(ctx, base);
+        return;
+    }
     EnsurePollerStarted();
     uint32_t before_dst = ReadGuestU32(WATCH_ADDR);
     uint32_t before_src = ReadGuestU32(SRC2_ADDR);
@@ -145,6 +168,10 @@ PPC_FUNC_HOOK(sub_828C0338) {
 // ============================================================================
 PPC_FUNC_IMPL(__imp__sub_828C47E8);
 PPC_FUNC_HOOK(sub_828C47E8) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_828C47E8(ctx, base);
+        return;
+    }
     EnsurePollerStarted();
     uint32_t before = ReadGuestU32(WATCH_ADDR);
     uint64_t seq_in = g_event_seq.fetch_add(1, std::memory_order_relaxed);
@@ -168,6 +195,9 @@ PPC_FUNC_HOOK(sub_828C47E8) {
 // ============================================================================
 namespace {
 inline void LogCallerEntry(const char* tag, uint32_t lr) {
+    if (!WatchDiagnosticsEnabled()) {
+        return;
+    }
     static thread_local uint64_t s_seq = 0;
     uint64_t seq = ++s_seq;
     if (seq <= 20 || (seq % 2000) == 0) {
@@ -176,6 +206,9 @@ inline void LogCallerEntry(const char* tag, uint32_t lr) {
     }
 }
 inline void LogCallerExit(const char* tag) {
+    if (!WatchDiagnosticsEnabled()) {
+        return;
+    }
     static thread_local uint64_t s_seq = 0;
     uint64_t seq = ++s_seq;
     if (seq <= 20 || (seq % 2000) == 0) {
@@ -247,6 +280,10 @@ inline uint32_t SafeReadGuestU32(uint32_t guest_addr) {
 
 PPC_FUNC_IMPL(__imp__sub_8227F5B8);
 PPC_FUNC_HOOK(sub_8227F5B8) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_8227F5B8(ctx, base);
+        return;
+    }
     static thread_local uint64_t s_seq = 0;
     uint64_t seq = ++s_seq;
     uint32_t color_ptr = ctx.r4.u32;
@@ -265,6 +302,10 @@ PPC_FUNC_HOOK(sub_8227F5B8) {
 
 PPC_FUNC_IMPL(__imp__sub_8227F608);
 PPC_FUNC_HOOK(sub_8227F608) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_8227F608(ctx, base);
+        return;
+    }
     static thread_local uint64_t s_seq = 0;
     uint64_t seq = ++s_seq;
     uint32_t color_ptr = ctx.r5.u32;
@@ -287,6 +328,10 @@ PPC_FUNC_HOOK(sub_8227F608) {
 // ============================================================================
 PPC_FUNC_IMPL(__imp__sub_828D4C88);
 PPC_FUNC_HOOK(sub_828D4C88) {
+    if (!WatchDiagnosticsEnabled()) {
+        __imp__sub_828D4C88(ctx, base);
+        return;
+    }
     EnsurePollerStarted();
     uint32_t before = ReadGuestU32(WATCH_ADDR);
     uint64_t seq_in = g_event_seq.fetch_add(1, std::memory_order_relaxed);

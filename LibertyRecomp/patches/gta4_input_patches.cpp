@@ -1,5 +1,6 @@
 #include "../../glue/rexglue-sdk-main/gta4-recomp/generated/gta4_init.h"
 
+#include <rex/input/mnk/encoded_action.h>
 #include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/input/mnk/pointer_motion.h>
 #include <rex/ui/virtual_key.h>
@@ -128,19 +129,83 @@ void MergeAction(uint8_t* base, uint32_t control, GTA4Action action, uint8_t val
   }
 
   const uint32_t index = static_cast<uint32_t>(action);
-  const uint32_t address =
-      control + kActionArrayOffset + index * kActionStride + kActionNewStateOffset;
-  if (value > LoadGuestU8(base, address)) {
-    StoreGuestU8(base, address, value);
+  const uint32_t action_address =
+      control + kActionArrayOffset + index * kActionStride;
+  const uint32_t encoded_value_address =
+      action_address + kActionNewStateOffset;
+  const uint8_t polarity = LoadGuestU8(base, action_address);
+  const uint8_t encoded_value = LoadGuestU8(base, encoded_value_address);
+  const uint8_t merged_value = rex::input::mnk::MergeActionMagnitude(
+      polarity, encoded_value, value);
+  if (merged_value != encoded_value) {
+    StoreGuestU8(base, encoded_value_address, merged_value);
   }
 }
 
-void MergeKey(uint8_t* base, uint32_t control, const NativeInputState& state, VirtualKey key,
-              GTA4Action action) {
-  if (IsDown(state, key)) {
-    MergeAction(base, control, action, kPressed);
-  }
-}
+struct KeyActionBinding {
+  VirtualKey key;
+  GTA4Action action;
+};
+
+// One declarative keyboard map is the sole keyboard-to-title conversion path.
+// Multiple entries for a key are intentional: GTA IV consumes different
+// action families for on-foot, vehicle, aircraft and frontend contexts.
+constexpr KeyActionBinding kKeyActionBindings[] = {
+    {VirtualKey::kW, GTA4Action::kMoveUp},
+    {VirtualKey::kW, GTA4Action::kVehicleMoveUp},
+    {VirtualKey::kW, GTA4Action::kVehicleAccelerate},
+    {VirtualKey::kW, GTA4Action::kVehicleFlyThrottleUp},
+    {VirtualKey::kW, GTA4Action::kFrontendUp},
+    {VirtualKey::kS, GTA4Action::kMoveDown},
+    {VirtualKey::kS, GTA4Action::kVehicleMoveDown},
+    {VirtualKey::kS, GTA4Action::kVehicleBrake},
+    {VirtualKey::kS, GTA4Action::kVehicleFlyThrottleDown},
+    {VirtualKey::kS, GTA4Action::kFrontendDown},
+    {VirtualKey::kA, GTA4Action::kMoveLeft},
+    {VirtualKey::kA, GTA4Action::kVehicleMoveLeft},
+    {VirtualKey::kA, GTA4Action::kVehicleFlyYawLeft},
+    {VirtualKey::kA, GTA4Action::kFrontendLeft},
+    {VirtualKey::kD, GTA4Action::kMoveRight},
+    {VirtualKey::kD, GTA4Action::kVehicleMoveRight},
+    {VirtualKey::kD, GTA4Action::kVehicleFlyYawRight},
+    {VirtualKey::kD, GTA4Action::kFrontendRight},
+    {VirtualKey::kShift, GTA4Action::kSprint},
+    {VirtualKey::kSpace, GTA4Action::kJump},
+    {VirtualKey::kSpace, GTA4Action::kVehicleHandbrake},
+    {VirtualKey::kSpace, GTA4Action::kFrontendAccept},
+    {VirtualKey::kF, GTA4Action::kEnter},
+    {VirtualKey::kF, GTA4Action::kVehicleExit},
+    {VirtualKey::kR, GTA4Action::kReload},
+    {VirtualKey::kQ, GTA4Action::kCover},
+    {VirtualKey::kE, GTA4Action::kPickup},
+    {VirtualKey::kC, GTA4Action::kDuck},
+    {VirtualKey::kC, GTA4Action::kLookBehind},
+    {VirtualKey::kC, GTA4Action::kVehicleLookBehind},
+    {VirtualKey::kV, GTA4Action::kNextCamera},
+    {VirtualKey::kV, GTA4Action::kVehicleCinematicCamera},
+    {VirtualKey::kH, GTA4Action::kVehicleHeadlight},
+    {VirtualKey::kG, GTA4Action::kVehicleHorn},
+    {VirtualKey::kTab, GTA4Action::kZoomRadar},
+    {VirtualKey::kUp, GTA4Action::kPhoneTakeOut},
+    {VirtualKey::kUp, GTA4Action::kFrontendUp},
+    {VirtualKey::kDown, GTA4Action::kPhonePutAway},
+    {VirtualKey::kDown, GTA4Action::kFrontendDown},
+    {VirtualKey::kLeft, GTA4Action::kFrontendLeft},
+    {VirtualKey::kRight, GTA4Action::kFrontendRight},
+    {VirtualKey::kReturn, GTA4Action::kFrontendAccept},
+    {VirtualKey::kBack, GTA4Action::kPhonePutAway},
+    {VirtualKey::kBack, GTA4Action::kFrontendCancel},
+    {VirtualKey::kEscape, GTA4Action::kFrontendPause},
+    {VirtualKey::kEscape, GTA4Action::kFrontendCancel},
+    {VirtualKey::kLButton, GTA4Action::kAttack},
+    {VirtualKey::kLButton, GTA4Action::kVehicleAttack},
+    {VirtualKey::kLButton, GTA4Action::kMeleeAttack1},
+    {VirtualKey::kLButton, GTA4Action::kFrontendAccept},
+    {VirtualKey::kRButton, GTA4Action::kAim},
+    {VirtualKey::kRButton, GTA4Action::kVehicleAttack2},
+    {VirtualKey::kRButton, GTA4Action::kMeleeBlock},
+    {VirtualKey::kRButton, GTA4Action::kFrontendCancel},
+};
 
 void MergeMouseAxis(uint8_t* base, uint32_t control, int32_t value, GTA4Action negative,
                     GTA4Action positive) {
@@ -177,68 +242,11 @@ void InjectNativeInput(uint8_t* base, uint32_t control, const NativeInputState& 
     gLastMouseSource = state.mouse_source;
   }
 
-  // Movement is written to every applicable gameplay context. GTA IV's active
-  // task decides whether the on-foot, vehicle, or aircraft action is consumed.
-  MergeKey(base, control, state, VirtualKey::kW, GTA4Action::kMoveUp);
-  MergeKey(base, control, state, VirtualKey::kW, GTA4Action::kVehicleMoveUp);
-  MergeKey(base, control, state, VirtualKey::kW, GTA4Action::kVehicleAccelerate);
-  MergeKey(base, control, state, VirtualKey::kW, GTA4Action::kVehicleFlyThrottleUp);
-  MergeKey(base, control, state, VirtualKey::kW, GTA4Action::kFrontendUp);
-
-  MergeKey(base, control, state, VirtualKey::kS, GTA4Action::kMoveDown);
-  MergeKey(base, control, state, VirtualKey::kS, GTA4Action::kVehicleMoveDown);
-  MergeKey(base, control, state, VirtualKey::kS, GTA4Action::kVehicleBrake);
-  MergeKey(base, control, state, VirtualKey::kS, GTA4Action::kVehicleFlyThrottleDown);
-  MergeKey(base, control, state, VirtualKey::kS, GTA4Action::kFrontendDown);
-
-  MergeKey(base, control, state, VirtualKey::kA, GTA4Action::kMoveLeft);
-  MergeKey(base, control, state, VirtualKey::kA, GTA4Action::kVehicleMoveLeft);
-  MergeKey(base, control, state, VirtualKey::kA, GTA4Action::kVehicleFlyYawLeft);
-  MergeKey(base, control, state, VirtualKey::kA, GTA4Action::kFrontendLeft);
-
-  MergeKey(base, control, state, VirtualKey::kD, GTA4Action::kMoveRight);
-  MergeKey(base, control, state, VirtualKey::kD, GTA4Action::kVehicleMoveRight);
-  MergeKey(base, control, state, VirtualKey::kD, GTA4Action::kVehicleFlyYawRight);
-  MergeKey(base, control, state, VirtualKey::kD, GTA4Action::kFrontendRight);
-
-  MergeKey(base, control, state, VirtualKey::kShift, GTA4Action::kSprint);
-  MergeKey(base, control, state, VirtualKey::kSpace, GTA4Action::kJump);
-  MergeKey(base, control, state, VirtualKey::kSpace, GTA4Action::kVehicleHandbrake);
-  MergeKey(base, control, state, VirtualKey::kSpace, GTA4Action::kFrontendAccept);
-  MergeKey(base, control, state, VirtualKey::kF, GTA4Action::kEnter);
-  MergeKey(base, control, state, VirtualKey::kF, GTA4Action::kVehicleExit);
-  MergeKey(base, control, state, VirtualKey::kR, GTA4Action::kReload);
-  MergeKey(base, control, state, VirtualKey::kQ, GTA4Action::kCover);
-  MergeKey(base, control, state, VirtualKey::kE, GTA4Action::kPickup);
-  MergeKey(base, control, state, VirtualKey::kC, GTA4Action::kDuck);
-  MergeKey(base, control, state, VirtualKey::kC, GTA4Action::kLookBehind);
-  MergeKey(base, control, state, VirtualKey::kC, GTA4Action::kVehicleLookBehind);
-  MergeKey(base, control, state, VirtualKey::kV, GTA4Action::kNextCamera);
-  MergeKey(base, control, state, VirtualKey::kV, GTA4Action::kVehicleCinematicCamera);
-  MergeKey(base, control, state, VirtualKey::kH, GTA4Action::kVehicleHeadlight);
-  MergeKey(base, control, state, VirtualKey::kG, GTA4Action::kVehicleHorn);
-  MergeKey(base, control, state, VirtualKey::kTab, GTA4Action::kZoomRadar);
-
-  MergeKey(base, control, state, VirtualKey::kUp, GTA4Action::kPhoneTakeOut);
-  MergeKey(base, control, state, VirtualKey::kUp, GTA4Action::kFrontendUp);
-  MergeKey(base, control, state, VirtualKey::kDown, GTA4Action::kPhonePutAway);
-  MergeKey(base, control, state, VirtualKey::kDown, GTA4Action::kFrontendDown);
-  MergeKey(base, control, state, VirtualKey::kLeft, GTA4Action::kFrontendLeft);
-  MergeKey(base, control, state, VirtualKey::kRight, GTA4Action::kFrontendRight);
-  MergeKey(base, control, state, VirtualKey::kReturn, GTA4Action::kFrontendAccept);
-  MergeKey(base, control, state, VirtualKey::kBack, GTA4Action::kPhonePutAway);
-  MergeKey(base, control, state, VirtualKey::kBack, GTA4Action::kFrontendCancel);
-  MergeKey(base, control, state, VirtualKey::kEscape, GTA4Action::kFrontendPause);
-  MergeKey(base, control, state, VirtualKey::kEscape, GTA4Action::kFrontendCancel);
-
-  MergeKey(base, control, state, VirtualKey::kLButton, GTA4Action::kAttack);
-  MergeKey(base, control, state, VirtualKey::kLButton, GTA4Action::kVehicleAttack);
-  MergeKey(base, control, state, VirtualKey::kLButton, GTA4Action::kMeleeAttack1);
-  MergeKey(base, control, state, VirtualKey::kLButton, GTA4Action::kFrontendAccept);
-  MergeKey(base, control, state, VirtualKey::kRButton, GTA4Action::kAim);
-  MergeKey(base, control, state, VirtualKey::kRButton, GTA4Action::kVehicleAttack2);
-  MergeKey(base, control, state, VirtualKey::kRButton, GTA4Action::kMeleeBlock);
-  MergeKey(base, control, state, VirtualKey::kRButton, GTA4Action::kFrontendCancel);
+  for (const KeyActionBinding& binding : kKeyActionBindings) {
+    if (IsDown(state, binding.key)) {
+      MergeAction(base, control, binding.action, kPressed);
+    }
+  }
 
   if (state.mouse_wheel > 0) {
     MergeAction(base, control, GTA4Action::kNextWeapon, kPressed);

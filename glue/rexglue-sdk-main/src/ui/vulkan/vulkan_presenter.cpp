@@ -27,6 +27,7 @@
 
 #include <rex/assert.h>
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/math.h>
 #include <rex/platform.h>
@@ -2357,6 +2358,8 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
   }
 
+  if (rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kPresenter)) {
   static uint64_t vulkan_paint_flow_count = 0;
   static bool vulkan_paint_flow_have_previous = false;
   static bool vulkan_paint_flow_last_guest_image = false;
@@ -2463,6 +2466,7 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
   vulkan_paint_flow_last_present_result = present_result;
   vulkan_paint_flow_last_swapchain_width = paint_context_.swapchain_extent.width;
   vulkan_paint_flow_last_swapchain_height = paint_context_.swapchain_extent.height;
+  }
 
   switch (present_result) {
     case VK_SUCCESS:

@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -17,10 +18,17 @@
 #include <vector>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/windowed_app.h>
 #include <rex/ui/windowed_app_context_sdl.h>
+
+REXCVAR_DEFINE_BOOL(diagnostics, false, "Diagnostics",
+                    "Enable diagnostic logging and instrumentation");
+REXCVAR_DEFINE_STRING(diagnostics_categories, "", "Diagnostics",
+                      "Comma-separated diagnostic categories (empty = all; logging controls "
+                      "general application logs independently of diagnostic artifacts)");
 
 #if REX_PLATFORM_WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,6 +47,19 @@ namespace {
 int RunWindowedApp(int argc, char** argv) {
   auto remaining = rex::cvar::Init(argc, argv);
   rex::cvar::ApplyEnvironment();
+  // The diagnostics policy is command-line-owned and must be installed before
+  // any logger sinks or worker threads exist. The REXLOG macros and the
+  // native-probe instrumentation are gated on it; without this call the
+  // policy stays unconfigured and every log line is suppressed.
+  {
+    std::string diagnostics_error;
+    if (!rex::diagnostics::Configure(REXCVAR_GET(diagnostics),
+                                     REXCVAR_GET(diagnostics_categories),
+                                     &diagnostics_error)) {
+      std::fprintf(stderr, "diagnostics: %s\n", diagnostics_error.c_str());
+      return EXIT_FAILURE;
+    }
+  }
   rex::InitLoggingEarly();
 
   int result;

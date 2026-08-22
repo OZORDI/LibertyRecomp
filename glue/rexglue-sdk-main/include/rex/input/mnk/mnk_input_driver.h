@@ -104,6 +104,7 @@ class MnkInputDriver final : public InputDriver,
 
   // Packet number incremented on state change
   uint32_t packet_number_ = 0;
+  X_INPUT_GAMEPAD last_emulated_gamepad_{};
 };
 
 }  // namespace rex::input::mnk

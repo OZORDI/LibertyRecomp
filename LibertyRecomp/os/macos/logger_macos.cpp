@@ -1,5 +1,6 @@
 #include <os/logger.h>
 #include <rex/logging.h>
+#include <rex/diagnostics/policy.h>
 
 #include <spdlog/sinks/ansicolor_sink.h>
 #include <spdlog/sinks/base_sink.h>
@@ -52,6 +53,8 @@ namespace
 
 void os::logger::PlatformInitSinks()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     // Colored stdout for Terminal.app / piped runs.
     // rexglue's rotating file sink (driven by log_file / log_max_file_size_mb /
     // log_max_files CVARs) handles persistent logs, so no file rotation here.
@@ -83,6 +86,8 @@ void os::logger::PlatformShutdownSinks()
 // then owns the single ansicolor stdout sink + Apple os_log sink.
 void os::logger::Init()
 {
+    if (!rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kLogging)) return;
     rex::LogConfig cfg;
     cfg.log_to_console = false;      // PlatformInitSinks adds the real console sink.
     cfg.default_level  = spdlog::level::trace;

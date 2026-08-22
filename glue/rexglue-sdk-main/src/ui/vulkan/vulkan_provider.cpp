@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 #include <rex/ui/vulkan/immediate_drawer.h>
 #include <rex/ui/vulkan/presenter.h>
@@ -50,8 +51,11 @@ std::unique_ptr<VulkanProvider> VulkanProvider::Create(const bool with_gpu_emula
                                                        const bool with_dynamic_rendering) {
   std::unique_ptr<VulkanProvider> provider(new VulkanProvider());
 
+  const bool enable_validation =
+      rex::diagnostics::IsEnabled(rex::diagnostics::Category::kVulkan) &&
+      REXCVAR_GET(vulkan_validation_enabled);
   provider->vulkan_instance_ =
-      VulkanInstance::Create(with_presentation, REXCVAR_GET(vulkan_validation_enabled));
+      VulkanInstance::Create(with_presentation, enable_validation);
   if (!provider->vulkan_instance_) {
     return nullptr;
   }

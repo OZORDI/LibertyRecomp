@@ -21,6 +21,7 @@
 #include <xxhash.h>
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/graphics/video_mode_util.h>
 #include <rex/graphics/gta4_native/surface_view.h>
 #include <rex/graphics/gta4_native/title_commands.h>
@@ -97,6 +98,12 @@ constexpr uint32_t kReplayFetchStateOffset = 0x480;
 constexpr uint32_t kReplayFetchStateSize = 0x180;
 constexpr uint32_t kReplayShaderConstantsOffset = 0x780;
 constexpr uint32_t kReplayShaderConstantsSize = 0x1E00;
+// c8-c11, derived from kReplayShaderConstantsOffset + register * 16.
+constexpr uint32_t kReplayVertexTransformConstantsOffset = 0x800;
+constexpr uint32_t kReplayVertexTransformConstantsSize = 0x40;
+// Offsets within CapturedDrawSnapshot::shader_constants. Calculated by
+// /tmp/calc_cached_snapshot_offsets.py rather than by hand.
+constexpr uint32_t kReplayVertexTransformSnapshotOffset = 0x80;
 constexpr uint32_t kReplayVertexBooleansOffset = 0x2780;
 constexpr uint32_t kReplayPixelBooleansOffset = 0x2790;
 constexpr uint32_t kReplayFixedStateOffset = 0x28A0;
@@ -129,6 +136,34 @@ constexpr uint32_t kCurrentViewportGlobal = 0x831C2200;
 constexpr uint32_t kPostFxTimecycleIndexGlobal = 0x82B307A4;
 constexpr uint32_t kPostFxTimecycleStride = 0xF0;
 constexpr uint32_t kPostFxDirectionalMotionBlurLengthOffset = 0x168;
+// Verified in the generated sub_8266F7D8 and sub_821B5B20 implementations.
+// The worker flips the index after a submitted command batch, and the cloud
+// callback reads the selected 528-byte slot at the offsets below.
+constexpr uint32_t kCloudDoubleBufferIndexGlobal = 0x82B307A4;
+constexpr uint32_t kCloudDoubleBufferProducerIndexGlobal = 0x82B307A0;
+constexpr uint32_t kCloudDoubleBufferBase = 0x82D41C40;
+constexpr uint32_t kCloudDoubleBufferStride = 528;
+// sub_8266F7D8 loads the global sky pointer from 0x830BB03C. The embedded
+// procedural-cloud object starts at sky+0x240 and holds its SkyhatPerlinNoise
+// backing pointer at +0x44 (constructed by sub_827D4268).
+constexpr uint32_t kCloudSkyObjectGlobal = 0x830BB03C;
+constexpr uint32_t kCloudProceduralObjectOffset = 0x240;
+constexpr uint32_t kCloudProceduralBackingPointerOffset = 0x44;
+constexpr uint32_t kCloudProceduralBackingVtable = 0x8207B630;
+constexpr std::array<uint32_t, 8> kCloudSkyProceduralFieldOffsets = {
+    0x40, 0x50, 0x54, 0xB4, 0x194, 0x1E4, 0x268, 0x26C};
+constexpr std::array<uint32_t, 2> kCloudProceduralFieldOffsets = {
+    0x28, 0x2C};
+constexpr std::array<uint32_t, 7> kCloudProceduralBackingFieldOffsets = {
+    0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28};
+// Xbox generated code proves these float reads. FusionFix's named PC layout
+// cross-reference identifies them as SkyLightMultiplier, CloudWarp,
+// DetailNoiseOffset, unknown_200, and SkyBrightness respectively.
+constexpr std::array<uint32_t, 5> kCloudConsumedFieldOffsets = {
+    36, 356, 436, 512, 516};
+constexpr std::array<uint32_t, 6> kCloudClockGlobals = {
+    0x82DF3918, 0x82DF391C, 0x82DF3924,
+    0x82DF3928, 0x82DF392C, 0x82DF3930};
 constexpr uint32_t kMaximumEnvironmentalContextIndex = 8;
 constexpr uint32_t kViewportCameraPositionOffset = 0x70;
 constexpr uint32_t kViewportViewProjectionOffset = 0x100;
@@ -284,6 +319,18 @@ struct CapturedNativeCommand {
   std::vector<uint8_t> bytes;
   std::vector<uint8_t> payload;
   CapturedDrawSnapshot draw_snapshot;
+  bool draw_diagnostic_valid = false;
+  uint32_t capture_frame = 0;
+  uint32_t capture_device = 0;
+  uint32_t capture_build_object = 0;
+  uint32_t capture_command_ordinal = 0;
+  uint32_t capture_vertex_shader = 0;
+  uint32_t capture_pixel_shader = 0;
+  uint32_t capture_vertex_declaration = 0;
+  uint32_t capture_index_buffer = 0;
+  uint64_t capture_constants_hash = 0;
+  uint64_t capture_transform_hash = 0;
+  std::array<uint32_t, 16> capture_transform{};
 };
 
 struct CachedNativeCommandList {
@@ -305,8 +352,42 @@ std::unordered_map<uint32_t, std::shared_ptr<const CachedNativeCommandList>>
 std::mutex g_vertex_declaration_diagnostic_mutex;
 std::unordered_map<uint32_t, bool> g_logged_vertex_declarations;
 
+struct NativeShaderBindingDiagnosticState {
+  uint32_t vertex_shader = 0;
+  uint32_t pixel_shader = 0;
+};
+
+std::mutex g_shader_binding_diagnostic_mutex;
+std::unordered_map<uint32_t, NativeShaderBindingDiagnosticState>
+    g_shader_bindings_by_device;
+
 uint8_t* GuestPointer(uint8_t* base, uint32_t address) {
   return base + address + REX_PHYS_HOST_OFFSET(address);
+}
+
+void TrackNativeShaderBinding(uint32_t device, ShaderStage stage,
+                              uint32_t shader) {
+  if (!rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace)) {
+    return;
+  }
+  std::lock_guard lock(g_shader_binding_diagnostic_mutex);
+  NativeShaderBindingDiagnosticState& state =
+      g_shader_bindings_by_device[device];
+  if (stage == ShaderStage::kVertex) {
+    state.vertex_shader = shader;
+  } else {
+    state.pixel_shader = shader;
+  }
+}
+
+NativeShaderBindingDiagnosticState CaptureNativeShaderBindings(
+    uint32_t device) {
+  std::lock_guard lock(g_shader_binding_diagnostic_mutex);
+  const auto found = g_shader_bindings_by_device.find(device);
+  return found != g_shader_bindings_by_device.end()
+             ? found->second
+             : NativeShaderBindingDiagnosticState{};
 }
 
 void CaptureDrawState(uint8_t* base, uint32_t device, CapturedDrawSnapshot& snapshot) {
@@ -404,6 +485,141 @@ uint32_t LoadU32(uint8_t* base, uint32_t address) {
   return __builtin_bswap32(*reinterpret_cast<volatile uint32_t*>(GuestPointer(base, address)));
 }
 
+struct CloudGuestStateSnapshot {
+  uint32_t selected_slot = 0;
+  uint32_t producer_slot = 0;
+  std::array<uint64_t, 2> slot_hashes{};
+  std::array<std::array<uint32_t, kCloudConsumedFieldOffsets.size()>, 2>
+      consumed_fields{};
+};
+
+struct CloudProceduralSnapshot {
+  uint32_t sky = 0;
+  uint32_t procedural = 0;
+  uint32_t backing = 0;
+  uint32_t backing_vtable = 0;
+  bool sky_valid = false;
+  bool backing_valid = false;
+  std::array<uint32_t, kCloudSkyProceduralFieldOffsets.size()> sky_fields{};
+  std::array<uint32_t, kCloudProceduralFieldOffsets.size()> procedural_fields{};
+  std::array<uint32_t, kCloudProceduralBackingFieldOffsets.size()> backing_fields{};
+};
+
+CloudGuestStateSnapshot CaptureCloudGuestState(uint8_t* base) {
+  CloudGuestStateSnapshot snapshot{};
+  snapshot.selected_slot = LoadU32(base, kCloudDoubleBufferIndexGlobal);
+  snapshot.producer_slot =
+      LoadU32(base, kCloudDoubleBufferProducerIndexGlobal);
+  for (uint32_t slot = 0; slot < snapshot.slot_hashes.size(); ++slot) {
+    const uint32_t slot_address =
+        kCloudDoubleBufferBase + slot * kCloudDoubleBufferStride;
+    snapshot.slot_hashes[slot] =
+        XXH3_64bits(GuestPointer(base, slot_address), kCloudDoubleBufferStride);
+    for (uint32_t field = 0; field < kCloudConsumedFieldOffsets.size(); ++field) {
+      snapshot.consumed_fields[slot][field] =
+          LoadU32(base, slot_address + kCloudConsumedFieldOffsets[field]);
+    }
+  }
+  return snapshot;
+}
+
+CloudProceduralSnapshot CaptureCloudProceduralState(uint8_t* base) {
+  CloudProceduralSnapshot snapshot{};
+  snapshot.sky = LoadU32(base, kCloudSkyObjectGlobal);
+  if (!snapshot.sky) {
+    return snapshot;
+  }
+  snapshot.sky_valid = true;
+  snapshot.procedural = snapshot.sky + kCloudProceduralObjectOffset;
+  for (uint32_t field = 0; field < snapshot.sky_fields.size(); ++field) {
+    snapshot.sky_fields[field] =
+        LoadU32(base, snapshot.sky + kCloudSkyProceduralFieldOffsets[field]);
+  }
+  for (uint32_t field = 0; field < snapshot.procedural_fields.size(); ++field) {
+    snapshot.procedural_fields[field] =
+        LoadU32(base, snapshot.procedural + kCloudProceduralFieldOffsets[field]);
+  }
+  snapshot.backing =
+      LoadU32(base, snapshot.procedural + kCloudProceduralBackingPointerOffset);
+  if (!snapshot.backing) {
+    return snapshot;
+  }
+  snapshot.backing_vtable = LoadU32(base, snapshot.backing);
+  if (snapshot.backing_vtable != kCloudProceduralBackingVtable) {
+    return snapshot;
+  }
+  snapshot.backing_valid = true;
+  for (uint32_t field = 0; field < snapshot.backing_fields.size(); ++field) {
+    snapshot.backing_fields[field] =
+        LoadU32(base, snapshot.backing + kCloudProceduralBackingFieldOffsets[field]);
+  }
+  return snapshot;
+}
+
+std::string FormatCloudGuestState(const CloudGuestStateSnapshot& snapshot) {
+  std::string result = fmt::format(
+      "producer={} consumer={} hashes={:016X}/{:016X}",
+      snapshot.producer_slot, snapshot.selected_slot, snapshot.slot_hashes[0],
+      snapshot.slot_hashes[1]);
+  for (uint32_t slot = 0; slot < snapshot.consumed_fields.size(); ++slot) {
+    result += fmt::format(" slot{}=[", slot);
+    for (uint32_t field = 0; field < kCloudConsumedFieldOffsets.size(); ++field) {
+      const uint32_t word = snapshot.consumed_fields[slot][field];
+      result += fmt::format(
+          "{}+{}:{:08X}:{:.9g}", field ? "," : "",
+          kCloudConsumedFieldOffsets[field], word, std::bit_cast<float>(word));
+    }
+    result += "]";
+  }
+  return result;
+}
+
+std::string FormatCloudProceduralState(const CloudProceduralSnapshot& snapshot) {
+  std::string result = fmt::format(
+      "sky={:08X}:{} proc={:08X} backing={:08X} vtable={:08X}:{}",
+      snapshot.sky, snapshot.sky_valid, snapshot.procedural, snapshot.backing,
+      snapshot.backing_vtable, snapshot.backing_valid);
+  if (!snapshot.sky_valid) {
+    return result;
+  }
+  result += " sky-fields=[";
+  for (uint32_t field = 0; field < snapshot.sky_fields.size(); ++field) {
+    const uint32_t word = snapshot.sky_fields[field];
+    result += fmt::format(
+        "{}+{:X}:{:08X}:{:.9g}", field ? "," : "",
+        kCloudSkyProceduralFieldOffsets[field], word, std::bit_cast<float>(word));
+  }
+  result += "] proc-fields=[";
+  for (uint32_t field = 0; field < snapshot.procedural_fields.size(); ++field) {
+    const uint32_t word = snapshot.procedural_fields[field];
+    result += fmt::format(
+        "{}+{:X}:{:08X}:{:.9g}", field ? "," : "",
+        kCloudProceduralFieldOffsets[field], word, std::bit_cast<float>(word));
+  }
+  result += "] backing-fields=[";
+  if (snapshot.backing_valid) {
+    for (uint32_t field = 0; field < snapshot.backing_fields.size(); ++field) {
+      const uint32_t word = snapshot.backing_fields[field];
+      result += fmt::format(
+          "{}+{:X}:{:08X}:{:.9g}", field ? "," : "",
+          kCloudProceduralBackingFieldOffsets[field], word,
+          std::bit_cast<float>(word));
+    }
+  }
+  result += "]";
+  return result;
+}
+
+uint32_t BeginCloudGuestTrace(std::atomic<uint32_t>& counter) {
+  const uint32_t limit =
+      REXCVAR_QUERY(uint32_t, gta4_trace_cloud_frames);
+  if (!limit) {
+    return 0;
+  }
+  const uint32_t ordinal = counter.fetch_add(1, std::memory_order_relaxed) + 1;
+  return ordinal <= limit ? ordinal : 0;
+}
+
 const char* IdentifyDeferredWrapperRole(uint8_t* base, uint32_t wrapper) {
   if (!wrapper) {
     return "none";
@@ -444,6 +660,44 @@ void StoreU64(uint8_t* base, uint32_t address, uint64_t value) {
 
 void StoreF32(uint8_t* base, uint32_t address, float value) {
   StoreU32(base, address, std::bit_cast<uint32_t>(value));
+}
+
+std::array<uint32_t, 16> CaptureLiveVertexTransform(uint8_t* base,
+                                                   uint32_t device) {
+  std::array<uint32_t, 16> transform{};
+  if (!base || !device) {
+    return transform;
+  }
+  for (uint32_t index = 0; index < transform.size(); ++index) {
+    transform[index] = LoadU32(
+        base, device + kReplayVertexTransformConstantsOffset +
+                  index * sizeof(uint32_t));
+  }
+  return transform;
+}
+
+std::array<uint32_t, 16> CaptureSnapshotVertexTransform(
+    const CapturedDrawSnapshot& snapshot) {
+  std::array<uint32_t, 16> transform{};
+  if (!snapshot.valid) {
+    return transform;
+  }
+  for (uint32_t index = 0; index < transform.size(); ++index) {
+    uint32_t raw = 0;
+    std::memcpy(&raw,
+                snapshot.shader_constants.data() +
+                    kReplayVertexTransformSnapshotOffset +
+                    index * sizeof(uint32_t),
+                sizeof(raw));
+    transform[index] = __builtin_bswap32(raw);
+  }
+  return transform;
+}
+
+bool IsKnownOffscreenVertexTransform(
+    const std::array<uint32_t, 16>& transform) {
+  return transform[12] == 0x431B959E && transform[13] == 0x4311C5BE &&
+         transform[14] == 0x3C7DD5B0 && transform[15] == 0x415D1833;
 }
 
 float SnapFontCoordinate(float coordinate, uint32_t extent) {
@@ -599,6 +853,7 @@ bool IsNativeMode() {
 }
 
 bool ShouldLogNativeHookCall(uint64_t call_count);
+uint64_t NextNativeHookDiagnosticCall(std::atomic<uint64_t>& counter);
 
 bool QueryNativeDeviceCapabilities(DeviceCapabilitiesResult& result) {
   QueryDeviceCapabilitiesCommand command{};
@@ -648,7 +903,7 @@ void ApplyShadowDistanceScale(uint8_t* base) {
   }
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO(
         "gta4-native-quality: shadow distance #{} multiplier={} profile0={} -> {} "
@@ -858,7 +1113,7 @@ void PatchNativeDisplayResourceDimensions(uint8_t* base, uint32_t resource, uint
   StoreU32(base, dimensions_address, native_dimensions);
 
   static std::atomic<uint64_t> patch_count{0};
-  const uint64_t patch = ++patch_count;
+  const uint64_t patch = NextNativeHookDiagnosticCall(patch_count);
   if (ShouldLogNativeHookCall(patch)) {
     REXLOG_INFO(
         "gta4-native-resolution: {} descriptor #{} caller={:08X} resource={:08X} "
@@ -950,6 +1205,69 @@ bool CaptureNativeCommand(const Command& command) {
     CaptureDrawState(g_active_native_capture.base, command.device, captured.draw_snapshot);
   }
 
+  if constexpr (std::is_same_v<Command, DrawIndexedPrimitiveCommand>) {
+    const bool trace_gbuffer_snapshot =
+        rex::diagnostics::IsEnabled(
+            rex::diagnostics::Category::kNativeTrace) &&
+        (command.index_count == 5961 || command.index_count == 1056);
+    if (trace_gbuffer_snapshot) {
+      captured.draw_diagnostic_valid = true;
+      captured.capture_frame =
+          LoadU32(g_active_native_capture.base,
+                  command.device + kSubmittedFrameOffset);
+      captured.capture_device = command.device;
+      captured.capture_build_object = g_active_native_capture.build_object;
+      captured.capture_command_ordinal =
+          uint32_t(g_active_native_capture.commands.size() + 1);
+      const NativeShaderBindingDiagnosticState bindings =
+          CaptureNativeShaderBindings(command.device);
+      captured.capture_vertex_shader = bindings.vertex_shader;
+      captured.capture_pixel_shader = bindings.pixel_shader;
+      captured.capture_vertex_declaration =
+          LoadU32(g_active_native_capture.base,
+                  command.device + kVertexDeclarationOffset);
+      captured.capture_index_buffer =
+          LoadU32(g_active_native_capture.base,
+                  command.device + kIndexBufferOffset);
+      captured.capture_constants_hash = XXH3_64bits(
+          captured.draw_snapshot.shader_constants.data(),
+          captured.draw_snapshot.shader_constants.size());
+      captured.capture_transform_hash = XXH3_64bits(
+          captured.draw_snapshot.shader_constants.data() +
+              kReplayVertexTransformSnapshotOffset,
+          kReplayVertexTransformConstantsSize);
+      captured.capture_transform =
+          CaptureSnapshotVertexTransform(captured.draw_snapshot);
+      REXLOG_INFO(
+          "gta4-native-cause: point=cached-draw-capture frame={} build={:08X} "
+          "ordinal={} selector={:08X} device={:08X} caller={:08X} draw={} "
+          "primitive={} base={} start={} indices={} vs-handle={:08X} "
+          "ps-handle={:08X} vdecl={:08X} ib={:08X} constants={:016X} "
+          "transform={:016X} known-offscreen={} "
+          "c8={:08X},{:08X},{:08X},{:08X} "
+          "c9={:08X},{:08X},{:08X},{:08X} "
+          "c10={:08X},{:08X},{:08X},{:08X} "
+          "c11={:08X},{:08X},{:08X},{:08X}",
+          captured.capture_frame, captured.capture_build_object,
+          captured.capture_command_ordinal, captured.selector_mask,
+          captured.capture_device, command.caller, command.draw_id,
+          command.primitive_type, command.base_vertex, command.start_index,
+          command.index_count, captured.capture_vertex_shader,
+          captured.capture_pixel_shader,
+          captured.capture_vertex_declaration, captured.capture_index_buffer,
+          captured.capture_constants_hash, captured.capture_transform_hash,
+          IsKnownOffscreenVertexTransform(captured.capture_transform),
+          captured.capture_transform[0], captured.capture_transform[1],
+          captured.capture_transform[2], captured.capture_transform[3],
+          captured.capture_transform[4], captured.capture_transform[5],
+          captured.capture_transform[6], captured.capture_transform[7],
+          captured.capture_transform[8], captured.capture_transform[9],
+          captured.capture_transform[10], captured.capture_transform[11],
+          captured.capture_transform[12], captured.capture_transform[13],
+          captured.capture_transform[14], captured.capture_transform[15]);
+    }
+  }
+
   if constexpr (std::is_same_v<Command, DrawPrimitiveUpCommand>) {
     if (command.vertex_data && command.vertex_data_size) {
       captured.payload.resize(command.vertex_data_size);
@@ -971,10 +1289,11 @@ bool SubmitNativeCommand(const Command& command) {
   if (auto* graphics = GetNativeGraphicsSystem()) {
     const bool accepted =
         graphics->SubmitTitleCommand(kTitleId, kTitleCommandAbi, &command, sizeof(command));
-    if (!accepted) {
+    if (!accepted &&
+        rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks)) {
       static std::atomic<uint64_t> rejection_count{0};
-      const uint64_t count = ++rejection_count;
-      if (count <= 32 || !(count % 1024)) {
+      const uint64_t count = NextNativeHookDiagnosticCall(rejection_count);
+      if (ShouldLogNativeHookCall(count)) {
         REXLOG_WARN("gta4-native-hook: rejected command #{} type={} size={}", count,
                     uint32_t(command.header.type), sizeof(command));
       }
@@ -1093,7 +1412,7 @@ void SubmitEnvironmentalData(uint8_t* base, uint32_t device, uint32_t postfx) {
   command.data = CaptureEnvironmentalData(base, postfx);
   if (!SubmitNativeCommand(command)) {
     static std::atomic<uint64_t> rejection_count{0};
-    const uint64_t count = ++rejection_count;
+    const uint64_t count = NextNativeHookDiagnosticCall(rejection_count);
     if (ShouldLogNativeHookCall(count)) {
       REXLOG_WARN(
           "gta4-native-environment: rejected snapshot #{} sequence={} valid={:016X}",
@@ -1103,7 +1422,16 @@ void SubmitEnvironmentalData(uint8_t* base, uint32_t device, uint32_t postfx) {
 }
 
 bool ShouldLogNativeHookCall(uint64_t call_count) {
-  return call_count <= 32 || !(call_count % 4096);
+  return call_count != 0 &&
+         rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
+         (call_count <= 32 || !(call_count % 4096));
+}
+
+uint64_t NextNativeHookDiagnosticCall(std::atomic<uint64_t>& counter) {
+  if (!rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks)) {
+    return 0;
+  }
+  return counter.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void SubmitRenderPhaseMarker(uint32_t device, RenderPhase phase, RenderPhaseEvent event,
@@ -1343,7 +1671,8 @@ void PatchCommandDevice(std::vector<uint8_t>& bytes, uint32_t device) {
 }
 
 bool SubmitCapturedNativeCommand(PPCContext& ctx, uint8_t* base, uint32_t device,
-                                 uint32_t command_list,
+                                 uint32_t command_list, uint32_t replay_mask,
+                                 uint32_t replay_command_ordinal,
                                  const CapturedNativeCommand& captured) {
   auto* graphics = GetNativeGraphicsSystem();
   if (!graphics || captured.bytes.empty()) {
@@ -1356,6 +1685,7 @@ bool SubmitCapturedNativeCommand(PPCContext& ctx, uint8_t* base, uint32_t device
   // A cached command may execute many times. Give each execution unique
   // provenance at submission rather than reusing the ID and LR from the list
   // build, otherwise transition events from distinct frames collide.
+  DrawIndexedPrimitiveCommand indexed_draw{};
   if (captured.type == CommandType::kDrawIndexedPrimitive) {
     if (bytes.size() != sizeof(DrawIndexedPrimitiveCommand)) {
       return false;
@@ -1367,6 +1697,7 @@ bool SubmitCapturedNativeCommand(PPCContext& ctx, uint8_t* base, uint32_t device
     draw.command_list = command_list;
     draw.draw_id =
         g_indexed_draw_invocation_id.fetch_add(1, std::memory_order_relaxed) + 1;
+    indexed_draw = draw;
     std::memcpy(bytes.data(), &draw, sizeof(draw));
   }
 
@@ -1391,10 +1722,89 @@ bool SubmitCapturedNativeCommand(PPCContext& ctx, uint8_t* base, uint32_t device
     }
   }
 
+  const bool trace_gbuffer_replay =
+      captured.draw_diagnostic_valid &&
+      rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace);
+  const uint32_t replay_frame =
+      trace_gbuffer_replay
+          ? LoadU32(base, device + kSubmittedFrameOffset)
+          : 0;
+  auto log_replay_state =
+      [&](std::string_view point,
+          const std::array<uint32_t, 16>& transform,
+          uint64_t constants_hash, uint64_t transform_hash, bool accepted) {
+        if (!trace_gbuffer_replay) {
+          return;
+        }
+        REXLOG_INFO(
+            "gta4-native-cause: point={} frame={} capture-frame={} "
+            "build={:08X} command-list={:08X} capture-ordinal={} "
+            "replay-ordinal={} selector={:08X} replay-mask={:08X} "
+            "capture-device={:08X} replay-device={:08X} caller={:08X} "
+            "draw={} indices={} accepted={} capture-constants={:016X} "
+            "capture-transform={:016X} constants={:016X} "
+            "transform={:016X} capture-known-offscreen={} "
+            "known-offscreen={} vs-handle={:08X} ps-handle={:08X} "
+            "capture-vdecl={:08X} live-vdecl={:08X} capture-ib={:08X} "
+            "live-ib={:08X} c8={:08X},{:08X},{:08X},{:08X} "
+            "c9={:08X},{:08X},{:08X},{:08X} "
+            "c10={:08X},{:08X},{:08X},{:08X} "
+            "c11={:08X},{:08X},{:08X},{:08X}",
+            point, replay_frame, captured.capture_frame,
+            captured.capture_build_object, command_list,
+            captured.capture_command_ordinal, replay_command_ordinal,
+            captured.selector_mask, replay_mask, captured.capture_device,
+            device, indexed_draw.caller, indexed_draw.draw_id,
+            indexed_draw.index_count, accepted,
+            captured.capture_constants_hash,
+            captured.capture_transform_hash, constants_hash, transform_hash,
+            IsKnownOffscreenVertexTransform(captured.capture_transform),
+            IsKnownOffscreenVertexTransform(transform),
+            captured.capture_vertex_shader, captured.capture_pixel_shader,
+            captured.capture_vertex_declaration,
+            LoadU32(base, device + kVertexDeclarationOffset),
+            captured.capture_index_buffer,
+            LoadU32(base, device + kIndexBufferOffset), transform[0],
+            transform[1], transform[2], transform[3], transform[4],
+            transform[5], transform[6], transform[7], transform[8],
+            transform[9], transform[10], transform[11], transform[12],
+            transform[13], transform[14], transform[15]);
+      };
+  auto capture_live_hashes = [&]() {
+    return std::pair<uint64_t, uint64_t>{
+        XXH3_64bits(
+            GuestPointer(base, device + kReplayShaderConstantsOffset),
+            kReplayShaderConstantsSize),
+        XXH3_64bits(
+            GuestPointer(base,
+                         device + kReplayVertexTransformConstantsOffset),
+            kReplayVertexTransformConstantsSize)};
+  };
+
+  if (trace_gbuffer_replay) {
+    const auto [constants_hash, transform_hash] = capture_live_hashes();
+    log_replay_state("cached-draw-replay-before",
+                     CaptureLiveVertexTransform(base, device), constants_hash,
+                     transform_hash, false);
+  }
+
   bool accepted = false;
   {
     ScopedReplayDrawState replay_state(base, device, captured.draw_snapshot);
+    if (trace_gbuffer_replay) {
+      const auto [constants_hash, transform_hash] = capture_live_hashes();
+      log_replay_state("cached-draw-replay-applied",
+                       CaptureLiveVertexTransform(base, device),
+                       constants_hash, transform_hash, false);
+    }
     accepted = graphics->SubmitTitleCommand(kTitleId, kTitleCommandAbi, bytes.data(), bytes.size());
+  }
+  if (trace_gbuffer_replay) {
+    const auto [constants_hash, transform_hash] = capture_live_hashes();
+    log_replay_state("cached-draw-replay-restored",
+                     CaptureLiveVertexTransform(base, device), constants_hash,
+                     transform_hash, accepted);
   }
   FreeAlignedGuestAllocation(ctx, base, replay_vertex_data);
   return accepted;
@@ -1449,7 +1859,9 @@ bool ReplayCachedNativeCommandList(PPCContext& ctx, uint8_t* base, uint32_t devi
     return true;
   }
 
-  for (const auto& command : cached->commands) {
+  for (size_t command_index = 0; command_index < cached->commands.size();
+       ++command_index) {
+    const auto& command = cached->commands[command_index];
     if (!CachedSelectorMatches(command.selector_mask, replay_mask)) {
       continue;
     }
@@ -1460,8 +1872,9 @@ bool ReplayCachedNativeCommandList(PPCContext& ctx, uint8_t* base, uint32_t devi
       std::memcpy(&resolve, command.bytes.data(), sizeof(resolve));
       const uint32_t known_frontbuffer =
           g_last_present_frontbuffer.load(std::memory_order_relaxed);
-      if ((known_frontbuffer && resolve.destination_texture == known_frontbuffer) ||
-          (resolve.flags & 0x04000000u)) {
+      if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
+          ((known_frontbuffer && resolve.destination_texture == known_frontbuffer) ||
+           (resolve.flags & 0x04000000u))) {
         std::fprintf(
             stderr,
             "[ResolveOriginTrace] origin=replay caller=%08X command-list=%08X "
@@ -1472,7 +1885,9 @@ bool ReplayCachedNativeCommandList(PPCContext& ctx, uint8_t* base, uint32_t devi
         std::fflush(stderr);
       }
     }
-    if (SubmitCapturedNativeCommand(ctx, base, device, command_list, command)) {
+    if (SubmitCapturedNativeCommand(ctx, base, device, command_list,
+                                    replay_mask,
+                                    uint32_t(command_index + 1), command)) {
       ++submitted_count;
     }
   }
@@ -1625,6 +2040,334 @@ void ApplyNativeShaderState(PPCContext& ctx, uint8_t* base, GuestFunction implem
   StoreU32(base, device + kPendingResourceMaskOffset, pending_resource_mask);
 }
 
+extern "C" void sub_82A42168(PPCContext& ctx, uint8_t* base) {
+  if (!IsNativeMode() ||
+      !rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace)) {
+    __imp__sub_82A42168(ctx, base);
+    return;
+  }
+
+  const uint32_t device = ctx.r3.u32;
+  const uint32_t first_register = ctx.r4.u32;
+  const uint32_t source = ctx.r5.u32;
+  const uint32_t register_count = ctx.r6.u32;
+  const uint32_t caller = uint32_t(ctx.lr);
+  const uint64_t register_end =
+      uint64_t(first_register) + uint64_t(register_count);
+  const bool touches_gbuffer_transform =
+      register_count && first_register < 12 && register_end > 8;
+
+  std::array<uint32_t, 16> transform_before{};
+  if (touches_gbuffer_transform) {
+    for (uint32_t index = 0; index < transform_before.size(); ++index) {
+      transform_before[index] = LoadU32(
+          base, device + kReplayVertexTransformConstantsOffset +
+                    index * sizeof(uint32_t));
+    }
+  }
+
+  __imp__sub_82A42168(ctx, base);
+
+  if (!touches_gbuffer_transform) {
+    return;
+  }
+
+  std::array<uint32_t, 16> transform_after{};
+  for (uint32_t index = 0; index < transform_after.size(); ++index) {
+    transform_after[index] = LoadU32(
+        base, device + kReplayVertexTransformConstantsOffset +
+                  index * sizeof(uint32_t));
+  }
+  static std::atomic<uint64_t> transform_upload_count{0};
+  static std::atomic<uint64_t> bad_transform_upload_count{0};
+  const uint64_t ordinal =
+      transform_upload_count.fetch_add(1, std::memory_order_relaxed) + 1;
+  const bool known_offscreen_transform =
+      transform_after[12] == 0x431B959E &&
+      transform_after[13] == 0x4311C5BE &&
+      transform_after[14] == 0x3C7DD5B0 &&
+      transform_after[15] == 0x415D1833;
+  const uint64_t bad_ordinal =
+      known_offscreen_transform
+          ? bad_transform_upload_count.fetch_add(1,
+                                                 std::memory_order_relaxed) +
+                1
+          : 0;
+  if (ordinal > 64 && (!bad_ordinal || bad_ordinal > 32)) {
+    return;
+  }
+
+  uint64_t source_hash = 0;
+  if (source && register_count <= 256) {
+    source_hash = XXH3_64bits(GuestPointer(base, source),
+                              size_t(register_count) * 16);
+  }
+  const uint32_t submitted_frame =
+      LoadU32(base, device + kSubmittedFrameOffset);
+  REXLOG_INFO(
+      "gta4-native-cause: point=vertex-constant-producer frame={} ordinal={} "
+      "bad-ordinal={} caller={:08X} device={:08X} first={} count={} "
+      "source={:08X} source-hash={:016X} known-offscreen={} "
+      "before-c11={:08X},{:08X},{:08X},{:08X} "
+      "after-c8={:08X},{:08X},{:08X},{:08X} "
+      "after-c9={:08X},{:08X},{:08X},{:08X} "
+      "after-c10={:08X},{:08X},{:08X},{:08X} "
+      "after-c11={:08X},{:08X},{:08X},{:08X}",
+      submitted_frame, ordinal, bad_ordinal, caller, device, first_register,
+      register_count, source, source_hash, known_offscreen_transform,
+      transform_before[12], transform_before[13], transform_before[14],
+      transform_before[15], transform_after[0], transform_after[1],
+      transform_after[2], transform_after[3], transform_after[4],
+      transform_after[5], transform_after[6], transform_after[7],
+      transform_after[8], transform_after[9], transform_after[10],
+      transform_after[11], transform_after[12], transform_after[13],
+      transform_after[14], transform_after[15]);
+}
+
+void LogKnownOffscreenTransformBoundary(std::string_view point,
+                                        const PPCContext& ctx, uint8_t* base,
+                                        uint32_t object,
+                                        uint32_t explicit_device = 0) {
+  if (!IsNativeMode() ||
+      !rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace)) {
+    return;
+  }
+  const uint32_t device = explicit_device
+                              ? explicit_device
+                              : LoadU32(base, kDeferredDeviceGlobal);
+  if (!device) {
+    return;
+  }
+  const std::array<uint32_t, 16> transform =
+      CaptureLiveVertexTransform(base, device);
+  if (!IsKnownOffscreenVertexTransform(transform)) {
+    return;
+  }
+  const uint64_t constants_hash = XXH3_64bits(
+      GuestPointer(base, device + kReplayShaderConstantsOffset),
+      kReplayShaderConstantsSize);
+  const uint64_t transform_hash = XXH3_64bits(
+      GuestPointer(base, device + kReplayVertexTransformConstantsOffset),
+      kReplayVertexTransformConstantsSize);
+  const NativeShaderBindingDiagnosticState bindings =
+      CaptureNativeShaderBindings(device);
+  REXLOG_INFO(
+      "gta4-native-cause: point={} frame={} caller={:08X} object={:08X} "
+      "device={:08X} args={:08X},{:08X},{:08X},{:08X},{:08X} "
+      "vs-handle={:08X} ps-handle={:08X} vdecl={:08X} ib={:08X} "
+      "constants={:016X} transform={:016X} "
+      "c8={:08X},{:08X},{:08X},{:08X} "
+      "c9={:08X},{:08X},{:08X},{:08X} "
+      "c10={:08X},{:08X},{:08X},{:08X} "
+      "c11={:08X},{:08X},{:08X},{:08X}",
+      point, LoadU32(base, device + kSubmittedFrameOffset), uint32_t(ctx.lr),
+      object, device, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32,
+      ctx.r7.u32, bindings.vertex_shader, bindings.pixel_shader,
+      LoadU32(base, device + kVertexDeclarationOffset),
+      LoadU32(base, device + kIndexBufferOffset), constants_hash,
+      transform_hash, transform[0], transform[1], transform[2],
+      transform[3], transform[4], transform[5], transform[6], transform[7],
+      transform[8], transform[9], transform[10], transform[11],
+      transform[12], transform[13], transform[14], transform[15]);
+}
+
+void LogKnownOffscreenTransformTransition(
+    std::string_view point, uint8_t* base, uint32_t device,
+    uint32_t caller, uint32_t object,
+    const std::array<uint32_t, 5>& args,
+    const std::array<uint32_t, 16>& before,
+    const std::array<uint32_t, 16>& after) {
+  if (!IsNativeMode() ||
+      !rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace) ||
+      !device) {
+    return;
+  }
+  const bool before_known = IsKnownOffscreenVertexTransform(before);
+  const bool after_known = IsKnownOffscreenVertexTransform(after);
+  if (!before_known && !after_known) {
+    return;
+  }
+  const uint64_t before_hash =
+      XXH3_64bits(before.data(), sizeof(before));
+  const uint64_t after_hash = XXH3_64bits(after.data(), sizeof(after));
+  REXLOG_INFO(
+      "gta4-native-cause: point={} frame={} caller={:08X} object={:08X} "
+      "device={:08X} args={:08X},{:08X},{:08X},{:08X},{:08X} "
+      "before-known={} after-known={} changed={} "
+      "before-transform={:016X} after-transform={:016X} "
+      "before-c8={:08X},{:08X},{:08X},{:08X} "
+      "before-c9={:08X},{:08X},{:08X},{:08X} "
+      "before-c10={:08X},{:08X},{:08X},{:08X} "
+      "before-c11={:08X},{:08X},{:08X},{:08X} "
+      "after-c8={:08X},{:08X},{:08X},{:08X} "
+      "after-c9={:08X},{:08X},{:08X},{:08X} "
+      "after-c10={:08X},{:08X},{:08X},{:08X} "
+      "after-c11={:08X},{:08X},{:08X},{:08X}",
+      point, LoadU32(base, device + kSubmittedFrameOffset), caller, object,
+      device, args[0], args[1], args[2], args[3], args[4], before_known,
+      after_known, before != after, before_hash, after_hash, before[0],
+      before[1], before[2], before[3], before[4], before[5], before[6],
+      before[7], before[8], before[9], before[10], before[11], before[12],
+      before[13], before[14], before[15], after[0], after[1], after[2],
+      after[3], after[4], after[5], after[6], after[7], after[8], after[9],
+      after[10], after[11], after[12], after[13], after[14], after[15]);
+}
+
+template <typename Function>
+void TraceKnownOffscreenTransformTransition(std::string_view point,
+                                            PPCContext& ctx, uint8_t* base,
+                                            Function function) {
+  if (!IsNativeMode() ||
+      !rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace)) {
+    function(ctx, base);
+    return;
+  }
+  const uint32_t device = LoadU32(base, kDeferredDeviceGlobal);
+  if (!device) {
+    function(ctx, base);
+    return;
+  }
+  const uint32_t caller = uint32_t(ctx.lr);
+  const uint32_t object = ctx.r3.u32;
+  const std::array<uint32_t, 5> args = {
+      ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32};
+  const std::array<uint32_t, 16> before =
+      CaptureLiveVertexTransform(base, device);
+  function(ctx, base);
+  const std::array<uint32_t, 16> after =
+      CaptureLiveVertexTransform(base, device);
+  LogKnownOffscreenTransformTransition(point, base, device, caller, object,
+                                       args, before, after);
+}
+
+extern "C" void sub_828C6568(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-material-list-select", ctx, base,
+      __imp__sub_828C6568);
+}
+
+extern "C" void sub_828C6620(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-material-list-render", ctx, base,
+      __imp__sub_828C6620);
+}
+
+extern "C" void sub_828C4338(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-model-materials", ctx, base,
+      __imp__sub_828C4338);
+}
+
+extern "C" void sub_821BE8A0(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-model-materials-legacy-caller", ctx, base,
+      __imp__sub_821BE8A0);
+}
+
+extern "C" void sub_828D41A8(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-model-list-caller", ctx, base,
+      __imp__sub_828D41A8);
+}
+
+extern "C" void sub_828D4268(PPCContext& ctx, uint8_t* base) {
+  TraceKnownOffscreenTransformTransition(
+      "offscreen-transition-model-transform-caller", ctx, base,
+      __imp__sub_828D4268);
+}
+
+extern "C" void sub_828BD250(PPCContext& ctx, uint8_t* base) {
+  if (!IsNativeMode() ||
+      !rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace)) {
+    __imp__sub_828BD250(ctx, base);
+    return;
+  }
+  const uint32_t device = LoadU32(base, kDeferredDeviceGlobal);
+  const uint32_t caller = uint32_t(ctx.lr);
+  const uint32_t state = ctx.r3.u32;
+  const uint32_t source = ctx.r4.u32;
+  const std::array<uint32_t, 16> before =
+      device ? CaptureLiveVertexTransform(base, device)
+             : std::array<uint32_t, 16>{};
+  std::array<uint32_t, 16> source_matrix{};
+  if (source) {
+    for (uint32_t index = 0; index < source_matrix.size(); ++index) {
+      source_matrix[index] =
+          LoadU32(base, source + index * sizeof(uint32_t));
+    }
+  }
+  __imp__sub_828BD250(ctx, base);
+  const std::array<uint32_t, 16> after =
+      device ? CaptureLiveVertexTransform(base, device)
+             : std::array<uint32_t, 16>{};
+  if (!device ||
+      (!IsKnownOffscreenVertexTransform(before) &&
+       !IsKnownOffscreenVertexTransform(after))) {
+    return;
+  }
+  const uint64_t source_hash =
+      XXH3_64bits(source_matrix.data(), sizeof(source_matrix));
+  REXLOG_INFO(
+      "gta4-native-cause: point=offscreen-transition-matrix-setter-source "
+      "frame={} caller={:08X} state={:08X} source={:08X} "
+      "source-transform={:016X} "
+      "source-r0={:08X},{:08X},{:08X},{:08X} "
+      "source-r1={:08X},{:08X},{:08X},{:08X} "
+      "source-r2={:08X},{:08X},{:08X},{:08X} "
+      "source-r3={:08X},{:08X},{:08X},{:08X}",
+      LoadU32(base, device + kSubmittedFrameOffset), caller, state, source,
+      source_hash, source_matrix[0], source_matrix[1], source_matrix[2],
+      source_matrix[3], source_matrix[4], source_matrix[5], source_matrix[6],
+      source_matrix[7], source_matrix[8], source_matrix[9], source_matrix[10],
+      source_matrix[11], source_matrix[12], source_matrix[13],
+      source_matrix[14], source_matrix[15]);
+  const std::array<uint32_t, 5> args = {state, source, 0, 0, 0};
+  LogKnownOffscreenTransformTransition(
+      "offscreen-transition-matrix-setter", base, device, caller, state,
+      args, before, after);
+}
+
+extern "C" void sub_828E7000(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-render-entry", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828E7000(ctx, base);
+}
+
+extern "C" void sub_828BFC00(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-indexed-entry", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828BFC00(ctx, base);
+}
+
+extern "C" void sub_828C8DB0(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-material-vertex", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828C8DB0(ctx, base);
+}
+
+extern "C" void sub_828C8E80(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-material-pixel", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828C8E80(ctx, base);
+}
+
+extern "C" void sub_828C8F38(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-material-apply", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828C8F38(ctx, base);
+}
+
+extern "C" void sub_828DFF00(PPCContext& ctx, uint8_t* base) {
+  LogKnownOffscreenTransformBoundary("offscreen-boundary-shader-select", ctx,
+                                     base, ctx.r3.u32);
+  __imp__sub_828DFF00(ctx, base);
+}
+
 SurfaceDescriptor CaptureSurfaceDescriptor(uint8_t* base, uint32_t surface) {
   SurfaceDescriptor descriptor;
   descriptor.handle = surface;
@@ -1660,6 +2403,73 @@ int32_t TruncateViewportCoordinate(float value) {
 }
 
 }  // namespace
+
+extern "C" void sub_822CD0E0(PPCContext& ctx, uint8_t* base) {
+  static std::atomic<uint32_t> trace_counter{0};
+  const uint32_t trace = BeginCloudGuestTrace(trace_counter);
+  CloudGuestStateSnapshot before{};
+  if (trace) {
+    before = CaptureCloudGuestState(base);
+  }
+  __imp__sub_822CD0E0(ctx, base);
+  if (trace) {
+    const CloudGuestStateSnapshot after = CaptureCloudGuestState(base);
+    REXLOG_WARN(
+        "gta4-native-cloud: point=guest-publish seq={} before=[{}] after=[{}]",
+        trace, FormatCloudGuestState(before), FormatCloudGuestState(after));
+  }
+}
+
+extern "C" void sub_82521D10(PPCContext& ctx, uint8_t* base) {
+  static std::atomic<uint32_t> trace_counter{0};
+  const uint32_t trace = BeginCloudGuestTrace(trace_counter);
+  CloudGuestStateSnapshot before{};
+  std::array<uint32_t, kCloudClockGlobals.size()> clock{};
+  if (trace) {
+    before = CaptureCloudGuestState(base);
+    for (uint32_t index = 0; index < clock.size(); ++index) {
+      clock[index] = LoadU32(base, kCloudClockGlobals[index]);
+    }
+  }
+  __imp__sub_82521D10(ctx, base);
+  if (trace) {
+    const CloudGuestStateSnapshot after = CaptureCloudGuestState(base);
+    REXLOG_WARN(
+        "gta4-native-cloud: point=guest-phase seq={} "
+        "clock={:08X},{:08X},{:08X},{:08X},{:08X},{:08X} "
+        "before=[{}] after=[{}]",
+        trace, clock[0], clock[1], clock[2], clock[3], clock[4], clock[5],
+        FormatCloudGuestState(before), FormatCloudGuestState(after));
+  }
+}
+
+extern "C" void sub_8266F7D8(PPCContext& ctx, uint8_t* base) {
+  static std::atomic<uint32_t> trace_counter{0};
+  const uint32_t trace = BeginCloudGuestTrace(trace_counter);
+  const float time_of_day = float(ctx.f1.f64);
+  const uint32_t argument_4 = ctx.r4.u32;
+  const uint32_t argument_5 = ctx.r5.u32;
+  const uint32_t argument_6 = ctx.r6.u32;
+  CloudGuestStateSnapshot before{};
+  CloudProceduralSnapshot procedural_before{};
+  if (trace) {
+    before = CaptureCloudGuestState(base);
+    procedural_before = CaptureCloudProceduralState(base);
+  }
+  __imp__sub_8266F7D8(ctx, base);
+  if (trace) {
+    const CloudGuestStateSnapshot after = CaptureCloudGuestState(base);
+    const CloudProceduralSnapshot procedural_after =
+        CaptureCloudProceduralState(base);
+    REXLOG_WARN(
+        "gta4-native-cloud: point=guest-exec seq={} tod={:.9g} args={},{},{} "
+        "before=[{}] after=[{}] proc-before=[{}] proc-after=[{}]",
+        trace, time_of_day, argument_4, argument_5, argument_6,
+        FormatCloudGuestState(before), FormatCloudGuestState(after),
+        FormatCloudProceduralState(procedural_before),
+        FormatCloudProceduralState(procedural_after));
+  }
+}
 
 extern "C" void sub_82670840(PPCContext& ctx, uint8_t* base) {
   if (IsNativeMode() && ctx.r3.u32) {
@@ -1710,7 +2520,8 @@ extern "C" void sub_821F1670(PPCContext& ctx, uint8_t* base) {
 
   __imp__sub_821F1670(ctx, base);
 
-  if (g_vector_font_rectangle_trace_count.load(std::memory_order_relaxed) < 32 &&
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kNativeTrace) &&
+      g_vector_font_rectangle_trace_count.load(std::memory_order_relaxed) < 32 &&
       REXCVAR_QUERY(bool, gta4_trace_vector_fonts)) {
     const uint64_t trace = ++g_vector_font_rectangle_trace_count;
     if (trace <= 32) {
@@ -1753,7 +2564,7 @@ extern "C" void sub_82270A08(PPCContext& ctx, uint8_t* base) {
   ctx.r3.u32 = effective_base_size;
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO(
         "gta4-native-quality: shadow map base #{} stock={} configured={} effective={} "
@@ -1784,14 +2595,14 @@ extern "C" void sub_824F3418(PPCContext& ctx, uint8_t* base) {
 
   if (highest_lod_resident) {
     static std::atomic<uint64_t> forced_count{0};
-    const uint64_t forced = ++forced_count;
+    const uint64_t forced = NextNativeHookDiagnosticCall(forced_count);
     if (ShouldLogNativeHookCall(forced)) {
       REXLOG_INFO("gta4-native-quality: forced highest resident LOD #{} drawable={:08X}",
                   forced, ctx.r4.u32);
     }
   } else {
     static std::atomic<uint64_t> fallback_count{0};
-    const uint64_t fallback = ++fallback_count;
+    const uint64_t fallback = NextNativeHookDiagnosticCall(fallback_count);
     if (ShouldLogNativeHookCall(fallback)) {
       REXLOG_INFO(
           "gta4-native-quality: highest LOD unavailable #{} drawable={:08X}; "
@@ -1822,7 +2633,7 @@ extern "C" void sub_821DFFE8(PPCContext& ctx, uint8_t* base) {
   StoreU32(base, kDistanceScaleInputGlobal, previous_scale_bits);
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO(
         "gta4-native-quality: draw distance #{} game={} multiplier={} effective={} "
@@ -1839,7 +2650,7 @@ extern "C" void sub_82586E70(PPCContext& ctx, uint8_t* base) {
   }
   StoreU8(base, kReducePedModelBudgetGlobal, 0);
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO("gta4-native-quality: disabled pedestrian model-budget reduction #{}",
                 override);
@@ -1853,7 +2664,7 @@ extern "C" void sub_82586E98(PPCContext& ctx, uint8_t* base) {
   }
   StoreU8(base, kReduceVehicleModelBudgetGlobal, 0);
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO("gta4-native-quality: disabled vehicle model-budget reduction #{}",
                 override);
@@ -1872,7 +2683,7 @@ extern "C" void sub_8223C288(PPCContext& ctx, uint8_t* base) {
   StoreU8(base, kDisableTimecycleFarClipGlobal, previous_disable);
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO("gta4-native-quality: suppressed timecycle far clip #{}", override);
   }
@@ -1888,7 +2699,7 @@ extern "C" void sub_8247E4C0(PPCContext& ctx, uint8_t* base) {
   ctx.r4.u32 = configured_limit;
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override = ++override_count;
+  const uint64_t override = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override)) {
     REXLOG_INFO("gta4-native-quality: drawable reference limit #{} {} -> {}", override,
                 kOriginalDrawableReferenceLimit, configured_limit);
@@ -1940,7 +2751,7 @@ extern "C" void sub_828C0338(PPCContext& ctx, uint8_t* base) {
     const size_t command_count = commands.size();
     PublishCachedNativeCommandList(command_list, std::move(commands));
     static std::atomic<uint64_t> publish_count{0};
-    const uint64_t publish = ++publish_count;
+    const uint64_t publish = NextNativeHookDiagnosticCall(publish_count);
     if (ShouldLogNativeHookCall(publish)) {
       REXLOG_INFO(
           "gta4-native-cache: publish #{} build={:08X} command-list={:08X} commands={}",
@@ -1983,7 +2794,7 @@ extern "C" void sub_82A47E28(PPCContext& ctx, uint8_t* base) {
   const bool found = ReplayCachedNativeCommandList(ctx, base, device, command_list, replay_mask,
                                                    selected_count, submitted_count);
   static std::atomic<uint64_t> replay_count{0};
-  const uint64_t replay = ++replay_count;
+  const uint64_t replay = NextNativeHookDiagnosticCall(replay_count);
   if (ShouldLogNativeHookCall(replay) || !found || selected_count != submitted_count) {
     REXLOG_INFO(
         "gta4-native-cache: replay #{} command-list={:08X} device={:08X} mask={:08X} "
@@ -2200,11 +3011,11 @@ extern "C" void sub_828DA250(PPCContext& ctx, uint8_t* base) {
 
   __imp__sub_828DA250(ctx, base);
 
-  if (slot == 0 &&
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) && slot == 0 &&
       (depth_wrapper != g_last_title_depth_wrapper ||
        depth_surface != g_last_title_depth_surface)) {
     static std::atomic<uint64_t> transition_count{0};
-    const uint64_t transition = ++transition_count;
+    const uint64_t transition = NextNativeHookDiagnosticCall(transition_count);
     REXLOG_INFO(
         "gta4-native-architecture: point=title-target-bind transition={} caller={:08X} "
         "owner={:08X} slot={} color-wrapper={:08X} color-role={} color-surface={:08X} "
@@ -2242,6 +3053,8 @@ extern "C" void sub_82A3B690(PPCContext& ctx, uint8_t* base) {
   }
 
   const uint32_t device = ctx.r3.u32;
+  LogKnownOffscreenTransformBoundary(
+      "offscreen-boundary-vertex-stream", ctx, base, ctx.r5.u32, device);
   const uint32_t stream = ctx.r4.u32;
   const uint32_t buffer = ctx.r5.u32;
   const uint32_t offset = ctx.r6.u32;
@@ -2287,6 +3100,8 @@ extern "C" void sub_82A3B7B0(PPCContext& ctx, uint8_t* base) {
   }
 
   const uint32_t device = ctx.r3.u32;
+  LogKnownOffscreenTransformBoundary(
+      "offscreen-boundary-index-buffer", ctx, base, ctx.r4.u32, device);
   const uint32_t buffer = ctx.r4.u32;
   const uint32_t slot = device + kIndexBufferOffset;
   RetireNativeBoundResource(base, device, LoadU32(base, slot));
@@ -2391,7 +3206,7 @@ extern "C" void sub_828E0048(PPCContext& ctx, uint8_t* base) {
       IsNativeMode() ? IdentifyVectorFontOwner(base, resource_owner) : 0;
   ScopedVectorFontBinding binding(logical_font_id, resource_owner, ctx.r3.u32);
 
-  if (logical_font_id &&
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kNativeTrace) && logical_font_id &&
       g_vector_font_owner_trace_count.load(std::memory_order_relaxed) < 64 &&
       REXCVAR_QUERY(bool, gta4_trace_vector_fonts)) {
     const uint64_t trace = ++g_vector_font_owner_trace_count;
@@ -2463,7 +3278,8 @@ extern "C" void sub_82A44B78(PPCContext& ctx, uint8_t* base) {
     StoreU64(base, device + 24, LoadU64(base, device + 24) | dirty_mask);
   }
 
-  if (g_vector_font_id &&
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kNativeTrace) &&
+      g_vector_font_id &&
       g_vector_font_texture_trace_count.load(std::memory_order_relaxed) < 64 &&
       REXCVAR_QUERY(bool, gta4_trace_vector_fonts)) {
     const uint64_t trace = ++g_vector_font_texture_trace_count;
@@ -2517,6 +3333,7 @@ extern "C" void sub_82A424A8(PPCContext& ctx, uint8_t* base) {
   const uint32_t device = ctx.r3.u32;
   const uint32_t shader = ctx.r4.u32;
   ApplyNativeShaderState(ctx, base, __imp__sub_82A424A8);
+  TrackNativeShaderBinding(device, ShaderStage::kPixel, shader);
   SetShaderCommand command{
       {sizeof(SetShaderCommand), CommandType::kSetPixelShader}, device, shader};
   SubmitNativeCommand(command);
@@ -2537,8 +3354,11 @@ extern "C" void sub_82A42760(PPCContext& ctx, uint8_t* base) {
   }
 
   const uint32_t device = ctx.r3.u32;
+  LogKnownOffscreenTransformBoundary(
+      "offscreen-boundary-vertex-shader", ctx, base, ctx.r4.u32, device);
   const uint32_t shader = ctx.r4.u32;
   ApplyNativeShaderState(ctx, base, __imp__sub_82A42760);
+  TrackNativeShaderBinding(device, ShaderStage::kVertex, shader);
   SetShaderCommand command{
       {sizeof(SetShaderCommand), CommandType::kSetVertexShader}, device, shader};
   SubmitNativeCommand(command);
@@ -2551,6 +3371,9 @@ extern "C" void sub_82A42930(PPCContext& ctx, uint8_t* base) {
   }
 
   const uint32_t device = ctx.r3.u32;
+  LogKnownOffscreenTransformBoundary(
+      "offscreen-boundary-vertex-declaration", ctx, base, ctx.r4.u32,
+      device);
   const uint32_t declaration = ctx.r4.u32;
   StoreU32(base, device + kVertexDeclarationOffset, declaration);
   StoreU64(base, device + 16, LoadU64(base, device + 16) | uint64_t(0x00080000));
@@ -2634,7 +3457,7 @@ extern "C" void sub_82A3DF50(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> call_count{0};
-  const uint64_t call = ++call_count;
+  const uint64_t call = NextNativeHookDiagnosticCall(call_count);
   if (ShouldLogNativeHookCall(call)) {
     REXLOG_INFO(
         "gta4-native-hook: DrawPrimitiveUPCommit #{} lr={:08X} device={:08X} "
@@ -2668,7 +3491,7 @@ extern "C" void sub_82A3DF60(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> call_count{0};
-  const uint64_t call = ++call_count;
+  const uint64_t call = NextNativeHookDiagnosticCall(call_count);
   if (ShouldLogNativeHookCall(call)) {
     REXLOG_INFO(
         "gta4-native-hook: DrawPrimitive #{} lr={:08X} device={:08X} primitive={} "
@@ -2724,7 +3547,8 @@ void SubmitNativeResolve(uint8_t* base, uint32_t device, uint32_t flags,
     command.destination_fetch[index] =
         LoadU32(base, destination_texture + 28 + index * sizeof(uint32_t));
   }
-  if (flags & 0x04000000u) {
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
+      (flags & 0x04000000u)) {
     std::fprintf(
         stderr,
         "[ResolveOriginTrace] origin=%s caller=%08X device=%08X flags=%08X "
@@ -2862,7 +3686,7 @@ extern "C" void sub_828C0160(PPCContext& ctx, uint8_t* base) {
     StoreU32(base, kSecondaryVideoHeightGlobal, resolution.height);
 
     static std::atomic<uint64_t> override_count{0};
-    const uint64_t override = ++override_count;
+    const uint64_t override = NextNativeHookDiagnosticCall(override_count);
     if (ShouldLogNativeHookCall(override)) {
       REXLOG_INFO(
           "gta4-native-resolution: video globals #{} requested={}x{} configured={}x{} "
@@ -2925,7 +3749,7 @@ extern "C" void sub_824F4730(PPCContext& ctx, uint8_t* base) {
       PatchDeferredWrapperDimensions(base, hiz_wrapper, hiz_width, hiz_height);
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override_index = ++override_count;
+  const uint64_t override_index = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override_index)) {
     REXLOG_INFO(
         "gta4-native-resolution: graph setup #{} mode={} requested={}x{} construction={}x{} "
@@ -3039,7 +3863,7 @@ extern "C" void sub_828DC7F0(PPCContext& ctx, uint8_t* base) {
   const uint32_t wrapper = ctx.r3.u32;
 
   static std::atomic<uint64_t> override_count{0};
-  const uint64_t override_index = ++override_count;
+  const uint64_t override_index = NextNativeHookDiagnosticCall(override_count);
   if (ShouldLogNativeHookCall(override_index)) {
     REXLOG_INFO(
         "gta4-native-notile: deferred AA allocation #{} name={:08X} requested={}x{} "
@@ -3060,8 +3884,8 @@ extern "C" void sub_828BE580(PPCContext& ctx, uint8_t* base) {
     const double distance = GetExteriorReflectionCaptureDistance();
     ctx.f4.f64 = distance;
     static std::atomic<uint64_t> capture_count{0};
-    const uint64_t count = ++capture_count;
-    if (count <= 16 || !(count % 1024)) {
+    const uint64_t count = NextNativeHookDiagnosticCall(capture_count);
+    if (ShouldLogNativeHookCall(count)) {
       REXLOG_INFO(
           "gta4-native-reflection: exterior capture #{} fov={} near={} far={}", count,
           ctx.f1.f64, ctx.f3.f64, distance);
@@ -3093,7 +3917,7 @@ extern "C" void sub_828C8A50(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> disabled_upload_count{0};
-  const uint64_t count = ++disabled_upload_count;
+  const uint64_t count = NextNativeHookDiagnosticCall(disabled_upload_count);
   if (ShouldLogNativeHookCall(count)) {
     REXLOG_INFO("gta4-native-aa: neutralized EAA_PARAMS2 upload #{} handle={} source={:08X}",
                 count, ctx.r5.u32, parameter_data);
@@ -3178,7 +4002,7 @@ extern "C" void sub_82A3E910(PPCContext& ctx, uint8_t* base) {
                         LoadU32(base, rectangles + 8) == width;
   if (!expected) {
     static std::atomic<uint64_t> mismatch_count{0};
-    const uint64_t mismatch = ++mismatch_count;
+    const uint64_t mismatch = NextNativeHookDiagnosticCall(mismatch_count);
     if (ShouldLogNativeHookCall(mismatch)) {
       REXLOG_ERROR(
           "gta4-native-notile: deferred phase begin invariant mismatch lr={:08X} count={} "
@@ -3199,7 +4023,7 @@ extern "C" void sub_82A3E910(PPCContext& ctx, uint8_t* base) {
   ctx.r5.u32 = kDeferredNativeRectangleCount;
 
   static std::atomic<uint64_t> begin_count{0};
-  const uint64_t begin = ++begin_count;
+  const uint64_t begin = NextNativeHookDiagnosticCall(begin_count);
   if (ShouldLogNativeHookCall(begin)) {
     REXLOG_INFO("gta4-native-notile: deferred phase begin #{} rectangles={}->{} size={}x{}",
                 begin, kDeferredOriginalRectangleCount, kDeferredNativeRectangleCount, width,
@@ -3243,7 +4067,7 @@ extern "C" void sub_824F6AF0(PPCContext& ctx, uint8_t* base) {
   }
   if (!resources_valid) {
     static std::atomic<uint64_t> fallback_count{0};
-    const uint64_t fallback = ++fallback_count;
+    const uint64_t fallback = NextNativeHookDiagnosticCall(fallback_count);
     if (ShouldLogNativeHookCall(fallback)) {
       REXLOG_ERROR(
           "gta4-native-notile: deferred phase end invariant mismatch device={:08X} size={}x{} "
@@ -3258,7 +4082,7 @@ extern "C" void sub_824F6AF0(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> object_snapshot_count{0};
-  const uint64_t object_snapshot = ++object_snapshot_count;
+  const uint64_t object_snapshot = NextNativeHookDiagnosticCall(object_snapshot_count);
   if (ShouldLogNativeHookCall(object_snapshot)) {
     std::array<uint32_t, 10> wrappers{};
     for (size_t index = 0; index < kDeferredFullSizeWrapperGlobals.size(); ++index) {
@@ -3359,7 +4183,7 @@ extern "C" void sub_824F6AF0(PPCContext& ctx, uint8_t* base) {
   ctx.r3 = tail.r3;
 
   static std::atomic<uint64_t> phase_count{0};
-  const uint64_t phase = ++phase_count;
+  const uint64_t phase = NextNativeHookDiagnosticCall(phase_count);
   if (ShouldLogNativeHookCall(phase)) {
     REXLOG_INFO("gta4-native-notile: deferred phase end #{} size={}x{} resolves=5 predicates=0",
                 phase, width, height);
@@ -3373,7 +4197,7 @@ extern "C" void sub_82A3CC68(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> call_count{0};
-  const uint64_t call = ++call_count;
+  const uint64_t call = NextNativeHookDiagnosticCall(call_count);
   if (ShouldLogNativeHookCall(call)) {
     REXLOG_INFO(
         "gta4-native-hook: Resolve #{} lr={:08X} device={:08X} flags={:08X} "
@@ -3404,7 +4228,8 @@ extern "C" void sub_82A3CC68(PPCContext& ctx, uint8_t* base) {
 
   const uint32_t known_frontbuffer =
       g_last_present_frontbuffer.load(std::memory_order_relaxed);
-  if (known_frontbuffer && ctx.r6.u32 == known_frontbuffer) {
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
+      known_frontbuffer && ctx.r6.u32 == known_frontbuffer) {
     std::array<uint32_t, kRenderTargetCount> render_targets{};
     for (uint32_t index = 0; index < kRenderTargetCount; ++index) {
       render_targets[index] =
@@ -3447,7 +4272,7 @@ extern "C" void sub_82A3EDA8(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> call_count{0};
-  const uint64_t call = ++call_count;
+  const uint64_t call = NextNativeHookDiagnosticCall(call_count);
   if (ShouldLogNativeHookCall(call)) {
     REXLOG_INFO(
         "gta4-native-hook: ResolveBatch #{} lr={:08X} device={:08X} flags={:08X} "
@@ -3462,7 +4287,8 @@ extern "C" void sub_82A3EDA8(PPCContext& ctx, uint8_t* base) {
   const uint32_t source_surface = device ? LoadU32(base, device + 12716) : 0;
   const uint32_t known_frontbuffer =
       g_last_present_frontbuffer.load(std::memory_order_relaxed);
-  if (known_frontbuffer && destination_texture == known_frontbuffer) {
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
+      known_frontbuffer && destination_texture == known_frontbuffer) {
     std::fprintf(stderr,
                  "[GuestResolveTrace] origin=batch caller=%08X device=%08X flags=%08X "
                  "destination=%08X source=%08X records=%08X count=%u\n",
@@ -3539,7 +4365,7 @@ extern "C" void sub_82A3E348(PPCContext& ctx, uint8_t* base) {
   }
 
   static std::atomic<uint64_t> call_count{0};
-  const uint64_t call = ++call_count;
+  const uint64_t call = NextNativeHookDiagnosticCall(call_count);
   if (ShouldLogNativeHookCall(call)) {
     REXLOG_INFO(
         "gta4-native-hook: DrawIndexedPrimitive #{} lr={:08X} device={:08X} primitive={} "
@@ -3561,7 +4387,78 @@ extern "C" void sub_82A3E348(PPCContext& ctx, uint8_t* base) {
   command.origin_flags = kDrawCommandOriginDirect;
   command.command_list = 0;
   command.draw_id = call;
+
+  const bool trace_gbuffer_submission =
+      rex::diagnostics::IsEnabled(
+          rex::diagnostics::Category::kNativeTrace) &&
+      (command.index_count == 5961 || command.index_count == 1056);
+  uint64_t constants_hash_before = 0;
+  uint64_t transform_hash_before = 0;
+  std::array<uint64_t, 5> dirty_before{};
+  std::array<uint32_t, 16> transform_before{};
+  NativeShaderBindingDiagnosticState shader_bindings{};
+  if (trace_gbuffer_submission) {
+    constants_hash_before = XXH3_64bits(
+        GuestPointer(base, device + kReplayShaderConstantsOffset),
+        kReplayShaderConstantsSize);
+    transform_hash_before = XXH3_64bits(
+        GuestPointer(base, device + kReplayVertexTransformConstantsOffset),
+        kReplayVertexTransformConstantsSize);
+    for (uint32_t index = 0; index < dirty_before.size(); ++index) {
+      dirty_before[index] = LoadU64(base, device + index * sizeof(uint64_t));
+    }
+    for (uint32_t index = 0; index < transform_before.size(); ++index) {
+      transform_before[index] = LoadU32(
+          base, device + kReplayVertexTransformConstantsOffset +
+                    index * sizeof(uint32_t));
+    }
+    shader_bindings = CaptureNativeShaderBindings(device);
+  }
   ConsumeNativeDrawDirtyState(base, device);
+
+  if (trace_gbuffer_submission) {
+    const uint64_t constants_hash_after = XXH3_64bits(
+        GuestPointer(base, device + kReplayShaderConstantsOffset),
+        kReplayShaderConstantsSize);
+    const uint64_t transform_hash_after = XXH3_64bits(
+        GuestPointer(base, device + kReplayVertexTransformConstantsOffset),
+        kReplayVertexTransformConstantsSize);
+    std::array<uint64_t, 5> dirty_after{};
+    for (uint32_t index = 0; index < dirty_after.size(); ++index) {
+      dirty_after[index] =
+          LoadU64(base, device + index * sizeof(uint64_t));
+    }
+    const uint32_t submitted_frame =
+        LoadU32(base, device + kSubmittedFrameOffset);
+    REXLOG_INFO(
+        "gta4-native-cause: point=gbuffer-title-submit frame={} draw={} "
+        "caller={:08X} device={:08X} primitive={} base={} start={} indices={} "
+        "vs-handle={:08X} ps-handle={:08X} vdecl={:08X} ib={:08X} "
+        "constants={:016X}->{:016X}:{} transform={:016X}->{:016X}:{} "
+        "dirty={:016X},{:016X},{:016X},{:016X},{:016X}->"
+        "{:016X},{:016X},{:016X},{:016X},{:016X} "
+        "c8={:08X},{:08X},{:08X},{:08X} "
+        "c9={:08X},{:08X},{:08X},{:08X} "
+        "c10={:08X},{:08X},{:08X},{:08X} "
+        "c11={:08X},{:08X},{:08X},{:08X}",
+        submitted_frame, call, command.caller, device,
+        command.primitive_type, command.base_vertex, command.start_index,
+        command.index_count, shader_bindings.vertex_shader,
+        shader_bindings.pixel_shader,
+        LoadU32(base, device + kVertexDeclarationOffset),
+        LoadU32(base, device + kIndexBufferOffset), constants_hash_before,
+        constants_hash_after, constants_hash_before == constants_hash_after,
+        transform_hash_before, transform_hash_after,
+        transform_hash_before == transform_hash_after, dirty_before[0],
+        dirty_before[1], dirty_before[2], dirty_before[3], dirty_before[4],
+        dirty_after[0], dirty_after[1], dirty_after[2], dirty_after[3],
+        dirty_after[4], transform_before[0], transform_before[1],
+        transform_before[2], transform_before[3], transform_before[4],
+        transform_before[5], transform_before[6], transform_before[7],
+        transform_before[8], transform_before[9], transform_before[10],
+        transform_before[11], transform_before[12], transform_before[13],
+        transform_before[14], transform_before[15]);
+  }
   SubmitNativeCommand(command);
 }
 

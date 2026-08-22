@@ -17,6 +17,8 @@
 
 #include <cstring>
 
+#include <rex/diagnostics/policy.h>
+
 namespace rex::debug {
 
 // Returns true if a debugger is attached to this process.
@@ -38,6 +40,9 @@ void DebugPrint(const char* s);
 // likely to no-op.
 template <typename... Args>
 void DebugPrint(fmt::string_view format, const Args&... args) {
+  if (!diagnostics::IsEnabled(diagnostics::Category::kLogging)) {
+    return;
+  }
   detail::DebugPrint(fmt::vformat(format, fmt::make_format_args(args...)).c_str());
 }
 
@@ -48,30 +53,64 @@ void DebugPrint(fmt::string_view format, const Args&... args) {
 #include <tracy/Tracy.hpp>
 
 // CPU profiling zones
-#define SCOPE_profile_cpu_f(name) ZoneNamedN(___tracy_cpu_zone, name, true)
-#define SCOPE_profile_cpu_i(name, detail)      \
-  ZoneNamedN(___tracy_cpu_zone_i, name, true); \
-  ZoneTextV(___tracy_cpu_zone_i, detail, std::strlen(detail))
+#define SCOPE_profile_cpu_f(name)                                               \
+  ZoneNamedN(___tracy_cpu_zone, name,                                          \
+             ::rex::diagnostics::IsEnabled(                                    \
+                 ::rex::diagnostics::Category::kNativeProfiler))
+#define SCOPE_profile_cpu_i(name, detail)                                       \
+  ZoneNamedN(___tracy_cpu_zone_i, name,                                        \
+             ::rex::diagnostics::IsEnabled(                                    \
+                 ::rex::diagnostics::Category::kNativeProfiler));              \
+  do {                                                                          \
+    if (::rex::diagnostics::IsEnabled(                                          \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                  \
+      ZoneTextV(___tracy_cpu_zone_i, detail, std::strlen(detail));              \
+    }                                                                           \
+  } while (0)
 
 // GPU profiling stubs -- backend code uses TracyVkZone/TracyD3D12Zone directly.
 #define SCOPE_profile_gpu_f(name)
 #define SCOPE_profile_gpu_i(name, detail)
 
 // Thread profiling
-#define PROFILE_THREAD_ENTER(name) tracy::SetThreadName(name)
+#define PROFILE_THREAD_ENTER(name)                                             \
+  do {                                                                          \
+    if (::rex::diagnostics::IsEnabled(                                          \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                  \
+      tracy::SetThreadName(name);                                               \
+    }                                                                           \
+  } while (0)
 #define PROFILE_THREAD_EXIT()
 
 // Fiber profiling
 #ifdef TRACY_FIBERS
-#define PROFILE_FIBER_ENTER(name) TracyFiberEnter(name)
-#define PROFILE_FIBER_LEAVE TracyFiberLeave
+#define PROFILE_FIBER_ENTER(name)                                              \
+  do {                                                                          \
+    if (::rex::diagnostics::IsEnabled(                                          \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                  \
+      TracyFiberEnter(name);                                                    \
+    }                                                                           \
+  } while (0)
+#define PROFILE_FIBER_LEAVE                                                     \
+  do {                                                                          \
+    if (::rex::diagnostics::IsEnabled(                                          \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                  \
+      TracyFiberLeave;                                                          \
+    }                                                                           \
+  } while (0)
 #else
 #define PROFILE_FIBER_ENTER(name)
 #define PROFILE_FIBER_LEAVE
 #endif
 
 // Counter profiling -- plot to Tracy
-#define COUNT_profile_set(name, value) TracyPlot(name, static_cast<int64_t>(value))
+#define COUNT_profile_set(name, value)                                         \
+  do {                                                                          \
+    if (::rex::diagnostics::IsEnabled(                                          \
+            ::rex::diagnostics::Category::kNativeProfiler)) {                  \
+      TracyPlot(name, static_cast<int64_t>(value));                             \
+    }                                                                           \
+  } while (0)
 
 #else  // !REXGLUE_ENABLE_PROFILING
 

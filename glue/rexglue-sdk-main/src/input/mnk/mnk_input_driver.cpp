@@ -205,95 +205,91 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
     return X_ERROR_DEVICE_NOT_CONNECTED;
   }
 
-  if (!is_active() || !has_focus_) {
-    if (out_state) {
-      std::memset(out_state, 0, sizeof(*out_state));
-      out_state->packet_number = packet_number_;
-    }
-    return X_ERROR_SUCCESS;
-  }
-
   std::lock_guard lock(state_mutex_);
 
-  if (!REXCVAR_GET(mnk_controller_emulation)) {
-    packet_number_++;
-    if (out_state) {
-      std::memset(out_state, 0, sizeof(*out_state));
-      out_state->packet_number = packet_number_;
-    }
-    return X_ERROR_SUCCESS;
+  X_INPUT_GAMEPAD gamepad = {};
+  if (is_active() && has_focus_ &&
+      REXCVAR_GET(mnk_controller_emulation)) {
+    uint16_t buttons = 0;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_a)))
+      buttons |= X_INPUT_GAMEPAD_A;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_b)))
+      buttons |= X_INPUT_GAMEPAD_B;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_x)))
+      buttons |= X_INPUT_GAMEPAD_X;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_y)))
+      buttons |= X_INPUT_GAMEPAD_Y;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_left_shoulder)))
+      buttons |= X_INPUT_GAMEPAD_LEFT_SHOULDER;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_right_shoulder)))
+      buttons |= X_INPUT_GAMEPAD_RIGHT_SHOULDER;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_press)))
+      buttons |= X_INPUT_GAMEPAD_LEFT_THUMB;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_rstick_press)))
+      buttons |= X_INPUT_GAMEPAD_RIGHT_THUMB;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_back)))
+      buttons |= X_INPUT_GAMEPAD_BACK;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_start)))
+      buttons |= X_INPUT_GAMEPAD_START;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_guide)))
+      buttons |= X_INPUT_GAMEPAD_GUIDE;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_up)))
+      buttons |= X_INPUT_GAMEPAD_DPAD_UP;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_down)))
+      buttons |= X_INPUT_GAMEPAD_DPAD_DOWN;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_left)))
+      buttons |= X_INPUT_GAMEPAD_DPAD_LEFT;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_right)))
+      buttons |= X_INPUT_GAMEPAD_DPAD_RIGHT;
+
+    gamepad.buttons = buttons;
+    gamepad.left_trigger =
+        IsBindPressed(key_down_, REXCVAR_GET(keybind_left_trigger)) ? 0xFF : 0;
+    gamepad.right_trigger =
+        IsBindPressed(key_down_, REXCVAR_GET(keybind_right_trigger)) ? 0xFF : 0;
+
+    int32_t lx = 0;
+    int32_t ly = 0;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_left)))
+      lx -= INT16_MAX;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_right)))
+      lx += INT16_MAX;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_up)))
+      ly += INT16_MAX;
+    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_down)))
+      ly -= INT16_MAX;
+
+    const PointerMotionSample motion = pointer_motion_.Consume();
+    const double sensitivity =
+        motion.source == rex::ui::MouseEvent::MotionSource::kSystemAccelerated
+            ? REXCVAR_GET(mnk_trackpad_sensitivity)
+            : REXCVAR_GET(mnk_sensitivity);
+    constexpr double kBaseScale = 200.0;
+    const int32_t rx =
+        static_cast<int32_t>(motion.delta_x * sensitivity * kBaseScale);
+    const int32_t ry =
+        static_cast<int32_t>(-motion.delta_y * sensitivity * kBaseScale);
+
+    auto clamp16 = [](int32_t value) -> int16_t {
+      return static_cast<int16_t>(
+          std::clamp(value, static_cast<int32_t>(INT16_MIN),
+                     static_cast<int32_t>(INT16_MAX)));
+    };
+    gamepad.thumb_lx = clamp16(lx);
+    gamepad.thumb_ly = clamp16(ly);
+    gamepad.thumb_rx = clamp16(rx);
+    gamepad.thumb_ry = clamp16(ry);
   }
 
-  uint16_t buttons = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_a)))
-    buttons |= X_INPUT_GAMEPAD_A;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_b)))
-    buttons |= X_INPUT_GAMEPAD_B;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_x)))
-    buttons |= X_INPUT_GAMEPAD_X;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_y)))
-    buttons |= X_INPUT_GAMEPAD_Y;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_left_shoulder)))
-    buttons |= X_INPUT_GAMEPAD_LEFT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_right_shoulder)))
-    buttons |= X_INPUT_GAMEPAD_RIGHT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_press)))
-    buttons |= X_INPUT_GAMEPAD_LEFT_THUMB;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_rstick_press)))
-    buttons |= X_INPUT_GAMEPAD_RIGHT_THUMB;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_back)))
-    buttons |= X_INPUT_GAMEPAD_BACK;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_start)))
-    buttons |= X_INPUT_GAMEPAD_START;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_guide)))
-    buttons |= X_INPUT_GAMEPAD_GUIDE;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_up)))
-    buttons |= X_INPUT_GAMEPAD_DPAD_UP;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_down)))
-    buttons |= X_INPUT_GAMEPAD_DPAD_DOWN;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_left)))
-    buttons |= X_INPUT_GAMEPAD_DPAD_LEFT;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_right)))
-    buttons |= X_INPUT_GAMEPAD_DPAD_RIGHT;
-
-  uint8_t lt = IsBindPressed(key_down_, REXCVAR_GET(keybind_left_trigger)) ? 0xFF : 0;
-  uint8_t rt = IsBindPressed(key_down_, REXCVAR_GET(keybind_right_trigger)) ? 0xFF : 0;
-
-  int32_t lx = 0;
-  int32_t ly = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_left)))
-    lx -= INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_right)))
-    lx += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_up)))
-    ly += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_down)))
-    ly -= INT16_MAX;
-
-  const PointerMotionSample motion = pointer_motion_.Consume();
-  const double sensitivity =
-      motion.source == rex::ui::MouseEvent::MotionSource::kSystemAccelerated
-          ? REXCVAR_GET(mnk_trackpad_sensitivity)
-          : REXCVAR_GET(mnk_sensitivity);
-  constexpr double kBaseScale = 200.0;
-  int32_t rx = static_cast<int32_t>(motion.delta_x * sensitivity * kBaseScale);
-  int32_t ry = static_cast<int32_t>(-motion.delta_y * sensitivity * kBaseScale);
-
-  auto clamp16 = [](int32_t v) -> int16_t {
-    return static_cast<int16_t>(std::clamp(v, (int32_t)INT16_MIN, (int32_t)INT16_MAX));
-  };
-
-  packet_number_++;
+  if (std::memcmp(&gamepad, &last_emulated_gamepad_, sizeof(gamepad)) != 0) {
+    ++packet_number_;
+    last_emulated_gamepad_ = gamepad;
+  }
 
   if (out_state) {
+    std::memset(out_state, 0, sizeof(*out_state));
     out_state->packet_number = packet_number_;
-    out_state->gamepad.buttons = buttons;
-    out_state->gamepad.left_trigger = lt;
-    out_state->gamepad.right_trigger = rt;
-    out_state->gamepad.thumb_lx = clamp16(lx);
-    out_state->gamepad.thumb_ly = clamp16(ly);
-    out_state->gamepad.thumb_rx = clamp16(rx);
-    out_state->gamepad.thumb_ry = clamp16(ry);
+    out_state->gamepad = gamepad;
   }
   return X_ERROR_SUCCESS;
 }

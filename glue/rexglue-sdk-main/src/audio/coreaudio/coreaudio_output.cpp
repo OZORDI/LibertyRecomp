@@ -24,6 +24,7 @@
 #include <rex/audio/flags.h>
 #include <rex/cvar.h>
 #include <rex/diagnostics/gta4_transition.h>
+#include <rex/diagnostics/policy.h>
 #include <rex/logging.h>
 
 REXCVAR_DEFINE_INT32(audio_device_period_frames, 256, "Audio/CoreAudio",
@@ -827,7 +828,8 @@ void CoreAudioOutput::ReconfigureDevice() {
 }
 
 void CoreAudioOutput::LogMetrics() {
-  if (!REXCVAR_GET(audio_coreaudio_metrics)) {
+  if (!rex::diagnostics::IsEnabled(rex::diagnostics::Category::kAudio) ||
+      !REXCVAR_GET(audio_coreaudio_metrics)) {
     return;
   }
   const CoreAudioOutputMetrics metrics = SnapshotMetrics();
@@ -846,8 +848,13 @@ void CoreAudioOutput::LogMetrics() {
 }
 
 void CoreAudioOutput::RefreshSignalDiagnosticSettings() {
-  signal_diagnostics_enabled_.store(
-      REXCVAR_GET(audio_coreaudio_signal_diagnostics), std::memory_order_relaxed);
+  const bool diagnostics_enabled =
+      rex::diagnostics::IsEnabled(rex::diagnostics::Category::kAudio) &&
+      REXCVAR_GET(audio_coreaudio_signal_diagnostics);
+  signal_diagnostics_enabled_.store(diagnostics_enabled, std::memory_order_relaxed);
+  if (!diagnostics_enabled) {
+    return;
+  }
   signal_loud_threshold_.store(
       static_cast<float>(std::clamp(REXCVAR_GET(audio_coreaudio_loud_threshold), 0.0, 1.0)),
       std::memory_order_relaxed);
@@ -858,6 +865,9 @@ void CoreAudioOutput::RefreshSignalDiagnosticSettings() {
 }
 
 void CoreAudioOutput::DrainSignalDiagnostics() {
+  if (!signal_diagnostics_enabled_.load(std::memory_order_relaxed)) {
+    return;
+  }
   CoreAudioSignalDiagnostic diagnostic;
   for (const auto& slot : clients_) {
     CoreAudioClientState* client = slot.load(std::memory_order_acquire);

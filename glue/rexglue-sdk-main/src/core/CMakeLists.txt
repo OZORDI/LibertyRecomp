@@ -8,6 +8,7 @@ add_library(rexcore OBJECT
     byte_stream.cpp
     clock.cpp
     cvar.cpp
+    diagnostics_policy.cpp
     exception_handler.cpp
     filesystem.cpp
     filesystem_wildcard.cpp
@@ -107,6 +108,10 @@ target_include_directories(rexcore PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/thirdparty/cli11/include
 )
+
+if(REXGLUE_BUILD_TESTS)
+    target_compile_definitions(rexcore PUBLIC REX_DIAGNOSTICS_TESTING=1)
+endif()
 
 if(APPLE)
     target_link_libraries(rexcore PRIVATE pthread)

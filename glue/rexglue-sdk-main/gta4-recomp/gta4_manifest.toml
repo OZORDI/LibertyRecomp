@@ -1,6 +1,6 @@
 [project]
 name = "gta4"
-sdk_version = "0.8.0"
+sdk_version = "0.9.0"
 
 [entrypoint]
 file_path = "assets/default_v8.xex"

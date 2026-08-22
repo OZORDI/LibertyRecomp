@@ -23,6 +23,9 @@
 #include <rex/ui/vulkan/device.h>
 
 #include "postfx_resource_pool.h"
+#include "native_frame_scheduling.h"
+#include "native_performance_samples.h"
+#include "native_reflection_registry.h"
 #include "smaa_pipeline.h"
 #include "split_postfx_pass.h"
 #include "sun_shafts_pass.h"
@@ -231,6 +234,11 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     uint32_t render_phase_object = 0;
     uint64_t vertex_constants_hash = 0;
     uint64_t pixel_constants_hash = 0;
+    // Diagnostic-only producer identity. These fields are native sidecars,
+    // not part of the title command ABI, and let traces prove whether a title
+    // frame was split before its Present command reaches the render worker.
+    uint64_t diagnostic_submit_sequence = 0;
+    uint32_t diagnostic_producer_epoch = 0;
     std::shared_ptr<SynchronousCommand> synchronous;
   };
 
@@ -247,6 +255,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
 
   struct NativeContentProbeStage {
     bool valid = false;
+    bool reserved = false;
     uint8_t kind = 0;
     uint8_t command_type = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
@@ -319,7 +328,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     std::array<NativeTranslucentQuery, kTranslucentQueryCapacity> queries{};
   };
 
-  static constexpr uint32_t kNativeGpuProfileQueryCapacity = 4096;
+  static constexpr uint32_t kNativeGpuProfileQueryCapacity =
+      uint32_t(performance::kMaximumGpuQueriesPerFrame);
 
   enum class NativeGpuProfileScopeKind : uint8_t {
     kFrame,
@@ -341,7 +351,13 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     uint64_t vertex_shader_hash = 0;
     uint64_t pixel_shader_hash = 0;
     uint64_t cpu_ticks = 0;
+    performance::GpuSpanToken performance_token{};
     bool ended = false;
+  };
+
+  struct NativeGpuProfileQueryResult {
+    uint64_t timestamp = 0;
+    uint64_t available = 0;
   };
 
   struct NativeGpuProfileState {
@@ -352,44 +368,38 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     bool supported = false;
     bool active = false;
     bool pending = false;
-    bool command_detail = false;
+    bool capture_complete = false;
+    bool export_started = false;
     uint32_t frame = 0;
     uint32_t query_count = 0;
     uint32_t dropped_spans = 0;
     uint32_t last_sampled_frame = 0;
     size_t frame_span = SIZE_MAX;
-    std::vector<NativeGpuProfileSpan> spans;
-    uint64_t cpu_wait_ticks = 0;
+    std::array<NativeGpuProfileSpan,
+               performance::kMaximumGpuSpansPerFrame>
+        spans{};
+    size_t span_count = 0;
+    std::array<NativeGpuProfileQueryResult,
+               performance::kMaximumGpuQueriesPerFrame>
+        query_results{};
+    performance::FrameBuilder sample_builder;
+    performance::FrameSampleRing sample_ring;
+    std::array<performance::FrameSample,
+               performance::kFrameSampleCapacity>
+        export_samples{};
+    size_t export_sample_count = 0;
+    std::thread export_thread;
     uint64_t cpu_texture_prepare_ticks = 0;
     uint64_t cpu_record_ticks = 0;
     uint64_t cpu_submit_ticks = 0;
     uint64_t cpu_callback_ticks = 0;
     VkDeviceSize upload_bytes = 0;
-    size_t pipelines_before = 0;
-    size_t pipelines_after = 0;
-    size_t texture_images_before = 0;
-    size_t texture_images_after = 0;
-    size_t surface_images_before = 0;
-    size_t surface_images_after = 0;
-    size_t samplers_before = 0;
-    size_t samplers_after = 0;
   };
 
   struct NativeImageResource {
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
-  };
-
-  struct NativeReflectionTarget {
-    ReflectionFamily family = ReflectionFamily::kMirror;
-    ReflectionRole role = ReflectionRole::kColor;
-    uint32_t wrapper = 0;
-    uint32_t logical_width = 0;
-    uint32_t logical_height = 0;
-    uint32_t physical_width = 0;
-    uint32_t physical_height = 0;
-    uint32_t sample_count_override = 0;
   };
 
   struct NativeTextureImage {
@@ -406,6 +416,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     uint32_t logical_height = 0;
     NativeReflectionTarget reflection{};
     bool is_reflection = false;
+    // Last submitted frame that referenced this image; eviction waits out
+    // kNativeTextureEvictionGraceFrames beyond this.
+    uint32_t last_used_frame = 0;
     std::vector<VkImageView> mip_views;
   };
 
@@ -477,6 +490,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
       kResolve,
       kResolveMultisampled,
       kDepthResolveMultisampled,
+      kDepthHandoff,
       kReflectionMip,
     } kind = Kind::kResolve;
     VkSampleCountFlagBits destination_samples = VK_SAMPLE_COUNT_1_BIT;
@@ -574,6 +588,17 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     VkPipeline pipeline = VK_NULL_HANDLE;
   };
 
+  // Immutable inputs required to create a draw pipeline after its complete
+  // fixed-function key and alpha-test specialization have been settled.
+  struct NativePipelineCompileJob {
+    NativePipelineKey key{};
+    const NativeShader* vertex_shader = nullptr;
+    const NativeShader* pixel_shader = nullptr;
+    std::shared_ptr<const NativeVertexDeclaration> vertex_declaration;
+    bool use_late_pixel_module = false;
+    uint32_t specialization_value = 0;
+  };
+
   struct NativeUploadAllocation {
     VkDeviceSize offset = 0;
     VkDeviceAddress device_address = 0;
@@ -649,6 +674,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   void AnalyzePendingTranslucentQueries();
   bool InitializeNativeGpuProfiler();
   void DestroyNativeGpuProfiler();
+  void ExportNativeGpuProfile();
   void AnalyzePendingNativeGpuProfile();
   bool BeginNativeGpuProfileFrame(VkCommandBuffer command_buffer,
                                   uint32_t submitted_frame,
@@ -660,7 +686,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
                                    RenderPhase render_phase = RenderPhase::kUnknown,
                                    CommandType command_type = CommandType::kPresent,
                                    uint32_t command_index = UINT32_MAX,
-                                   const NativeCommand* command = nullptr);
+                                   const NativeCommand* command = nullptr,
+                                   performance::GpuRange performance_range =
+                                       performance::GpuRange::kCount);
   void EndNativeGpuProfileSpan(VkCommandBuffer command_buffer, size_t span_index,
                                uint64_t cpu_begin_ticks = 0);
   bool RecordContentProbe(
@@ -668,7 +696,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
       NativeSurfaceImage* final_surface, NativeTextureImage* final_composite_input,
       const std::shared_ptr<const NativeTextureResource>& present_source,
       VkImage presenter_image, VkImageLayout presenter_layout,
-      uint32_t presenter_width, uint32_t presenter_height);
+      uint32_t presenter_width, uint32_t presenter_height,
+      bool force = false);
   bool RecordContentProbeImage(VkCommandBuffer command_buffer, uint32_t stage_index,
                                VkImage image, VkFormat format, VkImageLayout layout,
                                uint32_t width, uint32_t height, uint32_t handle,
@@ -702,10 +731,13 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   VkSampler GetOrCreateSampler(const xenos::xe_gpu_texture_fetch_t& fetch,
                                const NativeTextureImage* image = nullptr,
                                NativeSamplerKey* effective_key = nullptr);
-  void ReleaseUnusedTextureImages();
+  void ReleaseUnusedTextureImages(uint32_t submitted_frame);
   NativeTextureImage* GetOrCreateTextureImage(
       VkCommandBuffer command_buffer, const std::shared_ptr<const NativeTextureResource>& texture);
-  NativeSurfaceImage* GetOrCreateSurfaceImage(const SurfaceDescriptor& descriptor, bool depth);
+  NativeSurfaceImage* GetOrCreateSurfaceImage(
+      const SurfaceDescriptor& descriptor, bool depth,
+      VkSampleCountFlagBits host_sample_override =
+          VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM);
   VkImageView GetOrCreateTextureMipView(NativeTextureImage& image, uint32_t mip_level);
   VkPipeline GetOrCreateFullscreenPipeline(
       VkFormat destination_format, NativeResolveConversionPipeline::Kind kind,
@@ -715,6 +747,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
                                                   VkSampleCountFlagBits destination_samples =
                                                       VK_SAMPLE_COUNT_1_BIT);
   VkPipeline GetOrCreateDepthResolvePipeline(VkFormat destination_format);
+  VkPipeline GetOrCreateDepthHandoffPipeline(VkFormat destination_format,
+                                             VkSampleCountFlagBits destination_samples =
+                                                 VK_SAMPLE_COUNT_1_BIT);
   VkPipeline GetOrCreateReflectionMipPipeline(VkFormat destination_format);
   VkPipeline GetOrCreateHDRPresentPipeline();
   bool RecordResolveConversion(VkCommandBuffer command_buffer, NativeSurfaceImage& source,
@@ -767,6 +802,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
                                  uint32_t primitive_type, const NativeRenderingTarget& target,
                                  uint32_t user_pointer_stride = 0,
                                  bool primitive_restart_enable = false);
+  VkPipeline CreateNativePipelineFromJob(const NativePipelineCompileJob& job);
   bool GetRequiredVertexStreams(
       const NativePipelineState& state,
       std::array<bool, kVertexStreamCount>& required_streams) const;
@@ -818,6 +854,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   std::mutex render_mutex_;
   std::condition_variable render_condition_;
   std::deque<NativeCommand> render_queue_;
+  uint64_t diagnostic_submit_sequence_ = 0;
+  uint32_t diagnostic_producer_epoch_ = 1;
   std::atomic<bool> render_worker_running_{false};
   std::thread render_worker_;
   std::shared_ptr<NativePipelineState> pipeline_state_ = std::make_shared<NativePipelineState>();
@@ -849,7 +887,6 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   uint64_t clear_framebuffer_image_version_ = 0;
   std::unique_ptr<ui::vulkan::VulkanSubmissionTracker> submission_tracker_;
   uint64_t command_buffer_submission_ = 0;
-
   NativeUploadBuffer upload_buffer_;
   NativeContentProbeBuffer content_probe_buffer_;
   NativeTranslucentQueryState translucent_query_state_;
@@ -892,7 +929,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   std::unordered_map<GuestPlacementKey, NativePlacementOwner, GuestPlacementKeyHash>
       native_placement_owners_;
   uint64_t next_surface_write_serial_ = 1;
-  std::unordered_map<uint32_t, NativeReflectionTarget> reflection_resources_;
+  NativeReflectionRegistry reflection_resources_;
   uint32_t native_descriptor_capacity_ = 0;
   bool null_images_initialized_ = false;
 };

@@ -1,0 +1,240 @@
+{
+  "atlas_extent": 2048,
+  "atlases": {
+    "font1": {
+      "file": "font1.png",
+      "font_id": 0,
+      "ignored_prop_entries": 5,
+      "map_entries": 171,
+      "other_cells": "GTA IV shared atlas; stock alpha verified",
+      "prop_entries": 171,
+      "sha256": "8f61a5547958600abb00a8ab1cc11b061cfd420fdf1533cb90cc2a46a3997814",
+      "shared_from_profile": "gta4",
+      "source_prop_entries": 176,
+      "space_between_chars": [
+        0,
+        -2,
+        0
+      ],
+      "unproportional_width": 26,
+      "vector_ranges": [
+        {
+          "baseline": 126,
+          "first_cell": 0,
+          "font": "Neue Helvetica 67 Condensed Medium.otf",
+          "horizontal_scale": 0.9333333333333333,
+          "last_cell_exclusive": 134,
+          "point_size": 152,
+          "preserved_edge_cells": [
+            1,
+            2,
+            3,
+            4,
+            30,
+            86,
+            87,
+            88,
+            89,
+            90,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            111,
+            112,
+            113,
+            116,
+            117,
+            118,
+            119,
+            121,
+            122,
+            123,
+            126,
+            127,
+            128,
+            130,
+            131,
+            132
+          ],
+          "redrawn_cells": 90,
+          "reference_glyphs": 18,
+          "reference_height": 110.0,
+          "role": "HELECOND",
+          "traced_fallback_cells": 44
+        },
+        {
+          "baseline": 143,
+          "first_cell": 134,
+          "font": "Pricedown Bl.otf",
+          "horizontal_scale": 1.0,
+          "last_cell_exclusive": 150,
+          "point_size": 161,
+          "preserved_edge_cells": [],
+          "redrawn_cells": 16,
+          "reference_glyphs": 11,
+          "reference_height": 122.0,
+          "role": "PRICEDOWN",
+          "traced_fallback_cells": 0
+        }
+      ],
+      "whitespace": 8
+    },
+    "font2": {
+      "file": "font2.png",
+      "font_id": 2,
+      "ignored_prop_entries": 0,
+      "map_entries": 202,
+      "other_cells": "traced stock contours",
+      "prop_entries": 202,
+      "sha256": "f08ae7eaf72f10dc53a4a9640ee785bd6d41151f3a311fa4710b78da2ffc9b0f",
+      "source_prop_entries": 202,
+      "space_between_chars": [
+        -1,
+        -1,
+        -1
+      ],
+      "unproportional_width": 25,
+      "vector_ranges": [
+        {
+          "baseline": 127,
+          "first_cell": 0,
+          "font": "HelveticaNeue-Heavy.otf",
+          "horizontal_scale": 1.0,
+          "last_cell_exclusive": 134,
+          "point_size": 112,
+          "preserved_edge_cells": [],
+          "redrawn_cells": 134,
+          "reference_glyphs": 17,
+          "reference_height": 98.0,
+          "role": "HELVETICA HEAVY",
+          "traced_fallback_cells": 0
+        },
+        {
+          "baseline": 131,
+          "first_cell": 135,
+          "font": "Neue Helvetica 55 Roman.otf",
+          "horizontal_scale": 1.0,
+          "last_cell_exclusive": 195,
+          "point_size": 102,
+          "preserved_edge_cells": [
+            192,
+            193,
+            194
+          ],
+          "redrawn_cells": 57,
+          "reference_glyphs": 16,
+          "reference_height": 101.0,
+          "role": "HELVETICA ROMAN",
+          "traced_fallback_cells": 3
+        }
+      ],
+      "whitespace": 10
+    },
+    "font3": {
+      "file": "font3.png",
+      "font_id": 1,
+      "ignored_prop_entries": 8,
+      "map_entries": 168,
+      "other_cells": "traced stock contours",
+      "prop_entries": 168,
+      "sha256": "7d02932937c8dc7e1b12f66f32500f496e4703e057e3243761654871035afaf8",
+      "source_prop_entries": 176,
+      "space_between_chars": [
+        0,
+        0,
+        0
+      ],
+      "unproportional_width": 25,
+      "vector_ranges": [
+        {
+          "baseline": 128,
+          "first_cell": 92,
+          "font": "DIN Bold.otf",
+          "horizontal_scale": 0.6666666666666666,
+          "last_cell_exclusive": 168,
+          "point_size": 134,
+          "preserved_edge_cells": [
+            138,
+            139,
+            140,
+            141,
+            142,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            165
+          ],
+          "redrawn_cells": 52,
+          "reference_glyphs": 18,
+          "reference_height": 96.0,
+          "role": "DIN BOLD",
+          "traced_fallback_cells": 24
+        }
+      ],
+      "whitespace": 8
+    }
+  },
+  "faces": {
+    "din_bold": "DIN Bold.otf",
+    "helvetica_condensed_medium": "Neue Helvetica 67 Condensed Medium.otf",
+    "helvetica_heavy": "HelveticaNeue-Heavy.otf",
+    "helvetica_roman": "Neue Helvetica 55 Roman.otf",
+    "pricedown": "Pricedown Bl.otf"
+  },
+  "fit_model": {
+    "horizontal_metrics": "FONTS.DAT PROP trim with vector bearings",
+    "name": "runtime-sample-safe-uniform-face",
+    "safe_gutter_output_pixels": {
+      "font1_HELECOND_horizontal": 1,
+      "horizontal_default": 4,
+      "vertical": 4
+    },
+    "vertical_metrics": "sub_821F5028/sub_821F1EE0 sample window"
+  },
+  "format": 4,
+  "grid_extent": 16,
+  "layout": {
+    "columns": 16,
+    "output_cell_width": 128,
+    "output_row_pitch": 160,
+    "source_atlas_extent": 512,
+    "source_cell_width": 32,
+    "source_layout_resolution": [
+      512,
+      488
+    ],
+    "source_row_pitch": 40
+  },
+  "profile": "tbogt",
+  "source": "licensed vector faces fitted to compiled GTA IV sampling metrics"
+}
