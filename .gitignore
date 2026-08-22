@@ -684,6 +684,7 @@ run.pid
 
 # Local agent skills cache — not source
 .agents/skills/libertyrecomp/
+.agents/skills/libertyrecomp-build-run/
 
 # Scripts
 scripts/
