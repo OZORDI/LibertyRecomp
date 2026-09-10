@@ -1,6 +1,7 @@
 <p align="center">
-    <h1 align="center">Liberty Recompiled</h1>
-    <p align="center"><em>GTA IV Xbox 360 Static Recompilation Project</em></p>
+    <img src="docs/images/banner_repo.png" alt="Liberty Recompiled" width="800"/>
+    <br/>
+    <em>GTA IV Xbox 360 Static Recompilation Project</em>
 </p>
 
 ---
