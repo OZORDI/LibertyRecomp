@@ -1,3 +1,5 @@
+#include "gta4_quicksave_hooks.h"
+#include "gta4_aspect_hooks.h"
 #include "gta4_frontend_hooks.h"
 
 #include <array>
@@ -91,7 +93,10 @@ enum class TextId : uint8_t {
   kReflectionAaLabel,
   kShadowLabel,
   kDitherLabel,
+  kModernShadersLabel,
   kMotionControlsLabel,
+  kSkipIntroLabel,
+  kDisableTladGrainLabel,
   kAdvancedLabel,
   kSaveLabel,
   kBackLabel,
@@ -104,6 +109,14 @@ enum class TextId : uint8_t {
   kResolution4k,
   kDisplay,
   kOriginalAspect,
+  kAspect16x10,
+  kAspect3x2,
+  kAspect4x3,
+  kAspect5x4,
+  kAspect21x9,
+  kAspect32x9,
+  kAspect43x18,
+  kAspect32x10,
   kWindowed,
   kFullscreen,
   kOff,
@@ -160,6 +173,8 @@ enum class TextId : uint8_t {
   k60Fps,
   k120Fps,
   kUnlocked,
+  kOffNextLaunch,
+  kOnNextLaunch,
   kCount,
 };
 
@@ -194,11 +209,23 @@ constexpr std::array kResolutionChoices = {
 };
 constexpr std::array kAspectChoices = {
     Choice{"auto", TextId::kDisplay},
-    Choice{"original", TextId::kOriginalAspect},
+    Choice{"16:9", TextId::kOriginalAspect},
+    Choice{"16:10", TextId::kAspect16x10},
+    Choice{"3:2", TextId::kAspect3x2},
+    Choice{"4:3", TextId::kAspect4x3},
+    Choice{"5:4", TextId::kAspect5x4},
+    Choice{"21:9", TextId::kAspect21x9},
+    Choice{"32:9", TextId::kAspect32x9},
+    Choice{"43:18", TextId::kAspect43x18},
+    Choice{"32:10", TextId::kAspect32x10},
 };
 constexpr std::array kToggleChoices = {
     Choice{"false", TextId::kOff},
     Choice{"true", TextId::kOn},
+};
+constexpr std::array kNextLaunchChoices = {
+    Choice{"false", TextId::kOffNextLaunch},
+    Choice{"true", TextId::kOnNextLaunch},
 };
 constexpr std::array kHdrChoices = {
     Choice{"off", TextId::kOff},
@@ -328,7 +355,13 @@ constexpr std::array kSettings = {
             kReflectionAaChoices.data(), kReflectionAaChoices.size(), true},
     Setting{"LR_DITHER", TextId::kDitherLabel, "gta4_native_output_dither", kToggleChoices.data(),
             kToggleChoices.size()},
+    Setting{"LR_MODSHADER", TextId::kModernShadersLabel, "gta4_modern_shaders",
+            kToggleChoices.data(), kToggleChoices.size()},
     Setting{"LR_MOTION", TextId::kMotionControlsLabel, "gta4_motion_enabled",
+            kToggleChoices.data(), kToggleChoices.size()},
+    Setting{"LR_SKIPINTRO", TextId::kSkipIntroLabel, "gta4_skip_intro",
+            kNextLaunchChoices.data(), kNextLaunchChoices.size(), true},
+    Setting{"LR_TLAD_GRAIN", TextId::kDisableTladGrainLabel, "gta4_disable_tlad_film_grain",
             kToggleChoices.data(), kToggleChoices.size()},
 };
 
@@ -356,7 +389,10 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "Reflection MSAA",
     "Shadow Resolution",
     "Output Dithering",
+    "Modern shaders",
     "Motion Controls",
+    "Skip Intro",
+    "Disable Film Grain (TLAD)",
     "Advanced",
     "Save",
     "Back",
@@ -368,7 +404,15 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "2560 x 1440",
     "3840 x 2160",
     "Display",
-    "Original 16:9",
+    "16:9",
+    "16:10",
+    "3:2",
+    "4:3",
+    "5:4",
+    "21:9",
+    "32:9",
+    "43:18 (3440 x 1440)",
+    "32:10",
     "Windowed",
     "Fullscreen",
     "Off",
@@ -425,6 +469,8 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "60 FPS",
     "120 FPS",
     "Unlocked",
+    "Off (Next Launch)",
+    "On (Next Launch)",
 };
 
 struct NativePageState {
@@ -901,7 +947,10 @@ std::string CurrentSettingValue(const Setting& setting) {
   if (setting.binding == SettingBinding::kHdr) {
     return std::string(rex::graphics::gta4_native::GetConfiguredHdrModeName());
   }
-  return rex::cvar::GetFlagByName(setting.cvar);
+  std::string value = rex::cvar::GetFlagByName(setting.cvar);
+  if (std::string_view(setting.cvar) == "gta4_aspect_ratio" && value == "original")
+    value = "16:9";
+  return value;
 }
 
 const Choice& CurrentChoice(const Setting& setting) {
@@ -1429,6 +1478,8 @@ extern "C" void sub_82157F90(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_8221FD88(PPCContext& ctx, uint8_t* base) {
+  if (gta4::quicksave::ResolveText(ctx, base))
+    return;
   const bool diagnostics = FrontendDiagnosticsEnabled();
   const uint32_t destination = ctx.r3.u32;
   const uint32_t key_address = ctx.r4.u32;

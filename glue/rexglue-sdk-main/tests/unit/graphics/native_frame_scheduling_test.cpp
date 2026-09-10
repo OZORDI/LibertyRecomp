@@ -231,3 +231,70 @@ TEST_CASE("GTA IV native texture allocation retries exactly once") {
   REQUIRE_FALSE(gta4::ShouldRetryNativeTextureAllocation(1));
   REQUIRE_FALSE(gta4::ShouldRetryNativeTextureAllocation(2));
 }
+
+
+TEST_CASE("GTA IV texture lock flushes preserve the title resource clock", "[tv-resource-lifetime]") {
+  uint32_t frame = gta4::NativeResourceFrameForBatch(0, 2943, true);
+  REQUIRE(frame == 2943);
+  for (uint32_t flush = 0; flush < 16; ++flush) {
+    frame = gta4::NativeResourceFrameForBatch(frame, 0, false);
+    REQUIRE(frame == 2943);
+  }
+  const uint32_t last_used = frame;
+  frame = gta4::NativeResourceFrameForBatch(frame, 2945, true);
+  REQUIRE_FALSE(gta4::ShouldEvictNativeTextureCandidate(false, false, frame, last_used, 600));
+  // Reproduces the captured pre-fix eviction decision after an artificial zero stamp.
+  REQUIRE(gta4::ShouldEvictNativeTextureCandidate(false, false, 2945, 0, 600));
+}
+
+TEST_CASE("GTA IV genuine frame zero and reset are not confused with lock flushes", "[tv-resource-lifetime]") {
+  REQUIRE(gta4::NativeResourceFrameForBatch(0, 0, false) == 0);
+  REQUIRE(gta4::NativeResourceFrameForBatch(2945, 0, true) == 0);
+  REQUIRE(gta4::NativeResourceFrameForBatch(UINT32_MAX, 0, true) == 0);
+  REQUIRE(gta4::NativeResourceFrameForBatch(UINT32_MAX, 0, false) == UINT32_MAX);
+  REQUIRE(gta4::NativeResourceFrameForBatch(2945, 1, true) == 1);
+}
+
+TEST_CASE("GTA IV internal batches do not reset or accelerate periodic maintenance", "[tv-resource-lifetime]") {
+  gta4::NativePeriodicWorkSchedule schedule(40);
+  uint32_t frame = gta4::NativeResourceFrameForBatch(0, 2943, true);
+  REQUIRE_FALSE(schedule.ShouldRun(frame, 120));
+  for (uint32_t n = 0; n < 39; ++n) {
+    for (uint32_t flush = 0; flush < 4; ++flush) {
+      frame = gta4::NativeResourceFrameForBatch(frame, 0, false);
+      REQUIRE_FALSE(schedule.ShouldRun(frame, 120));
+    }
+    frame = gta4::NativeResourceFrameForBatch(frame, frame + 1, true);
+    REQUIRE_FALSE(schedule.ShouldRun(frame, 120));
+  }
+  frame = gta4::NativeResourceFrameForBatch(frame, frame + 1, true);
+  REQUIRE(schedule.ShouldRun(frame, 120));
+  REQUIRE_FALSE(schedule.ShouldRun(gta4::NativeResourceFrameForBatch(frame, 0, false), 120));
+}
+
+TEST_CASE("GTA IV GPU-produced contents are not disposable CPU texture cache entries", "[tv-resource-lifetime]") {
+  REQUIRE_FALSE(gta4::CanDiscardNativeTextureImageContents(true, false));
+  // An old CPU payload is not a verified backup of later GPU writes.
+  REQUIRE_FALSE(gta4::CanDiscardNativeTextureImageContents(true, true));
+  REQUIRE_FALSE(gta4::CanDiscardNativeTextureImageContents(false, false));
+  REQUIRE(gta4::CanDiscardNativeTextureImageContents(false, true));
+  for (bool pressure : {false, true}) {
+    for (bool recovery : {false, true}) {
+      const auto eligible = [&](bool gpu, bool payload, bool referenced) {
+        return gta4::CanDiscardNativeTextureImageContents(gpu, payload) && !referenced &&
+            (recovery || gta4::ShouldEvictNativeTextureCandidate(false, pressure, 2945, 0, 600));
+      };
+      REQUIRE_FALSE(eligible(true, false, false));
+      REQUIRE_FALSE(eligible(true, true, false));
+      REQUIRE_FALSE(eligible(false, true, true));
+      REQUIRE(eligible(false, true, false));
+    }
+  }
+}
+
+TEST_CASE("GTA IV retained GPU contents still follow explicit generation release", "[tv-resource-lifetime]") {
+  REQUIRE(gta4::ShouldRetireSupersededNativeTextureGeneration(479, 480));
+  REQUIRE(gta4::ClassifyNativeTextureRelease(true, true) == gta4::NativeTextureReleaseAction::kKeepPending);
+  REQUIRE(gta4::ClassifyNativeTextureRelease(false, true) == gta4::NativeTextureReleaseAction::kDestroyImage);
+  REQUIRE(gta4::ClassifyNativeTextureRelease(false, false) == gta4::NativeTextureReleaseAction::kForget);
+}

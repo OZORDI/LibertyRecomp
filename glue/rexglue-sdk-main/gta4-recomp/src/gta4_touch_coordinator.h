@@ -12,6 +12,9 @@ struct AbsolutePointerEvent;
 }
 
 struct GTA4TouchExtension {
+  // Prepare context and edge latches before draining this poll's pointers.
+  void (*begin_poll)(PPCContext& context, uint8_t* base, uint64_t epoch,
+                      bool frontend, bool map) = nullptr;
   // Called on the guest input thread for gameplay pointers not reserved by
   // frontend, map, or minimap semantics. Returning true claims the event.
   bool (*on_pointer_event)(const rex::input::AbsolutePointerEvent& event,
@@ -19,7 +22,7 @@ struct GTA4TouchExtension {
                            uint64_t epoch) = nullptr;
   // Explicit pressed latches preserve a complete Down+Up tap drained within
   // one guest poll. Both arrays are frozen with the coordinator epoch.
-  void (*collect_virtual_keys)(std::array<uint8_t, 256>& down,
+  void (*collect_virtual_keys)(uint64_t epoch, std::array<uint8_t, 256>& down,
                                std::array<uint8_t, 256>& pressed) = nullptr;
   void (*on_controls_disabled)(PPCContext& context, uint8_t* base,
                                uint64_t epoch) = nullptr;

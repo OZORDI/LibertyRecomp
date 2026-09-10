@@ -12,6 +12,7 @@
 #include <bit>
 
 #include <rex/audio/xma/context.h>
+#include <rex/audio/handoff_trace.h>
 #include <rex/audio/xma/decoder.h>
 #include <rex/cvar.h>
 #include <rex/dbg.h>
@@ -238,6 +239,7 @@ uint32_t XmaDecoder::AllocateContext() {
   XmaContext& context = contexts_[index];
   assert_false(context.is_allocated());
   context.set_is_allocated(true);
+  handoff::Record("xma-allocate", index, {context.guest_ptr()});
   return context.guest_ptr();
 }
 
@@ -303,6 +305,7 @@ void XmaDecoder::WriteRegister(uint32_t addr, uint32_t value) {
   register_file_[r] = value;
 
   if (r >= XmaRegister::Context0Kick && r <= XmaRegister::Context9Kick) {
+    handoff::Span handoff_kick("xma-kick", r, value);
     // Context kick command.
     // This will kick off the given hardware contexts.
     // Basically, this kicks the SPU and says "hey, decode that audio!"

@@ -1,4 +1,5 @@
 #include "gta4_motion_bridge.h"
+#include "gta4_motion_action_policy.h"
 
 #include <algorithm>
 #include <atomic>
@@ -27,27 +28,12 @@ namespace {
 // cross-checked against CVehicleWheel::m_nFlags in the public IV SDK.
 constexpr uint32_t kPrimaryReloadActionRecord = 0x82B2AD64;
 
-constexpr uint32_t kVehicleGasPedalOffset = 4200;
-constexpr uint32_t kVehicleBrakePedalOffset = 4204;
-constexpr uint32_t kVehicleSteeringOffset = 4208;
-constexpr uint32_t kBikePitchOffset = 5328;
-constexpr uint32_t kBoatTrimOffset = 6376;
-constexpr uint32_t kHelicopterBankOffset = 8100;
-constexpr uint32_t kHelicopterPitchOffset = 8104;
-
 constexpr uint32_t kAutomobileWheelsOffset = 3952;
 constexpr uint32_t kAutomobileWheelCountOffset = 3956;
 constexpr uint32_t kWheelFlagsOffset = 356;
 constexpr uint32_t kWheelStride = 368;
 constexpr uint32_t kWheelNotInAirMask = 0x00000002;
 constexpr uint32_t kPrimaryUserIndex = 0;
-
-enum class VehicleMotionKind : uint32_t {
-  kHelicopter,
-  kBike,
-  kBoat,
-  kAutomobile,
-};
 
 struct PlayerVehicleTracker {
   std::mutex mutex;
@@ -58,14 +44,6 @@ struct PlayerVehicleTracker {
 
 PlayerVehicleTracker g_player_vehicle_tracker;
 std::atomic<uint64_t> g_motion_application_count = 0;
-
-float LoadFloat(uint8_t* base, uint32_t address) {
-  return std::bit_cast<float>(REX_LOAD_U32(address));
-}
-
-void StoreFloat(uint8_t* base, uint32_t address, float value) {
-  REX_STORE_U32(address, std::bit_cast<uint32_t>(value));
-}
 
 uint32_t ResolvePlayerPad(const PPCContext& parent, uint8_t* base, uint32_t controller) {
   PPCContext nested = parent;
@@ -94,45 +72,18 @@ void ObservePlayerVehicle(uint32_t vehicle, VehicleMotionKind kind) {
   }
 }
 
-bool ApplySignedAxis(uint8_t* base, uint32_t address, float motion) {
-  if (!std::isfinite(motion) || motion == 0.0f) {
-    return false;
-  }
-  const float original = LoadFloat(base, address);
-  if (!std::isfinite(original) || std::abs(motion) <= std::abs(original)) {
-    return false;
-  }
-  StoreFloat(base, address, motion);
-  return true;
-}
-
-bool ApplySplitAxis(uint8_t* base, uint32_t positive_address, uint32_t negative_address,
-                    float motion) {
-  if (!std::isfinite(motion) || motion == 0.0f) {
-    return false;
-  }
-  const float positive = LoadFloat(base, positive_address);
-  const float negative = LoadFloat(base, negative_address);
-  if (!std::isfinite(positive) || !std::isfinite(negative) ||
-      std::abs(motion) <= std::max(std::abs(positive), std::abs(negative))) {
-    return false;
-  }
-  StoreFloat(base, positive_address, motion > 0.0f ? motion : 0.0f);
-  StoreFloat(base, negative_address, motion < 0.0f ? -motion : 0.0f);
-  return true;
-}
-
 bool IsAutomobileAirborne(uint8_t* base, uint32_t automobile) {
   const uint32_t wheels = REX_LOAD_U32(automobile + kAutomobileWheelsOffset);
   const uint32_t wheel_count = REX_LOAD_U32(automobile + kAutomobileWheelCountOffset);
-  if (!wheels || !wheel_count) {
+  if (!wheels || !wheel_count || wheel_count > 32) {
     return false;
   }
 
   for (uint32_t index = 0; index < wheel_count; ++index) {
     const uint64_t wheel_address =
         static_cast<uint64_t>(wheels) + static_cast<uint64_t>(index) * kWheelStride;
-    if (wheel_address > std::numeric_limits<uint32_t>::max()) {
+    if (wheel_address + kWheelFlagsOffset + sizeof(uint32_t) >
+        static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1) {
       return false;
     }
     const uint32_t flags = REX_LOAD_U32(static_cast<uint32_t>(wheel_address) + kWheelFlagsOffset);
@@ -151,65 +102,44 @@ void LogAppliedMotion(VehicleMotionKind kind, uint32_t vehicle) {
   }
 }
 
-void ApplyVehicleMotion(const PPCContext& entry_context, uint8_t* base, uint32_t vehicle,
-                        uint32_t controller, VehicleMotionKind kind) {
-  if (!vehicle || !controller || !ResolvePlayerPad(entry_context, base, controller)) {
-    return;
-  }
-
-  ObservePlayerVehicle(vehicle, kind);
-  auto& bridge = GTA4MotionBridge::Get();
-  const MotionSnapshot motion = bridge.Read(kPrimaryUserIndex);
-  if (!motion.controls_enabled || !motion.fresh) {
-    return;
-  }
-
-  bool applied = false;
+bool MotionKindEnabled(const GTA4MotionBridge& bridge, VehicleMotionKind kind) {
   switch (kind) {
     case VehicleMotionKind::kHelicopter:
-      if (!bridge.IsPreferenceEnabled(MotionPreference::kHelicopter)) {
-        return;
-      }
-      applied |= ApplySignedAxis(base, vehicle + kHelicopterBankOffset, motion.roll_axis);
-      applied |= ApplySignedAxis(base, vehicle + kHelicopterPitchOffset, motion.pitch_axis);
-      break;
+      return bridge.IsPreferenceEnabled(MotionPreference::kHelicopter);
     case VehicleMotionKind::kBike:
-      if (!bridge.IsPreferenceEnabled(MotionPreference::kBike)) {
-        return;
-      }
-      applied |= ApplySignedAxis(base, vehicle + kVehicleSteeringOffset, motion.roll_axis);
-      applied |= ApplySignedAxis(base, vehicle + kBikePitchOffset, motion.pitch_axis);
-      break;
+      return bridge.IsPreferenceEnabled(MotionPreference::kBike);
     case VehicleMotionKind::kBoat:
-      if (!bridge.IsPreferenceEnabled(MotionPreference::kBoat)) {
-        return;
-      }
-      applied |= ApplySignedAxis(base, vehicle + kVehicleSteeringOffset, motion.roll_axis);
-      applied |= ApplySignedAxis(base, vehicle + kBoatTrimOffset, motion.pitch_axis);
-      break;
+      return bridge.IsPreferenceEnabled(MotionPreference::kBoat);
     case VehicleMotionKind::kAutomobile:
-      if (!bridge.IsPreferenceEnabled(MotionPreference::kAftertouch) ||
-          !IsAutomobileAirborne(base, vehicle)) {
-        return;
-      }
-      applied |= ApplySignedAxis(base, vehicle + kVehicleSteeringOffset, motion.roll_axis);
-      applied |= ApplySplitAxis(base, vehicle + kVehicleGasPedalOffset,
-                                vehicle + kVehicleBrakePedalOffset, motion.pitch_axis);
-      break;
+      return bridge.IsPreferenceEnabled(MotionPreference::kAftertouch);
   }
-
-  if (applied) {
-    LogAppliedMotion(kind, vehicle);
-  }
+  return false;
 }
 
 void InvokeVehicleControl(PPCContext& ctx, uint8_t* base, PPCFunc* original,
-                          VehicleMotionKind kind) {
-  const PPCContext entry_context = ctx;
-  const uint32_t vehicle = ctx.r3.u32;
-  const uint32_t controller = ctx.r4.u32;
+                           VehicleMotionKind kind) {
+  const uint32_t vehicle = ctx.r3.u32, controller = ctx.r4.u32;
+  const uint32_t pad = vehicle && controller ? ResolvePlayerPad(ctx, base, controller) : 0;
+  VehicleMotionActions actions{};
+  if (pad && REX_LOAD_U32(pad + 3412) == kPrimaryUserIndex) {
+    ObservePlayerVehicle(vehicle, kind);
+    auto& bridge = GTA4MotionBridge::Get();
+    const MotionSnapshot motion = bridge.Read(kPrimaryUserIndex);
+    if (motion.controls_enabled && motion.fresh && MotionKindEnabled(bridge, kind)) {
+      const bool airborne = kind != VehicleMotionKind::kAutomobile ||
+                            IsAutomobileAirborne(base, vehicle);
+      actions = BuildVehicleMotionActions(kind, motion.roll_axis, motion.pitch_axis, airborne);
+    }
+  }
+  ScopedMotionActions scope(pad, actions,
+      [base](uint32_t address) { return REX_LOAD_U8(address); },
+      [base](uint32_t address, uint8_t value) { REX_STORE_U8(address, value); });
+  // All field derivation (including boat/bike steering +4216) stays in the
+  // compiled retail routine. Its register results are retained unchanged.
   original(ctx, base);
-  ApplyVehicleMotion(entry_context, base, vehicle, controller, kind);
+  if (scope.changed()) {
+    LogAppliedMotion(kind, vehicle);
+  }
 }
 
 }  // namespace

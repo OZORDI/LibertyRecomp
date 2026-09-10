@@ -15,6 +15,7 @@ public:
     enum class Health {
         kInitializing,
         kReady,
+        kDegraded,
         kError,
     };
 
@@ -77,6 +78,7 @@ public:
     bool Save(const nlohmann::json& payload);
 
     [[nodiscard]] Health health() const noexcept;
+    [[nodiscard]] bool readable() const noexcept;
     [[nodiscard]] ErrorCode error_code() const noexcept;
     [[nodiscard]] const std::string& error_detail() const noexcept;
     [[nodiscard]] const nlohmann::json& payload() const noexcept;

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <rex/input/input_driver.h>
+#include <rex/input/motion_sample_cache.h>
 
 #include <SDL3/SDL.h>
 
@@ -123,6 +124,7 @@ class SDLInputDriver final : public InputDriver,
   std::atomic<uint64_t> next_motion_device_generation_{1};
   std::array<ControllerState, HID_SDL_USER_COUNT> controllers_;
   std::mutex controllers_mutex_;
+  MotionSampleCache motion_samples_;
   std::array<KeystrokeState, HID_SDL_USER_COUNT> keystroke_states_;
 };
 

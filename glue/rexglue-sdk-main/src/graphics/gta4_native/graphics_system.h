@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <atomic>
 #include <condition_variable>
 #include <compare>
@@ -34,8 +35,11 @@
 #include "frame_constant_arena.h"
 #include "stateful_constant_state.h"
 #include "native_buffer_arena.h"
+#include "native_bulb_appearance.h"
 #include "native_aspect_content.h"
 #include <rex/graphics/gta4_native/phone_trace.h>
+#include <rex/graphics/gta4_native/tv_trace.h>
+#include <rex/graphics/gta4_native/fire_escape_trace.h>
 #include "native_attachment_policy.h"
 #include "native_binding_policy.h"
 #include "native_descriptor_backend.h"
@@ -55,6 +59,7 @@
 #include "native_sampler_cache_key.h"
 #include "native_sampler_lod_bias.h"
 #include "shader_override_policy.h"
+#include "modern_shader_policy.h"
 #include "native_virtual_resource_registry.h"
 #include "smaa_pipeline.h"
 #include "split_postfx_pass.h"
@@ -366,7 +371,10 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   };
 
   struct NativeCommand {
+    std::shared_ptr<const FireTraceContext> fire_trace;
+    std::shared_ptr<const BulbSourceSnapshot> bulb_trace;
     std::shared_ptr<PhoneTraceContext> phone_trace;
+    std::shared_ptr<TvTraceContext> tv_trace;
     CommandType type = CommandType::kPresent;
     LightingContext lighting{};
     uint32_t light_trace_id = 0;
@@ -500,7 +508,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   };
 
   struct NativeContentProbeStage {
+    std::shared_ptr<BulbProbeIdentity> bulb;
     std::shared_ptr<PhoneProbeIdentity> phone;
+    std::shared_ptr<TvProbeIdentity> tv;
     bool valid = false;
     bool reserved = false;
     uint8_t kind = 0;
@@ -1197,6 +1207,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
       uint32_t handle, const xenos::xe_gpu_texture_fetch_t& fetch, uint32_t stage);
   void StartRenderWorker();
   void RenderWorkerMain();
+  void BeginModernShaderFrame();
+  void TraceModernShaderDraw(const NativeCommand& command, VkPipeline pipeline,
+                             VkSampleCountFlagBits samples);
   void ApplyStateCommand(const NativeCommand& command);
   bool ApplyShaderConstantDelta(NativeCommand& command, uint32_t device);
   bool InitializeShaderCache();
@@ -1325,7 +1338,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
                                uint32_t height, uint32_t handle, uint32_t address, uint8_t kind,
                                uint32_t mip_level = 0, VkImageAspectFlags aspect_override = 0,
                                uint32_t vertical_band = 0, uint32_t vertical_band_count = 1,
-                               NativeContentProbeBuffer* probe_buffer = nullptr);
+                               NativeContentProbeBuffer* probe_buffer = nullptr,
+                               const VkRect2D* sample_region = nullptr);
   bool RecordRoomLightInputs(VkCommandBuffer command_buffer, const NativeCommand& command,
                              uint32_t submitted_frame, uint32_t command_index, uint64_t draw_id);
   static void PublishRoomLightInputs(const std::shared_ptr<NativeRoomLightInputs>& inputs,
@@ -1409,6 +1423,7 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
                                const GuestSurfaceView& source_view,
                                const GuestSurfaceView& requested_view,
                                xenos::CopySampleSelect sample_select,
+                               int32_t color_exponent,
                                NativeTextureImage* hdr_mirror = nullptr);
   bool RecordDepthResolveConversion(VkCommandBuffer command_buffer, NativeSurfaceImage& source,
                                     NativeTextureImage& destination, uint32_t destination_level,
@@ -1594,6 +1609,10 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   bool shader_cache_load_attempted_ = false;
   bool shader_cache_initialized_ = false;
   ShaderOverrideMode shader_override_mode_ = ShaderOverrideMode::kPair;
+  ModernShaderFramePolicy modern_shader_frame_;
+  bool modern_shader_trace_ = false;
+  uint64_t modern_shader_change_ = 0;
+  std::array<uint32_t, size_t(ModernShaderFamily::kCount)> modern_shader_trace_counts_{};
   uint32_t shader_registration_count_ = 0;
 
   VkCommandPool command_pool_ = VK_NULL_HANDLE;
@@ -1633,6 +1652,134 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   uint32_t secondary_upload_underutilized_frame_count_ = 0;
   NativeContentProbeBuffer content_probe_buffer_;
   NativeContentProbeBuffer secondary_content_probe_buffer_;
+  NativeContentProbeBuffer tv_content_probe_buffer_, secondary_tv_content_probe_buffer_;
+  std::shared_ptr<TvTraceContext> tv_frame_trace_;
+  // Worker-only diagnostic provenance; never participates in image ownership.
+  std::shared_ptr<TvTraceContext> tv_lifecycle_trace_;
+  std::set<uint32_t> tv_lifecycle_plane_handles_;
+  uint64_t tv_lifecycle_id_ = 0, tv_lifecycle_command_sequence_ = 0;
+  uint32_t tv_lifecycle_batch_frame_ = 0;
+  bool IsTvLifecycleImage(const NativeTextureImage& image) const;
+  void TraceTvImageLifecycle(std::string_view point, const NativeTextureImage& image,
+                            std::string_view reason, std::string_view details = {});
+  std::set<std::pair<uint64_t,uint64_t>> tv_exported_cpu_generations_;
+  uint32_t TvCommandRole(const NativeCommand& command) const;
+  void TraceTvNativeCommand(const NativeCommand& command);
+  void RecordTvImage(VkCommandBuffer cb,const NativeCommand& command,uint32_t checkpoint,
+      uint32_t attachment,NativeSurfaceImage* surface,NativeTextureImage* texture,std::string_view role);
+  void RecordTvTarget(VkCommandBuffer cb,const NativeCommand& command,
+      const NativeRenderingTarget& target,uint32_t checkpoint);
+  void RecordTvInputs(VkCommandBuffer cb,const NativeCommand& command);
+  void RecordTvResolve(VkCommandBuffer cb,const NativeCommand& command,uint32_t checkpoint);
+  static void PublishTvProbe(const NativeContentProbeStage& stage,const uint8_t* bytes,bool visible);
+  void AnalyzePendingTvProbe(uint32_t slot,uint64_t submission);
+  struct NativeBulbFullProbe {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    uint8_t* mapping = nullptr;
+    VkDeviceSize allocation_size = 0;
+    uint32_t memory_type = UINT32_MAX;
+    uint32_t frame = 0, command_index = 0, fixture = 0, width = 0, height = 0;
+    uint32_t format = 0, aspect = 0, block_extent = 1, bytes_per_block = 0, layout = 0, handle = 0;
+    uint64_t run = 0, source_sequence = 0, sequence = 0, submission = 0, bytes = 0;
+    uint64_t image = 0, view = 0, lifetime = 0, generation = 0, pixel_shader = 0, vertex_shader = 0;
+    std::array<uint32_t, 4> components{};
+    std::string role;
+  };
+  struct FireFullProbe {
+    NativeBulbFullProbe data;
+    VkImage scratch = VK_NULL_HANDLE;
+    VkDeviceMemory scratch_memory = VK_NULL_HANDLE;
+    uint64_t occurrence = 0, event = 0;
+    uint32_t mip = 0, samples = 1;
+  };
+  struct FireQueryRow {
+    uint32_t frame = 0, command = 0;
+    uint64_t sequence = 0, occurrence = 0, event = 0;
+  };
+  struct FireQueryBatch {
+    VkQueryPool pool = VK_NULL_HANDLE;
+    uint64_t submission = 0;
+    bool ready = false;
+    std::vector<FireQueryRow> rows;
+  };
+  std::array<std::vector<FireFullProbe>, 2> fire_probes_;
+  std::array<FireQueryBatch, 2> fire_queries_;
+  bool fire_frame_ = false, fire_images_ = false, fire_event_active_ = false;
+  uint32_t fire_last_logged_frame_ = 0;
+  size_t fire_first_draw_index_ = SIZE_MAX, fire_last_ui_index_ = SIZE_MAX;
+  uint64_t fire_frame_bytes_ = 0, fire_cpu_bytes_ = 0;
+  std::unordered_map<std::string, uint32_t> fire_checkpoints_;
+  std::unordered_set<uint64_t> fire_input_images_, fire_cpu_resources_;
+  std::chrono::steady_clock::time_point fire_last_seen_, fire_last_images_;
+  void BeginFireFrame(VkCommandBuffer cb, uint32_t frame);
+  void TraceFireCommand(std::string_view point, const NativeCommand& command, std::string_view result);
+  bool SelectFireCheckpoint(const NativeCommand& command, const NativeRenderingTarget& target);
+  void FireImage(VkCommandBuffer cb, std::string_view role, const NativeCommand* command = nullptr,
+      NativeSurfaceImage* surface = nullptr, NativeTextureImage* texture = nullptr,
+      VkImage direct = VK_NULL_HANDLE, VkFormat format = VK_FORMAT_UNDEFINED,
+      VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED, uint32_t width = 0, uint32_t height = 0,
+      VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT, uint32_t mip = 0);
+  void FireTarget(VkCommandBuffer cb, const NativeCommand& command, const NativeRenderingTarget& target, bool after);
+  void FireInputs(VkCommandBuffer cb, const NativeCommand& command);
+  uint32_t BeginFireQuery(VkCommandBuffer cb, const NativeCommand& command, uint32_t existing);
+  void EndFireQuery(VkCommandBuffer cb, uint32_t index);
+  void PublishFireProbes(uint32_t slot, uint64_t submission);
+  void DestroyFireProbes();
+
+  // Indexed by physical frame slot; never swapped with the hot-member aliases.
+  std::array<std::vector<NativeBulbFullProbe>, 2> bulb_full_probes_;
+  uint32_t bulb_full_frame_ = 0;
+  uint64_t bulb_full_bytes_ = 0;
+  bool NeedsBulbInterference(const NativeCommand& command, const NativeRenderingTarget& target) const;
+  void RecordBulbFullImage(VkCommandBuffer cb, std::string_view role, const NativeCommand* command = nullptr,
+      NativeSurfaceImage* surface = nullptr, NativeTextureImage* texture = nullptr,
+      VkImage direct = VK_NULL_HANDLE, VkFormat format = VK_FORMAT_UNDEFINED,
+      VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED, uint32_t width = 0, uint32_t height = 0,
+      VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
+  void RecordBulbInterferenceBefore(VkCommandBuffer cb, const NativeCommand& command, const NativeRenderingTarget& target);
+  void PublishBulbFullProbe(uint32_t slot, uint64_t submission);
+  void DestroyBulbFullProbes();
+  struct BulbRoute {
+    std::shared_ptr<const BulbSourceSnapshot> source;
+    uint64_t sequence = 0;
+    uint32_t command_index = 0, writers = 0;
+    bool recorded = false, budget_reported = false;
+    BulbScreenRegion region;
+    std::set<std::pair<uint64_t, uint64_t>> images;
+    std::set<uint64_t> generations;
+  };
+  std::vector<BulbRoute> bulb_routes_;
+  std::optional<BulbRoute> bulb_prospective_route_;
+  bool bulb_trace_frame_ = false;
+  std::atomic<bool> bulb_source_capture_done_{false};
+  uint32_t bulb_capture_count_ = 0, bulb_last_frame_ = 0;
+  uint64_t bulb_run_ = 0;
+  uint32_t bulb_selected_fixture_ = UINT32_MAX;
+  std::array<uint32_t,kBulbFixtures.size()> bulb_fixture_visits_{};
+  const NativeCommand* bulb_current_command_ = nullptr;
+  NativeContentProbeBuffer bulb_content_probe_buffer_, secondary_bulb_content_probe_buffer_;
+  void CaptureBulbSource(NativeCommand& command, std::span<const uint8_t> device_state);
+  void BeginBulbFrame(uint32_t frame);
+  void TraceBulbCommand(std::string_view point, const NativeCommand& command, std::string_view reason);
+  bool PrepareBulbDraw(const NativeCommand& command, const NativeRenderingTarget& target);
+  bool BulbRouteTouches(const BulbRoute& route, const NativeCommand& command, const NativeRenderingTarget& target) const;
+  bool NeedsBulbCheckpoint(const NativeCommand& command, const NativeRenderingTarget& target) const;
+  void RecordBulbImage(VkCommandBuffer cb, BulbRoute& route, std::string_view role,
+      NativeSurfaceImage* surface = nullptr, NativeTextureImage* texture = nullptr,
+      VkImage direct_image = VK_NULL_HANDLE, VkFormat direct_format = VK_FORMAT_UNDEFINED,
+      VkImageLayout direct_layout = VK_IMAGE_LAYOUT_UNDEFINED, uint32_t direct_width = 0, uint32_t direct_height = 0,
+      VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT, bool full_texture = false);
+  void RecordBulbPostFx(VkCommandBuffer cb, const NativeCommand& command, NativeTextureImage* image, std::string_view role, bool recorded);
+  void RecordBulbBefore(VkCommandBuffer cb, const NativeCommand& command, const NativeRenderingTarget& target);
+  void RecordBulbAfter(VkCommandBuffer cb, const NativeCommand& command, const NativeRenderingTarget& target, bool recorded);
+  void TraceBulbResolve(VkCommandBuffer cb, const NativeCommand& command, NativeSurfaceImage* source,
+      NativeTextureImage* destination, std::string_view result, std::string_view reason);
+  void RecordBulbPresentation(VkCommandBuffer cb, NativeSurfaceImage* final_surface, NativeTextureImage* composite_input,
+      const std::shared_ptr<const NativeTextureResource>& present_source, VkImage image, VkImageLayout layout,
+      uint32_t width, uint32_t height);
+  static void PublishBulbProbe(const NativeContentProbeStage& stage, const uint8_t* bytes, bool visible);
+  void AnalyzePendingBulbProbe(uint32_t slot, uint64_t submission);
   NativeContentProbeBuffer phone_content_probe_buffer_;
   NativeContentProbeBuffer secondary_phone_content_probe_buffer_;
   std::shared_ptr<PhoneTraceContext> phone_frame_trace_;

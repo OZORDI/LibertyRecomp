@@ -8,6 +8,9 @@ namespace {
 
 std::mutex g_bindings_mutex;
 NativeControllerCompatibilityBindings g_bindings;
+std::array<uint8_t, 256> g_virtual_keys{};
+uint32_t g_virtual_user = 0;
+bool g_virtual_active = false;
 
 bool IsBindingPressed(rex::ui::VirtualKey key, const bool* key_down,
                       size_t key_count) {
@@ -27,6 +30,24 @@ void SetNativeControllerCompatibilityBindings(
 NativeControllerCompatibilityBindings GetNativeControllerCompatibilityBindings() {
   std::lock_guard lock(g_bindings_mutex);
   return g_bindings;
+}
+
+void PublishVirtualControllerCompatibilityKeys(uint32_t user_index,
+    const std::array<uint8_t, 256>& keys, bool active) {
+  std::lock_guard lock(g_bindings_mutex);
+  g_virtual_user = user_index;
+  g_virtual_active = active;
+  g_virtual_keys = active ? keys : std::array<uint8_t, 256>{};
+}
+
+bool ReadVirtualControllerCompatibilityGamepad(uint32_t user_index, X_INPUT_GAMEPAD& gamepad) {
+  std::lock_guard lock(g_bindings_mutex);
+  gamepad = {};
+  if (!g_virtual_active || user_index != g_virtual_user) return false;
+  bool keys[256]{};
+  for (size_t i = 0; i < g_virtual_keys.size(); ++i) keys[i] = g_virtual_keys[i] != 0;
+  gamepad = BuildNativeControllerCompatibilityGamepad(g_bindings, keys, std::size(keys));
+  return true;
 }
 
 X_INPUT_GAMEPAD BuildNativeControllerCompatibilityGamepad(

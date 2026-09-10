@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include <rex/input/input.h>
 #include <rex/ui/virtual_key.h>
@@ -43,6 +45,11 @@ struct NativeControllerCompatibilityBindings {
 void SetNativeControllerCompatibilityBindings(
     const NativeControllerCompatibilityBindings& bindings);
 NativeControllerCompatibilityBindings GetNativeControllerCompatibilityBindings();
+
+// Immutable title-poll snapshot. An inactive source is not a connected device.
+void PublishVirtualControllerCompatibilityKeys(uint32_t user_index,
+    const std::array<uint8_t, 256>& keys, bool active);
+bool ReadVirtualControllerCompatibilityGamepad(uint32_t user_index, X_INPUT_GAMEPAD& gamepad);
 
 // Produces digital buttons, key-bound triggers and optional left-stick axes.
 // Opposing directions cancel; unbound axes and the right stick stay neutral.

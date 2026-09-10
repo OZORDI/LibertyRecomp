@@ -91,6 +91,12 @@ ContextTouchLayout BuildContextTouchLayout(
   const float right = viewport.safe_x + viewport.safe_width;
   const float bottom = viewport.safe_y + viewport.safe_height;
 
+  if (mode == ContextTouchMode::kFrontend || mode == ContextTouchMode::kMap) {
+    AddCircle(layout, ContextTouchControlKind::kButton, rex::ui::VirtualKey::kBack, "BACK",
+              right - padding - button_radius, bottom - padding - button_radius, button_radius);
+    return layout;
+  }
+
   const bool minigame_uses_sticks =
       mode == ContextTouchMode::kMinigame &&
       std::any_of(script_controls.begin(), script_controls.end(),
@@ -134,6 +140,8 @@ ContextTouchLayout BuildContextTouchLayout(
     AddLookSurface(layout, viewport);
   } else if (mode == ContextTouchMode::kVehicleHelicopter) {
     constexpr std::array buttons = {
+        ButtonDescription{rex::ui::VirtualKey::kNumpad4, "YAW L"},
+        ButtonDescription{rex::ui::VirtualKey::kNumpad6, "YAW R"},
         ButtonDescription{rex::ui::VirtualKey::kW, "THROTTLE"},
         ButtonDescription{rex::ui::VirtualKey::kS, "DESCEND"},
         ButtonDescription{rex::ui::VirtualKey::kLButton, "FIRE"},
@@ -193,14 +201,26 @@ ContextTouchLayout BuildContextTouchLayout(
       if (script_controls[index].kind == TouchScriptQueryKind::kAnalogueSticks) {
         continue;
       }
+      const auto canonical = CanonicalTouchScriptControl(script_controls[index]);
+      bool duplicate = false;
+      for (size_t prior = 0; prior < index; ++prior) {
+        const auto earlier = CanonicalTouchScriptControl(script_controls[prior]);
+        duplicate |= earlier.kind == canonical.kind && earlier.action == canonical.action;
+      }
+      if (duplicate) {
+        continue;
+      }
       const float column = static_cast<float>(visible_index % 2);
       const float row = static_cast<float>(visible_index / 2);
+      if (bottom - padding - button_radius * 2.0f - row * step < viewport.safe_y) break;
       char label[16]{};
-      std::snprintf(label, sizeof(label), "ACT %u", script_controls[index].action);
+      std::snprintf(label, sizeof(label),
+                    canonical.kind == TouchScriptQueryKind::kRawButton ? "BTN %u" : "ACT %u",
+                    canonical.action);
       AddCircle(layout, ContextTouchControlKind::kScriptButton, rex::ui::VirtualKey::kNone, label,
                 right - padding - button_radius - column * step,
                 bottom - padding - button_radius - row * step, button_radius,
-                script_controls[index]);
+                canonical);
       ++visible_index;
     }
   }
@@ -278,17 +298,22 @@ ContextTouchOverlayTransform BuildContextTouchOverlayTransform(const ContextTouc
 void ContextTouchKeyLatch::Press(rex::ui::VirtualKey key, uint64_t epoch) noexcept {
   const size_t index = static_cast<uint16_t>(key);
   if (index < refcounts_.size()) {
+    if (!refcounts_[index]) {
+      pressed_epoch_[index] = epoch;
+    }
     if (refcounts_[index] != std::numeric_limits<uint16_t>::max()) {
       ++refcounts_[index];
     }
-    pressed_epoch_[index] = epoch;
   }
 }
 
-void ContextTouchKeyLatch::Release(rex::ui::VirtualKey key) noexcept {
+void ContextTouchKeyLatch::Release(rex::ui::VirtualKey key, bool cancelled) noexcept {
   const size_t index = static_cast<uint16_t>(key);
   if (index < refcounts_.size() && refcounts_[index]) {
     --refcounts_[index];
+    if (cancelled && !refcounts_[index]) {
+      pressed_epoch_[index] = 0;
+    }
   }
 }
 
@@ -300,10 +325,12 @@ void ContextTouchKeyLatch::Cancel() noexcept {
 void ContextTouchKeyLatch::Collect(uint64_t epoch, std::array<uint8_t, 256>& down,
                                    std::array<uint8_t, 256>& pressed) const noexcept {
   for (size_t index = 0; index < refcounts_.size(); ++index) {
-    if (refcounts_[index]) {
+    const bool edge = epoch != 0 && pressed_epoch_[index] == epoch;
+    // GTA reads held action bytes: keep a sub-poll tap held for its one poll.
+    if (refcounts_[index] || edge) {
       down[index] = 1;
     }
-    if (pressed_epoch_[index] == epoch) {
+    if (edge) {
       pressed[index] = 1;
     }
   }

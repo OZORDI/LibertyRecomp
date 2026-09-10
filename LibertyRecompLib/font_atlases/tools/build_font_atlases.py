@@ -183,8 +183,8 @@ PROFILE_FACE_RANGES = {
         "font1",
         0,
         134,
-        "HELECOND",
-        "helvetica_condensed_medium",
+        "STANDARD / DIN 1451 MITTELSCHRIFT",
+        "din_mittelschrift",
         "MAINFONT",
         horizontal_gutter=MIN_SAFE_GUTTER_X,
         calibrate_sampled_width=True,
@@ -196,20 +196,28 @@ PROFILE_FACE_RANGES = {
     FaceRange(
         "font2", 135, 195, "HELE ROMAN", "helvetica_roman", "SUBFONT_1"
     ),
+    # The base game's GARAGE name-label bank is not the STANDARD text bank.
+    # Episodes supply their own glyphs here; their selections below stay intact.
+    FaceRange(
+        "font3", 93, 162, "GARAGE / HELVETICA COMPRESSED",
+        "helvetica_compressed", "SUBFONT_2",
+        calibrate_sampled_width=True,
+        fit_base_characters=True,
+        allow_traced_fallback=True,
+    ),
     ),
     "tlad": (
         FaceRange(
             "font1",
             0,
             134,
-            "HELECOND",
-            "helvetica_condensed_medium",
+            "STANDARD / DIN 1451 MITTELSCHRIFT",
+            "din_mittelschrift",
             "MAINFONT",
             horizontal_gutter=MIN_SAFE_GUTTER_X,
             calibrate_sampled_width=True,
             fit_base_characters=True,
             allow_traced_fallback=True,
-            fixed_transform=FaceTransform(152, 126, 0.9333333333333333, 110.0, 18),
         ),
         FaceRange(
             "font1", 134, 150, "PRICEDOWN", "pricedown", "SUBFONT_1",
@@ -240,14 +248,13 @@ PROFILE_FACE_RANGES = {
             "font1",
             0,
             134,
-            "HELECOND",
-            "helvetica_condensed_medium",
+            "STANDARD / DIN 1451 MITTELSCHRIFT",
+            "din_mittelschrift",
             "MAINFONT",
             horizontal_gutter=MIN_SAFE_GUTTER_X,
             calibrate_sampled_width=True,
             fit_base_characters=True,
             allow_traced_fallback=True,
-            fixed_transform=FaceTransform(152, 126, 0.9333333333333333, 110.0, 18),
         ),
         FaceRange(
             "font1", 134, 150, "PRICEDOWN", "pricedown", "SUBFONT_1",
@@ -333,6 +340,7 @@ def locate_fonts(extracted: Path, required_keys: set[str]) -> dict[str, Path]:
         "mesquite": "MesquiteStd.otf",
         "din_bold": "DIN Bold.otf",
         "din_mittelschrift": "din1451alt.ttf",
+        "helvetica_compressed": "helvetica-compressed-5871d14b6903a.otf",
     }
     return {key: find_preferred(extracted, filenames[key]) for key in required_keys}
 
@@ -1136,6 +1144,15 @@ def main() -> None:
             },
             "source": "licensed vector faces fitted to compiled GTA IV sampling metrics",
             "faces": {key: path.name for key, path in fonts.items()},
+            "font_sources": {
+                key: {
+                    "file": path.name,
+                    "sha256": sha256_file(path),
+                    "family": ImageFont.truetype(str(path), 16).getname()[0],
+                    "style": ImageFont.truetype(str(path), 16).getname()[1],
+                }
+                for key, path in sorted(fonts.items())
+            },
             "atlases": {},
         }
 
@@ -1226,6 +1243,8 @@ def main() -> None:
                     {
                         "role": face_range.role,
                         "font": fonts[face_range.font_key].name,
+                        "font_key": face_range.font_key,
+                        "font_sha256": sha256_file(fonts[face_range.font_key]),
                         "first_cell": face_range.first,
                         "last_cell_exclusive": face_range.last_exclusive,
                         "redrawn_cells": len(redrawn_records),

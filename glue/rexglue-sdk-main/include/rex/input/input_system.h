@@ -66,6 +66,7 @@ class InputSystem : public system::IInputSystem {
   };
 
   rex::ui::Window* window_ = nullptr;
+  std::function<bool()> is_active_callback_;
 
   std::vector<std::unique_ptr<InputDriver>> drivers_;
   std::vector<std::array<DriverTraceTracker, 4>> driver_trace_trackers_;

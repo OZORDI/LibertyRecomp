@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include <rex/audio/xma/context.h>
+#include <rex/audio/handoff_trace.h>
 #include <rex/audio/xma/decoder.h>
 #include <rex/audio/xma/helpers.h>
 #include <rex/dbg.h>
@@ -99,6 +100,7 @@ int XmaContext::Setup(uint32_t id, memory::Memory* memory, uint32_t guest_ptr) {
 }
 
 bool XmaContext::Work() {
+  handoff::Span handoff_work("xma-work", id_, guest_ptr_);
   if (!is_allocated() || !is_enabled()) {
     return false;
   }
@@ -109,6 +111,7 @@ bool XmaContext::Work() {
   auto context_ptr = memory()->TranslateVirtual(guest_ptr());
   XMA_CONTEXT_DATA data(context_ptr);
   const XMA_CONTEXT_DATA initial_data = data;
+  handoff::Record("xma-work-state", id_, {handoff_generation_, data.input_buffer_0_ptr, data.input_buffer_1_ptr, data.input_buffer_read_offset, data.current_buffer, data.output_buffer_ptr, data.output_buffer_read_offset, data.output_buffer_write_offset, data.output_buffer_block_count, data.output_buffer_valid, data.input_buffer_0_valid, data.input_buffer_1_valid, current_frame_remaining_subframes_, uint64_t(uint32_t(remaining_subframe_blocks_in_output_buffer_)), data.error_status, data.subframe_decode_count});
 
   if (!data.output_buffer_valid) {
     return true;
@@ -184,6 +187,11 @@ void XmaContext::Clear() {
 }
 
 void XmaContext::ClearLocked(XMA_CONTEXT_DATA* data) {
+  if (handoff::Enabled()) {
+    ++handoff_generation_;
+    handoff::Record("xma-clear", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_, data->input_buffer_0_ptr, data->input_buffer_1_ptr, data->output_buffer_ptr, data->input_buffer_read_offset}, "codec-history-unchanged");
+    handoff_frame_=0;
+  }
   data->input_buffer_0_valid = 0;
   data->input_buffer_1_valid = 0;
   data->output_buffer_valid = 0;
@@ -206,6 +214,7 @@ void XmaContext::Release() {
   std::lock_guard<std::mutex> lock(lock_);
   assert_true(is_allocated());
 
+  handoff::Record("xma-release", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_}, "codec-history-unchanged");
   set_is_allocated(false);
   auto context_ptr = memory()->TranslateVirtual(guest_ptr());
   std::memset(context_ptr, 0, sizeof(XMA_CONTEXT_DATA));
@@ -466,6 +475,10 @@ int XmaContext::PrepareDecoder(int sample_rate, bool is_two_channel) {
 
     av_context_->sample_rate = sample_rate;
     av_context_->channels = channels;
+    if (handoff::Enabled()) {
+      ++handoff_codec_epoch_;
+      handoff::Record("xma-reopen", id_, {handoff_generation_, handoff_codec_epoch_, uint64_t(sample_rate), channels, uint64_t(reinterpret_cast<uintptr_t>(av_context_))});
+    }
 
     if (avcodec_open2(av_context_, av_codec_, NULL) < 0) {
       REXAPU_ERROR("XmaContext: Failed to reopen FFmpeg context");
@@ -493,17 +506,20 @@ bool XmaContext::DecodePacket(AVCodecContext* av_context, const AVPacket* av_pac
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
     REXAPU_ERROR("XmaContext {}: Error sending packet for decoding: {} ({})", id(), errbuf, ret);
+    handoff::Record("xma-error", id_, {uint64_t(int64_t(ret)), 0, handoff_generation_, handoff_codec_epoch_}, "send-packet");
     return false;
   }
   ret = avcodec_receive_frame(av_context, av_frame);
 
   if (ret == AVERROR(EAGAIN)) {
+    handoff::Record("xma-codec-return", id_, {uint64_t(int64_t(ret)), 1, handoff_generation_, handoff_codec_epoch_}, "receive-needs-input");
     return false;
   }
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
     REXAPU_ERROR("XmaContext {}: Error during decoding: {} ({})", id(), errbuf, ret);
+    handoff::Record("xma-error", id_, {uint64_t(int64_t(ret)), 1, handoff_generation_, handoff_codec_epoch_}, "receive-frame");
     return false;
   }
   return true;
@@ -645,9 +661,23 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
 
   raw_frame_.fill(0);
 
+  const uint64_t handoff_decode_start=handoff::Enabled()?handoff::Clock():0;
   PrepareDecoder(data->sample_rate, bool(data->is_stereo));
   PreparePacket(packet_info.current_frame_size_, padding_start);
-  if (DecodePacket(av_context_, av_packet_, av_frame_)) {
+  const bool handoff_decoded = DecodePacket(av_context_, av_packet_, av_frame_);
+  if (handoff_decode_start) {
+    const uint64_t decode_ns=handoff::Clock()-handoff_decode_start;
+    const uint32_t channels=uint32_t(data->is_stereo)+1;
+    const auto planes=reinterpret_cast<const float* const*>(av_frame_->data);
+    handoff::Signal signal;
+    const bool valid_frame=handoff_decoded && av_frame_->nb_samples>=int(kSamplesPerFrame) && planes[0] && (channels==1||planes[1]);
+    if(valid_frame)signal=handoff::Inspect(planes,nullptr,kSamplesPerFrame,channels);
+    ++handoff_frame_;
+    handoff::Record(handoff_decoded?"xma-frame":"xma-no-frame",id_,{handoff_generation_,handoff_codec_epoch_,handoff_frame_,uint64_t(reinterpret_cast<uintptr_t>(av_context_)),data->input_buffer_0_ptr,data->input_buffer_1_ptr,data->current_buffer,data->input_buffer_read_offset,data->output_buffer_ptr,uint64_t(data->sample_rate),channels,data->error_status,uint64_t(av_frame_->nb_samples),uint64_t(av_context_?av_context_->frame_number:0),decode_ns,handoff::Clock()-handoff_decode_start-decode_ns},nullptr,&signal);
+    if(valid_frame && (handoff_frame_<=4 || signal.nonfinite || (signal.clipped && handoff_frame_%32==0)))
+      handoff::Capture(handoff::Stage::Decoded,nullptr,kSamplesPerFrame,channels,GetSampleRate(data->sample_rate),id_,handoff_frame_,handoff_generation_,handoff_codec_epoch_,false,planes);
+  }
+  if (handoff_decoded) {
     ConvertFrame(reinterpret_cast<const uint8_t**>(&av_frame_->data), bool(data->is_stereo),
                  raw_frame_.data());
     current_frame_remaining_subframes_ = 4 << data->is_stereo;

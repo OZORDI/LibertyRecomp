@@ -4,6 +4,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <rex/input/input_system.h>
+#include <rex/input/absolute_pointer.h>
+#include <rex/input/mnk/controller_compatibility.h>
+#include <rex/cvar.h>
+#include <string>
+REXCVAR_DECLARE(std::string, touch_controls);
 
 namespace rex::input {
 namespace {
@@ -192,6 +197,75 @@ TEST_CASE("The cached input state is invalidated after device loss",
   driver_ptr->connection_result = X_ERROR_DEVICE_NOT_CONNECTED;
   CHECK(input.GetState(0, &state) == X_ERROR_DEVICE_NOT_CONNECTED);
   CHECK_FALSE(input.TryGetLastState(0, &state));
+}
+
+
+namespace {
+struct VirtualTouchFixture {
+  std::string mode = REXCVAR_GET(touch_controls);
+  mnk::NativeControllerCompatibilityBindings bindings = mnk::GetNativeControllerCompatibilityBindings();
+  TouchPresentationState presentation{};
+  VirtualTouchFixture() {
+    GetAbsolutePointerService().GetPresentationState(&presentation);
+    REXCVAR_SET(touch_controls,std::string("on"));
+    GetAbsolutePointerService().SetFocused(true,0);
+    mnk::NativeControllerCompatibilityBindings test{};
+    test.a=rex::ui::VirtualKey::kReturn;test.left_stick_right=rex::ui::VirtualKey::kD;
+    mnk::SetNativeControllerCompatibilityBindings(test);
+  }
+  ~VirtualTouchFixture() {
+    mnk::PublishVirtualControllerCompatibilityKeys(0,{},false);
+    mnk::SetNativeControllerCompatibilityBindings(bindings);
+    REXCVAR_SET(touch_controls,mode);
+    GetAbsolutePointerService().SetFocused(presentation.focused,0);
+  }
+};
+}
+
+TEST_CASE("touch controller joins actual polling with stable packets and UI suppression", "[controls_fix][touch][polling]") {
+  VirtualTouchFixture fixture;
+  InputSystem input(nullptr);
+  bool active=true;input.SetActiveCallback([&]{return active;});
+  std::array<uint8_t,256> keys{};
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kReturn)]=1;
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kD)]=1;
+  mnk::PublishVirtualControllerCompatibilityKeys(0,keys,true);
+  X_INPUT_STATE state{},repeated{};X_INPUT_CAPABILITIES caps{};
+  CHECK(input.GetCapabilities(0,0,&caps)==X_ERROR_SUCCESS);
+  CHECK(input.GetState(0,nullptr)==X_ERROR_SUCCESS);
+  CHECK(input.GetState(0,&state)==X_ERROR_SUCCESS);
+  CHECK(state.gamepad.buttons==X_INPUT_GAMEPAD_A);
+  CHECK(state.gamepad.thumb_lx==32767);
+  CHECK(input.GetState(0,&repeated)==X_ERROR_SUCCESS);
+  CHECK(repeated.packet_number==state.packet_number);
+  CHECK(input.GetState(1,&repeated)==X_ERROR_DEVICE_NOT_CONNECTED);
+  active=false;
+  CHECK(input.GetState(0,&repeated)==X_ERROR_SUCCESS);
+  CHECK(repeated.gamepad.buttons==0);
+  CHECK(repeated.gamepad.thumb_lx==0);
+  CHECK(repeated.packet_number!=state.packet_number);
+  mnk::PublishVirtualControllerCompatibilityKeys(0,{},false);
+  CHECK(input.GetState(0,&repeated)==X_ERROR_DEVICE_NOT_CONNECTED);
+}
+
+TEST_CASE("touch polling preserves physical buttons and stronger opposite stick", "[controls_fix][touch][polling]") {
+  VirtualTouchFixture fixture;
+  InputSystem input(nullptr);
+  auto physical=std::make_unique<MutableStateDriver>();
+  physical->state.gamepad.buttons=X_INPUT_GAMEPAD_B;
+  physical->state.gamepad.thumb_lx=-32768;
+  input.AddDriver(std::move(physical));
+  std::array<uint8_t,256> keys{};
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kReturn)]=1;
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kD)]=1;
+  mnk::PublishVirtualControllerCompatibilityKeys(0,keys,true);
+  X_INPUT_STATE state{};
+  CHECK(input.GetState(0,&state)==X_ERROR_SUCCESS);
+  CHECK(state.gamepad.buttons==(X_INPUT_GAMEPAD_A|X_INPUT_GAMEPAD_B));
+  CHECK(state.gamepad.thumb_lx==-32768);
+  GetAbsolutePointerService().SetFocused(false,0);
+  CHECK(input.GetState(0,&state)==X_ERROR_SUCCESS);
+  CHECK(state.gamepad.buttons==X_INPUT_GAMEPAD_B);
 }
 
 }  // namespace rex::input

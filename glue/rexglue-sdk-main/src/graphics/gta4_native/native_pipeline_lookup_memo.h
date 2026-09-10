@@ -37,6 +37,7 @@ struct NativePipelineLookupContext {
   uint32_t user_pointer_stride = 0;
   uint32_t descriptor_backend = 0;
   uint32_t shader_override_mode = 0;
+  uint32_t modern_shader_settings = 0;
   bool depth_stencil_attachment_active = false;
   bool uses_presenter = false;
   bool primitive_restart_enable = false;

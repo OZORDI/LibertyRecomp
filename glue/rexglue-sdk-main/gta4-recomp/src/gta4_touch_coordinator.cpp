@@ -1,3 +1,4 @@
+#include "gta4_aspect_hooks.h"
 #include "gta4_touch_coordinator.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <rex/cvar.h>
 #include <rex/input/absolute_pointer.h>
 #include <rex/input/mnk/encoded_action.h>
+#include <rex/input/mnk/controller_compatibility.h>
 #include <rex/logging.h>
 
 #include "gta4_init.h"
@@ -454,10 +456,13 @@ void FreezeVirtualKeys(const GTA4TouchExtension& extension, uint64_t epoch,
   VirtualKeySnapshot snapshot;
   snapshot.epoch = epoch;
   if (controls_active && extension.collect_virtual_keys) {
-    extension.collect_virtual_keys(snapshot.down, snapshot.pressed);
+    extension.collect_virtual_keys(epoch, snapshot.down, snapshot.pressed);
   }
   std::lock_guard lock(g_extension_mutex);
+  if (GTA4_TouchTitleInputOwned()) snapshot = {};
   g_virtual_keys = snapshot;
+  rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, snapshot.down,
+      controls_active && !GTA4_TouchTitleInputOwned());
 }
 
 void DisableContextControls(const GTA4TouchExtension& extension,
@@ -496,8 +501,7 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
   const bool frontend_navigation_active = frontend_active && !map_active;
   const bool gameplay_active = !frontend_active;
   const bool title_input_owned = GTA4_TouchTitleInputOwned();
-  const bool context_controls_active =
-      gameplay_active && !title_input_owned;
+  const bool context_controls_active = !title_input_owned;
   g_replay.frontend_active = frontend_navigation_active;
   g_replay.map_active = map_active;
   g_replay.context_controls_active = context_controls_active;
@@ -521,9 +525,16 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
     DisableContextControls(extension, context, base, epoch);
   }
 
+  if (context_controls_active && extension.begin_poll) {
+    extension.begin_poll(context, base, epoch, frontend_active, map_active);
+  }
   AbsolutePointerEvent event;
   while (rex::input::TryDequeueAbsolutePointerEvent(&event)) {
     if (title_input_owned) {
+      continue;
+    }
+    if (frontend_active && extension.on_pointer_event &&
+        extension.on_pointer_event(event, context, base, epoch)) {
       continue;
     }
     if (map_active) {
@@ -622,6 +633,7 @@ void GTA4_SetTouchTitleInputOwned(bool owned) noexcept {
   if (owned) {
     std::lock_guard lock(g_extension_mutex);
     g_virtual_keys = {};
+    rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, {}, false);
   }
 }
 
@@ -669,12 +681,16 @@ void GTA4_TouchObserveHudSubmit(const PPCContext& context, uint8_t* base) noexce
 
   const float cell_right = cell_left + column_width;
   const float padding = row_height * 0.5f;
-  const Rect cell{
+  Rect cell{
       .left = std::min({cell_left, cell_right, text_x}) - padding,
       .top = text_y - row_height * 0.5f,
       .right = std::max({cell_left, cell_right, text_x}) + padding,
       .bottom = text_y + row_height * 0.5f,
   };
+  const auto layout = gta4::aspect::CurrentUi(base);
+  const auto mapped = layout.transform.Map(gta4::aspect::Rect{cell.left, cell.top, cell.right, cell.bottom});
+  cell = {.left = float(mapped.left), .top = float(mapped.top),
+          .right = float(mapped.right), .bottom = float(mapped.bottom)};
   if (!cell.valid()) {
     return;
   }
@@ -696,6 +712,8 @@ void GTA4_TouchObserveHudSubmit(const PPCContext& context, uint8_t* base) noexce
 
 void GTA4_TouchCaptureFrontendDraw(PPCContext& context, uint8_t* base,
                                    GTA4GuestFunction draw_function) {
+  const gta4::aspect::Scope aspect_scope(gta4::aspect::MenuBodyUi(base));
+  const gta4::aspect::FrontendLayoutScope adaptive_columns(context, base);
   RowCapture previous = std::move(g_row_capture);
   g_row_capture = {};
   if (context.r3.u32 == kFrontendChannel) {
@@ -733,6 +751,10 @@ extern "C" void sub_821BF050(PPCContext& context, uint8_t* base) {
       }
     }
     if (!first && quad.valid()) {
+      const auto layout = gta4::aspect::CurrentUi(base);
+      const auto mapped = layout.transform.Map(gta4::aspect::Rect{quad.left, quad.top, quad.right, quad.bottom});
+      quad = {.left = float(mapped.left), .top = float(mapped.top),
+              .right = float(mapped.right), .bottom = float(mapped.bottom)};
       IncludeRect(g_radar_capture.bounds, quad);
       g_radar_capture.has_quad = true;
     }
@@ -741,6 +763,7 @@ extern "C" void sub_821BF050(PPCContext& context, uint8_t* base) {
 }
 
 extern "C" void sub_8233ABF0(PPCContext& context, uint8_t* base) {
+  const gta4::aspect::Scope aspect_scope(gta4::aspect::UiRole::kRadar);
   RadarCapture previous = g_radar_capture;
   g_radar_capture = {.active = true};
   __imp__sub_8233ABF0(context, base);

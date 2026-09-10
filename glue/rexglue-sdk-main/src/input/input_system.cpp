@@ -14,6 +14,8 @@
 
 #include <rex/dbg.h>
 #include <rex/input/flags.h>
+#include <rex/input/absolute_pointer.h>
+#include <rex/input/mnk/controller_compatibility.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
 #include <rex/input/input_trace.h>
@@ -65,6 +67,7 @@ void InputSystem::AttachWindow(rex::ui::Window* window) {
 }
 
 void InputSystem::SetActiveCallback(std::function<bool()> callback) {
+  is_active_callback_ = callback;
   for (auto& driver : drivers_) {
     driver->set_is_active_callback(callback);
   }
@@ -84,6 +87,18 @@ X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
       return result;
     }
   }
+  X_INPUT_GAMEPAD virtual_pad{};
+  if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad)) {
+    if (out_caps) {
+      *out_caps = {};
+      out_caps->type = 1;
+      out_caps->sub_type = 1;
+      out_caps->gamepad.buttons = 0xFFFF;
+      out_caps->gamepad.left_trigger = 255;
+      out_caps->gamepad.right_trigger = 255;
+    }
+    return X_ERROR_SUCCESS;
+  }
   return any_connected ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
 }
 
@@ -95,6 +110,9 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
     // Do not manufacture a temporary state here: state polling may transfer
     // ownership of transient input such as relative mouse motion. Capabilities
     // provide the same connection answer without sampling controller state.
+    X_INPUT_GAMEPAD virtual_pad{};
+    if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad))
+      return X_ERROR_SUCCESS;
     bool any_connected = false;
     for (auto& driver : drivers_) {
       X_INPUT_CAPABILITIES capabilities = {};
@@ -173,6 +191,23 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
         }
       }
     }
+  }
+
+  X_INPUT_GAMEPAD virtual_pad{};
+  if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad)) {
+    // Same host-UI ownership gate as every physical driver. Keep connectivity
+    // but publish a neutral virtual source when the title cannot accept input.
+    if (is_active_callback_ && !is_active_callback_()) virtual_pad = {};
+    merged.gamepad.buttons = static_cast<uint16_t>(merged.gamepad.buttons) |
+                             static_cast<uint16_t>(virtual_pad.buttons);
+    merged.gamepad.left_trigger = std::max(merged.gamepad.left_trigger, virtual_pad.left_trigger);
+    merged.gamepad.right_trigger = std::max(merged.gamepad.right_trigger, virtual_pad.right_trigger);
+    const auto axis = [](int16_t a, int16_t b) -> int16_t {
+      return std::abs(int(a)) >= std::abs(int(b)) ? a : b;
+    };
+    merged.gamepad.thumb_lx = axis(merged.gamepad.thumb_lx, virtual_pad.thumb_lx);
+    merged.gamepad.thumb_ly = axis(merged.gamepad.thumb_ly, virtual_pad.thumb_ly);
+    first_result = false;
   }
 
   if (first_result) {

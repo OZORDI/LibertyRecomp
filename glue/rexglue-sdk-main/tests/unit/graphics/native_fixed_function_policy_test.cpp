@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "graphics/gta4_native/native_fixed_function_policy.h"
+#include "graphics/gta4_native/native_shader_booleans.h"
 
 namespace rex::graphics::gta4_native {
 namespace {
@@ -160,4 +161,96 @@ TEST_CASE("GTA IV native stencil mask reference fallback is explicit",
 }
 
 }  // namespace
+}  // namespace rex::graphics::gta4_native
+
+
+#include <limits>
+#include "graphics/gta4_native/native_color_output.h"
+
+namespace rex::graphics::gta4_native {
+TEST_CASE("Native output exponent is signed and matches resolve compensation",
+          "[gta4-native][graphics][color-output]") {
+  for (int32_t e = -32; e <= 31; ++e) {
+    const uint32_t encoded = uint32_t(e) & 63u;
+    CHECK(NativeColorExponent(encoded << 20) == e);
+    CHECK(NativeResolveExponent(encoded << 26) == e);
+    CHECK(NativePowerOfTwo(e) == std::ldexp(1.0f, e));
+  }
+  CHECK(NativeColorExponent(0x03FC0001) == -1);
+  CHECK(NativeResolveExponent(0x04000000) == 1);
+  CHECK(NativePowerOfTwo(NativeColorExponent(0x03FC0001)) *
+        NativePowerOfTwo(NativeResolveExponent(0x04000000)) == 1.0f);
+}
+
+TEST_CASE("Native glass scales alpha after coverage and retains positive background weight",
+          "[gta4-native][graphics][color-output]") {
+  const auto p = NativeColorOutput(0x03FC0001);
+  CHECK(p.scale[0] == 0.5f);
+  const std::array<float, 4> source = {8.0f, 4.0f, 2.0f, 1.5f};
+  const auto result = ApplyNativeColorOutput(source, p);
+  CHECK(result == std::array<float, 4>{4.0f, 2.0f, 1.0f, 0.75f});
+  CHECK(1.0f - result[3] == 0.25f);
+  // Original coverage sees 1.5; a premature scale would incorrectly fail this test.
+  CHECK(source[3] > 1.0f);
+  CHECK_FALSE(result[3] > 1.0f);
+}
+
+TEST_CASE("Native packed floating color clamps only normalized alpha",
+          "[gta4-native][graphics][color-output]") {
+  const auto p = NativeColorOutput(12u << 16);
+  CHECK(ApplyNativeColorOutput({8, -2, 40, 2}, p) ==
+        std::array<float, 4>{8, -2, 40, 1});
+  CHECK(ApplyNativeColorOutput({8, -2, 40, -2}, p)[3] == 0);
+  CHECK(ApplyNativeColorOutput({8, -2, 40, std::numeric_limits<float>::quiet_NaN()}, p)[3] == 0);
+  CHECK(ApplyNativeColorOutput({8, -2, 40, std::numeric_limits<float>::infinity()}, p)[3] == 1);
+}
+
+TEST_CASE("Native float target and inactive attachment do not get normalized clamps",
+          "[gta4-native][graphics][color-output]") {
+  const std::array<float, 4> source = {8, -2, 40, 2};
+  CHECK(ApplyNativeColorOutput(source, NativeColorOutput(7u << 16)) == source);
+  CHECK(ApplyNativeColorOutput(source, NativeColorOutput(0x03FC0001, false)) == source);
+  CHECK(ApplyNativeColorOutput(source, NativeColorOutput(0)) ==
+        std::array<float, 4>{1, 0, 1, 1});
+  CHECK(ApplyNativeColorOutput(source, NativeColorOutput(5u << 16)) ==
+        std::array<float, 4>{8, -2, 32, 2});
+}
+
+TEST_CASE("Native MRT output contracts retain independent scales and format bounds",
+          "[gta4-native][graphics][color-output]") {
+  std::array<NativeColorOutputParameters, 4> contracts{
+      NativeColorOutput(0x03FC0001), NativeColorOutput((1u << 20) | (7u << 16)),
+      NativeColorOutput(0), NativeColorOutput(0, false)};
+  const std::array<float, 4> source{4, 2, 1, 1.5f};
+  CHECK(ApplyNativeColorOutput(source, contracts[0])[3] == 0.75f);
+  CHECK(ApplyNativeColorOutput(source, contracts[1])[3] == 3.0f);
+  CHECK(ApplyNativeColorOutput(source, contracts[2])[3] == 1.0f);
+  CHECK(ApplyNativeColorOutput(source, contracts[3])[3] == 1.5f);
+  CHECK(kNativeColorOutputOffset == 0x360);
+  CHECK(sizeof(NativeColorOutputParameters) == 48);
+}
+TEST_CASE("Native shader Boolean banks preserve every supported bit",
+          "[gta4-native][graphics][shader-booleans]") {
+  CHECK(PackNativeShaderBooleans(0u, 0u) == 0u);
+  CHECK(PackNativeShaderBooleans(0xFFFFu, 0u) == 0x0000FFFFu);
+  CHECK(PackNativeShaderBooleans(0u, 0xFFFFu) == 0xFFFF0000u);
+  CHECK(PackNativeShaderBooleans(0xFFFFFFFFu, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+  for (uint32_t bit = 0; bit < 16; ++bit) {
+    const uint32_t mask = 1u << bit;
+    CHECK(PackNativeShaderBooleans(mask, 0u) == mask);
+    CHECK(PackNativeShaderBooleans(0u, mask) == (mask << 16));
+    CHECK(PackNativeShaderBooleans(mask, mask) == (mask | (mask << 16)));
+  }
+}
+
+TEST_CASE("Native shader Boolean bank packing cannot leak between stages",
+          "[gta4-native][graphics][shader-booleans]") {
+  CHECK(PackNativeShaderBooleans(0xFFFF0000u, 0u) == 0u);
+  CHECK(PackNativeShaderBooleans(0u, 0xFFFF0000u) == 0u);
+  CHECK(PackNativeShaderBooleans(0xA5A5u, 0x5A5Au) == 0x5A5AA5A5u);
+  // b1 and b129 are the paired deferred-alpha controls. Vertex b8 and b11
+  // are real title controls, not unused padding in the shared ABI.
+  CHECK(PackNativeShaderBooleans(0x0902u, 0x0002u) == 0x00020902u);
+}
+
 }  // namespace rex::graphics::gta4_native

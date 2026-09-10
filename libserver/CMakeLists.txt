@@ -22,7 +22,7 @@ add_library(libserver_json INTERFACE)
 target_include_directories(libserver_json INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 
-add_library(libserver_http_runtime STATIC src/http_runtime.cpp)
+add_library(libserver_http_runtime STATIC src/http_runtime.cpp src/deferred_responses.cpp)
 target_include_directories(libserver_http_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(libserver_http_runtime PUBLIC OpenSSL::SSL Threads::Threads)
@@ -61,6 +61,32 @@ if(BUILD_TESTING)
   add_executable(libserver_gta4_stat_schema_test tests/gta4_stat_schema_test.cpp)
   target_link_libraries(libserver_gta4_stat_schema_test PRIVATE libserver_gta4_stat_schema)
   libserver_enable_warnings(libserver_gta4_stat_schema_test)
+
+  add_executable(libserver_identity_contract_test tests/identity_contract_test.cpp)
+  target_include_directories(libserver_identity_contract_test PRIVATE src)
+  target_link_libraries(libserver_identity_contract_test PRIVATE libserver_json)
+  libserver_enable_warnings(libserver_identity_contract_test)
+  add_test(NAME libserver_identity_contract_test COMMAND libserver_identity_contract_test)
+
+  add_executable(libserver_service_recovery_test tests/service_recovery_test.cpp)
+  target_link_libraries(libserver_service_recovery_test PRIVATE libserver_http_runtime
+      libserver_persistent_state libserver_gta4_stat_schema libserver_json
+      OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+  libserver_enable_warnings(libserver_service_recovery_test)
+  add_test(NAME libserver_service_recovery_test COMMAND libserver_service_recovery_test)
+
+  add_test(NAME libserver_reliability_regression
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_reliability_regression_test.py"
+              "$<TARGET_FILE:libserver>")
+  set_tests_properties(libserver_reliability_regression PROPERTIES TIMEOUT 180)
+
+  add_executable(libserver_state_regression_test tests/server_state_regression_test.cpp)
+  target_link_libraries(libserver_state_regression_test PRIVATE libserver_http_runtime
+      libserver_persistent_state libserver_gta4_stat_schema libserver_json
+      OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+  libserver_enable_warnings(libserver_state_regression_test)
+  add_test(NAME libserver_state_regression_test COMMAND libserver_state_regression_test)
 
   add_test(NAME libserver_self_test COMMAND libserver --self-test)
   add_test(NAME libserver_persistent_state_test COMMAND libserver_persistent_state_test)
@@ -115,6 +141,11 @@ if(BUILD_TESTING)
                 "$<TARGET_FILE:libserver>")
     set_tests_properties(libserver_social_lobby_e2e_test PROPERTIES
         SKIP_RETURN_CODE 77 TIMEOUT 480)
+    add_test(NAME libserver_deferred_tls_regression
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/deferred_tls_regression_test.py"
+                "$<TARGET_FILE:libserver>")
+    set_tests_properties(libserver_deferred_tls_regression PROPERTIES TIMEOUT 60)
     add_test(NAME libserver_production_hosting_test
         COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/production_hosting_test.py"

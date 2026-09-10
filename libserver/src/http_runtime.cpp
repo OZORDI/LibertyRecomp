@@ -208,8 +208,26 @@ Connection::Connection(Socket socket, SSL_CTX* tls_context)
   SSL_set_accept_state(ssl_);
 }
 
+Connection::Connection(Connection&& other) noexcept
+    : on_detach_(std::move(other.on_detach_)),
+      owns_socket_(std::exchange(other.owns_socket_, false)),
+      socket_(std::exchange(other.socket_, kInvalidSocket)),
+      ssl_(std::exchange(other.ssl_, nullptr)),
+      tls_requested_(other.tls_requested_),
+      handshake_complete_(other.handshake_complete_),
+      shutdown_started_(other.shutdown_started_) {}
+
 Connection::~Connection() {
   if (ssl_) SSL_free(ssl_);
+  if (owns_socket_) CloseSocket(socket_);
+}
+
+std::shared_ptr<Connection> Connection::Detach() {
+  auto detached = std::make_shared<Connection>(std::move(*this));
+  detached->owns_socket_ = true;
+  if (detached->on_detach_) detached->on_detach_();
+  detached->on_detach_ = {};
+  return detached;
 }
 
 bool Connection::valid() const {
@@ -724,9 +742,9 @@ void WorkerPool::Shutdown() {
     stopping_ = true;
     abandoned.swap(queue_);
     active.assign(active_.begin(), active_.end());
+    for (Socket socket : active) ShutdownSocket(socket);
   }
   for (Socket socket : abandoned) CloseSocket(socket);
-  for (Socket socket : active) ShutdownSocket(socket);
   condition_.notify_all();
   for (auto& worker : workers_) {
     if (worker.joinable()) worker.join();
@@ -757,17 +775,27 @@ void WorkerPool::WorkerMain() {
       queue_.pop_front();
       active_.insert(socket);
     }
-    try {
-      Connection connection(socket, tls_context_);
-      if (connection.valid()) handler_(connection);
-    } catch (...) {
-      // A malformed or failed request must not terminate a worker or the process.
-    }
+    bool close_socket = true;
     {
-      std::lock_guard lock(mutex_);
-      active_.erase(socket);
+      Connection connection(socket, tls_context_);
+      connection.on_detach_ = [this, socket] {
+        std::lock_guard lock(mutex_);
+        active_.erase(socket);
+      };
+      try {
+        if (connection.valid()) handler_(connection);
+      } catch (...) {
+        // A malformed request must not terminate the worker.
+      }
+      close_socket = connection.socket() != kInvalidSocket;
     }
-    CloseSocket(socket);
+    if (close_socket) {
+      {
+        std::lock_guard lock(mutex_);
+        active_.erase(socket);
+      }
+      CloseSocket(socket);
+    }
   }
 }
 

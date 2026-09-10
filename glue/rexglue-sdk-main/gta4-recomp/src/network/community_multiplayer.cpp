@@ -6,6 +6,8 @@
  */
 
 #include "community_multiplayer.h"
+#include "pending_stats_flush.h"
+#include "community_qos_policy.h"
 #include "community_profile_policy.h"
 #include "community_retry_policy.h"
 #include "community_stats_policy.h"
@@ -171,7 +173,6 @@ constexpr uint32_t kLastGta4AchievementId = 65;
 constexpr std::array<std::string_view, 2> kKnownGta4EpisodePackages = {"TLAD", "TBOGT"};
 constexpr size_t kQosChallengeBytes = 16;
 constexpr size_t kQosChallengeHexCharacters = 34;
-constexpr uint64_t kMaximumQosRttMilliseconds = 65535;
 // Derived from retail GET_CURRENT_EPISODE (sub_825D4CC8) by
 // tools/audit_gta_invite_accept_contract.py.
 constexpr uint32_t kGta4CurrentEpisodeAddress = 0x82B39504;
@@ -572,13 +573,15 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
 
   HttpResponse Request(std::string_view method, std::string_view path, const json* body,
                        bool authenticated, std::span<const std::string> additional_headers = {},
-                       long timeout_ms = kRequestTimeoutMilliseconds) {
+                       long timeout_ms = kRequestTimeoutMilliseconds,
+                       bool allow_recovery = false) {
     std::string token;
     if (authenticated) {
-      if (!EnsureAuthenticated(false, timeout_ms)) {
-        if (ready()) {
-          MarkUnavailable(last_error());
-        }
+      bool skipped_unavailable = false;
+      if (!EnsureAuthenticated(false, timeout_ms, allow_recovery, &skipped_unavailable)) {
+        // A request skipped before another thread recovered must not publish
+        // an old unavailable observation over that newer authenticated success.
+        if (!skipped_unavailable) MarkUnavailable(last_error());
         return {.error = last_error()};
       }
       std::lock_guard lock(auth_mutex_);
@@ -587,7 +590,7 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
 
     HttpResponse response = RequestRaw(method, path, body, token, additional_headers, timeout_ms);
     if (authenticated && response.status == 401 &&
-        EnsureAuthenticated(true, timeout_ms)) {
+        EnsureAuthenticated(true, timeout_ms, allow_recovery)) {
       std::lock_guard lock(auth_mutex_);
       token = access_token_;
       response = RequestRaw(method, path, body, token, additional_headers, timeout_ms);
@@ -597,6 +600,19 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
       MarkUnavailable(ErrorMessage(response));
     } else if (!response.error.empty() || response.status < 200 || response.status >= 300) {
       SetError(ErrorMessage(response));
+    } else if (authenticated && allow_recovery) {
+      // A retained idempotent write may retry after a prior request marked the
+      // service unavailable. Actual authenticated success, not another poll,
+      // restores readiness. Run notification callbacks on the presence worker
+      // rather than under a caller's stats-write mutex.
+      SetError({});
+      {
+        std::lock_guard lock(presence_mutex_);
+        if (!presence_stopping_ && !ready_.exchange(true, std::memory_order_acq_rel)) {
+          recovery_notification_ = true;
+        }
+      }
+      presence_condition_.notify_all();
     }
     return response;
   }
@@ -663,6 +679,22 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
   void PresenceWorkerMain() {
     size_t failed_attempts = 0;
     for (;;) {
+      bool recovered_by_request = false;
+      {
+        std::lock_guard lock(presence_mutex_);
+        if (presence_stopping_) return;
+        recovered_by_request = recovery_notification_ && ready();
+        recovery_notification_ = false;
+      }
+      if (recovered_by_request) {
+        failed_attempts = 0;
+        PublishCurrentPresence();
+        if (ready()) {
+          std::lock_guard handler_lock(connection_handler_mutex_);
+          if (connection_restored_handler_) connection_restored_handler_();
+        }
+        continue;
+      }
       if (!ready()) {
         const auto retry_delay = CommunityReconnectDelay(failed_attempts);
         {
@@ -705,7 +737,7 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
         std::unique_lock lock(presence_mutex_);
         if (presence_condition_.wait_for(lock, kPresenceRefreshInterval,
                                          [this] {
-                                           return presence_stopping_ || !ready();
+                                           return presence_stopping_ || !ready() || recovery_notification_;
                                          })) {
           if (presence_stopping_) return;
           continue;
@@ -795,9 +827,12 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
     return Base64Encode(signature, true);
   }
 
-  bool EnsureAuthenticated(bool force_refresh, long timeout_ms) {
+  bool EnsureAuthenticated(bool force_refresh, long timeout_ms, bool allow_recovery = false,
+                           bool* skipped_unavailable = nullptr) {
     std::lock_guard lock(auth_mutex_);
-    if (!ready()) {
+    if (skipped_unavailable) *skipped_unavailable = false;
+    if (!ready() && !allow_recovery) {
+      if (skipped_unavailable) *skipped_unavailable = true;
       return false;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -988,6 +1023,7 @@ class CommunityState final : public std::enable_shared_from_this<CommunityState>
   std::mutex presence_publish_mutex_;
   std::condition_variable presence_condition_;
   bool presence_stopping_ = false;
+  bool recovery_notification_ = false;
   uint64_t presence_session_id_ = 0;
   std::mutex connection_handler_mutex_;
   std::function<void()> connection_restored_handler_;
@@ -1866,7 +1902,8 @@ class CommunityImportedServices final : public ISocialService,
         "Idempotency-Key: " + pending.idempotency};
     for (size_t attempt = 0; attempt < kMaximumStatWriteAttempts; ++attempt) {
       const HttpResponse response =
-          state_->Request("POST", "/api/v2/stats/writes", &pending.body, true, headers);
+          state_->Request("POST", "/api/v2/stats/writes", &pending.body, true, headers,
+                          kRequestTimeoutMilliseconds, true);
       REXLOG_INFO(
           "community-stats-op operation=write target={:016X} views={} properties=32-bit "
           "status={} error={}",
@@ -1881,7 +1918,14 @@ class CommunityImportedServices final : public ISocialService,
     return false;
   }
 
-  bool Flush(uint64_t session_id) override { return session_id != 0; }
+  bool Flush(uint64_t session_id) override {
+    std::lock_guard lock(stats_write_mutex_);
+    return gta4::network::detail::FlushPendingStats(
+        session_id, state_->ready(), pending_stat_write_,
+        [this](const PendingStatWrite& pending, bool& terminal) {
+          return SendPendingStatWrite(pending, terminal);
+        });
+  }
 
   std::vector<StatView> Read(std::span<const uint64_t> xuids,
                              std::span<const uint32_t> view_ids,
@@ -3113,7 +3157,16 @@ class SessionObserver {
 class CommunityQosService final : public IQosService {
  public:
   explicit CommunityQosService(std::shared_ptr<CommunityState> state)
-      : state_(std::move(state)) {}
+      : state_(std::move(state)), probe_worker_([this] { ProbeWorkerMain(); }) {}
+
+  ~CommunityQosService() override {
+    {
+      std::lock_guard lock(probe_mutex_);
+      probe_stopping_ = true;
+    }
+    probe_condition_.notify_all();
+    if (probe_worker_.joinable()) probe_worker_.join();
+  }
 
   bool ready() const override { return state_->ready(); }
   std::string last_error() const override { return state_->last_error(); }
@@ -3124,6 +3177,7 @@ class CommunityQosService final : public IQosService {
     if (!session_id || (!update.enabled && !update.title_data && !update.bits_per_second)) {
       return false;
     }
+    std::lock_guard update_lock(listener_update_mutex_);
     json body = {{"session_id", Hex64(session_id)},
                  {"exchange_key", HexBytes(exchange_key)}};
     if (update.enabled) body["enabled"] = *update.enabled;
@@ -3134,13 +3188,31 @@ class CommunityQosService final : public IQosService {
       body["title_data"] = *encoded;
     }
     const HttpResponse response = state_->Request("PUT", "/api/v2/qos/listeners", &body, true);
-    return response.status == 204;
+    if (response.status != 204) return false;
+    {
+      std::lock_guard lock(probe_mutex_);
+      auto& listener = local_listeners_[session_id];
+      listener.exchange_key = HexBytes(exchange_key);
+      if (update.enabled) listener.enabled = *update.enabled;
+    }
+    probe_condition_.notify_all();
+    return true;
   }
 
   bool Close(uint64_t session_id, std::span<const uint8_t, 16> exchange_key) override {
     if (!session_id) return false;
+    std::lock_guard update_lock(listener_update_mutex_);
     const json body = {{"session_id", Hex64(session_id)},
                        {"exchange_key", HexBytes(exchange_key)}};
+    {
+      std::lock_guard lock(probe_mutex_);
+      const auto listener = local_listeners_.find(session_id);
+      if (listener != local_listeners_.end() &&
+          listener->second.exchange_key == HexBytes(exchange_key)) {
+        local_listeners_.erase(listener);
+      }
+    }
+    probe_condition_.notify_all();
     const HttpResponse response =
         state_->Request("DELETE", "/api/v2/qos/listeners", &body, true);
     return response.status == 204 || response.status == 404;
@@ -3159,22 +3231,32 @@ class CommunityQosService final : public IQosService {
     const json body = {{"targets", std::move(wire_targets)}};
     const auto started = std::chrono::steady_clock::now();
     const HttpResponse response = state_->Request("POST", "/api/v2/qos/lookup", &body, true);
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - started);
-    const uint16_t rtt = static_cast<uint16_t>(std::min<uint64_t>(
-        static_cast<uint64_t>(std::max<int64_t>(elapsed.count(), 0)),
-        kMaximumQosRttMilliseconds));
     std::vector<QosResult> results(targets.size());
     if (response.status != 200) return results;
     try {
       const json decoded = json::parse(response.body);
       if (!decoded.contains("results") || !decoded.at("results").is_array() ||
-          decoded.at("results").size() != targets.size()) {
+          decoded.at("results").size() != targets.size() ||
+          decoded.value("measurement", std::string{}) != "relay-host-ack-v1" ||
+          !decoded.contains("server_elapsed_microseconds") ||
+          !decoded.at("server_elapsed_microseconds").is_number_unsigned()) {
         return {};
       }
+      const uint64_t total_us = static_cast<uint64_t>(std::max<int64_t>(elapsed.count(), 0));
+      const uint64_t service_us = decoded.at("server_elapsed_microseconds").get<uint64_t>();
       for (size_t index = 0; index < targets.size(); ++index) {
         const json& result = decoded.at("results").at(index);
-        if (!result.is_object() || !result.value("reachable", false)) continue;
+        if (!result.is_object() || !result.value("reachable", false) ||
+            result.value("measurement", std::string{}) != "relay-host-ack-v1" ||
+            result.value("probes_recv", 0) != 1 ||
+            !result.contains("relay_host_microseconds") ||
+            !result.at("relay_host_microseconds").is_number_unsigned()) continue;
+        const uint64_t host_us = result.at("relay_host_microseconds").get<uint64_t>();
+        const auto rtt = gta4::network::detail::RelayHostRttMilliseconds(
+            total_us, service_us, host_us);
+        if (!rtt || result.value("probes_xmit", 0) != 1) continue;
         const std::string challenge = result.value("challenge", std::string{});
         if (challenge.size() != kQosChallengeHexCharacters ||
             challenge != body.at("targets").at(index).at("challenge").get<std::string>()) {
@@ -3192,8 +3274,8 @@ class CommunityQosService final : public IQosService {
         results[index].title_data = decoded_title;
         results[index].probes_xmit = 1;
         results[index].probes_recv = 1;
-        results[index].rtt_min_milliseconds = rtt;
-        results[index].rtt_median_milliseconds = rtt;
+        results[index].rtt_min_milliseconds = *rtt;
+        results[index].rtt_median_milliseconds = *rtt;
       }
     } catch (...) {
       return std::vector<QosResult>(targets.size());
@@ -3202,7 +3284,71 @@ class CommunityQosService final : public IQosService {
   }
 
  private:
+  struct LocalListener { std::string exchange_key; bool enabled = false; };
+  void ProbeWorkerMain() {
+    for (;;) {
+      {
+        std::unique_lock lock(probe_mutex_);
+        probe_condition_.wait(lock, [&] {
+          return probe_stopping_ || std::ranges::any_of(local_listeners_,
+              [](const auto& entry) { return entry.second.enabled; });
+        });
+        if (probe_stopping_) return;
+      }
+      const auto response = state_->Request("GET", "/api/v3/qos/probes?wait_ms=250",
+                                            nullptr, true, {}, kRelayPollTimeoutMilliseconds);
+      if (response.status == 200) {
+        try {
+          const json body = json::parse(response.body);
+          const auto& probes = body.at("probes");
+          if (!probes.is_array() || probes.size() > rex::system::xam::kMaximumQosTargets) {
+            throw std::runtime_error("invalid QoS probe page");
+          }
+          json acknowledgements = json::array();
+          for (const auto& probe : probes) {
+            const auto session_id = ParseFixedHex<uint64_t>(probe.at("session_id").get<std::string>(), 16);
+            const auto token = probe.at("probe_id").get<std::string>();
+            const auto challenge = probe.at("challenge").get<std::string>();
+            bool authorized = false;
+            {
+              std::lock_guard lock(probe_mutex_);
+              if (probe_stopping_) return;
+              const auto listener = session_id ? local_listeners_.find(*session_id) : local_listeners_.end();
+              authorized = listener != local_listeners_.end() && listener->second.enabled &&
+                  listener->second.exchange_key == probe.at("exchange_key").get<std::string>();
+            }
+            if (!authorized || !IsSafeOpaqueToken(token) ||
+                challenge.size() != kQosChallengeHexCharacters) continue;
+            acknowledgements.push_back({{"probe_id", token}, {"challenge", challenge}});
+          }
+          if (!acknowledgements.empty()) {
+            {
+              std::lock_guard lock(probe_mutex_);
+              if (probe_stopping_) return;
+            }
+            const json ack = {{"acknowledgements", std::move(acknowledgements)}};
+            (void)state_->Request("POST", "/api/v3/qos/ack", &ack, true, {},
+                                  kRelayPollTimeoutMilliseconds);
+          }
+        } catch (...) {
+          // Invalid or stale probes are never acknowledged.
+        }
+      }
+      std::unique_lock lock(probe_mutex_);
+      if (response.status != 200) {
+        probe_condition_.wait_for(lock, std::chrono::milliseconds(kRelayLongPollMilliseconds),
+                                  [&] { return probe_stopping_; });
+      }
+      if (probe_stopping_) return;
+    }
+  }
   std::shared_ptr<CommunityState> state_;
+  std::mutex probe_mutex_;
+  std::mutex listener_update_mutex_;
+  std::condition_variable probe_condition_;
+  bool probe_stopping_ = false;
+  std::unordered_map<uint64_t, LocalListener> local_listeners_;
+  std::thread probe_worker_;
 };
 
 class CommunitySessionDirectory final : public ISessionDirectory {
@@ -3806,7 +3952,7 @@ class CommunityPeerTransport final : public IPeerDatagramTransport, public Sessi
       outbound_.push_back(
           {.session_id = session_id,
            .encoded_payload_bytes = encoded->size(),
-           .wire = {{"destination_ipv4", *destination},
+           .wire = {{"session_id", Hex64(session_id)}, {"destination_ipv4", *destination},
                     {"destination_port", destination_port},
                     {"source_port", source_port},
                     {"payload", std::move(*encoded)}}});
@@ -3892,7 +4038,7 @@ class CommunityPeerTransport final : public IPeerDatagramTransport, public Sessi
             }
           }
         }
-        Poll(port);
+        Poll(port, route->session_id);
       }
     }
   }
@@ -3929,8 +4075,9 @@ class CommunityPeerTransport final : public IPeerDatagramTransport, public Sessi
     }
   }
 
-  void Poll(uint16_t port) {
-    const std::string path = "/api/v2/relay/datagrams?local_port=" + std::to_string(port) +
+  void Poll(uint16_t port, uint64_t session_id) {
+    const std::string path = "/api/v2/relay/datagrams?session_id=" + Hex64(session_id) +
+                             "&local_port=" + std::to_string(port) +
                              "&max_bytes=" + std::to_string(kMaximumReceiveBatchBytes) +
                              "&wait_ms=" + std::to_string(kRelayLongPollMilliseconds);
     const HttpResponse response =
@@ -3954,6 +4101,8 @@ class CommunityPeerTransport final : public IPeerDatagramTransport, public Sessi
       }
       if (received.empty()) return;
       std::lock_guard lock(mutex_);
+      const auto current_route = routes_.find(port);
+      if (current_route == routes_.end() || current_route->second.session_id != session_id) return;
       auto& queue = pending_[port];
       while (!received.empty()) {
         if (queue.size() == kMaximumPendingDatagramsPerPort) queue.pop_front();

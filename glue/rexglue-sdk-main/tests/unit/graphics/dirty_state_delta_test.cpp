@@ -15,6 +15,7 @@
 #include "graphics/gta4_native/dirty_state_delta.h"
 #include "graphics/gta4_native/frame_constant_arena.h"
 #include "graphics/gta4_native/stateful_constant_state.h"
+#include "graphics/gta4_native/native_shader_booleans.h"
 
 namespace gta4 = rex::graphics::gta4_native;
 
@@ -567,6 +568,9 @@ TEST_CASE("GTA IV shared constant identity includes every semantic input family"
   distinct([](Key& key) { key.sample_count = 1; });
   distinct([](Key& key) { key.alpha_reference_bits = 1; });
   distinct([](Key& key) { key.alpha_to_mask = 1; });
+  distinct([](Key& key) { key.color_output_info[0] = 1; });
+  distinct([](Key& key) { key.color_output_info[3] = 1; });
+  distinct([](Key& key) { key.color_output_mask = 1; });
   distinct([](Key& key) { key.clip_plane_bits[0] = 1; });
   distinct([](Key& key) { key.clip_plane_enable_mask = 1; });
   distinct([](Key& key) { key.vertex_booleans = 1; });
@@ -575,4 +579,15 @@ TEST_CASE("GTA IV shared constant identity includes every semantic input family"
   distinct([](Key& key) { key.environmental_sequence = 1; });
   distinct([](Key& key) { key.environment_present = 1; });
   distinct([](Key& key) { key.device = 1; });
+}
+
+TEST_CASE("Native Boolean transport preserves both full shader banks", "[gta4-native][shader-booleans]") {
+  CHECK(gta4::PackNativeShaderBooleans(0, 0) == 0);
+  CHECK(gta4::PackNativeShaderBooleans(0xFFFFFFFFu, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+  CHECK(gta4::PackNativeShaderBooleans(0xFFFF0000u, 0xFFFF0000u) == 0);
+  for (uint32_t bit = 0; bit < 16; ++bit) {
+    CHECK(gta4::PackNativeShaderBooleans(1u << bit, 0) == (1u << bit));
+    CHECK(gta4::PackNativeShaderBooleans(0, 1u << bit) == (1u << (bit + 16)));
+  }
+  CHECK(gta4::PackNativeShaderBooleans(0x902u, 2u) == 0x00020902u);
 }

@@ -18,6 +18,8 @@
 #include <cstring>
 #include <functional>
 #include <fstream>
+#include <filesystem>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -89,6 +91,8 @@ REXCVAR_DEFINE_UINT32(vulkan_present_acquire_timeout_ms, 50, "UI/Vulkan",
 
 REXCVAR_DEFINE_BOOL(vulkan_presenter_probe_guest_output_pixels, false, "UI/Vulkan",
                     "Periodically read back guest output for pixel diagnostics");
+REXCVAR_DEFINE_UINT32(vulkan_presenter_probe_guest_output_interval, 2048, "UI/Vulkan",
+                      "Successful-paint interval for the opt-in guest-output probe (minimum 128)");
 
 REXCVAR_DEFINE_BOOL(
     vulkan_presenter_probe_swapchain_pixels, false, "UI/Vulkan",
@@ -142,6 +146,8 @@ float LinearToSRGB(float value) {
 }
 
 }  // namespace
+
+#include "frame_pixel_probe_io.inc"
 
 #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
 namespace {
@@ -206,6 +212,11 @@ VulkanPresenter::PaintContext::Submission::~Submission() {
   const VulkanDevice::Functions& dfn = vulkan_device_->functions();
   const VkDevice device = vulkan_device_->device();
 
+  if (diagnostic_swapchain_probe_.pending && diagnostic_swapchain_probe_.frame_probe.valid()) {
+    const auto& p = diagnostic_swapchain_probe_.frame_probe;
+    REXLOG_WARN("gta4-frame-pixel: point=unavailable run={} frame={} source={} paint-submission={} reason=probe-destroyed-before-drain",
+                p.run, p.frame, p.source_sequence, diagnostic_swapchain_probe_.paint_submission);
+  }
   if (diagnostic_swapchain_probe_.mapping) {
     dfn.vkUnmapMemory(device, diagnostic_swapchain_probe_.memory);
     diagnostic_swapchain_probe_.mapping = nullptr;
@@ -1876,7 +1887,14 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
   PaintContext::Submission::DiagnosticSwapchainProbe& completed_probe =
       paint_submission.diagnostic_swapchain_probe();
   if (completed_probe.pending) {
-    if (!(vulkan_device_->memory_types().host_coherent &
+    const uint64_t completed_paint = paint_context_.submission_tracker.UpdateAndGetCompletedSubmission();
+    // Do not read OR reuse this buffer before its own submission finishes,
+    // even if a different submission in the same ring has become reusable.
+    if (completed_probe.paint_submission > completed_paint) {
+      return PaintResult::kNotPresentedRetry;
+    }
+    bool probe_memory_visible = completed_probe.paint_submission && completed_probe.paint_submission <= completed_paint;
+    if (probe_memory_visible && !(vulkan_device_->memory_types().host_coherent &
           (uint32_t(1) << completed_probe.memory_type))) {
       VkMappedMemoryRange invalidate_range;
       invalidate_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -1886,11 +1904,14 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
       invalidate_range.size = VK_WHOLE_SIZE;
       if (dfn.vkInvalidateMappedMemoryRanges(device, 1, &invalidate_range) !=
           VK_SUCCESS) {
+        probe_memory_visible = false;
         REXLOG_WARN(
             "VulkanPresenter: Failed to invalidate swapchain probe memory");
       }
     }
 
+    WriteFramePixelProbe(completed_probe, completed_paint, probe_memory_visible);
+    if (probe_memory_visible && !completed_probe.frame_probe.valid()) {
     uint32_t rgb_nonzero_samples = 0;
     uint32_t nonfinite_rgb_samples = 0;
     uint32_t negative_rgb_samples = 0;
@@ -2006,7 +2027,9 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
         luminance_samples[kLuminanceP99Index], luminance_max, alpha_min,
         alpha_max, zero_alpha_samples, negative_alpha_samples,
         nonfinite_alpha_samples, rgb_nonzero_samples == 0, checksum);
+    }
     completed_probe.pending = false;
+    completed_probe.frame_probe = {};
   }
 
   VkCommandPool draw_command_pool = paint_submission.draw_command_pool();
@@ -2138,12 +2161,17 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
   std::shared_ptr<GuestOutputImage> guest_output_image;
   uint32_t guest_output_mailbox_index = UINT32_MAX;
   size_t guest_output_effect_count = 0;
+  uint64_t frame_mailbox_version = 0;
+  FramePixelProbe frame_probe{};
+  FramePixelProbeRegion frame_region{};
+  uint32_t frame_final_effect = UINT32_MAX;
   {
     std::unique_lock<std::mutex> guest_output_consumer_lock(ConsumeGuestOutput(
         guest_output_mailbox_index, &guest_output_properties, &guest_output_paint_config));
     if (guest_output_mailbox_index != UINT32_MAX) {
       assert_true(guest_output_images_[guest_output_mailbox_index].ever_successfully_refreshed);
       guest_output_image = guest_output_images_[guest_output_mailbox_index].image;
+      frame_mailbox_version = guest_output_images_[guest_output_mailbox_index].version;
     }
     // Incremented the reference count of the guest output image - safe to leave
     // the consumer critical section now as everything here either will be using
@@ -2151,6 +2179,18 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
     // multiple threads can't paint the main target at the same time).
   }
 
+  const auto& requested_frame_probe = guest_output_properties.provenance.frame_pixel_probe;
+  if (requested_frame_probe.valid()) {
+    if (guest_output_image && requested_frame_probe.matches(guest_output_properties.provenance.submitted_frame,
+        uint64_t(uintptr_t(guest_output_image->image())), guest_output_image->extent().width,
+        guest_output_image->extent().height, frame_mailbox_version)) {
+      frame_probe = requested_frame_probe;
+    } else {
+      REXLOG_WARN("gta4-frame-pixel: point=identity-rejected run={} frame={} source={} mailbox={} version={} reason=consumed-image-mismatch",
+                  requested_frame_probe.run, requested_frame_probe.frame, requested_frame_probe.source_sequence,
+                  guest_output_mailbox_index, frame_mailbox_version);
+    }
+  }
   bool log_tv_paint = tv_trace_carried;
   bool tv_provenance_is_current = false;
   if (guest_output_properties.provenance.diagnostic_trace) {
@@ -2185,6 +2225,13 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
         paint_context_.swapchain_extent.height, max_framebuffer_extent.width,
         max_framebuffer_extent.height, guest_output_paint_config);
     guest_output_effect_count = guest_output_flow.effect_count;
+    if (frame_probe.valid() && guest_output_flow.effect_count) {
+      const size_t last = guest_output_flow.effect_count - 1;
+      frame_region = MapFramePixelProbe(frame_probe, guest_output_flow.output_x, guest_output_flow.output_y,
+          guest_output_flow.effect_output_sizes[last].first, guest_output_flow.effect_output_sizes[last].second,
+          paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height);
+      frame_final_effect = uint32_t(guest_output_flow.effects[last]);
+    }
     if (guest_output_flow.effect_count) {
       // Store the main target reference to the guest output image so it's not
       // destroyed while it's still potentially in use by main target painting
@@ -2691,11 +2738,18 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
 
   dfn.vkCmdEndRenderPass(draw_command_buffer);
 
+  const FramePixelProbeKey frame_key{frame_probe.run, frame_probe.source_sequence, frame_probe.frame, diagnostic_swapchain_epoch_};
+  const bool frame_probe_selected = frame_probe.valid() && frame_region.valid() && guest_output_pass_recorded &&
+      !full_black_fallback_recorded && !FramePixelProbeDirectory().empty() && frame_pixel_probe_budget_.can_record(frame_key);
+  if (frame_probe.valid() && !paint_context_.swapchain_probe_enabled) {
+    REXLOG_WARN("gta4-frame-pixel: point=unavailable run={} frame={} source={} reason=swapchain-readback-disabled-or-unsupported",
+                frame_probe.run, frame_probe.frame, frame_probe.source_sequence);
+  }
   bool swapchain_probe_recorded = false;
   PaintContext::Submission::DiagnosticSwapchainProbe& swapchain_probe =
       paint_submission.diagnostic_swapchain_probe();
   if (paint_context_.swapchain_probe_enabled) {
-    if (log_tv_paint) {
+    if (log_tv_paint || frame_probe_selected) {
       const VkDeviceSize pixel_stride = swapchain_probe.mapping
                                             ? GetDiagnosticSwapchainProbePixelStride(
                                                   paint_context_.swapchain_render_pass_format)
@@ -2736,6 +2790,11 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
                      PaintContext::Submission::
                          kDiagnosticSwapchainProbeGridHeight) *
                  2));
+            if (frame_probe_selected) {
+              const auto sample = frame_region.sample(grid_x, grid_y);
+              region.imageOffset.x = int32_t(sample[0]);
+              region.imageOffset.y = int32_t(sample[1]);
+            }
             region.imageOffset.z = 0;
             region.imageExtent.width = 1;
             region.imageExtent.height = 1;
@@ -2910,7 +2969,29 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
 
   if (swapchain_probe_recorded) {
     swapchain_probe.pending = true;
-    swapchain_probe.provenance = tv_trace_provenance;
+    swapchain_probe.provenance = frame_probe_selected ? guest_output_properties.provenance : tv_trace_provenance;
+    swapchain_probe.frame_probe = frame_probe_selected ? frame_probe : FramePixelProbe{};
+    if (frame_probe_selected) {
+      frame_pixel_probe_budget_.commit(frame_key);
+      swapchain_probe.frame_region = frame_region;
+      swapchain_probe.frame_mailbox = guest_output_mailbox_index;
+      swapchain_probe.frame_mailbox_version = frame_mailbox_version;
+      swapchain_probe.frame_guest_view = uint64_t(uintptr_t(guest_output_image->view()));
+      swapchain_probe.frame_paint_slot = uint32_t(current_paint_submission_index % paint_submission_count);
+      swapchain_probe.frame_swapchain_handle = uint64_t(uintptr_t(paint_context_.swapchain_images[swapchain_image_index]));
+      swapchain_probe.frame_swap_width = paint_context_.swapchain_extent.width;
+      swapchain_probe.frame_swap_height = paint_context_.swapchain_extent.height;
+      swapchain_probe.frame_effect_count = uint32_t(guest_output_effect_count);
+      swapchain_probe.frame_final_effect = frame_final_effect;
+      swapchain_probe.frame_ui_drawers = execute_ui_drawers;
+      swapchain_probe.frame_acquire_result = int32_t(acquire_result);
+      swapchain_probe.frame_submit_result = int32_t(submit_result);
+      swapchain_probe.frame_present_result = VK_NOT_READY;
+      REXLOG_INFO("gta4-frame-pixel: point=copy-submitted run={} frame={} source={} present={} mailbox={} version={} image={} native-submission={} paint-submission={} epoch={} swapchain-image={}",
+                  frame_probe.run, frame_probe.frame, frame_probe.source_sequence, guest_output_properties.provenance.title_present_id,
+                  guest_output_mailbox_index, frame_mailbox_version, frame_probe.guest_image, frame_probe.native_submission,
+                  current_paint_submission_index, diagnostic_swapchain_epoch_, swapchain_probe.frame_swapchain_handle);
+    }
     swapchain_probe.paint_attempt = tv_paint_attempt;
     swapchain_probe.paint_submission = current_paint_submission_index;
     swapchain_probe.swapchain_epoch = diagnostic_swapchain_epoch_;
@@ -2948,6 +3029,11 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
     gpu_flight::Fail("present.queue", int32_t(present_result),
                      uint64_t(uintptr_t(paint_context_.swapchain)), current_paint_submission_index,
                      tv_trace_provenance.submitted_frame);
+  }
+  if (swapchain_probe_recorded && frame_probe_selected) {
+    swapchain_probe.frame_present_result = int32_t(present_result);
+    REXLOG_INFO("gta4-frame-pixel: point=present-queued run={} frame={} source={} paint-submission={} result={} physical-scanout-verified=false",
+                frame_probe.run, frame_probe.frame, frame_probe.source_sequence, current_paint_submission_index, int32_t(present_result));
   }
   paint_present_ticks = rex::chrono::Clock::QueryHostTickCount() - paint_present_begin;
   PublishPaintTiming(paint_acquire_ticks, paint_submit_ticks, paint_present_ticks,
@@ -3023,9 +3109,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
         swapchain_image_index, int32_t(acquire_result), int32_t(present_result));
   }
 
+  const uint64_t guest_output_probe_interval =
+      std::max(uint32_t{128}, REXCVAR_GET(vulkan_presenter_probe_guest_output_interval));
   const bool guest_output_pixel_milestone =
       vulkan_paint_flow_count == 128 || vulkan_paint_flow_count == 1024 ||
-      (vulkan_paint_flow_count >= 2048 && !(vulkan_paint_flow_count % 2048));
+      (vulkan_paint_flow_count >= guest_output_probe_interval &&
+       !(vulkan_paint_flow_count % guest_output_probe_interval));
   // This forces a GPU readback and copies a full-resolution frame. Keep it
   // explicitly opt-in rather than coupling it to general presenter logging.
   if (guest_output_pixel_milestone &&

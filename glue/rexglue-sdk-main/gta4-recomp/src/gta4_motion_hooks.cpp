@@ -1,3 +1,4 @@
+#include "gta4_quicksave_hooks.h"
 #include "gta4_motion_bridge.h"
 
 #include <array>
@@ -147,6 +148,7 @@ MotionNativeRegistration* FindRegistration(uint32_t return_address) {
 }  // namespace gta4
 
 extern "C" void sub_82845600(PPCContext& ctx, uint8_t* base) {
+  gta4::quicksave::ObserveNativeRegistration(ctx, base);
   const uint32_t return_address = static_cast<uint32_t>(ctx.lr);
   auto* registration = gta4::FindRegistration(return_address);
   if (!registration) {

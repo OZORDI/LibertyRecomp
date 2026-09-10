@@ -13,8 +13,10 @@ extern "C" void sub_82174AD8(PPCContext& ctx, uint8_t* base) {
 }
 extern "C" void sub_82146790(PPCContext& ctx, uint8_t* base) {
   const uint32_t dc = ctx.r3.u32;
+  GTA4_HelpTraceFinalize(base, dc, uint32_t(ctx.lr));
   TraceFadeDcReady(base, dc, uint32_t(ctx.lr));
   __imp__sub_82146790(ctx, base);
+  gta4::aspect::FinalizeDc(base, dc);
   if (!PhoneCaptureActive() || !dc ||
       g_phone_context.scope != uint32_t(PhoneTraceScope::kPhoneBuilder)) return;
   const uint32_t vtable = LoadU32(base, dc);
@@ -74,6 +76,7 @@ extern "C" void sub_828BD648(PPCContext& ctx, uint8_t* base) {
   const bool trace = PhoneCaptureActive();
   const uint32_t requested = ctx.r3.u32, apply = ctx.r4.u32, caller = uint32_t(ctx.lr);
   const uint32_t before = trace ? LoadU32(base, kCurrentViewportGlobal) : 0;
+  gta4::aspect::PrepareViewport(ctx, base);
   __imp__sub_828BD648(ctx, base);
   if (trace)
     PhoneTraceLog("viewport-transition", fmt::format("run={} occurrence={} caller={:08X} requested={:08X} apply={} before={:08X} after={:08X} returned={:08X}",

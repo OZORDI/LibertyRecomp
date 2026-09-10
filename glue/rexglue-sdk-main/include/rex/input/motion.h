@@ -29,6 +29,8 @@ struct MotionState {
   uint64_t gyroscope_host_timestamp_ns = 0;
   uint64_t gyroscope_sensor_timestamp_ns = 0;
   uint64_t sequence = 0;
+  // Snapshot read time in the same host clock as the delivery timestamps.
+  uint64_t poll_host_timestamp_ns = 0;
 };
 
 }  // namespace rex::input

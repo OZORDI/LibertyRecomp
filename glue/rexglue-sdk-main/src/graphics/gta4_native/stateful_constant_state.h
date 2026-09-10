@@ -323,6 +323,8 @@ struct SharedConstantSemanticKey {
   uint32_t sample_count = 0;
   uint32_t alpha_reference_bits = 0;
   uint32_t alpha_to_mask = 0;
+  std::array<uint32_t, 4> color_output_info{};
+  uint32_t color_output_mask = 0;
   std::array<uint32_t, 4> clip_plane_bits{};
   uint32_t clip_plane_enable_mask = 0;
   uint32_t vertex_booleans = 0;

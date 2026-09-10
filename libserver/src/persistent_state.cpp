@@ -558,6 +558,11 @@ bool PersistentState::Save(const nlohmann::json& payload) {
     return true;
 }
 
+bool PersistentState::readable() const noexcept {
+    return opened_ && !durability_ambiguous_ &&
+           (health_ == Health::kReady || health_ == Health::kDegraded);
+}
+
 PersistentState::Health PersistentState::health() const noexcept {
     return health_;
 }
@@ -591,6 +596,8 @@ const char* PersistentState::HealthName(Health health) noexcept {
         return "initializing";
     case Health::kReady:
         return "ready";
+    case Health::kDegraded:
+        return "degraded";
     case Health::kError:
         return "error";
     }
@@ -654,7 +661,12 @@ bool PersistentState::ShouldFault(FaultPoint point) {
 }
 
 bool PersistentState::Fail(ErrorCode error, std::string detail) {
-    health_ = Health::kError;
+    const bool retryable_save = error == ErrorCode::kSerializationFailed ||
+        error == ErrorCode::kSnapshotTooLarge || error == ErrorCode::kTempCreateFailed ||
+        error == ErrorCode::kTempWriteFailed || error == ErrorCode::kTempSyncFailed ||
+        error == ErrorCode::kRenameFailed || error == ErrorCode::kFaultInjected;
+    health_ = opened_ && !durability_ambiguous_ && retryable_save
+                  ? Health::kDegraded : Health::kError;
     error_code_ = error;
     error_detail_ = std::move(detail);
     return false;

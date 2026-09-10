@@ -9,6 +9,7 @@
 #include <thread>
 
 #include <rex/logging.h>
+#include <rex/audio/handoff_trace.h>
 #include <rex/system/kernel_state.h>
 #include <rex/thread.h>
 
@@ -127,10 +128,20 @@ std::recursive_mutex g_audvoice_source_publication_mutex;
 
 class AudVoiceSourcePublicationLock {
  public:
-  AudVoiceSourcePublicationLock() : lock_(g_audvoice_source_publication_mutex) {}
-
+  explicit AudVoiceSourcePublicationLock(uint32_t pc=0)
+      : pc_(pc),start_(rex::audio::handoff::Enabled()?rex::audio::handoff::Clock():0),lock_(g_audvoice_source_publication_mutex),acquired_(start_?rex::audio::handoff::Clock():0) {}
+  ~AudVoiceSourcePublicationLock() {
+    if(start_) {
+      const auto finish=rex::audio::handoff::Clock();
+      if(acquired_-start_>=1000000 || finish-acquired_>=1000000)
+        rex::audio::handoff::Record("voice-lock",pc_,{acquired_-start_,finish-acquired_});
+    }
+  }
  private:
+  uint32_t pc_=0;
+  uint64_t start_=0;
   std::lock_guard<std::recursive_mutex> lock_;
+  uint64_t acquired_=0;
 };
 
 class RecordsLock {
@@ -885,12 +896,12 @@ extern "C" void sub_8292FAB8(PPCContext& ctx, uint8_t* base) {
   // immediately reloads and uses the published source. It must participate in
   // the same domain as cleanup and every consumer; locking sub_8218F700 alone
   // would still leave the post-publication use exposed to concurrent cleanup.
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292FAB8);
   __imp__sub_8292FAB8(ctx, base);
 }
 
 extern "C" void sub_8292F0E8(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292F0E8);
   const uint32_t outer = ctx.r3.u32;
   const uint32_t caller = ctx.lr;
   uint32_t source_slot = 0;
@@ -924,7 +935,7 @@ extern "C" void sub_8218EDB8(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_829304A0(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x829304A0);
   const uint32_t outer = ctx.r3.u32;
   const uint32_t caller = ctx.lr;
   uint32_t source_slot = 0;
@@ -936,37 +947,37 @@ extern "C" void sub_829304A0(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_8292F130(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292F130);
   __imp__sub_8292F130(ctx, base);
 }
 
 extern "C" void sub_8292F250(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292F250);
   __imp__sub_8292F250(ctx, base);
 }
 
 extern "C" void sub_8292F2C0(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292F2C0);
   __imp__sub_8292F2C0(ctx, base);
 }
 
 extern "C" void sub_8292FDE0(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292FDE0);
   __imp__sub_8292FDE0(ctx, base);
 }
 
 extern "C" void sub_8292FFD0(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x8292FFD0);
   __imp__sub_8292FFD0(ctx, base);
 }
 
 extern "C" void sub_82930078(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x82930078);
   __imp__sub_82930078(ctx, base);
 }
 
 extern "C" void sub_829302A8(PPCContext& ctx, uint8_t* base) {
-  AudVoiceSourcePublicationLock publication_lock;
+  AudVoiceSourcePublicationLock publication_lock(0x829302A8);
   __imp__sub_829302A8(ctx, base);
 }
 

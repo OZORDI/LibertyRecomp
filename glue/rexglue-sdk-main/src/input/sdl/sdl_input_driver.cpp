@@ -244,13 +244,13 @@ bool SDLCALL SDLInputDriver::EventWatch(void* userdata, SDL_Event* event) {
       type == SDL_EVENT_GAMEPAD_ADDED || type == SDL_EVENT_GAMEPAD_REMOVED;
   const bool keyboard_inventory_event =
       type == SDL_EVENT_KEYBOARD_ADDED || type == SDL_EVENT_KEYBOARD_REMOVED;
-  if (!controller_event && !keyboard_inventory_event) {
+  const bool sensor_event = type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
+  if (!controller_event && !keyboard_inventory_event && !sensor_event) {
     return false;
   }
 
-  // The watch only keeps host device-presence policy current. Open gamepads
-  // and their state are reconciled from SDL's thread-safe current inventory at
-  // every guest poll, so correctness never depends on callback ordering.
+  // Inventory is reconciled at each guest poll. Actual sensor delivery is
+  // observed here; repeated reads of SDL's cached values are not new samples.
   static_cast<SDLInputDriver*>(userdata)->HandleEvent(*event);
   return false;
 }
@@ -420,38 +420,19 @@ bool SDLInputDriver::TryGetMotionState(uint32_t user_index, MotionState* out_sta
     return false;
   }
 
-  // SDL exposes current sensor data through a thread-safe polling API. Sample
-  // it at the same guest request boundary as buttons and axes instead of
-  // depending on whether a backend emits sensor events.
-  bool sampled = false;
-  auto poll_sensor = [&](SDL_SensorType sensor, uint32_t flag, auto& values,
-                         uint64_t& host_timestamp_ns, const char* sensor_name) {
-    if (!(controller->motion.available_sensors & flag)) {
-      return;
-    }
-
-    const bool first_sample = !(controller->motion.valid_samples & flag);
-    if (!SDL_GetGamepadSensorData(controller->sdl, sensor, values.data(),
-                                  static_cast<int>(values.size()))) {
-      return;
-    }
-
-    host_timestamp_ns = SDL_GetTicksNS();
-    controller->motion.valid_samples |= flag;
-    sampled = true;
-    if (first_sample) {
-      REXLOG_INFO("SDL HID: Polled first {} sample for player index {}.", sensor_name, user_index);
-    }
-  };
-  poll_sensor(SDL_SENSOR_ACCEL, kMotionSensorAccelerometer, controller->motion.acceleration_m_s2,
-              controller->motion.accelerometer_host_timestamp_ns, "accelerometer");
-  poll_sensor(SDL_SENSOR_GYRO, kMotionSensorGyroscope, controller->motion.angular_velocity_rad_s,
-              controller->motion.gyroscope_host_timestamp_ns, "gyroscope");
-  if (sampled) {
-    ++controller->motion.sequence;
+  MotionState sampled{};
+  if (!motion_samples_.Read(SDL_GetGamepadID(controller->sdl), SDL_GetTicksNS(), sampled)) {
+    return false;
   }
-
-  *out_state = controller->motion;
+  // Sample the poll clock after the cache copy, so a concurrent delivery
+  // cannot appear to come from the future and spuriously reset calibration.
+  sampled.poll_host_timestamp_ns = SDL_GetTicksNS();
+  sampled.available_sensors = controller->motion.available_sensors;
+  sampled.valid_samples &= sampled.available_sensors;
+  sampled.accelerometer_rate_hz = controller->motion.accelerometer_rate_hz;
+  sampled.gyroscope_rate_hz = controller->motion.gyroscope_rate_hz;
+  // Do not call a current-state getter and restamp its cached data as new.
+  *out_state = sampled;
   return true;
 }
 
@@ -646,6 +627,16 @@ void SDLInputDriver::HandleEvent(const SDL_Event& event) {
   // may be a dedicated thread SDL has created for the joystick subsystem.
 
   switch (event.type) {
+    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: {
+      const uint32_t sensor = event.gsensor.sensor == SDL_SENSOR_ACCEL
+                                  ? kMotionSensorAccelerometer
+                                  : event.gsensor.sensor == SDL_SENSOR_GYRO
+                                        ? kMotionSensorGyroscope : kMotionSensorNone;
+      motion_samples_.Observe(event.gsensor.which, sensor,
+                              {event.gsensor.data[0], event.gsensor.data[1], event.gsensor.data[2]},
+                              event.gsensor.timestamp, event.gsensor.sensor_timestamp);
+      return;
+    }
     case SDL_EVENT_KEYBOARD_ADDED:
       GetAbsolutePointerService().AddPhysicalKeyboard(uint64_t(event.kdevice.which),
                                                       event.kdevice.timestamp);
@@ -710,6 +701,7 @@ void SDLInputDriver::CloseControllerLocked(size_t index, const char* reason) {
       SDL_SetGamepadSensorEnabled(state.sdl, SDL_SENSOR_GYRO, false);
     }
   }
+  motion_samples_.EndDevice(instance_id);
   SDL_CloseGamepad(state.sdl);
   state = {};
   keystroke_states_.at(index) = {};
@@ -805,6 +797,8 @@ void SDLInputDriver::OpenControllerLocked(SDL_JoystickID instance_id) {
     state.sdl = controller;
     state.motion.device_generation =
         next_motion_device_generation_.fetch_add(1, std::memory_order_relaxed);
+    motion_samples_.BeginDevice(instance_id, state.motion.device_generation, SDL_GetTicksNS());
+    SDL_SetEventEnabled(SDL_EVENT_GAMEPAD_SENSOR_UPDATE, true);
 
     auto enable_sensor = [&](SDL_SensorType sensor, uint32_t flag, float& out_rate) {
       if (!SDL_GamepadHasSensor(controller, sensor)) {

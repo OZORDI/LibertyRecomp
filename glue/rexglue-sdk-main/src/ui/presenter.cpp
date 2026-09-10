@@ -607,10 +607,21 @@ bool Presenter::RefreshGuestOutput(
   writable_properties.display_aspect_ratio_y = display_aspect_ratio_y;
   writable_properties.is_8bpc = false;
   writable_properties.provenance = provenance;
+  // Selection originates in the callback that wrote THIS mailbox image, never
+  // from a global latest frame or from provenance attached before rendering.
+  writable_properties.provenance.frame_pixel_probe = {};
   bool is_active = writable_properties.IsActive();
   if (is_active) {
+    auto observed_refresher = [&](GuestOutputRefreshContext& context) {
+      context.SetFramePixelProbe({});
+      const bool updated = refresher(context);
+      writable_properties.provenance.frame_pixel_probe = PublishFramePixelProbe(
+          context.frame_pixel_probe(), updated, provenance.submitted_frame,
+          frontbuffer_width, frontbuffer_height);
+      return updated;
+    };
     if (!RefreshGuestOutputImpl(guest_output_mailbox_writable_, frontbuffer_width,
-                                frontbuffer_height, refresher, writable_properties.is_8bpc)) {
+                                frontbuffer_height, observed_refresher, writable_properties.is_8bpc)) {
       // If failed to refresh, don't send the currently writable image to the
       // mailbox as it may be in an undefined state. Don't disable the guest
       // output either though because the failure may be something transient.
@@ -688,6 +699,12 @@ bool Presenter::RefreshGuestOutput(
         provenance.selected_generation, provenance.native_command_count);
   }
 
+  if (writable_properties.provenance.frame_pixel_probe.valid()) {
+    const auto& probe = writable_properties.provenance.frame_pixel_probe;
+    REXLOG_INFO("gta4-frame-pixel: point=mailbox-published run={} frame={} source={} present={} image={} version={} mailbox={} native-submission={}",
+                probe.run, probe.frame, probe.source_sequence, provenance.title_present_id,
+                probe.guest_image, probe.guest_version, published_mailbox_index, probe.native_submission);
+  }
   // Trigger the presentation on the host.
   PaintResult paint_result = PaintResult::kNotPresented;
   PaintMode paint_mode_snapshot = PaintMode::kNone;

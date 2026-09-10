@@ -26,6 +26,7 @@
 
 #include "achievement_bridge_gc.h"
 #include "gta4_frontend_hooks.h"
+#include "gta4_presentation_options.h"
 #include "gta4_keyboard_controller.h"
 #include "gta4_touch_coordinator.h"
 #include "install/gta4_install_dialog.h"
@@ -81,8 +82,8 @@ GTA4App::GTA4App(rex::ui::WindowedAppContext& context)
 GTA4App::~GTA4App() = default;
 
 REXCVAR_DEFINE_STRING(gta4_aspect_ratio, "auto", "GTA IV/Graphics/Display",
-                      "Render aspect ratio: auto uses the display, original preserves 16:9")
-    .allowed({"auto", "original"})
+                      "Render aspect: auto follows the display; fixed ratios fit without stretching")
+    .allowed({"auto", "original", "16:9", "16:10", "3:2", "4:3", "5:4", "21:9", "43:18", "32:9", "32:10"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_STRING(gta4_present_mode, "auto", "GTA IV/Graphics/Display",
                       "Presentation mode: auto, vsync, mailbox, or immediate")
@@ -680,6 +681,7 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
 }
 
 void GTA4App::OnPostSetup() {
+  gta4::presentation::InitializeOptions();
   rex::graphics::gta4_native::InitializeAntiAliasingController();
   gta4::input::InitializeContextTouchControls();
   if (REXCVAR_GET(gta4_diagnostics_skip_user_music)) {

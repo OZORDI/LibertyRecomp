@@ -25,6 +25,24 @@ inline constexpr uint32_t kNativeBufferCacheLimitMiB = 256;
 inline constexpr size_t kNativeMaximumVertexConversionsPerBuffer = 2;
 inline constexpr uint32_t kNativeUploadShrinkObservationFrames = 120;
 
+// Internal lock flushes submit GPU work but are not title presents. Keep the
+// resource-maintenance clock on the most recent title frame. A real present
+// with frame zero (startup, reset, or wrap) remains a real clock observation.
+constexpr uint32_t NativeResourceFrameForBatch(uint32_t previous_title_frame,
+                                               uint32_t submitted_frame,
+                                               bool is_title_present) {
+  return is_title_present ? submitted_frame : previous_title_frame;
+}
+
+// Cache eviction may drop only a reproducible image. GPU-produced textures are
+// authoritative content, not disposable copies of CPU snapshots: clearing a new
+// allocation cannot restore a previous resolve. Guest release/supersession still
+// retires these images through the separate submission-safe release path.
+constexpr bool CanDiscardNativeTextureImageContents(bool gpu_produced,
+                                                      bool has_cpu_payload) {
+  return !gpu_produced && has_cpu_payload;
+}
+
 constexpr bool ShouldEvictNativeTexture(uint32_t current_frame, uint32_t last_used_frame,
                                         uint32_t grace_frames) {
   const uint32_t age = current_frame >= last_used_frame ? current_frame - last_used_frame : 0u;

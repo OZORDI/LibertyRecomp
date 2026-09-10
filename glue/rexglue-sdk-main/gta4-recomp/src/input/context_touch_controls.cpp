@@ -14,6 +14,7 @@
 #include <rex/cvar.h>
 #include <rex/input/absolute_pointer.h>
 #include <rex/input/mnk/encoded_action.h>
+#include <rex/input/mnk/controller_compatibility.h>
 #include <rex/logging.h>
 
 #include "gta4_touch_coordinator.h"
@@ -87,6 +88,11 @@ struct ScriptKeyHash {
     return (static_cast<size_t>(key.action) << 3) ^ static_cast<size_t>(key.kind);
   }
 };
+
+ScriptKey CanonicalScriptKey(TouchScriptQueryKind kind, uint32_t action) {
+  const auto canonical = CanonicalTouchScriptControl({kind, action});
+  return {canonical.kind, canonical.action};
+}
 
 struct ScriptAvailability {
   uint64_t last_seen_epoch = 0;
@@ -215,14 +221,17 @@ ContextTouchMode DetermineModeLocked(uint8_t* base, uint64_t epoch) {
   return ContextTouchMode::kOnFoot;
 }
 
-void ReleaseControlLocked(const ContextTouchControl& control) {
+void ReleaseControlLocked(const ContextTouchControl& control, bool cancelled) {
   if (control.kind == ContextTouchControlKind::kButton) {
-    g_runtime.key_latch.Release(control.key);
+    g_runtime.key_latch.Release(control.key, cancelled);
   } else if (control.kind == ContextTouchControlKind::kScriptButton) {
-    const ScriptKey key{control.script.kind, control.script.action};
+    const ScriptKey key = CanonicalScriptKey(control.script.kind, control.script.action);
     auto it = g_runtime.script_refcounts.find(key);
     if (it != g_runtime.script_refcounts.end() && it->second && --it->second == 0) {
       g_runtime.script_refcounts.erase(it);
+      if (cancelled) {
+        g_runtime.script_pressed_epoch.erase(key);
+      }
     }
   }
 }
@@ -238,11 +247,25 @@ void CancelAllLocked() {
   g_runtime.look_y = 0;
 }
 
+bool ScriptControlOwnedLocked(const ScriptKey& key) {
+  if (key.kind == TouchScriptQueryKind::kAnalogueSticks) {
+    return std::any_of(g_runtime.pointers.begin(), g_runtime.pointers.end(), [](const auto& item) {
+      const size_t index = item.second.control_index;
+      return index < g_runtime.layout.control_count &&
+             g_runtime.layout.controls[index].kind == ContextTouchControlKind::kMovementStick;
+    });
+  }
+  const auto held = g_runtime.script_refcounts.find(key);
+  return held != g_runtime.script_refcounts.end() && held->second != 0;
+}
+
 std::vector<TouchScriptControl> ActiveScriptControlsLocked(uint64_t epoch) {
   std::vector<TouchScriptControl> controls;
   for (auto it = g_runtime.script_availability.begin();
        it != g_runtime.script_availability.end();) {
-    if (!EpochWithin(epoch, it->second.last_seen_epoch, kScriptQueryExpiryEpochs)) {
+    const bool owned = ScriptControlOwnedLocked(it->first);
+    if (!owned && !EpochWithin(epoch, it->second.last_seen_epoch, kScriptQueryExpiryEpochs)) {
+      g_runtime.script_pressed_epoch.erase(it->first);
       it = g_runtime.script_availability.erase(it);
       continue;
     }
@@ -250,6 +273,13 @@ std::vector<TouchScriptControl> ActiveScriptControlsLocked(uint64_t epoch) {
     ++it;
   }
   std::sort(controls.begin(), controls.end(), [](const auto& left, const auto& right) {
+    // The visible grid is bounded by the safe area. Preserve active owners
+    // before truncating newly discovered controls to that grid's capacity.
+    const bool left_owned = ScriptControlOwnedLocked({left.kind, left.action});
+    const bool right_owned = ScriptControlOwnedLocked({right.kind, right.action});
+    if (left_owned != right_owned) {
+      return left_owned;
+    }
     if (left.kind != right.kind) {
       return left.kind < right.kind;
     }
@@ -282,7 +312,14 @@ ContextTouchViewport ReadViewport() {
   };
 }
 
-void RefreshLayoutLocked(uint8_t* base, uint64_t epoch) {
+bool SameControlIdentity(const ContextTouchControl& a, const ContextTouchControl& b) {
+  return a.kind == b.kind && a.key == b.key && a.script.kind == b.script.kind &&
+         a.script.action == b.script.action;
+}
+
+void RecalculateAxesLocked();
+
+void RefreshLayoutLocked(uint8_t* base, uint64_t epoch, bool frontend = false, bool map = false) {
   if (g_runtime.look_epoch != epoch) {
     g_runtime.look_epoch = epoch;
     g_runtime.look_x = 0;
@@ -291,17 +328,81 @@ void RefreshLayoutLocked(uint8_t* base, uint64_t epoch) {
   g_runtime.epoch = epoch;
   const bool enabled = rex::input::TouchControlsActive();
   const ContextTouchViewport viewport = ReadViewport();
-  const ContextTouchMode mode =
-      enabled ? DetermineModeLocked(base, epoch) : ContextTouchMode::kDisabled;
+  const ContextTouchMode mode = !enabled ? ContextTouchMode::kDisabled :
+      map ? ContextTouchMode::kMap : frontend ? ContextTouchMode::kFrontend :
+      DetermineModeLocked(base, epoch);
   const std::vector<TouchScriptControl> script_controls = mode == ContextTouchMode::kMinigame
                                                               ? ActiveScriptControlsLocked(epoch)
                                                               : std::vector<TouchScriptControl>{};
   ContextTouchLayout next = BuildContextTouchLayout(mode, viewport, script_controls);
   if (!ContextTouchLayoutEquivalent(g_runtime.layout, next)) {
     const ContextTouchMode previous = g_runtime.layout.mode;
-    CancelAllLocked();
+    ContextTouchLayout old_geometry{.mode = mode, .viewport = g_runtime.layout.viewport};
+    ContextTouchLayout new_geometry{.mode = mode, .viewport = next.viewport};
+    const bool retain = previous == ContextTouchMode::kMinigame && mode == previous &&
+                         ContextTouchLayoutEquivalent(old_geometry, new_geometry);
+    if (retain) {
+      // Reserve locations of surviving controls first; assign new controls only
+      // unused cells. A query changing from pressed to held has one identity.
+      std::array<bool, ContextTouchLayout::kMaximumControls> retained{};
+      for (size_t n = 0; n < next.control_count; ++n) {
+        for (size_t o = 0; o < g_runtime.layout.control_count; ++o) {
+          if (SameControlIdentity(next.controls[n], g_runtime.layout.controls[o])) {
+            next.controls[n] = g_runtime.layout.controls[o]; retained[n] = true; break;
+          }
+        }
+      }
+      for (size_t n = 0; n < next.control_count; ++n) {
+        auto& control = next.controls[n];
+        if (retained[n] || control.kind != ContextTouchControlKind::kScriptButton) continue;
+        const float edge = std::min(viewport.safe_width, viewport.safe_height);
+        const float step = control.radius * 2.0f + edge * 0.025f;
+        for (size_t cell = 0; cell < ContextTouchLayout::kMaximumControls; ++cell) {
+          const float x = viewport.safe_x + viewport.safe_width - edge * 0.035f -
+                          control.radius - float(cell % 2) * step;
+          const float y = viewport.safe_y + viewport.safe_height - edge * 0.035f -
+                          control.radius - float(cell / 2) * step;
+          bool occupied = false;
+          for (size_t j = 0; j < next.control_count; ++j) {
+            if (j == n || (!retained[j] && j > n)) continue;
+            const auto& other = next.controls[j];
+            occupied |= other.kind == ContextTouchControlKind::kScriptButton &&
+                        std::abs(other.center_x - x) < control.radius &&
+                        std::abs(other.center_y - y) < control.radius;
+          }
+          if (!occupied) {
+            control.center_x = x; control.center_y = y;
+            control.minimum_x = x - control.radius; control.maximum_x = x + control.radius;
+            control.minimum_y = y - control.radius; control.maximum_y = y + control.radius;
+            break;
+          }
+        }
+      }
+      for (auto it = g_runtime.pointers.begin(); it != g_runtime.pointers.end();) {
+        auto& owner = it->second;
+        const auto old_control = g_runtime.layout.controls[owner.control_index];
+        bool matched = false;
+        for (size_t n = 0; n < next.control_count; ++n) {
+          if (SameControlIdentity(old_control, next.controls[n])) {
+            owner.control_index = n;
+            owner.layout_generation = g_runtime.layout_generation + 1;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) {
+          ++it;
+        } else {
+          ReleaseControlLocked(old_control, true);
+          it = g_runtime.pointers.erase(it);
+        }
+      }
+    } else {
+      CancelAllLocked();
+    }
     g_runtime.layout = std::move(next);
     ++g_runtime.layout_generation;
+    RecalculateAxesLocked();
     if (REXCVAR_GET(gta4_touch_trace)) {
       REXLOG_INFO(
           "gta4-touch: layout epoch={} mode={}->{} generation={} host_generation={} "
@@ -353,12 +454,14 @@ void PressControlLocked(const ContextTouchControl& control, uint64_t epoch) {
   if (control.kind == ContextTouchControlKind::kButton) {
     g_runtime.key_latch.Press(control.key, epoch);
   } else if (control.kind == ContextTouchControlKind::kScriptButton) {
-    const ScriptKey key{control.script.kind, control.script.action};
+    const ScriptKey key = CanonicalScriptKey(control.script.kind, control.script.action);
     uint16_t& refcount = g_runtime.script_refcounts[key];
+    if (!refcount) {
+      g_runtime.script_pressed_epoch[key] = epoch;
+    }
     if (refcount != std::numeric_limits<uint16_t>::max()) {
       ++refcount;
     }
-    g_runtime.script_pressed_epoch[key] = epoch;
   }
 }
 
@@ -385,7 +488,9 @@ void RecalculateAxesLocked() {
 bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&, uint8_t* base,
                     uint64_t epoch) {
   std::lock_guard lock(g_runtime.mutex);
-  RefreshLayoutLocked(base, epoch);
+  if (g_runtime.epoch != epoch) {
+    return false;
+  }
   if (g_runtime.layout.mode == ContextTouchMode::kDisabled ||
       event.generation != g_runtime.layout.viewport.generation) {
     CancelAllLocked();
@@ -441,7 +546,8 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&, 
 
   const size_t control_index = pointer->second.control_index;
   if (control_index < g_runtime.layout.control_count) {
-    ReleaseControlLocked(g_runtime.layout.controls[control_index]);
+    ReleaseControlLocked(g_runtime.layout.controls[control_index],
+                         event.phase == rex::input::AbsolutePointerPhase::kCancel);
   }
   g_runtime.pointers.erase(pointer);
   RecalculateAxesLocked();
@@ -453,9 +559,17 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&, 
   return true;
 }
 
-void CollectVirtualKeys(std::array<uint8_t, 256>& down, std::array<uint8_t, 256>& pressed) {
+void BeginPoll(PPCContext&, uint8_t* base, uint64_t epoch, bool frontend, bool map) {
   std::lock_guard lock(g_runtime.mutex);
-  g_runtime.key_latch.Collect(g_runtime.epoch, down, pressed);
+  RefreshLayoutLocked(base, epoch, frontend, map);
+}
+
+void CollectVirtualKeys(uint64_t epoch, std::array<uint8_t, 256>& down,
+                        std::array<uint8_t, 256>& pressed) {
+  std::lock_guard lock(g_runtime.mutex);
+  if (g_runtime.epoch == epoch) {
+    g_runtime.key_latch.Collect(epoch, down, pressed);
+  }
 }
 
 void OnControlsDisabled(PPCContext&, uint8_t*, uint64_t epoch) {
@@ -492,8 +606,8 @@ bool MergeAxis(uint8_t* base, uint32_t control, Action negative, Action positive
 
 void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uint64_t epoch) {
   std::lock_guard lock(g_runtime.mutex);
-  RefreshLayoutLocked(base, epoch);
-  if (!control || LoadU32(base, control + kControlUserIndexOffset) != kPrimaryTouchUser) {
+  if (g_runtime.epoch != epoch || !control ||
+      LoadU32(base, control + kControlUserIndexOffset) != kPrimaryTouchUser) {
     return;
   }
   const ContextTouchMode mode = g_runtime.layout.mode;
@@ -512,7 +626,9 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
     changed |= MergeAxis(base, control, Action::kVehicleMoveUp, Action::kVehicleMoveDown,
                          g_runtime.movement_y);
   } else if (mode == ContextTouchMode::kVehicleHelicopter) {
-    changed |= MergeAxis(base, control, Action::kVehicleFlyYawLeft, Action::kVehicleFlyYawRight,
+    // Generated sub_822ABEE0: 30/31 is bank, 32/33 is pitch, 57/58 is yaw.
+    // Yaw has separate Numpad4/Numpad6 touch buttons in the virtual-key path.
+    changed |= MergeAxis(base, control, Action::kVehicleMoveLeft, Action::kVehicleMoveRight,
                          g_runtime.movement_x);
     changed |= MergeAxis(base, control, Action::kVehicleMoveUp, Action::kVehicleMoveDown,
                          g_runtime.movement_y);
@@ -547,6 +663,7 @@ void InitializeContextTouchControls() noexcept {
   }
   g_runtime.initialized = true;
   GTA4_RegisterTouchExtension({
+      .begin_poll = &BeginPoll,
       .on_pointer_event = &OnPointerEvent,
       .collect_virtual_keys = &CollectVirtualKeys,
       .on_controls_disabled = &OnControlsDisabled,
@@ -555,6 +672,7 @@ void InitializeContextTouchControls() noexcept {
 }
 
 void ShutdownContextTouchControls() noexcept {
+  rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, {}, false);
   GTA4_RegisterTouchExtension({});
   std::lock_guard lock(g_runtime.mutex);
   CancelAllLocked();
@@ -587,7 +705,7 @@ ContextTouchOverlaySnapshot GetContextTouchOverlaySnapshot() noexcept {
 
 void ObserveTouchScriptQuery(TouchScriptQueryKind kind, uint32_t action, uint64_t epoch) noexcept {
   std::lock_guard lock(g_runtime.mutex);
-  g_runtime.script_availability[{kind, action}].last_seen_epoch = epoch;
+  g_runtime.script_availability[CanonicalScriptKey(kind, action)].last_seen_epoch = epoch;
 }
 
 void ObserveTouchParachuteState(uint32_t state, uint64_t epoch) noexcept {
@@ -608,13 +726,15 @@ uint32_t GetTouchScriptQueryValue(TouchScriptQueryKind kind, uint32_t action,
   if (g_runtime.layout.mode != ContextTouchMode::kMinigame || epoch != g_runtime.epoch) {
     return 0;
   }
-  const ScriptKey key{kind, action};
+  const ScriptKey key = CanonicalScriptKey(kind, action);
+  const auto pressed = g_runtime.script_pressed_epoch.find(key);
+  const bool edge = epoch != 0 && pressed != g_runtime.script_pressed_epoch.end() &&
+                    pressed->second == epoch;
   if (kind == TouchScriptQueryKind::kControlPressed) {
-    auto pressed = g_runtime.script_pressed_epoch.find(key);
-    return pressed != g_runtime.script_pressed_epoch.end() && pressed->second == epoch ? 1 : 0;
+    return edge ? 1 : 0;
   }
-  auto held = g_runtime.script_refcounts.find(key);
-  if (held == g_runtime.script_refcounts.end() || !held->second) {
+  const auto held = g_runtime.script_refcounts.find(key);
+  if (!edge && (held == g_runtime.script_refcounts.end() || !held->second)) {
     return 0;
   }
   return kind == TouchScriptQueryKind::kControlAnalog ? 255 : 1;

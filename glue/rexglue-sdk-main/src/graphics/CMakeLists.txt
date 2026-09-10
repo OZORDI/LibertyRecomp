@@ -268,6 +268,7 @@ if(REXGLUE_USE_VULKAN)
 
     add_library(rexgpu-gta4-native SHARED
         gta4_native/graphics_system.cpp
+        gta4_native/modern_shader_options.cpp
         gta4_native/shader_override_policy.h
         gta4_native/native_buffer_arena.cpp
         gta4_native/native_descriptor_backend.cpp

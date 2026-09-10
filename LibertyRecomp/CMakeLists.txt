@@ -566,9 +566,11 @@ if (WIN32)
     )
 
     # Set Win32 icon path.
-    set(WIN32_ICON_PATH "${PROJECT_SOURCE_DIR}/../LibertyRecompResources/images/game_icon.ico")
+    set(WIN32_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/res/icons/game_icon.ico")
 
     configure_file("res/win32/res.rc.template" "${CMAKE_BINARY_DIR}/res.rc" @ONLY)
+    set_source_files_properties("${CMAKE_BINARY_DIR}/res.rc" PROPERTIES
+        OBJECT_DEPENDS "${WIN32_ICON_PATH}")
     add_executable(LibertyRecomp ${LIBERTY_RECOMP_CXX_SOURCES} "${CMAKE_BINARY_DIR}/res.rc")
 
     # Hide console for release configurations.
@@ -1890,7 +1892,27 @@ BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/inst
 endif()
 
 ## Game Icon ##
-BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/game_icon.bmp" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/game_icon.bmp" ARRAY_NAME "g_game_icon")
+if(LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
+    # Desktop branding is checked in and does not depend on the optional
+    # external resource archive. Keep generated C/header files in the build tree.
+    set(LIBERTY_DESKTOP_ICON_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    file(MAKE_DIRECTORY "${LIBERTY_DESKTOP_ICON_GENERATED}/res/icons")
+    BIN2C(TARGET_OBJ LibertyRecomp
+        SOURCE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/res/icons/game_icon.bmp"
+        DEST_FILE "${LIBERTY_DESKTOP_ICON_GENERATED}/res/icons/desktop_icon.bmp"
+        ARRAY_NAME "g_desktop_app_icon")
+    target_include_directories(LibertyRecomp PRIVATE "${LIBERTY_DESKTOP_ICON_GENERATED}")
+    target_compile_definitions(LibertyRecomp PRIVATE LIBERTY_RECOMP_DESKTOP_ICON)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        include("${CMAKE_SOURCE_DIR}/cmake/LinuxDesktopIntegration.cmake")
+        liberty_configure_linux_desktop(LibertyRecomp "${CMAKE_CURRENT_SOURCE_DIR}/res")
+    elseif(APPLE)
+        set_property(TARGET LibertyRecomp APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/res/macos/game_icon.icns")
+    endif()
+else()
+    BIN2C(TARGET_OBJ LibertyRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/game_icon.bmp" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/game_icon.bmp" ARRAY_NAME "g_game_icon")
+endif()
 
 ## Button Prompts (Controller-specific XTD files) ##
 set(BUTTON_PROMPTS_SOURCE "${PROJECT_SOURCE_DIR}/../LibertyRecompLib/private/button_prompts")

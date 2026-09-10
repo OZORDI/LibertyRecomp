@@ -21,6 +21,7 @@
 #include <pthread/qos.h>
 
 #include <rex/audio/coreaudio/coreaudio_output.h>
+#include <rex/audio/handoff_trace.h>
 #include <rex/audio/flags.h>
 #include <rex/cvar.h>
 #include <rex/diagnostics/gta4_transition.h>
@@ -697,6 +698,7 @@ bool CoreAudioOutput::StartIfPrerolled() {
   }
 
   const OSStatus status = AudioOutputUnitStart(audio_unit_);
+  handoff::Record("preroll-start",device_id_,{uint64_t(uint32_t(status)),channel_count(),device_period_frames_.load()});
   if (status != noErr) {
     REXAPU_ERROR("CoreAudio: AudioOutputUnitStart failed (status {})", status);
     reconfigure_requested_.store(true, std::memory_order_release);
@@ -729,6 +731,7 @@ void CoreAudioOutput::ControlThreadMain() {
       rebuffer_requested_.store(false, std::memory_order_release);
       ReconfigureDevice();
     } else if (rebuffer_requested_.exchange(false, std::memory_order_acq_rel)) {
+      handoff::Record("rebuffer",device_id_,{rebuffer_events_.load(),callback_count_.load(),callback_frames_.load()});
       StopOutput();
       rebuffer_events_.fetch_add(1, std::memory_order_relaxed);
       REXAPU_WARN("CoreAudio: output starved; rebuilding reliability preroll");
@@ -789,6 +792,8 @@ void CoreAudioOutput::DrainRetiredCredits() {
 }
 
 void CoreAudioOutput::ReconfigureDevice() {
+  handoff::Span handoff_device("device-reconfigure",device_id_);
+  handoff::Record("device",device_id_,{channel_count(),device_period_frames_.load()},"reconfigure-begin");
   diagnostics::gta4_transition::Record(
       diagnostics::gta4_transition::EventSource::kCoreAudio,
       diagnostics::gta4_transition::EventType::kAudioDeviceChange, 0, 0, 0,
@@ -1086,6 +1091,7 @@ OSStatus CoreAudioOutput::Render(void* context, AudioUnitRenderActionFlags*, con
 
 OSStatus CoreAudioOutput::RenderFrames(UInt32 frame_count, AudioBufferList* buffer_list) {
   const uint64_t start_ticks = mach_absolute_time();
+  handoff::Span handoff_render("device-callback",0,frame_count,channel_count());
   callback_active_.store(true, std::memory_order_release);
   const uint64_t callback_index =
       callback_count_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1156,6 +1162,7 @@ OSStatus CoreAudioOutput::RenderFrames(UInt32 frame_count, AudioBufferList* buff
     const uint32_t consumed = client->ring.Read(destination, frame_count, channels, !replace);
     const uint64_t after = client->ring.read_frame();
     const uint64_t available_after = client->ring.available_frames();
+    handoff::Record(consumed<frame_count?"underrun":"consume",client_index,{callback_index,output_frame_start,frame_count,consumed,before,after,available_before,available_after,client->credit_depth.load(),client->submitted_blocks.load()});
     output_diagnostic.client_ring_read_before[client_index] = before;
     output_diagnostic.client_ring_read_after[client_index] = after;
     output_diagnostic.client_available_after[client_index] = available_after;
@@ -1232,6 +1239,7 @@ OSStatus CoreAudioOutput::RenderFrames(UInt32 frame_count, AudioBufferList* buff
     }
   }
 
+  handoff::Capture(handoff::Stage::Mix,destination,frame_count,channels,kGuestAudioSampleRate,mixed_clients,callback_index,output_frame_start,callback_underrun_frames);
   if (mixed_clients) {
     const size_t sample_count = size_t(frame_count) * channels;
     for (size_t i = 0; i < sample_count; ++i) {
@@ -1242,6 +1250,7 @@ OSStatus CoreAudioOutput::RenderFrames(UInt32 frame_count, AudioBufferList* buff
   if (muted_.load(std::memory_order_relaxed)) {
     std::memset(destination, 0, static_cast<size_t>(required_bytes));
   }
+  handoff::Capture(handoff::Stage::Output,destination,frame_count,channels,kGuestAudioSampleRate,mixed_clients,callback_index,output_frame_start,callback_underrun_frames);
   diagnostics::gta4_transition::CapturePcmFloatInterleaved(
       destination, frame_count, channels, kGuestAudioSampleRate);
   output_buffer.mDataByteSize = static_cast<UInt32>(required_bytes);

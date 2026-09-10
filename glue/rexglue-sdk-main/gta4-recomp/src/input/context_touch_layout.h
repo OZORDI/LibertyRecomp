@@ -22,6 +22,8 @@ enum class ContextTouchMode : uint8_t {
   kParachuteFreefall,
   kParachuteDeployed,
   kMinigame,
+  kFrontend,
+  kMap,
 };
 
 enum class TouchScriptQueryKind : uint8_t {
@@ -62,6 +64,16 @@ struct TouchScriptControl {
   uint32_t action = 0;
 };
 
+// Raw buttons and semantic actions are different ID namespaces. The held,
+// pressed and analog queries of one semantic action share a touch owner.
+constexpr TouchScriptControl CanonicalTouchScriptControl(TouchScriptControl control) noexcept {
+  if (control.kind == TouchScriptQueryKind::kControlPressed ||
+      control.kind == TouchScriptQueryKind::kControlAnalog) {
+    control.kind = TouchScriptQueryKind::kControlHeld;
+  }
+  return control;
+}
+
 struct ContextTouchControl {
   ContextTouchControlKind kind = ContextTouchControlKind::kButton;
   rex::ui::VirtualKey key = rex::ui::VirtualKey::kNone;
@@ -96,7 +108,7 @@ struct ContextTouchOverlayTransform {
 class ContextTouchKeyLatch {
  public:
   void Press(rex::ui::VirtualKey key, uint64_t epoch) noexcept;
-  void Release(rex::ui::VirtualKey key) noexcept;
+  void Release(rex::ui::VirtualKey key, bool cancelled = false) noexcept;
   void Cancel() noexcept;
   void Collect(uint64_t epoch, std::array<uint8_t, 256>& down,
                std::array<uint8_t, 256>& pressed) const noexcept;

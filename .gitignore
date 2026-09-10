@@ -718,3 +718,12 @@ scripts/
 /libserver/runtime/data/state.json
 !tools/test_dependency_patches.py
 !tools/validate_shader_cache_candidate.py
+
+# Reproducible community-server regression runners.
+!/libserver/tests/server_reliability_regression_test.py
+!/libserver/tests/deferred_tls_regression_test.py
+!/glue/rexglue-sdk-main/tests/regression/run_community_backend_integration.py
+
+# Reproducible desktop application icon generation and verification.
+!tools/generate_desktop_icons.py
+!tools/test_desktop_icons.py

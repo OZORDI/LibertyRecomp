@@ -12,6 +12,7 @@
 #include <thread>
 
 #include <rex/audio/conversion.h>
+#include <rex/audio/handoff_trace.h>
 #include <rex/audio/coreaudio/coreaudio_audio_driver.h>
 #include <rex/diagnostics/gta4_transition.h>
 #include <rex/logging.h>
@@ -48,6 +49,7 @@ void CoreAudioAudioDriver::Shutdown() {
 void CoreAudioAudioDriver::SubmitFrame(uint32_t frame_ptr) {
   if (!attached_ || !state_->accepting.load(std::memory_order_acquire) ||
       state_->paused.load(std::memory_order_acquire) || !output_->available()) {
+    handoff::Record("audio-silent", frame_ptr, {attached_, state_?state_->paused.load():true, output_?output_->available():false});
     SubmitSilent();
     return;
   }
@@ -73,6 +75,13 @@ void CoreAudioAudioDriver::SubmitFrame(uint32_t frame_ptr) {
   const uint64_t ring_read_after = state_->ring.read_frame();
   const uint64_t ring_write_after = state_->ring.write_frame();
   const uint64_t ring_available_after = state_->ring.available_frames();
+  if (handoff::Enabled()) {
+    const auto serial=state_->submitted_blocks.load(std::memory_order_relaxed);
+    const auto id=state_->diagnostic_client_index;
+    handoff::Record("submit",id,{serial,frame_ptr,input_accepted,ring_read_before,ring_read_after,ring_write_before,ring_write_after,ring_available_before,ring_available_after,channels,state_->credit_depth.load()});
+    handoff::Capture(handoff::Stage::Guest,input_frame,kGuestAudioFramesPerBlock,6,kGuestAudioSampleRate,id,serial,ring_write_before,frame_ptr,true);
+    handoff::Capture(handoff::Stage::Converted,converted_frame_.data(),kGuestAudioFramesPerBlock,channels,kGuestAudioSampleRate,id,serial,ring_write_before,input_accepted);
+  }
   output_->InspectSubmittedBlock(state_.get(), converted_frame_.data(),
                                  kGuestAudioFramesPerBlock, channels, frame_ptr,
                                  input_accepted, ring_read_before, ring_read_after,

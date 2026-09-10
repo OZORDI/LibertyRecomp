@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <mutex>
 
+#include "gta4_motion_reload_policy.h"
+
 namespace gta4 {
 
 enum class MotionPreference : uint32_t {
@@ -50,11 +52,10 @@ class GTA4MotionBridge {
 
   void Calibrate(uint32_t user_index = 0);
   void NotifyVehicleEntry(uint32_t user_index = 0);
+  void SetReloadContextActive(bool active);
   bool ConsumeReloadGesture(MotionReloadConsumer consumer, uint32_t user_index = 0);
 
  private:
-  enum class ReloadPhase { kIdle, kAwaitingDown, kCooldown };
-
   GTA4MotionBridge() = default;
 
   void UpdateLocked(uint32_t user_index);
@@ -77,9 +78,8 @@ class GTA4MotionBridge {
   float neutral_pitch_radians_ = 0.0f;
   float neutral_roll_radians_ = 0.0f;
 
-  ReloadPhase reload_phase_ = ReloadPhase::kIdle;
-  std::chrono::steady_clock::time_point reload_deadline_ = {};
-  std::array<bool, static_cast<size_t>(MotionReloadConsumer::kCount)> reload_completed_ = {};
+  MotionReloadGesture<static_cast<size_t>(MotionReloadConsumer::kCount)> reload_gesture_;
+  bool reload_context_active_ = true;
 };
 
 }  // namespace gta4

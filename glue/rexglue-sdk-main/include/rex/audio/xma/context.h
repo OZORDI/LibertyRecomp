@@ -254,6 +254,8 @@ class XmaContext {
   memory::Memory* memory_ = nullptr;
   std::unique_ptr<rex::thread::Event> work_completion_event_;
 
+  // Diagnostic counters, not guest/hardware state. Access under lock_.
+  uint64_t handoff_generation_ = 0, handoff_codec_epoch_ = 0, handoff_frame_ = 0;
   uint32_t id_ = 0;
   uint32_t guest_ptr_ = 0;
   std::mutex lock_;

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Liberty Recompiled
+Comment=Play Grand Theft Auto IV with Liberty Recompiled
+Exec=LibertyRecomp
+TryExec=LibertyRecomp
+Icon=io.github.ozordi.libertyrecomp
+Terminal=false
+Categories=Game;ActionGame;
+StartupNotify=true

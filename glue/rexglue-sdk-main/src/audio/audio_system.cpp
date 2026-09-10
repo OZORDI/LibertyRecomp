@@ -48,6 +48,8 @@ REXCVAR_DEFINE_INT32(
 // and let the normal AudioSystem handling take it, to prevent duplicate
 // implementations. They can be found in xboxkrnl_audio_xma.cc
 
+#include "handoff_trace.inc"
+
 namespace rex::audio {
 
 AudioSystem::AudioSystem(runtime::FunctionDispatcher* function_dispatcher)
@@ -78,9 +80,11 @@ AudioSystem::~AudioSystem() {
   if (xma_decoder_) {
     xma_decoder_->Shutdown();
   }
+  handoff::Shutdown();
 }
 
 X_STATUS AudioSystem::Setup(system::KernelState* kernel_state) {
+  handoff::Initialize();
   X_STATUS result = xma_decoder_->Setup(kernel_state);
   if (result) {
     return result;
@@ -116,6 +120,7 @@ void AudioSystem::WorkerThreadMain() {
     diagnostics::gta4_transition::RecordSteady(
         diagnostics::gta4_transition::EventSource::kAudio,
         diagnostics::gta4_transition::EventType::kAudioWaitBegin);
+    const uint64_t handoff_wait_begin = handoff::Enabled() ? handoff::Clock() : 0;
     auto result = rex::thread::WaitAny(
         wait_handles_, rex::countof(wait_handles_), true,
         std::chrono::milliseconds(500));
@@ -126,6 +131,7 @@ void AudioSystem::WorkerThreadMain() {
             ? diagnostics::gta4_transition::kFlagError
             : diagnostics::gta4_transition::kFlagNone,
         static_cast<uint64_t>(result.first), result.second);
+    if (handoff_wait_begin) handoff::Record("audio-wait", result.second, {handoff::Clock()-handoff_wait_begin, uint64_t(result.first)});
     if (result.first == rex::thread::WaitResult::kFailed) {
       REXAPU_WARN("AudioWorker: WaitAny failed");
       continue;
@@ -181,6 +187,7 @@ void AudioSystem::WorkerThreadMain() {
             client_callback, 0, 0,
             diagnostics::gta4_transition::kFlagBefore, index, 0,
             client_callback_arg);
+        handoff::Span handoff_callback("guest-mixer", index, client_callback, client_callback_arg);
         uint64_t args[] = {client_callback_arg};
         function_dispatcher_->Execute(worker_thread_->thread_state(), client_callback, args,
                                       rex::countof(args));
@@ -266,6 +273,7 @@ void AudioSystem::Shutdown() {
 }
 
 X_STATUS AudioSystem::RegisterClient(uint32_t callback, uint32_t callback_arg, size_t* out_index) {
+  handoff::Record("audio-register", callback, {callback_arg});
   REXAPU_DEBUG("AudioSystem::RegisterClient: callback={:08X} callback_arg={:08X}", callback,
                callback_arg);
   auto global_lock = global_critical_region_.Acquire();
@@ -339,6 +347,7 @@ void AudioSystem::SubmitFrame(size_t index, uint32_t samples_ptr) {
 }
 
 void AudioSystem::UnregisterClient(size_t index) {
+  handoff::Span handoff_unregister("audio-unregister", index);
   SCOPE_profile_cpu_f("apu");
 
   assert_true(index < kMaximumClientCount);
@@ -452,6 +461,7 @@ bool AudioSystem::Restore(stream::ByteStream* stream) {
 }
 
 void AudioSystem::Pause() {
+  handoff::Record("audio-pause");
   if (paused_) {
     return;
   }
@@ -482,6 +492,7 @@ void AudioSystem::Pause() {
 }
 
 void AudioSystem::Resume() {
+  handoff::Record("audio-resume");
   if (!paused_) {
     return;
   }

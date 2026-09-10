@@ -21,9 +21,11 @@
 #include <shellscalingapi.h>
 #endif
 
-#ifdef LIBERTY_RECOMP_HAS_RESOURCES
+#if defined(LIBERTY_RECOMP_DESKTOP_ICON)
+#include <res/icons/desktop_icon.bmp.h>
+#elif defined(LIBERTY_RECOMP_HAS_RESOURCES)
 #include <res/images/game_icon.bmp.h>
-#endif // LIBERTY_RECOMP_HAS_RESOURCES
+#endif
 
 bool m_isFullscreenKeyReleased = true;
 bool m_isResizing = false;
@@ -427,7 +429,9 @@ void GameWindow::SetIcon(EPlayerCharacter player)
             break;
     }
 
-#ifdef LIBERTY_RECOMP_HAS_RESOURCES
+#if defined(LIBERTY_RECOMP_DESKTOP_ICON)
+    SetIcon(g_desktop_app_icon, sizeof(g_desktop_app_icon));
+#elif defined(LIBERTY_RECOMP_HAS_RESOURCES)
     SetIcon(g_game_icon, sizeof(g_game_icon));
 #endif
 }

@@ -1,0 +1,52 @@
+{
+  "source_dimensions": [
+    2732,
+    2732
+  ],
+  "png_sizes": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "windows_icon_sizes": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256
+  ],
+  "mac_iconset_logical_sizes": [
+    16,
+    32,
+    128,
+    256,
+    512
+  ],
+  "mac_iconset_scales": [
+    1,
+    2
+  ],
+  "assets": {
+    "LibertyRecomp/res/icons/source.png": "e170c3131096038f8d5a0662a59d50fab507b20dae040b5e9f00959eca6423da",
+    "LibertyRecomp/res/icons/game_icon.ico": "317f10a968ca266d7e1983ba7461f45f231e490594b48d3d03b6dda2d5564545",
+    "LibertyRecomp/res/icons/game_icon.bmp": "e527d3fbd2c965c261144c56840ef19b9e39086e1ebc9c07b139a7f6ee9749f1",
+    "LibertyRecomp/res/macos/game_icon.icns": "6411f35ed333ffb712b28c7991552a532a7b45fb524837894bb7e546035d434e",
+    "LibertyRecomp/res/icons/png/16.png": "47aca0d64156910fcc0dfc53bc8c6e86b738bfe8e793014e381e740abc691deb",
+    "LibertyRecomp/res/icons/png/24.png": "a550e4b73fb330a32170e394c5734179efaf8f9df890c2f5c3fde7de35cc467f",
+    "LibertyRecomp/res/icons/png/32.png": "3c0fe86722a4671db86d84757e8c800954e94eadbd646d45032af99ce1f6ccf0",
+    "LibertyRecomp/res/icons/png/48.png": "4b2b4c9979eb231ff776720cf680bf9b6da1c26db4f319f17871b7ff4db306dd",
+    "LibertyRecomp/res/icons/png/64.png": "91ca2713672d975e9db64cb403180f7aaa0e71762da4fc0349500e1d5f4d0f74",
+    "LibertyRecomp/res/icons/png/128.png": "8e8622662562102a3e416c6183d96d0235edcb7c621c679cdada78749874ddbf",
+    "LibertyRecomp/res/icons/png/256.png": "2f179fa347377b3420d22ad72e3f1915a4fd4b1cad782b11dfa99bfabf050249",
+    "LibertyRecomp/res/icons/png/512.png": "381d866d80f3dee1535ad5f2ad9504d4212e992ec22aa90a44cabc7374af7343",
+    "LibertyRecomp/res/icons/png/1024.png": "da60a8689dc4579dc00593c05065dd3cbf662bf8da670f8e7d2ed04e011d8c2f"
+  }
+}

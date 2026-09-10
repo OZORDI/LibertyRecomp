@@ -6,11 +6,14 @@
 #include "gta4_vehicle_weapon_policy.h"
 #include "gta4_vehicle_mouse_policy.h"
 #include "gta4_touch_coordinator.h"
+#include "gta4_motion_bridge.h"
+#include "gta4_gyro_aim_policy.h"
 #include "input/context_touch_controls.h"
 #include "input/user_music_player.h"
 
 #include <rex/cvar.h>
 #include <rex/input/input.h>
+#include <rex/input/absolute_pointer.h>
 #include <rex/input/input_system.h>
 #include <rex/input/mnk/encoded_action.h>
 #include <rex/input/mnk/mnk_input_driver.h>
@@ -29,6 +32,12 @@
 
 REXCVAR_DEFINE_BOOL(gta4_native_input_trace, false, "GTA IV/Input",
                     "Trace native keyboard/mouse poll epochs and action injection");
+REXCVAR_DEFINE_BOOL(gta4_motion_aim, false, "GTA IV/Motion Sensor",
+                    "Enable gyroscope fine aiming when aiming on foot");
+REXCVAR_DEFINE_DOUBLE(gta4_motion_aim_full_scale, 2.0, "GTA IV/Motion Sensor/Tuning",
+                      "Gyroscope radians per second for full aim input").range(0.1, 20.0);
+REXCVAR_DEFINE_BOOL(gta4_motion_aim_invert_x, false, "GTA IV/Motion Sensor/Tuning", "Invert gyro aim X");
+REXCVAR_DEFINE_BOOL(gta4_motion_aim_invert_y, false, "GTA IV/Motion Sensor/Tuning", "Invert gyro aim Y");
 
 namespace gta4::input {
 namespace {
@@ -275,6 +284,8 @@ struct InputEpoch {
   uint32_t gamepad_packet = 0;
   int32_t mouse_x = 0;
   int32_t mouse_y = 0;
+  int32_t gyro_x = 0;
+  int32_t gyro_y = 0;
   int32_t map_mouse_x = 0;
   int32_t map_mouse_y = 0;
   uint64_t sequence = 0;
@@ -593,12 +604,12 @@ bool IsDown(const NativeInputState& state, VirtualKey key) {
 }
 
 bool IsNativeActionDown(const InputEpoch& epoch, VirtualKey key) {
-  // Touch controls are virtual PC actions and do not pass through MnK's
-  // hardware keyboard/controller bridge. Preserve their action injection.
+  // Both physical and touch compatibility keys now reach retail XInput.
+  // Only non-controller PC actions are merged at this later boundary.
   const auto index = static_cast<uint16_t>(key);
-  return GTA4_TouchVirtualKeyDown(index) ||
-         (!IsKeyboardControllerKey(key, epoch.helicopter_controls) &&
-          index < epoch.state.keys.size() && epoch.state.keys[index] != 0);
+  return !IsKeyboardControllerKey(key, epoch.helicopter_controls) &&
+         (GTA4_TouchVirtualKeyDown(index) ||
+          (index < epoch.state.keys.size() && epoch.state.keys[index] != 0));
 }
 
 bool IsPressed(const InputEpoch& epoch, VirtualKey key) {
@@ -1395,14 +1406,18 @@ void ResetMouseConversion() {
 InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
                         uint32_t caller, bool helicopter_controls) {
   NativeInputState state{};
-  const bool valid = rex::input::mnk::ConsumeNativeInputState(&state);
-  const uint32_t input_user = valid ? state.user_index : 0;
+  const bool native_valid = rex::input::mnk::ConsumeNativeInputState(&state);
+  const bool touch_active = rex::input::TouchControlsActive() && !GTA4_TouchTitleInputOwned();
+  if (!native_valid) state = {};
+  const uint32_t input_user = native_valid ? state.user_index : 0;
   rex::input::X_INPUT_STATE gamepad_state{};
   auto* runtime = rex::Runtime::instance();
   auto* input_system =
       runtime ? static_cast<rex::input::InputSystem*>(runtime->input_system()) : nullptr;
   const bool gamepad_valid =
       input_system && input_system->TryGetLastState(input_user, &gamepad_state);
+  const bool valid = NeedsNativeActionReplay(native_valid, touch_active,
+      REXCVAR_GET(gta4_motion_aim), gamepad_valid);
   const uint16_t gamepad_buttons =
       gamepad_valid ? static_cast<uint16_t>(gamepad_state.gamepad.buttons) : 0;
   const bool frontend_active = FrontendActive(entry_context, base);
@@ -1513,6 +1528,21 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
         state.mouse_dy, state.mouse_sensitivity, kMouseUnitsPerCount, frame_seconds,
         kReferenceFrameSeconds);
   }
+  g_epoch.gyro_x = g_epoch.gyro_y = 0;
+  const auto vehicle = ReadVehicleInputContext(base);
+  const bool aiming = IsDown(g_epoch.state, VirtualKey::kRButton) ||
+      (gamepad_valid && gamepad_state.gamepad.left_trigger > 30);
+  const bool gyro_allowed = REXCVAR_GET(gta4_motion_aim) && aiming && !frontend_active &&
+      !phone.visible && !vehicle.vehicle && !GTA4_TouchTitleInputOwned() &&
+      LoadU32(base, 0x82BA1D40) == 0;
+  if (gyro_allowed) {
+    const auto motion = gta4::GTA4MotionBridge::Get().Read(input_user);
+    const auto gyro = BuildGyroAimActions(motion.controls_enabled && motion.fresh,
+        motion.angular_velocity_rad_s, float(REXCVAR_GET(gta4_motion_aim_full_scale)),
+        REXCVAR_GET(gta4_motion_aim_invert_x), REXCVAR_GET(gta4_motion_aim_invert_y));
+    g_epoch.gyro_x = gyro.horizontal;
+    g_epoch.gyro_y = gyro.vertical;
+  }
   ArmContextRequests(base);
   return g_epoch;
 }
@@ -1595,12 +1625,6 @@ void InjectEpoch(uint8_t* base, uint32_t control, uint32_t active_gameplay_contr
       gameplay_activity |= MergeButton(base, control, binding.action, kPressed);
     }
   }
-  // Touch ENTER/EXIT is a virtual action source, independent of physical F/Y.
-  if (owns_gameplay && !map_context &&
-      GTA4_TouchVirtualKeyDown(static_cast<uint16_t>(VirtualKey::kF))) {
-    gameplay_activity |= MergeButton(base, control, Action::kEnter, kPressed);
-    gameplay_activity |= MergeButton(base, control, Action::kVehicleExit, kPressed);
-  }
   if (!owns_gameplay) {
     if (gameplay_activity || context_activity) {
       StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
@@ -1633,14 +1657,9 @@ void InjectEpoch(uint8_t* base, uint32_t control, uint32_t active_gameplay_contr
     if (vehicle_context.is_driver && vehicle_context.is_heli) {
       // Physical LMB/Shift now publish A/X through the controller. Preserve
       // only the separate touch fire source and existing Numpad0 alias here.
-      if (GTA4_TouchVirtualKeyDown(static_cast<uint16_t>(VirtualKey::kLButton)) ||
-          IsDown(epoch.state, VirtualKey::kNumpad0)) {
+      if (IsDown(epoch.state, VirtualKey::kNumpad0)) {
         gameplay_activity |=
             MergeButton(base, control, Action::kVehicleAttack2, kPressed);
-      }
-      if (GTA4_TouchVirtualKeyDown(static_cast<uint16_t>(VirtualKey::kShift))) {
-        gameplay_activity |= MergeButton(
-            base, control, Action::kVehicleContextAction45, kPressed);
       }
     }
 
@@ -1717,6 +1736,11 @@ void InjectEpoch(uint8_t* base, uint32_t control, uint32_t active_gameplay_contr
       gameplay_activity |=
           MergeButton(base, control, Action::kVehiclePrevRadio, kPressed);
     }
+  }
+
+  if (!vehicle_context.vehicle) {
+    gameplay_activity |= MergeAxis(base, control, Action::kLookLeft, Action::kLookRight, epoch.gyro_x);
+    gameplay_activity |= MergeAxis(base, control, Action::kLookUp, Action::kLookDown, epoch.gyro_y);
   }
 
   const VehicleMouseActions mouse = RouteVehicleMouse(
@@ -2004,11 +2028,16 @@ extern "C" void sub_828CCD60(PPCContext& ctx, uint8_t* base) {
   // for this epoch's native overlay. No first-frame delay or duplicate keys.
   const bool helicopter_controls =
       gta4::input::ConfigureKeyboardControllerForPoll(ctx, base);
+  const uint64_t touch_epoch = gta4::input::ReadEpoch().sequence + 1;
+  GTA4_TouchConsumePoll(ctx, base, touch_epoch);
   __imp__sub_828CCD60(ctx, base);
   const gta4::input::InputEpoch epoch =
       gta4::input::CaptureEpoch(ctx, base, caller, helicopter_controls);
   gta4::input::ProcessPauseTabShoulders(ctx, base, epoch);
-  GTA4_TouchConsumePoll(ctx, base, epoch.sequence);
+  gta4::GTA4MotionBridge::Get().SetReloadContextActive(
+      !epoch.frontend_active && !epoch.phone_visible && !GTA4_TouchTitleInputOwned() &&
+      gta4::input::LoadU32(base, 0x82BA1D40) == 0 &&
+      !gta4::input::ReadVehicleInputContext(base).vehicle);
   if (rex::input::IsInputTraceEnabled() && epoch.valid) {
     uint32_t retail_controller_flags = 0;
     if (epoch.state.user_index < gta4::input::kRetailControllerRecordCount) {

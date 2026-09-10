@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "gta4_init.h"
+#include "gta4_aspect_hooks.h"
 
 namespace {
 

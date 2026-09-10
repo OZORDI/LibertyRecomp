@@ -148,8 +148,13 @@ TEST_CASE("touch key latch keeps same-action owners and sub-poll taps") {
   down.fill(0);
   pressed.fill(0);
   latch.Collect(epoch, down, pressed);
-  CHECK(down[space] == 0);
+  CHECK(down[space] == 1);
   CHECK(pressed[space] == 1);
+  down.fill(0);
+  pressed.fill(0);
+  latch.Collect(epoch + 1, down, pressed);
+  CHECK(down[space] == 0);
+  CHECK(pressed[space] == 0);
 
   latch.Cancel();
   pressed.fill(0);

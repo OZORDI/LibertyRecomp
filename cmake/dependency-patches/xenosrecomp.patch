@@ -1,17 +1,16 @@
 diff --git a/XenosRecomp/air_compiler.cpp b/XenosRecomp/air_compiler.cpp
-index 9da5a539ed99edbe03b7469bb82d21fe22b9e69d..131f890c817c9f3332be6c1839a2a49eefdd087c 100644
 --- a/XenosRecomp/air_compiler.cpp
 +++ b/XenosRecomp/air_compiler.cpp
-@@ -5,6 +5,8 @@
+@@ -4,6 +4,8 @@
+ #include <iterator>
  #include <spawn.h>
  #include <unistd.h>
- 
-+extern char** environ;
 +
++extern char** environ;
+ 
  struct TemporaryPath
  {
-     const std::string path;
-@@ -20,7 +22,7 @@ struct TemporaryPath
+@@ -20,7 +22,7 @@
  static int executeCommand(const char** argv)
  {
      pid_t pid;
@@ -20,7 +19,7 @@ index 9da5a539ed99edbe03b7469bb82d21fe22b9e69d..131f890c817c9f3332be6c1839a2a49e
          return -1;
  
      int status;
-@@ -54,7 +56,11 @@ std::vector<uint8_t> AirCompiler::compile(const std::string& shaderSource)
+@@ -54,7 +56,11 @@
      }
  
      const char* compileCommand[] = {
@@ -33,7 +32,7 @@ index 9da5a539ed99edbe03b7469bb82d21fe22b9e69d..131f890c817c9f3332be6c1839a2a49e
  #ifdef UNLEASHED_RECOMP
          "-DUNLEASHED_RECOMP",
  #endif
-@@ -73,7 +79,7 @@ std::vector<uint8_t> AirCompiler::compile(const std::string& shaderSource)
+@@ -73,7 +79,7 @@
          std::exit(1);
      }
  
@@ -43,7 +42,6 @@ index 9da5a539ed99edbe03b7469bb82d21fe22b9e69d..131f890c817c9f3332be6c1839a2a49e
      {
          fmt::println("Metal linker exited with status: {}", linkStatus);
 diff --git a/XenosRecomp/main.cpp b/XenosRecomp/main.cpp
-index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091003b017c 100644
 --- a/XenosRecomp/main.cpp
 +++ b/XenosRecomp/main.cpp
 @@ -1,4 +1,5 @@
@@ -60,7 +58,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
  
  #ifdef XENOS_RECOMP_AIR
  #include "air_compiler.h"
-@@ -38,6 +40,10 @@ struct RecompiledShader
+@@ -38,6 +40,10 @@
      std::vector<uint8_t> lateSpirv;
      std::vector<uint8_t> air;
      uint32_t specConstantsMask = 0;
@@ -71,7 +69,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
  };
  
  void recompileShader(RecompiledShader& shader, const std::string_view include, std::atomic<uint32_t>& progress, uint32_t numShaders)
-@@ -47,27 +53,33 @@ void recompileShader(RecompiledShader& shader, const std::string_view include, s
+@@ -47,27 +53,33 @@
  
      thread_local ShaderRecompiler recompiler;
      recompiler = {};
@@ -111,18 +109,19 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
      }
      assert(spirv != nullptr);
  
-@@ -76,16 +88,20 @@ void recompileShader(RecompiledShader& shader, const std::string_view include, s
+@@ -76,16 +88,20 @@
  
      spirv->Release();
  
 -    if (recompiler.isPixelShader &&
 -        (recompiler.specConstantsMask & SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK) == SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK)
-+    if (recovered ? !shader.recoveredLate.empty() :
-+        (isPixelShader && (shader.specConstantsMask & SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK) == SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK))
-     {
+-    {
 -        recompiler = {};
 -        recompiler.recompile(shader.data, include, false);
 -        assert((recompiler.specConstantsMask & SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK) == SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK);
++    if (recovered ? !shader.recoveredLate.empty() :
++        (isPixelShader && (shader.specConstantsMask & SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK) == SPEC_CONSTANT_ALPHA_TEST_CAPABILITY_MASK))
++    {
 +        if (!recovered)
 +        {
 +            recompiler = {};
@@ -138,7 +137,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
          }
          assert(spirv != nullptr);
  
-@@ -105,7 +121,8 @@ int main(int argc, char** argv)
+@@ -105,7 +121,8 @@
  #ifndef XENOS_RECOMP_INPUT
      if (argc < 4)
      {
@@ -148,7 +147,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
          return 0;
      }
  #endif
-@@ -134,6 +151,46 @@ int main(int argc, char** argv)
+@@ -134,6 +151,46 @@
  #endif
          ;
  
@@ -195,7 +194,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
      size_t includeSize = 0;
      auto includeData = readAllBytes(includeInput, includeSize);
      std::string_view include(reinterpret_cast<const char*>(includeData.get()), includeSize);
-@@ -154,6 +211,7 @@ int main(int argc, char** argv)
+@@ -154,6 +211,7 @@
              size_t fileSize = 0;
              auto fileData = readAllBytes(file.path().string().c_str(), fileSize);
              bool foundAny = false;
@@ -203,7 +202,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
  
              for (size_t i = 0; fileSize > sizeof(ShaderContainer) && i < fileSize - sizeof(ShaderContainer) - 1;)
              {
-@@ -166,12 +224,18 @@ int main(int argc, char** argv)
+@@ -166,12 +224,18 @@
                      shaderContainer->field20 == 0)
                  {
                      XXH64_hash_t hash = XXH3_64bits(shaderContainer, dataSize);
@@ -227,10 +226,11 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
                      }
  
                      i += dataSize;
-@@ -188,6 +252,52 @@ int main(int argc, char** argv)
+@@ -187,6 +251,52 @@
+             if (foundAny)
                  files.emplace_back(std::move(fileData));
          }
- 
++
 +        try
 +        {
 +            const auto recoveryDirectory = std::filesystem::path(recoveredSourcePath).parent_path();
@@ -276,11 +276,10 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
 +        }
 +        if (missingPreferredSource)
 +            return 1;
-+
+ 
          std::mutex shaderQueueMutex;
          std::deque<XXH64_hash_t> shaderQueue;
-         for (const auto& [hash, _] : shaders)
-@@ -237,14 +347,7 @@ int main(int argc, char** argv)
+@@ -237,14 +347,7 @@
  
          for (auto& [hash, shader] : shaders)
          {
@@ -296,7 +295,7 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
              const size_t dxilOffset = dxil.size();
              const size_t spirvOffset = spirv.size();
              const size_t airOffset = air.size();
-@@ -264,10 +367,18 @@ int main(int argc, char** argv)
+@@ -264,10 +367,18 @@
              const size_t lateSpirvOffset = shader.lateSpirv.empty() ? 0 : spirv.size();
              spirv.insert(spirv.end(), shader.lateSpirv.begin(), shader.lateSpirv.end());
  
@@ -316,10 +315,9 @@ index 5cbea50e6e5f0701a5dcdba40ccbc08d11d29329..753bcd34506aa1a634e0c70e148eb091
  
          f.println("}};");
 diff --git a/XenosRecomp/shader_common.h b/XenosRecomp/shader_common.h
-index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a753673d80b17a 100644
 --- a/XenosRecomp/shader_common.h
 +++ b/XenosRecomp/shader_common.h
-@@ -36,6 +36,7 @@ struct PushConstants
+@@ -36,6 +36,7 @@
  [[vk::push_constant]] ConstantBuffer<PushConstants> g_PushConstants;
  
  #ifdef GTA4_RECOMP
@@ -327,7 +325,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #define g_Booleans                  vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 528)
  #define g_SwappedTexcoords          vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 532)
  #define g_SwappedNormals            vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 536)
-@@ -48,6 +49,9 @@ struct PushConstants
+@@ -48,6 +49,9 @@
  #define g_AlphaThreshold            vk::RawBufferLoad<float>(g_PushConstants.SharedConstants + 580)
  #define g_conditionalSurveyIndex    vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 584)
  #define g_conditionalRenderingIndex vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 588)
@@ -337,7 +335,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #else
  #define g_Booleans                  vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 320)
  #define g_SwappedTexcoords          vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 324)
-@@ -89,6 +93,7 @@ struct PushConstants
+@@ -89,6 +93,7 @@
  };
  
  #ifdef GTA4_RECOMP
@@ -345,7 +343,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #define g_Booleans (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 528)))
  #define g_SwappedTexcoords (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 532)))
  #define g_SwappedNormals (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 536)))
-@@ -101,6 +106,7 @@ struct PushConstants
+@@ -101,6 +106,7 @@
  #define g_AlphaThreshold (*(reinterpret_cast<device float*>(g_PushConstants.SharedConstants + 580)))
  #define g_conditionalSurveyIndex (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 584)))
  #define g_conditionalRenderingIndex (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 588)))
@@ -353,7 +351,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #else
  #define g_Booleans (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 320)))
  #define g_SwappedTexcoords (*(reinterpret_cast<device uint*>(g_PushConstants.SharedConstants + 324)))
-@@ -119,6 +125,7 @@ struct PushConstants
+@@ -119,6 +125,7 @@
  #else
  
  #ifdef GTA4_RECOMP
@@ -361,7 +359,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #define DEFINE_SHARED_CONSTANTS() \
      uint g_Booleans : packoffset(c33.x); \
      uint g_SwappedTexcoords : packoffset(c33.y); \
-@@ -131,7 +138,9 @@ struct PushConstants
+@@ -131,7 +138,9 @@
      bool g_ClipPlaneEnabled : packoffset(c36.x); \
      float g_AlphaThreshold : packoffset(c36.y); \
      uint g_conditionalSurveyIndex : packoffset(c36.z); \
@@ -372,7 +370,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #else
  #define DEFINE_SHARED_CONSTANTS() \
      uint g_Booleans : packoffset(c20.x); \
-@@ -152,6 +161,52 @@ uint g_SpecConstants();
+@@ -152,6 +161,52 @@
  
  #endif
  
@@ -425,7 +423,7 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  float4 cube(float4 value)
  {
      float3 src = value.zwx;
-@@ -281,46 +336,62 @@ float4 tfetch2D(constant Texture2DDescriptorHeap* textureHeap,
+@@ -281,47 +336,96 @@
                  constant SamplerDescriptorHeap* samplerHeap,
                  uint resourceDescriptorIndex,
                  uint samplerDescriptorIndex,
@@ -488,15 +486,50 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
      sampler sampler = samplerHeap[samplerDescriptorIndex].samp;
      float3 dir = cubeDir(texCoord);
 -    return texture.sample(sampler, dir);
+-}
 +#if defined(GTA4_RECOMP) && !defined(XENOS_RECOMP_PIXEL_SHADER)
 +    return texture.sample(sampler, dir, level(lodBias));
 +#else
 +    return texture.sample(sampler, dir, bias(lodBias));
 +#endif
- }
++}
++
++#ifdef GTA4_RECOMP
++// Explicit texture levels are separate from implicit sampling plus bias. The
++// caller combines register LOD, fetch-constant bias and instruction bias once.
++float4 tfetch2DLod(constant Texture2DDescriptorHeap* textureHeap,
++                   constant SamplerDescriptorHeap* samplerHeap,
++                   uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                   float2 texCoord, float2 offset, float lod)
++{
++    texture2d<float> texture = textureHeap[resourceDescriptorIndex].tex;
++    return texture.sample(samplerHeap[samplerDescriptorIndex].samp,
++        texCoord + offset / float2(getTexture2DDimensions(texture)), level(lod));
++}
++
++float4 tfetch3DLod(constant Texture3DDescriptorHeap* textureHeap,
++                   constant SamplerDescriptorHeap* samplerHeap,
++                   uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                   float3 texCoord, float3 offset, float lod)
++{
++    texture3d<float> texture = textureHeap[resourceDescriptorIndex].tex;
++    return texture.sample(samplerHeap[samplerDescriptorIndex].samp,
++        texCoord + offset / float3(getTexture3DDimensions(texture)), level(lod));
++}
++
++float4 tfetchCubeLod(constant TextureCubeDescriptorHeap* textureHeap,
++                     constant SamplerDescriptorHeap* samplerHeap,
++                     uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                     float3 texCoord, float lod)
++{
++    return textureHeap[resourceDescriptorIndex].tex.sample(
++        samplerHeap[samplerDescriptorIndex].samp, cubeDir(texCoord), level(lod));
++}
++#endif
  
  float2 getWeights2D(constant Texture2DDescriptorHeap* textureHeap,
-@@ -389,50 +460,51 @@ uint3 getTexture3DDimensions(Texture3D<float4> texture)
+                     constant SamplerDescriptorHeap* samplerHeap,
+@@ -389,52 +493,78 @@
  
  // Pixel shaders need implicit derivatives for authored mip selection,
  // trilinear filtering and anisotropic footprints. Vertex shaders still use
@@ -509,28 +542,36 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
      Texture2D<float4> texture = g_Texture2DDescriptorHeap[resourceDescriptorIndex];
  #ifdef XENOS_RECOMP_PIXEL_SHADER
 -    return texture.Sample(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture));
-+    return texture.SampleBias(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture), lodBias);
- #else
+-#else
 -    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture), 0);
-+    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture), lodBias);
- #endif
- }
- 
+-#endif
+-}
+-
 -float4 tfetch2DArray(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord, float3 offset)
++    return texture.SampleBias(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture), lodBias);
++#else
++    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], texCoord + offset / getTexture2DDimensions(texture), lodBias);
++#endif
++}
++
 +float4 tfetch2DArray(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord, float3 offset, float lodBias = 0.0)
  {
      Texture2DArray<float4> texture = g_Texture2DArrayDescriptorHeap[resourceDescriptorIndex];
      uint3 dimensions = getTexture2DArrayDimensions(texture);
  #ifdef XENOS_RECOMP_PIXEL_SHADER
 -    return texture.Sample(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z));
-+    return texture.SampleBias(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z), lodBias);
- #else
+-#else
 -    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z), 0);
-+    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z), lodBias);
- #endif
- }
- 
+-#endif
+-}
+-
 -float4 tfetch3D(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord, float3 offset)
++    return texture.SampleBias(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z), lodBias);
++#else
++    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex], float3(texCoord.xy + offset.xy / dimensions.xy, texCoord.z * dimensions.z), lodBias);
++#endif
++}
++
 +float4 tfetch3D(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord, float3 offset, float lodBias = 0.0)
  {
      Texture3D<float4> texture = g_Texture3DDescriptorHeap[resourceDescriptorIndex];
@@ -543,11 +584,14 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #else
      return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex],
 -                               texCoord + offset / dimensions, 0);
-+                               texCoord + offset / dimensions, lodBias);
- #endif
- }
- 
+-#endif
+-}
+-
 -float4 tfetchCube(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord)
++                               texCoord + offset / dimensions, lodBias);
++#endif
++}
++
 +float4 tfetchCube(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float3 texCoord, float lodBias = 0.0)
  {
      float3 dir = cubeDir(texCoord);
@@ -559,15 +603,104 @@ index 0a47317c8dfa87d7e5ab52209adbecced55a2251..443c530e04c9a7dda3768279c6a75367
  #else
      return g_TextureCubeDescriptorHeap[resourceDescriptorIndex].SampleLevel(
 -        g_SamplerDescriptorHeap[samplerDescriptorIndex], dir, 0);
+-#endif
+-}
 +        g_SamplerDescriptorHeap[samplerDescriptorIndex], dir, lodBias);
- #endif
- }
++#endif
++}
++
++#ifdef GTA4_RECOMP
++float4 tfetch2DLod(uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                   float2 texCoord, float2 offset, float lod)
++{
++    Texture2D<float4> texture = g_Texture2DDescriptorHeap[resourceDescriptorIndex];
++    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex],
++        texCoord + offset / getTexture2DDimensions(texture), lod);
++}
++
++float4 tfetch3DLod(uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                   float3 texCoord, float3 offset, float lod)
++{
++    Texture3D<float4> texture = g_Texture3DDescriptorHeap[resourceDescriptorIndex];
++    return texture.SampleLevel(g_SamplerDescriptorHeap[samplerDescriptorIndex],
++        texCoord + offset / getTexture3DDimensions(texture), lod);
++}
++
++float4 tfetchCubeLod(uint resourceDescriptorIndex, uint samplerDescriptorIndex,
++                     float3 texCoord, float lod)
++{
++    return g_TextureCubeDescriptorHeap[resourceDescriptorIndex].SampleLevel(
++        g_SamplerDescriptorHeap[samplerDescriptorIndex], cubeDir(texCoord), lod);
++}
++#endif
  
+ float2 getWeights2D(uint resourceDescriptorIndex, uint samplerDescriptorIndex, float2 texCoord, float2 offset)
+ {
 diff --git a/XenosRecomp/shader_recompiler.cpp b/XenosRecomp/shader_recompiler.cpp
-index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f91407638a 100644
 --- a/XenosRecomp/shader_recompiler.cpp
 +++ b/XenosRecomp/shader_recompiler.cpp
-@@ -423,6 +423,12 @@ void ShaderRecompiler::recompile(const TextureFetchInstruction& instr, bool bicu
+@@ -1,3 +1,4 @@
++#include <stdexcept>
+ #include "shader_recompiler.h"
+ #include "shader_common.h"
+ 
+@@ -288,7 +289,11 @@
+ 
+ void ShaderRecompiler::recompile(const TextureFetchInstruction& instr, bool bicubic)
+ {
+-    if (instr.opcode != FetchOpcode::TextureFetch && instr.opcode != FetchOpcode::GetTextureWeights)
++    if (instr.opcode != FetchOpcode::TextureFetch && instr.opcode != FetchOpcode::GetTextureWeights
++#ifdef GTA4_RECOMP
++        && instr.opcode != FetchOpcode::SetTextureLod
++#endif
++    )
+         return;
+ 
+     if (instr.isPredicated)
+@@ -308,6 +313,31 @@
+             for (size_t i = 0; i < componentCount; i++)
+                 out += SWIZZLES[((instr.srcSwizzle >> (i * 2))) & 0x3];
+         };
++
++#ifdef GTA4_RECOMP
++    // setTexLOD updates per-invocation state, not a sampler or a destination
++    // register. Keep the assignment inside the instruction's predicate scope.
++    if (instr.opcode == FetchOpcode::SetTextureLod)
++    {
++        indent();
++        out += "textureLod = ";
++        printSrcRegister(1);
++        out += ";\n";
++        if (instr.isPredicated)
++        {
++            --indentation;
++            indent();
++            out += "}\n";
++        }
++        return;
++    }
++
++    // Computed LOD is selected by the fetch instruction, not just the stage.
++    // A register LOD is an explicit level without computed LOD, and contributes
++    // to the bias when computed LOD is enabled (Xenia's fetch lowering).
++    const bool useComputedLod = instr.useCompLod &&
++        (isPixelShader || instr.useRegGradients);
++#endif
+ 
+     std::string constName;
+     const char* constNamePtr = nullptr;
+@@ -394,6 +424,10 @@
+     }
+ 
+     out += dimension;
++#ifdef GTA4_RECOMP
++    if (instr.opcode == FetchOpcode::TextureFetch && !useComputedLod)
++        out += "Lod";
++#endif
+ 
+ #ifdef UNLEASHED_RECOMP
+     if (bicubic)
+@@ -423,6 +457,19 @@
              break;
      }
  
@@ -575,12 +708,41 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
 +    // slot, not a potentially shared native sampler index, owns this value.
 +#ifdef GTA4_RECOMP
 +    if (instr.opcode == FetchOpcode::TextureFetch)
-+        print(", GetTextureLodBias({})", instr.constIndex);
++    {
++        out += ", ";
++        if (instr.useRegLod)
++            out += "textureLod + ";
++        print("GetTextureLodBias({})", instr.constIndex);
++        if (instr.lodBias)
++            print(" + ({})", instr.lodBias * (1.0f / 16.0f));
++    }
 +#endif
      out += ").";
  
      printDstSwizzle(instr.dstSwizzle, true);
-@@ -1335,11 +1341,13 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -1328,6 +1375,21 @@
+     }
+ }
+ 
++#ifdef GTA4_RECOMP
++namespace {
++uint32_t NativeBooleanMask(uint32_t microcodeAddress)
++{
++    // The shader instruction, not CTAB presence, selects the constant bank.
++    // This also supports Boolean operands stripped from the constant table.
++    if (microcodeAddress < 16)
++        return uint32_t{1} << microcodeAddress;
++    if (microcodeAddress >= 128 && microcodeAddress < 144)
++        return uint32_t{1} << (microcodeAddress - 128 + 16);
++    throw std::runtime_error("Boolean address outside native shared-constant banks");
++}
++} // namespace
++#endif
++
+ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_view& include, bool useEarlyFragmentTests)
+ {
+     const auto shaderContainer = reinterpret_cast<const ShaderContainer*>(shaderData);
+@@ -1335,10 +1397,12 @@
      assert((shaderContainer->flags & 0xFFFFFF00) == 0x102A1100);
      assert(shaderContainer->constantTableOffset != NULL);
  
@@ -590,13 +752,30 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
 +        out += "#if defined(__air__) && !defined(XENOS_RECOMP_PIXEL_SHADER)\n#define XENOS_RECOMP_PIXEL_SHADER\n#endif\n";
      out += include;
      out += '\n';
- 
--    isPixelShader = (shaderContainer->flags & 0x1) == 0;
 -
+-    isPixelShader = (shaderContainer->flags & 0x1) == 0;
+ 
      const auto shader = reinterpret_cast<const Shader*>(shaderData + shaderContainer->shaderOffset);
      const bool hasAlphaTestCapability = isPixelShader &&
-         (reinterpret_cast<const PixelShader*>(shader)->outputs & PIXEL_SHADER_OUTPUT_COLOR0);
-@@ -1445,6 +1453,13 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -1403,13 +1467,17 @@
+                 case ControlFlowOpcode::CondExecPredClean:
+                 case ControlFlowOpcode::CondExecPredCleanEnd:
+                     addr = cf.condExec.address; count = cf.condExec.count; sequence = cf.condExec.sequence;
++#ifndef GTA4_RECOMP
+                     stop = (cf.opcode == ControlFlowOpcode::CondExecEnd
+                         || cf.opcode == ControlFlowOpcode::CondExecPredCleanEnd);
++#endif
+                     break;
+                 case ControlFlowOpcode::CondExecPred:
+                 case ControlFlowOpcode::CondExecPredEnd:
+                     addr = cf.condExecPred.address; count = cf.condExecPred.count; sequence = cf.condExecPred.sequence;
++#ifndef GTA4_RECOMP
+                     stop = (cf.opcode == ControlFlowOpcode::CondExecPredEnd);
++#endif
+                     break;
+                 default:
+                     break;
+@@ -1445,6 +1513,13 @@
          }
      }
  
@@ -610,7 +789,7 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
      out += "#ifdef __spirv__\n\n";
  
  #ifdef UNLEASHED_RECOMP
-@@ -1866,6 +1881,10 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -1866,6 +1941,10 @@
  
          if (pixelShader->outputs & PIXEL_SHADER_OUTPUT_COLOR0)
              out += "\tfloat4 oC0 : SV_Target0;\n";
@@ -621,7 +800,7 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
          if (pixelShader->outputs & PIXEL_SHADER_OUTPUT_COLOR1)
              out += "\tfloat4 oC1 : SV_Target1;\n";
          if (pixelShader->outputs & PIXEL_SHADER_OUTPUT_COLOR2)
-@@ -2013,6 +2032,11 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -2013,6 +2092,11 @@
      println("\t{0} output = ({0})0;", outputName);
      out += "#endif\n";
  
@@ -633,7 +812,7 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
  #ifdef UNLEASHED_RECOMP
      if (hasMtxProjection)
      {
-@@ -2106,6 +2130,15 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -2106,6 +2190,15 @@
          }
      }
  
@@ -649,7 +828,7 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
      if (!isPixelShader)
      {
      #ifdef UNLEASHED_RECOMP
-@@ -2126,7 +2159,11 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -2126,7 +2219,11 @@
              print("\tfloat4 r{} = ", i);
              if (isPixelShader && i == ((shader->fieldC >> 8) & 0xFF))
              {
@@ -661,7 +840,74 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
              }
          #ifdef UNLEASHED_RECOMP
              else if (!isPixelShader && hasIndexCount && i == 0)
-@@ -2528,6 +2565,15 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
+@@ -2145,6 +2242,9 @@
+     out += "\tint aL = 0;\n";
+     out += "\tbool p0 = false;\n";
+     out += "\tfloat ps = 0.0;\n";
++#ifdef GTA4_RECOMP
++    out += "\tfloat textureLod = 0.0;\n";
++#endif
+     if (isPixelShader)
+     {
+ #ifdef UNLEASHED_RECOMP
+@@ -2292,6 +2392,9 @@
+             uint32_t count = 0;
+             uint32_t sequence = 0;
+             bool shouldReturn = false;
++#ifdef GTA4_RECOMP
++            bool booleanExecScope = false;
++#endif
+ 
+             switch (cfInstr.opcode)
+             {
+@@ -2310,7 +2413,26 @@
+                 address = cfInstr.condExec.address;
+                 count = cfInstr.condExec.count;
+                 sequence = cfInstr.condExec.sequence;
+-                shouldReturn = (cfInstr.opcode == ControlFlowOpcode::CondExecEnd || cfInstr.opcode == ControlFlowOpcode::CondExecEnd);
++                shouldReturn = (cfInstr.opcode == ControlFlowOpcode::CondExecEnd ||
++                                cfInstr.opcode == ControlFlowOpcode::CondExecPredCleanEnd);
++#ifdef GTA4_RECOMP
++                // cexec / cexece are real control flow. PredicateClean is a
++                // scheduling hint, not permission to discard the Boolean test.
++                // Keep cexece's shader epilogue and return inside the condition:
++                // a false conditional end continues to the following CF clause.
++                indent();
++                println("// bool-exec cf={} address={} count={} b{} expected={}",
++                    pc - 1, address, count, uint32_t(cfInstr.condExec.boolAddress),
++                    uint32_t(cfInstr.condExec.condition));
++                indent();
++                println("if ((g_Booleans & {}u) {} 0u)",
++                    NativeBooleanMask(cfInstr.condExec.boolAddress),
++                    cfInstr.condExec.condition ? "!=" : "==");
++                indent();
++                out += "{\n";
++                ++indentation;
++                booleanExecScope = true;
++#endif
+                 break;
+ 
+             case ControlFlowOpcode::CondExecPred:
+@@ -2374,11 +2496,17 @@
+                     }
+                     else
+                     {
++#ifdef GTA4_RECOMP
++                        println("if ((g_Booleans & {}u) {} 0u)",
++                            NativeBooleanMask(cfInstr.condJmp.boolAddress),
++                            cfInstr.condJmp.condition ^ simpleControlFlow ? "!=" : "==");
++#else
+                         auto findResult = boolConstants.find(cfInstr.condJmp.boolAddress);
+                         if (findResult != boolConstants.end())
+                             println("if ((g_Booleans & {}) {}= 0)", findResult->second, cfInstr.condJmp.condition ^ simpleControlFlow ? "!" : "=");
+                         else
+-                            println("if ({})", cfInstr.condJmp.condition ^ simpleControlFlow ? "false" : "true"); 
++                            println("if ({})", cfInstr.condJmp.condition ^ simpleControlFlow ? "false" : "true");
++#endif
+                         // println("if (b{} {}= 0)", uint32_t(cfInstr.condJmp.boolAddress), cfInstr.condJmp.condition ^ simpleControlFlow ? "!" : "=");
+                     }
+ 
+@@ -2528,6 +2656,15 @@
                          indent();
                          out += "}\n";
                  #endif
@@ -677,11 +923,25 @@ index e0b87f9b67b8e8d2f116830d5349916e8ef1706a..7d795437019dfac0d188109e39b870f9
                      }
                  }
                  else
+@@ -2555,6 +2692,14 @@
+                     out += "\t\t\tbreak;\n";
+                 }
+             }
++#ifdef GTA4_RECOMP
++            if (booleanExecScope)
++            {
++                --indentation;
++                indent();
++                out += "} // bool-exec\n";
++            }
++#endif
+         }
+ 
+         controlFlowCode += 3;
 diff --git a/XenosRecomp/shader_recompiler.h b/XenosRecomp/shader_recompiler.h
-index 6c10b2bbcb779977bbdae76f0858e25b9d57ae81..d485264c6b0d754305ceee5426d4ed39e53179fb 100644
 --- a/XenosRecomp/shader_recompiler.h
 +++ b/XenosRecomp/shader_recompiler.h
-@@ -33,6 +33,7 @@ struct ShaderRecompiler : StringBuffer
+@@ -33,6 +33,7 @@
      std::unordered_map<uint32_t, const char*> samplers;
      std::unordered_map<uint32_t, uint32_t> ifEndLabels;
      uint32_t specConstantsMask = 0;
@@ -691,7 +951,6 @@ index 6c10b2bbcb779977bbdae76f0858e25b9d57ae81..d485264c6b0d754305ceee5426d4ed39
      bool hasMtxProjection = false;
 diff --git a/XenosRecomp/shader_source_preservation.h b/XenosRecomp/shader_source_preservation.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..d8c85dada6088cbf82fd5bea6ef8fcff1f347032
 --- /dev/null
 +++ b/XenosRecomp/shader_source_preservation.h
 @@ -0,0 +1,151 @@
@@ -848,7 +1107,6 @@ index 0000000000000000000000000000000000000000..d8c85dada6088cbf82fd5bea6ef8fcff
 +}
 diff --git a/shader_override_compiler.py b/shader_override_compiler.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..83ee6673656395126b073843fdceb6f01d8113f5
 --- /dev/null
 +++ b/shader_override_compiler.py
 @@ -0,0 +1,677 @@
@@ -1529,9 +1787,173 @@ index 0000000000000000000000000000000000000000..83ee6673656395126b073843fdceb6f0
 +
 +if __name__ == "__main__":
 +    raise SystemExit(main())
+diff --git a/validate_smaa_pipeline.py b/validate_smaa_pipeline.py
+new file mode 100644
+--- /dev/null
++++ b/validate_smaa_pipeline.py
+@@ -0,0 +1,160 @@
++#!/usr/bin/env python3
++"""Validate canonical SMAA assets and reproducibly emit embedded SPIR-V."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import re
++import shutil
++import struct
++import subprocess
++import tempfile
++from pathlib import Path
++
++
++UPSTREAM_HASHES = {
++    "SMAA.hlsl": "4db53d92ef0b45661f8450303589ffabce93c352cae4282a6f32dd2b80efbeb9",
++    "AreaTex.h": "1933bf43ce86ba71f7ed5f0fa94b148610c634dc3395b9bc67a817d51ee73af2",
++    "SearchTex.h": "1fac315ab5f87b60083c9b8387af17f056204d3d1bf21500f2acc5b3e8c1a37a",
++}
++QUALITY_PRESETS = ("LOW", "MEDIUM", "HIGH", "ULTRA")
++
++
++def sha256(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def parse_byte_array(path: Path, name: str) -> bytes:
++    source = path.read_text(encoding="utf-8")
++    match = re.search(
++        rf"static const unsigned char\s+{re.escape(name)}\[\]\s*=\s*\{{(.*?)\}};",
++        source,
++        flags=re.DOTALL,
++    )
++    if not match:
++        raise ValueError(f"{path}: missing {name}")
++    return bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", match.group(1)))
++
++
++def compile_shader(
++    compiler: str,
++    validator: str | None,
++    source: Path,
++    include_root: Path,
++    preset: str,
++    output: Path,
++) -> None:
++    subprocess.run(
++        [
++            compiler,
++            "-V",
++            "--target-env",
++            "vulkan1.1",
++            f"-I{include_root}",
++            f"-DSMAA_PRESET_{preset}=1",
++            "-S",
++            "frag",
++            str(source),
++            "-o",
++            str(output),
++        ],
++        check=True,
++    )
++    if validator:
++        subprocess.run([validator, "--target-env", "vulkan1.1", str(output)], check=True)
++
++
++def format_words(symbol: str, payload: bytes) -> str:
++    if len(payload) % struct.calcsize("<I"):
++        raise ValueError(f"{symbol}: SPIR-V byte count is not uint32 aligned")
++    words = [word[0] for word in struct.iter_unpack("<I", payload)]
++    lines = [f"inline constexpr uint32_t {symbol}[] = {{"]
++    row = []
++    for word in words:
++        row.append(f"0x{word:08X}")
++        if len(row) == 8:
++            lines.append("    " + ", ".join(row) + ",")
++            row.clear()
++    if row:
++        lines.append("    " + ", ".join(row) + ",")
++    lines.append("};")
++    return "\n".join(lines)
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--repo-root", type=Path, required=True)
++    parser.add_argument("--glslang-validator", default=shutil.which("glslangValidator"))
++    parser.add_argument("--spirv-val", default=shutil.which("spirv-val"))
++    parser.add_argument("--output", type=Path)
++    parser.add_argument("--check", type=Path)
++    args = parser.parse_args()
++
++    if not args.glslang_validator:
++        parser.error("glslangValidator was not found")
++
++    asset_root = args.repo_root / "LibertyRecompLib/postfx/smaa"
++    shader_root = args.repo_root / "glue/rexglue-sdk-main/src/graphics/gta4_native/smaa"
++    for name, expected_hash in UPSTREAM_HASHES.items():
++        path = asset_root / name
++        actual_hash = sha256(path)
++        if actual_hash != expected_hash:
++            raise ValueError(f"{path}: sha256 {actual_hash}, expected {expected_hash}")
++
++    area = parse_byte_array(asset_root / "AreaTex.h", "areaTexBytes")
++    search = parse_byte_array(asset_root / "SearchTex.h", "searchTexBytes")
++    expected_area_size = 160 * 560 * 2
++    expected_search_size = 64 * 16
++    if len(area) != expected_area_size:
++        raise ValueError(f"AreaTex byte count {len(area)}, expected {expected_area_size}")
++    if len(search) != expected_search_size:
++        raise ValueError(f"SearchTex byte count {len(search)}, expected {expected_search_size}")
++
++    shader_payloads: list[tuple[str, bytes]] = []
++    with tempfile.TemporaryDirectory(prefix="liberty-smaa-") as temporary:
++        temporary_root = Path(temporary)
++        for preset in QUALITY_PRESETS:
++            for pass_name in ("edge", "weight"):
++                source = shader_root / f"smaa_{pass_name}_ps.glsl"
++                output = temporary_root / f"{pass_name}_{preset.lower()}.spv"
++                compile_shader(
++                    args.glslang_validator,
++                    args.spirv_val,
++                    source,
++                    asset_root,
++                    preset,
++                    output,
++                )
++                shader_payloads.append((f"smaa_{pass_name}_{preset.lower()}_ps", output.read_bytes()))
++        neighborhood_output = temporary_root / "neighborhood.spv"
++        compile_shader(
++            args.glslang_validator,
++            args.spirv_val,
++            shader_root / "smaa_neighborhood_ps.glsl",
++            asset_root,
++            "HIGH",
++            neighborhood_output,
++        )
++        shader_payloads.append(("smaa_neighborhood_ps", neighborhood_output.read_bytes()))
++
++    generated = "// Generated by tools/XenosRecomp/validate_smaa_pipeline.py.\n"
++    generated += "// Canonical SMAA source: iryoku/smaa commit 71c806a838bdd7d517df19192a20f0c61b3ca29d.\n\n"
++    generated += "\n\n".join(format_words(symbol, payload) for symbol, payload in shader_payloads)
++    generated += "\n"
++
++    if args.output:
++        args.output.parent.mkdir(parents=True, exist_ok=True)
++        args.output.write_text(generated, encoding="utf-8")
++    if args.check:
++        if args.check.read_text(encoding="utf-8") != generated:
++            raise ValueError(f"{args.check}: generated SPIR-V is stale")
++
++    print(
++        f"validated AreaTex={len(area)} bytes SearchTex={len(search)} bytes "
++        f"shaders={len(shader_payloads)}"
++    )
++
++
++if __name__ == "__main__":
++    main()
 diff --git a/tests/shader_overrides/example_pixel.glsl b/tests/shader_overrides/example_pixel.glsl
 new file mode 100644
-index 0000000000000000000000000000000000000000..dc91b6348e318dfbae881f76255f9b788848d4ee
 --- /dev/null
 +++ b/tests/shader_overrides/example_pixel.glsl
 @@ -0,0 +1,7 @@
@@ -1544,7 +1966,6 @@ index 0000000000000000000000000000000000000000..dc91b6348e318dfbae881f76255f9b78
 +}
 diff --git a/tests/shader_overrides/example_vertex.hlsl b/tests/shader_overrides/example_vertex.hlsl
 new file mode 100644
-index 0000000000000000000000000000000000000000..1c79c3cf12ccd03576b82b457c26eb78e9b946a8
 --- /dev/null
 +++ b/tests/shader_overrides/example_vertex.hlsl
 @@ -0,0 +1,9 @@
@@ -1559,7 +1980,6 @@ index 0000000000000000000000000000000000000000..1c79c3cf12ccd03576b82b457c26eb78
 +}
 diff --git a/tests/shader_overrides/manifest.json b/tests/shader_overrides/manifest.json
 new file mode 100644
-index 0000000000000000000000000000000000000000..b58a4bcd553485fee35f67601a62fca00d954792
 --- /dev/null
 +++ b/tests/shader_overrides/manifest.json
 @@ -0,0 +1,21 @@
@@ -1586,7 +2006,6 @@ index 0000000000000000000000000000000000000000..b58a4bcd553485fee35f67601a62fca0
 +}
 diff --git a/tests/test_override_sampler_lod_bias.py b/tests/test_override_sampler_lod_bias.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..0be4a0bc0132add45b27e047f5d80d00517d6502
 --- /dev/null
 +++ b/tests/test_override_sampler_lod_bias.py
 @@ -0,0 +1,136 @@
@@ -1728,7 +2147,6 @@ index 0000000000000000000000000000000000000000..0be4a0bc0132add45b27e047f5d80d00
 +    unittest.main()
 diff --git a/tests/test_shader_override_compiler.py b/tests/test_shader_override_compiler.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..f7300e93684219b065bbbaf5bf207c1db7165ed9
 --- /dev/null
 +++ b/tests/test_shader_override_compiler.py
 @@ -0,0 +1,363 @@
@@ -2097,7 +2515,6 @@ index 0000000000000000000000000000000000000000..f7300e93684219b065bbbaf5bf207c1d
 +    unittest.main()
 diff --git a/tests/test_ssaa_fragment_coordinate_mapping.py b/tests/test_ssaa_fragment_coordinate_mapping.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..17c74f6743d2fab990e4393951393f76f6d50f6f
 --- /dev/null
 +++ b/tests/test_ssaa_fragment_coordinate_mapping.py
 @@ -0,0 +1,37 @@
@@ -2138,169 +2555,1026 @@ index 0000000000000000000000000000000000000000..17c74f6743d2fab990e4393951393f76
 +
 +if __name__ == "__main__":
 +    unittest.main()
-diff --git a/validate_smaa_pipeline.py b/validate_smaa_pipeline.py
+diff --git a/tests/test_conditional_exec_translation.py b/tests/test_conditional_exec_translation.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..d6804e486256c330d8fd7a037e45c4433cf20ac8
 --- /dev/null
-+++ b/validate_smaa_pipeline.py
-@@ -0,0 +1,160 @@
-+#!/usr/bin/env python3
-+"""Validate canonical SMAA assets and reproducibly emit embedded SPIR-V."""
++++ b/tests/test_conditional_exec_translation.py
+@@ -0,0 +1,249 @@
++"""Regression coverage for Boolean EXEC clauses using retail shader containers.
 +
++Tests invoke the built translator, including mutations of instruction gates.
++No fixed shader strings or asset-name exceptions are added to production code.
++"""
 +from __future__ import annotations
-+
-+import argparse
-+import hashlib
++import os
++from pathlib import Path
 +import re
-+import shutil
 +import struct
 +import subprocess
 +import tempfile
-+from pathlib import Path
++import unittest
++
++ROOT = Path(__file__).resolve().parents[3]
++BINARY = Path(os.environ.get('XENOS_RECOMP_TEST_BINARY', str(
++    ROOT/'out/build/xenosrecomp-macos/XenosRecomp/XenosRecomp')))
++COMMON = ROOT/'tools/XenosRecomp/XenosRecomp/shader_common.h'
 +
 +
-+UPSTREAM_HASHES = {
-+    "SMAA.hlsl": "4db53d92ef0b45661f8450303589ffabce93c352cae4282a6f32dd2b80efbeb9",
-+    "AreaTex.h": "1933bf43ce86ba71f7ed5f0fa94b148610c634dc3395b9bc67a817d51ee73af2",
-+    "SearchTex.h": "1fac315ab5f87b60083c9b8387af17f056204d3d1bf21500f2acc5b3e8c1a37a",
-+}
-+QUALITY_PRESETS = ("LOW", "MEDIUM", "HIGH", "ULTRA")
++def shader(name: str) -> Path:
++    return ROOT/'LibertyRecompLib/shader/rage_shaders'/name.rsplit('_', 1)[0]/(name+'.bin')
 +
 +
-+def sha256(path: Path) -> str:
-+    return hashlib.sha256(path.read_bytes()).hexdigest()
++def mutate_cf(data: bytes, index: int, *, opcode: int | None = None,
++              boolean: int | None = None, condition: int | None = None) -> bytes:
++    h = struct.unpack_from('>9I', data)
++    physical, size = struct.unpack_from('>II', data, h[6])
++    offset = h[1] + physical + (index // 2) * 12
++    if offset + 12 > h[1] + physical + size:
++        raise ValueError('control-flow index outside shader')
++    a, b, c = struct.unpack_from('>III', data, offset)
++    pair = [a | ((b & 65535) << 32), (b >> 16) | (c << 16)]
++    cf = pair[index % 2]
++    for value, shift, bits in ((opcode, 44, 4), (boolean, 34, 8), (condition, 42, 1)):
++        if value is not None:
++            if not 0 <= value < 1 << bits:
++                raise ValueError('invalid field')
++            cf = (cf & ~(((1 << bits)-1) << shift)) | (value << shift)
++    pair[index % 2] = cf
++    result = bytearray(data)
++    struct.pack_into('>III', result, offset, pair[0] & 0xffffffff,
++                     (pair[0] >> 32) | ((pair[1] & 65535) << 16), pair[1] >> 16)
++    return bytes(result)
 +
 +
-+def parse_byte_array(path: Path, name: str) -> bytes:
-+    source = path.read_text(encoding="utf-8")
-+    match = re.search(
-+        rf"static const unsigned char\s+{re.escape(name)}\[\]\s*=\s*\{{(.*?)\}};",
-+        source,
-+        flags=re.DOTALL,
-+    )
++def translate(name: str, data: bytes | None = None) -> str:
++    with tempfile.TemporaryDirectory(prefix='liberty-cexec-test-') as directory:
++        source, output = shader(name), Path(directory)/'output.hlsl'
++        if data is not None:
++            source = Path(directory)/'input.bin'
++            source.write_bytes(data)
++        p = subprocess.run([str(BINARY), str(source), str(output), str(COMMON)],
++                           capture_output=True, text=True, timeout=30)
++        if p.returncode:
++            raise RuntimeError(p.stdout + p.stderr)
++        return output.read_text()
++
++
++def scope(source: str) -> tuple[str, str, str]:
++    match = re.search(r'// bool-exec[^\n]*\n\s*(if[^\n]*)\n\s*\{', source)
 +    if not match:
-+        raise ValueError(f"{path}: missing {name}")
-+    return bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", match.group(1)))
++        raise AssertionError('missing Boolean EXEC guard')
++    end = source.find('} // bool-exec', match.end())
++    if end < 0:
++        raise AssertionError('missing Boolean EXEC scope end')
++    return match.group(1), source[match.end():end], source[end:]
 +
 +
-+def compile_shader(
-+    compiler: str,
-+    validator: str | None,
-+    source: Path,
-+    include_root: Path,
-+    preset: str,
-+    output: Path,
-+) -> None:
-+    subprocess.run(
-+        [
-+            compiler,
-+            "-V",
-+            "--target-env",
-+            "vulkan1.1",
-+            f"-I{include_root}",
-+            f"-DSMAA_PRESET_{preset}=1",
-+            "-S",
-+            "frag",
-+            str(source),
-+            "-o",
-+            str(output),
-+        ],
-+        check=True,
-+    )
-+    if validator:
-+        subprocess.run([validator, "--target-env", "vulkan1.1", str(output)], check=True)
++def control_flow(data: bytes) -> list[dict[str, int]]:
++    header = struct.unpack_from('>9I', data)
++    physical, size = struct.unpack_from('>II', data, header[6])
++    words = struct.unpack_from('>' + str(size // 4) + 'I', data, header[1] + physical)
++    limit = len(words)
++    result = []
++    for group in range(len(words) // 3):
++        if group * 3 >= limit:
++            break
++        a, b, c = words[group * 3:group * 3 + 3]
++        for raw in (a | ((b & 65535) << 32), (b >> 16) | (c << 16)):
++            op, address = (raw >> 44) & 15, raw & 4095
++            if op in (1, 2, 3, 4, 5, 6, 13, 14) and address:
++                limit = min(limit, address * 3)
++            result.append(dict(index=len(result), opcode=op, address=address,
++                               boolean=(raw >> 34) & 255, condition=(raw >> 42) & 1))
++    return result
 +
 +
-+def format_words(symbol: str, payload: bytes) -> str:
-+    if len(payload) % struct.calcsize("<I"):
-+        raise ValueError(f"{symbol}: SPIR-V byte count is not uint32 aligned")
-+    words = [word[0] for word in struct.iter_unpack("<I", payload)]
-+    lines = [f"inline constexpr uint32_t {symbol}[] = {{"]
-+    row = []
-+    for word in words:
-+        row.append(f"0x{word:08X}")
-+        if len(row) == 8:
-+            lines.append("    " + ", ".join(row) + ",")
-+            row.clear()
-+    if row:
-+        lines.append("    " + ", ".join(row) + ",")
-+    lines.append("};")
-+    return "\n".join(lines)
++def replace_with_jump(data: bytes, index: int, target: int, *,
++                      boolean: int = 0, condition: int = 0,
++                      unconditional: bool = False) -> bytes:
++    header = struct.unpack_from('>9I', data)
++    physical = struct.unpack_from('>I', data, header[6])[0]
++    offset = header[1] + physical + (index // 2) * 12
++    a, b, c = struct.unpack_from('>III', data, offset)
++    pair = [a | ((b & 65535) << 32), (b >> 16) | (c << 16)]
++    pair[index % 2] = (11 << 44) | (condition << 42) | (boolean << 34) | (int(unconditional) << 13) | target
++    result = bytearray(data)
++    struct.pack_into('>III', result, offset, pair[0] & 0xffffffff,
++                     (pair[0] >> 32) | ((pair[1] & 65535) << 16), pair[1] >> 16)
++    return bytes(result)
++
++
++class ConditionalExecTranslationTest(unittest.TestCase):
++    def test_vertex_deck_angle_only_runs_for_false_b1(self):
++        guard, body, tail = scope(translate('gta_normal_vs4'))
++        self.assertEqual(guard, 'if ((g_Booleans & 2u) == 0u)')
++        self.assertIn('ps = gWorldView(2).z * r0.y;', body)
++        self.assertIn('r3.z = ps;', body)
++        self.assertNotIn('output.oColor0', body)
++        self.assertIn('output.oColor0', tail)
++
++    def test_pixel_deferred_alpha_is_guarded_by_absolute_b129(self):
++        guard, body, tail = scope(translate('gta_normal_ps2'))
++        self.assertEqual(guard, 'if ((g_Booleans & 131072u) != 0u)')
++        self.assertIn('ps = abs(r0.w) >= 0.0;', body)
++        self.assertIn('output.oC1.w', tail)
++
++    def test_default_deferred_pair_also_receives_real_gates(self):
++        self.assertIn('& 2u) == 0u', scope(translate('gta_default_vs4'))[0])
++        self.assertIn('& 131072u) != 0u', scope(translate('gta_default_ps2'))[0])
++
++    def test_both_non_end_boolean_opcodes_and_polarities(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        for op in (3, 13):
++            for condition in (0, 1):
++                with self.subTest(opcode=op, condition=condition):
++                    source = translate('gta_normal_vs4', mutate_cf(data, 4, opcode=op, condition=condition))
++                    guard, body, tail = scope(source)
++                    self.assertEqual(guard, f'if ((g_Booleans & 2u) {"!=" if condition else "=="} 0u)')
++                    self.assertNotIn('return output;', body)
++                    self.assertIn('return output;', tail)
++
++    def test_conditional_end_returns_only_inside_taken_scope(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        for op in (4, 14):
++            with self.subTest(opcode=op):
++                guard, body, tail = scope(translate('gta_normal_vs4', mutate_cf(data, 4, opcode=op)))
++                self.assertIn('return output;', body)
++                self.assertIn('output.oPos', tail)
++                self.assertIn('return output;', tail)
++
++    def test_stage_and_ctab_do_not_rewrite_absolute_boolean_address(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        for absolute, bit in ((0, 0), (8, 8), (11, 11), (15, 15), (128, 16), (129, 17), (143, 31)):
++            with self.subTest(boolean=absolute):
++                guard, _, _ = scope(translate('gta_normal_vs4', mutate_cf(data, 4, boolean=absolute)))
++                self.assertEqual(guard, f'if ((g_Booleans & {1 << bit}u) == 0u)')
++
++    def test_unsupported_boolean_address_fails_instead_of_silent_false(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        for address in (16, 127, 144, 255):
++            with self.subTest(boolean=address):
++                with self.assertRaisesRegex(RuntimeError, 'Boolean address outside native'):
++                    translate('gta_normal_vs4', mutate_cf(data, 4, boolean=address))
++
++    def test_boolean_jump_keeps_stripped_high_register_and_branch_polarity(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        for boolean in (8, 11):
++            for condition in (0, 1):
++                with self.subTest(boolean=boolean, condition=condition):
++                    # Replace the allocation hint, not a shader ALU instruction.
++                    mutated = replace_with_jump(data, 5, 7, boolean=boolean, condition=condition)
++                    result = translate('gta_normal_vs4', mutated)
++                    inverse = '==' if condition else '!='
++                    self.assertIn(f'if ((g_Booleans & {1 << boolean}u) {inverse} 0u)', result)
++
++    def test_conditional_end_in_dispatch_mode_does_not_break_on_false(self):
++        data = shader('gta_normal_vs4').read_bytes()
++        data = replace_with_jump(data, 5, 6, unconditional=True)
++        for opcode in (4, 14):
++            with self.subTest(opcode=opcode):
++                result = translate('gta_normal_vs4', mutate_cf(data, 4, opcode=opcode))
++                self.assertIn('switch (pc)', result)
++                _, body, tail = scope(result)
++                self.assertIn('break;', body)
++                self.assertRegex(tail, r'} // bool-exec\s+case 5:')
++                self.assertIn('case 6:', tail)
++                self.assertIn('return output;', tail)
++
++    def test_all_retail_boolean_exec_clauses_keep_exact_gates(self):
++        checked = 0
++        corpus = ROOT/'LibertyRecompLib/shader/rage_shaders'
++        for path in sorted(corpus.rglob('*.bin')):
++            data = path.read_bytes()
++            if len(data) < 36 or data[:3] != bytes.fromhex('102a11'):
++                continue
++            clauses = [cf for cf in control_flow(data) if cf['opcode'] in (3, 4, 13, 14)]
++            if not clauses:
++                continue
++            # Supply bytes explicitly so nested corpus entries are supported.
++            result = translate(path.stem, data)
++            matches = re.findall(r'// bool-exec cf=(\d+) address=\d+ count=\d+ b(\d+) expected=(\d+)\n\s*if \(\(g_Booleans & (\d+)u\) (==|!=) 0u\)', result)
++            actual = {int(index): (int(boolean), int(condition), int(mask), compare)
++                      for index, boolean, condition, mask, compare in matches}
++            with self.subTest(shader=str(path.relative_to(corpus))):
++                self.assertEqual(len(actual), len(clauses))
++                for cf in clauses:
++                    address = cf['boolean']
++                    bit = address if address < 16 else address - 128 + 16
++                    self.assertEqual(actual[cf['index']],
++                                     (address, cf['condition'], 1 << bit,
++                                      '!=' if cf['condition'] else '=='))
++                    checked += 1
++        self.assertGreater(checked, 0)
++
++    def test_non_deferred_controls_keep_their_sampling_modes(self):
++        for name in ('water_ps0', 'mirror_ps0', 'gta_normal_ps3'):
++            with self.subTest(shader=name):
++                source = translate(name)
++                self.assertNotIn('// bool-exec', source)
++                self.assertIn('tfetch2D(', source)
++
++    def test_native_upload_preserves_every_bit_in_both_boolean_banks(self):
++        header = ROOT/'glue/rexglue-sdk-main/src/graphics/gta4_native/native_shader_booleans.h'
++        renderer = ROOT/'glue/rexglue-sdk-main/src/graphics/gta4_native/graphics_system.cpp'
++        self.assertIn('PackNativeShaderBooleans(vertex_booleans, pixel_booleans)', renderer.read_text())
++        # The independent oracle constructs the ABI bytes, rather than repeating
++        # the implementation's mask-and-shift expression.
++        values = [0, 0xffff, 0xffff0000, 0xffffffff]
++        values += [1 << bit for bit in range(16)]
++        checks = []
++        for vertex in values:
++            for pixel in values:
++                expected = int.from_bytes(vertex.to_bytes(4, 'little')[:2]
++                                          + pixel.to_bytes(4, 'little')[:2], 'little')
++                checks.append(f'static_assert(PackNativeShaderBooleans({vertex}u, {pixel}u) == {expected}u);')
++        with tempfile.TemporaryDirectory(prefix='liberty-bool-upload-') as directory:
++            source = Path(directory)/'boolean_upload.cpp'
++            output = Path(directory)/'boolean_upload'
++            source.write_text(f'#include "{header}"\nusing rex::graphics::gta4_native::PackNativeShaderBooleans;\n'
++                              + '\n'.join(checks) + '\nint main() { return 0; }\n')
++            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', str(source), '-o', str(output)],
++                           capture_output=True, text=True, check=True, timeout=30)
++            subprocess.run([str(output)], check=True, timeout=10)
++
++    def test_pixel_conditional_end_contains_coverage_epilogue(self):
++        data = shader('gta_normal_ps2').read_bytes()
++        for op in (4, 14):
++            with self.subTest(opcode=op):
++                _, body, tail = scope(translate('gta_normal_ps2', mutate_cf(data, 3, opcode=op)))
++                self.assertIn('alphaTestPass', body)
++                self.assertIn('return output;', body)
++                self.assertIn('output.oC0.xyzw', tail)
++                self.assertIn('return output;', tail)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/run_conditional_exec_gpu_test.py b/tests/run_conditional_exec_gpu_test.py
+new file mode 100644
+--- /dev/null
++++ b/tests/run_conditional_exec_gpu_test.py
+@@ -0,0 +1,98 @@
++#!/usr/bin/env python3
++"""GPU comparison of original-container deck vertex translation, old versus fixed.
++
++The generated shader arithmetic is unchanged. Only stage-interface annotations
++are removed to allow the same function to be called from a test compute kernel.
++Expected outputs come from the decoded original Boolean EXEC clause. This is
++not a claim of full-game visual acceptance.
++"""
++from pathlib import Path
++import argparse
++import hashlib
++import itertools
++import json
++import math
++import re
++import struct
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[3]
++WRAPPER = r'''
++kernel void probeRetailDeck(constant PushConstants* pushes [[buffer(0)]],
++    const device float4* cases [[buffer(1)]], device float4* results [[buffer(2)]],
++    uint id [[thread_position_in_grid]]) {
++    VertexShaderInput input = {};
++    input.iPosition0 = float4(0.25,0.5,0.75,1.0);
++    input.iColor0 = float4(0.6,0.7,0.8,cases[id].x);
++    input.iNormal0 = float4(0.0,0.0,cases[id].y,1.0);
++    input.iTangent0 = float4(1.0,0.0,0.0,1.0);
++    input.iTexCoord0 = float4(0.25,0.75,0.0,0.0);
++    auto output = shaderMain(nullptr,nullptr,nullptr,nullptr,nullptr,pushes[id],input);
++    results[id*2] = output.oColor0;
++    results[id*2+1] = output.oPos;
++}
++'''
++
++
++def run(command):
++    return subprocess.run([str(x) for x in command], check=True, capture_output=True,
++                          text=True, timeout=120)
++
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--before-translator',type=Path,required=True)
++    parser.add_argument('--translator',type=Path,default=ROOT/'out/build/xenosrecomp-macos/XenosRecomp/XenosRecomp')
++    parser.add_argument('--output-directory',type=Path,required=True)
++    args=parser.parse_args()
++    out=args.output_directory.resolve();out.mkdir(parents=True,exist_ok=True)
++    source=ROOT/'LibertyRecompLib/shader/rage_shaders/gta_normal/gta_normal_vs4.bin'
++    common=ROOT/'tools/XenosRecomp/XenosRecomp/shader_common.h'
++    rows=[];vs=bytearray();shared=bytearray();inputs=bytearray()
++    for alpha,normal,cosine,enabled in itertools.product((0.25,1.0),(-1.0,1.0),(0.0,0.125,0.5,1.0),(False,True)):
++        constants=bytearray(4096)
++        for first in (0,4,8):
++            for row in range(4):
++                struct.pack_into('<4f',constants,(first+row)*16,*[float(row==col) for col in range(4)])
++        # Only the view-normal z computation uses this value. Position uses the
++        # independent identity world/view/projection matrix, as in the shader.
++        struct.pack_into('<f',constants,6*16+2*4,cosine)
++        struct.pack_into('<4f',constants,39*16,1,0,1,0)
++        struct.pack_into('<4f',constants,40*16,0,0,1,0)
++        sc=bytearray(1024);struct.pack_into('<I',sc,528,int(enabled)<<1)
++        vs.extend(constants);shared.extend(sc);inputs.extend(struct.pack('<4f',alpha,normal,0,0))
++        rows.append(dict(vertex_alpha=alpha,normal_sign=normal,view_cosine=cosine,
++                         boolean=enabled,expected_alpha=alpha if enabled else abs(cosine*normal)))
++    (out/'vertex.bin').write_bytes(vs);(out/'shared.bin').write_bytes(shared);(out/'input.bin').write_bytes(inputs)
++    exe=out/'conditional_exec_gpu_test'
++    run(['xcrun','clang++','-std=c++17','-fobjc-arc',Path(__file__).with_name('conditional_exec_gpu_test.mm'),
++         '-framework','Foundation','-framework','Metal','-o',exe])
++    result={}
++    for variant,tool in (('before',args.before_translator),('fixed',args.translator)):
++        hlsl=out/(variant+'.hlsl')
++        run([tool,source,hlsl,common])
++        text=hlsl.read_text();start=text.index('struct VertexShaderInput')
++        head,body=text[:start],text[start:]
++        # Preserve every expression, constant access, register write and gate.
++        body=re.sub(r'\[\[(?:attribute\([^)]*\)|buffer\([^)]*\)|user\([^)]*\)|position|invariant|clip_distance|vertex|stage_in)\]\]','',body)
++        metal=out/(variant+'.metal');metal.write_text(head+body+'\n'+WRAPPER)
++        air=out/(variant+'.air');lib=out/(variant+'.metallib')
++        run(['xcrun','metal','-c','-D__air__','-DGTA4_RECOMP','-Wno-unused-variable',metal,'-o',air])
++        run(['xcrun','metallib',air,'-o',lib])
++        receipt=run([exe,lib,out/'vertex.bin',out/'shared.bin',out/'input.bin',out/(variant+'.bin'),len(rows)])
++        print(variant,receipt.stdout.strip())
++        data=(out/(variant+'.bin')).read_bytes();assert len(data)==len(rows)*32
++        values=list(struct.iter_unpack('<8f',data));failures=[]
++        for index,(row,value) in enumerate(zip(rows,values)):
++            if not math.isfinite(value[3]) or abs(value[3]-row['expected_alpha'])>0.00001:
++                failures.append(dict(index=index,**row,actual_alpha=value[3]))
++        result[variant]=dict(invocations=len(values),failures=failures,source_sha256=hashlib.sha256(hlsl.read_bytes()).hexdigest(),output_sha256=hashlib.sha256(data).hexdigest())
++    assert not result['fixed']['failures'],result['fixed']
++    assert result['before']['failures'],'baseline failed to reproduce erroneous branch execution'
++    assert all(row['boolean'] for row in result['before']['failures'])
++    report=dict(status='passed',original_container_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),cases=rows,results=result)
++    (out/'verified-gpu-results.json').write_text(json.dumps(report,indent=2)+'\n')
++    print('CONDITIONAL_EXEC_GPU=PASS','fixed_cases',len(rows),'baseline_mismatches',len(result['before']['failures']))
++
++if __name__=='__main__':
++    main()
+diff --git a/tests/conditional_exec_gpu_test.mm b/tests/conditional_exec_gpu_test.mm
+new file mode 100644
+--- /dev/null
++++ b/tests/conditional_exec_gpu_test.mm
+@@ -0,0 +1,62 @@
++// Executes the translated retail deck vertex shader as a compute-callable
++// function. The Python driver removes stage-interface attributes only.
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#include <array>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <vector>
++
++static std::vector<uint8_t> Read(const char* path) {
++  std::ifstream f(path, std::ios::binary);
++  if (!f) return {};
++  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
++}
++struct Push { uint64_t vertex, pixel, shared; };
++static_assert(sizeof(Push) == 24);
++
++int main(int argc, const char** argv) {
++  @autoreleasepool {
++    if (argc != 7) { std::fprintf(stderr, "usage: probe library vertex.bin shared.bin input.bin output.bin count\n"); return 2; }
++    const size_t count = std::stoul(argv[6]);
++    const auto vertexData = Read(argv[2]), sharedData = Read(argv[3]), inputData = Read(argv[4]);
++    if (!count || vertexData.size() != count*4096 || sharedData.size() != count*1024 || inputData.size()!=count*16) return 2;
++    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
++    if (!device) return 2;
++    NSError* error = nil;
++    id<MTLLibrary> library = [device newLibraryWithURL:[NSURL fileURLWithPath:@(argv[1])] error:&error];
++    if (!library) { NSLog(@"library error: %@",error); return 2; }
++    id<MTLFunction> function = [library newFunctionWithName:@"probeRetailDeck"];
++    id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&error];
++    if (!pipeline) { NSLog(@"pipeline error: %@",error); return 2; }
++    id<MTLBuffer> vertex = [device newBufferWithBytes:vertexData.data() length:vertexData.size() options:MTLResourceStorageModeShared];
++    id<MTLBuffer> shared = [device newBufferWithBytes:sharedData.data() length:sharedData.size() options:MTLResourceStorageModeShared];
++    id<MTLBuffer> input = [device newBufferWithBytes:inputData.data() length:inputData.size() options:MTLResourceStorageModeShared];
++    id<MTLBuffer> output = [device newBufferWithLength:count*32 options:MTLResourceStorageModeShared];
++    if (!vertex || !shared || !input || !output) return 2;
++    std::vector<Push> addresses(count);
++    for (size_t i=0;i<count;++i) addresses[i] = {vertex.gpuAddress+i*4096, vertex.gpuAddress+i*4096, shared.gpuAddress+i*1024};
++    id<MTLBuffer> pushes = [device newBufferWithBytes:addresses.data() length:addresses.size()*sizeof(Push) options:MTLResourceStorageModeShared];
++    id<MTLCommandQueue> queue = [device newCommandQueue];
++    id<MTLCommandBuffer> command = [queue commandBuffer];
++    id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
++    [encoder setComputePipelineState:pipeline];
++    [encoder setBuffer:pushes offset:0 atIndex:0];
++    [encoder setBuffer:input offset:0 atIndex:1];
++    [encoder setBuffer:output offset:0 atIndex:2];
++    [encoder useResource:vertex usage:MTLResourceUsageRead];
++    [encoder useResource:shared usage:MTLResourceUsageRead];
++    [encoder dispatchThreads:MTLSizeMake(count,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];
++    [encoder endEncoding];
++    [command commit];
++    [command waitUntilCompleted];
++    if (command.status == MTLCommandBufferStatusError) { NSLog(@"execution error: %@",command.error); return 2; }
++    std::ofstream result(argv[5],std::ios::binary);
++    result.write(static_cast<const char*>(output.contents),output.length);
++    if (!result) return 2;
++    std::printf("device=%s retail_shader_invocations=%zu completed=true\n",device.name.UTF8String,count);
++  }
++  return 0;
++}
+diff --git a/tests/test_texture_lod_translation.py b/tests/test_texture_lod_translation.py
+new file mode 100644
+index 0000000..02ced7b
+--- /dev/null
++++ b/tests/test_texture_lod_translation.py
+@@ -0,0 +1,181 @@
++"""Exercise the built GTA IV translator using original and mutated containers.
++
++Run after building XenosRecomp:
++    python3 -m unittest discover -s tools/XenosRecomp/tests -p test_texture_lod_translation.py
++Set XENOS_RECOMP_TEST_BINARY to test a different translator executable.
++"""
++from __future__ import annotations
++
++import os
++from pathlib import Path
++import re
++import struct
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[3]
++CORPUS = ROOT / "LibertyRecompLib/shader/rage_shaders"
++COMMON = ROOT / "tools/XenosRecomp/XenosRecomp/shader_common.h"
++BINARY = Path(os.environ.get("XENOS_RECOMP_TEST_BINARY", str(
++    ROOT / "out/build/xenosrecomp-macos/XenosRecomp/XenosRecomp")))
++
++
++def shader_path(name: str) -> Path:
++    return CORPUS / name.rsplit("_", 1)[0] / (name + ".bin")
++
++
++def instruction_offset(data: bytes, instruction: int, word: int = 0) -> int:
++    header = struct.unpack_from(">9I", data)
++    physical_offset, size = struct.unpack_from(">2I", data, header[6])
++    offset = instruction * 12 + word * 4
++    if not (0 <= word < 3 and 0 <= offset and offset + 4 <= size):
++        raise ValueError("instruction outside shader code")
++    return header[1] + physical_offset + offset
++
++
++def replace_bits(data: bytes, instruction: int, word: int,
++                 shift: int, width: int, value: int) -> bytes:
++    offset = instruction_offset(data, instruction, word)
++    original = struct.unpack_from(">I", data, offset)[0]
++    mask = ((1 << width) - 1) << shift
++    changed = bytearray(data)
++    struct.pack_into(">I", changed, offset,
++                     (original & ~mask) | ((value << shift) & mask))
++    return bytes(changed)
++
++
++class TextureLodTranslationTest(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls) -> None:
++        if not BINARY.is_file():
++            raise RuntimeError(f"Build the GTA IV XenosRecomp test binary first: {BINARY}")
++
++    def translate(self, name: str, data: bytes | None = None) -> str:
++        with tempfile.TemporaryDirectory(prefix="liberty-lod-test-") as temporary:
++            destination = Path(temporary) / "output.hlsl"
++            source = shader_path(name)
++            if data is not None:
++                source = Path(temporary) / "input.bin"
++                source.write_bytes(data)
++            subprocess.run([str(BINARY), str(source), str(destination), str(COMMON)],
++                           check=True, capture_output=True, text=True, timeout=30)
++            output = destination.read_text()
++        # Only inspect executable shader code, excluding shared helper definitions.
++        return output[output.index("\tint a0 = 0;"):]
++
++    def test_original_deferred_reflections_keep_both_predicated_lod_updates(self) -> None:
++        source = self.translate("deferred_lighting_ps2")
++        self.assertRegex(source, r"if \(p0\)\s*\{\s*textureLod = r1\.x;\s*\}")
++        self.assertRegex(source, r"if \(!p0\)\s*\{\s*textureLod = r1\.z;\s*\}")
++        self.assertEqual(source.count("tfetch2DLod("), 2)
++        self.assertEqual(source.count("textureLod + GetTextureLodBias(6)"), 2)
++        self.assertLess(source.index("textureLod = r1.x;"), source.index("tfetch2DLod("))
++
++    def test_original_vehicle_glass_keeps_the_unpredicated_snapshot(self) -> None:
++        source = self.translate("gta_vehicle_vehglass_ps0")
++        self.assertIn("\n\ttextureLod = r4.w;\n", source)
++        self.assertEqual(source.count("tfetch2DLod("), 1)
++        self.assertIn("textureLod + GetTextureLodBias(4)", source)
++        self.assertLess(source.index("textureLod = r4.w;"), source.index("tfetch2DLod("))
++
++    def test_all_original_register_lod_families_use_explicit_sampling(self) -> None:
++        expected = {
++            **{f"deferred_lighting_ps{i}": 2 for i in (0, 1, 2, 3, 14, 15)},
++            "deferred_lighting_ps27": 1,
++            **{f"{family}_ps{i}": 1 for family in
++               ("gta_vehicle_badges", "gta_vehicle_lightsemissive", "gta_vehicle_vehglass")
++               for i in range(3)},
++        }
++        for name, count in expected.items():
++            with self.subTest(shader=name):
++                source = self.translate(name)
++                self.assertEqual(source.count("tfetch2DLod("), count)
++                self.assertEqual(len(re.findall(r"textureLod = r\d+\.[xyzw];", source)), count)
++                self.assertEqual(source.count("textureLod + GetTextureLodBias("), count)
++
++    def test_pixel_base_level_fetches_do_not_gain_implicit_derivatives(self) -> None:
++        for name in ("gta_trees_ps2", "shadowsmartblit_ps4", "shadowsmartblit_ps5"):
++            with self.subTest(shader=name):
++                source = self.translate(name)
++                self.assertIn("tfetch2DLod(", source)
++                self.assertNotIn("textureLod + GetTextureLodBias", source)
++
++    def test_existing_implicit_material_fetches_remain_implicit(self) -> None:
++        for name in ("mirror_ps0", "water_ps0", "water_ps1", "gta_cutout_fence_ps2",
++                     "gta_cutout_fence_ps3", "gta_reflect_ps2", "gta_cubemap_reflect_ps2"):
++            with self.subTest(shader=name):
++                source = self.translate(name)
++                self.assertRegex(source, r"tfetch(?:2D|Cube)\(")
++                self.assertNotRegex(source, r"tfetch\w+Lod\(")
++                self.assertNotRegex(source, r"textureLod = r\d+")
++
++    def test_vertex_fetches_still_sample_explicit_base_level(self) -> None:
++        source = self.translate("water_vs0")
++        self.assertEqual(source.count("tfetch2DLod("), 5)
++        self.assertNotIn("textureLod +", source)
++        self.assertNotIn("tfetch2D(", source)
++
++    def test_lod_state_is_initialized_per_invocation(self) -> None:
++        source = self.translate("deferred_lighting_ps2")
++        self.assertEqual(source.count("float textureLod = 0.0;"), 1)
++        self.assertLess(source.index("float textureLod = 0.0;"), source.index("textureLod = r1.x;"))
++
++    def test_set_lod_uses_encoded_source_component(self) -> None:
++        original = shader_path("deferred_lighting_ps2").read_bytes()
++        for component, suffix in enumerate("xyzw"):
++            with self.subTest(component=suffix):
++                changed = replace_bits(original, 42, 0, 26, 2, component)
++                source = self.translate("deferred_lighting_ps2", changed)
++                self.assertRegex(source, rf"if \(p0\)\s*\{{\s*textureLod = r1\.{suffix};\s*\}}")
++
++    def test_set_lod_keeps_encoded_predicate_polarity(self) -> None:
++        original = shader_path("deferred_lighting_ps2").read_bytes()
++        changed = replace_bits(original, 42, 2, 31, 1, 0)
++        source = self.translate("deferred_lighting_ps2", changed)
++        self.assertRegex(source, r"if \(!p0\)\s*\{\s*textureLod = r1\.x;\s*\}")
++
++    def test_computed_lod_bit_selects_mode_independently_of_register_bias(self) -> None:
++        original = shader_path("deferred_lighting_ps2").read_bytes()
++        for computed in (0, 1):
++            for register in (0, 1):
++                with self.subTest(computed=computed, register=register):
++                    changed = replace_bits(original, 43, 1, 28, 1, computed)
++                    changed = replace_bits(changed, 43, 1, 29, 1, register)
++                    source = self.translate("deferred_lighting_ps2", changed)
++                    call = re.search(r"r5\.xyz = (tfetch2D(?:Lod)?)\((.*?)\)\.xyz;",
++                                     source, re.DOTALL)
++                    self.assertIsNotNone(call)
++                    self.assertEqual(call.group(1), "tfetch2D" if computed else "tfetch2DLod")
++                    self.assertEqual("textureLod +" in call.group(2), bool(register))
++                    self.assertEqual(call.group(2).count("GetTextureLodBias(6)"), 1)
++
++    def test_instruction_bias_is_signed_and_applied_once_in_both_modes(self) -> None:
++        original = shader_path("deferred_lighting_ps2").read_bytes()
++        for computed in (0, 1):
++            for encoded, text in ((-64, "-4"), (-8, "-0.5"), (8, "0.5"), (63, "3.9375")):
++                with self.subTest(computed=computed, bias=encoded):
++                    changed = replace_bits(original, 43, 1, 28, 1, computed)
++                    changed = replace_bits(changed, 43, 2, 2, 7, encoded)
++                    source = self.translate("deferred_lighting_ps2", changed)
++                    self.assertIn(f"textureLod + GetTextureLodBias(6) + ({text})", source)
++
++    def test_zero_instruction_bias_does_not_add_an_extra_term(self) -> None:
++        source = self.translate("deferred_lighting_ps2")
++        self.assertNotIn("GetTextureLodBias(6) + (", source)
++
++    def test_explicit_helpers_use_level_in_hlsl_and_metal(self) -> None:
++        source = COMMON.read_text()
++        for dimension in ("2D", "3D", "Cube"):
++            helpers = re.findall(rf"float4 tfetch{dimension}Lod\([^{{]+\{{(.*?)\n\}}",
++                                 source, re.DOTALL)
++            self.assertEqual(len(helpers), 2)
++            self.assertTrue(any(".SampleLevel(" in helper for helper in helpers))
++            self.assertTrue(any("level(lod)" in helper for helper in helpers))
++            for helper in helpers:
++                self.assertNotIn(".SampleBias(", helper)
++                self.assertNotIn("bias(lod)", helper)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/run_texture_lod_gpu_test.py b/tests/run_texture_lod_gpu_test.py
+new file mode 100644
+index 0000000..231a93c
+--- /dev/null
++++ b/tests/run_texture_lod_gpu_test.py
+@@ -0,0 +1,87 @@
++#!/usr/bin/env python3
++"""Run mip-selection readback checks on the local Mac GPU.
++
++The test uses the production shared Metal helpers. Python generates expected
++values; the GPU checks integer/fractional levels, signed bias, clamping, and
++invariance to texture-coordinate footprint. Implicit sampling is a negative
++control. This is a helper test, not a GTA IV visual acceptance test.
++"""
++from __future__ import annotations
++
++import argparse
++from pathlib import Path
++import struct
++import subprocess
++import sys
++
++ROOT = Path(__file__).resolve().parents[3]
++METAL = r'''
++#define __air__
++#define GTA4_RECOMP
++#define XENOS_RECOMP_PIXEL_SHADER
++#include "COMMON_PATH"
++
++struct LodTestParams {
++    float register_lod, sampler_bias, instruction_bias, uv_scale;
++    uint implicit_control;
++};
++struct LodTestVertexOutput { float4 position [[position]]; float2 uv; };
++vertex LodTestVertexOutput lodTestVertex(uint index [[vertex_id]]) {
++    const float2 positions[3] = {float2(-1, -1), float2(3, -1), float2(-1, 3)};
++    LodTestVertexOutput output;
++    output.position = float4(positions[index], 0.0, 1.0);
++    output.uv = positions[index] * 0.5 + 0.5;
++    return output;
++}
++fragment float4 lodTestFragment(
++    LodTestVertexOutput input [[stage_in]],
++    constant Texture2DDescriptorHeap* textures [[buffer(0)]],
++    constant SamplerDescriptorHeap* samplers [[buffer(1)]],
++    constant LodTestParams& params [[buffer(2)]]) {
++    float lod = params.register_lod + params.sampler_bias + params.instruction_bias;
++    float2 uv = input.uv * params.uv_scale;
++    if (params.implicit_control)
++        return tfetch2D(textures, samplers, 0, 0, uv, float2(0), lod);
++    return tfetch2DLod(textures, samplers, 0, 0, uv, float2(0), lod);
++}
++'''
 +
 +
 +def main() -> None:
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument("--repo-root", type=Path, required=True)
-+    parser.add_argument("--glslang-validator", default=shutil.which("glslangValidator"))
-+    parser.add_argument("--spirv-val", default=shutil.which("spirv-val"))
-+    parser.add_argument("--output", type=Path)
-+    parser.add_argument("--check", type=Path)
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--output-directory", type=Path, required=True)
 +    args = parser.parse_args()
-+
-+    if not args.glslang_validator:
-+        parser.error("glslangValidator was not found")
-+
-+    asset_root = args.repo_root / "LibertyRecompLib/postfx/smaa"
-+    shader_root = args.repo_root / "glue/rexglue-sdk-main/src/graphics/gta4_native/smaa"
-+    for name, expected_hash in UPSTREAM_HASHES.items():
-+        path = asset_root / name
-+        actual_hash = sha256(path)
-+        if actual_hash != expected_hash:
-+            raise ValueError(f"{path}: sha256 {actual_hash}, expected {expected_hash}")
-+
-+    area = parse_byte_array(asset_root / "AreaTex.h", "areaTexBytes")
-+    search = parse_byte_array(asset_root / "SearchTex.h", "searchTexBytes")
-+    expected_area_size = 160 * 560 * 2
-+    expected_search_size = 64 * 16
-+    if len(area) != expected_area_size:
-+        raise ValueError(f"AreaTex byte count {len(area)}, expected {expected_area_size}")
-+    if len(search) != expected_search_size:
-+        raise ValueError(f"SearchTex byte count {len(search)}, expected {expected_search_size}")
-+
-+    shader_payloads: list[tuple[str, bytes]] = []
-+    with tempfile.TemporaryDirectory(prefix="liberty-smaa-") as temporary:
-+        temporary_root = Path(temporary)
-+        for preset in QUALITY_PRESETS:
-+            for pass_name in ("edge", "weight"):
-+                source = shader_root / f"smaa_{pass_name}_ps.glsl"
-+                output = temporary_root / f"{pass_name}_{preset.lower()}.spv"
-+                compile_shader(
-+                    args.glslang_validator,
-+                    args.spirv_val,
-+                    source,
-+                    asset_root,
-+                    preset,
-+                    output,
-+                )
-+                shader_payloads.append((f"smaa_{pass_name}_{preset.lower()}_ps", output.read_bytes()))
-+        neighborhood_output = temporary_root / "neighborhood.spv"
-+        compile_shader(
-+            args.glslang_validator,
-+            args.spirv_val,
-+            shader_root / "smaa_neighborhood_ps.glsl",
-+            asset_root,
-+            "HIGH",
-+            neighborhood_output,
-+        )
-+        shader_payloads.append(("smaa_neighborhood_ps", neighborhood_output.read_bytes()))
-+
-+    generated = "// Generated by tools/XenosRecomp/validate_smaa_pipeline.py.\n"
-+    generated += "// Canonical SMAA source: iryoku/smaa commit 71c806a838bdd7d517df19192a20f0c61b3ca29d.\n\n"
-+    generated += "\n\n".join(format_words(symbol, payload) for symbol, payload in shader_payloads)
-+    generated += "\n"
-+
-+    if args.output:
-+        args.output.parent.mkdir(parents=True, exist_ok=True)
-+        args.output.write_text(generated, encoding="utf-8")
-+    if args.check:
-+        if args.check.read_text(encoding="utf-8") != generated:
-+            raise ValueError(f"{args.check}: generated SPIR-V is stale")
-+
-+    print(
-+        f"validated AreaTex={len(area)} bytes SearchTex={len(search)} bytes "
-+        f"shaders={len(shader_payloads)}"
-+    )
++    if sys.platform != "darwin":
++        raise SystemExit("This GPU test requires macOS and an installed Metal toolchain.")
++    directory = args.output_directory.resolve()
++    directory.mkdir(parents=True, exist_ok=True)
++    source = directory / "texture_lod_gpu_test.metal"
++    source.write_text(METAL.replace("COMMON_PATH", str(
++        ROOT / "tools/XenosRecomp/XenosRecomp/shader_common.h")))
++    vectors = bytearray()
++    for reg, sampler, instruction in ((0, 0, 0), (1, 0, 0), (2, 0, 0),
++                                      (1, 0.5, 0), (1, 0.5, -0.25), (3, 1, 0), (0, -1, 0)):
++        for footprint in (0.25, 1, 8, 64):
++            expected = min(3.0, max(0.0, reg + sampler + instruction))
++            vectors.extend(struct.pack("<4fIf", reg, sampler, instruction, footprint, 0, expected))
++    for footprint in (0.25, 64):
++        vectors.extend(struct.pack("<4fIf", 1, 0, 0, footprint, 1, 1))
++    vector_path = directory / "texture_lod_vectors.bin"
++    vector_path.write_bytes(vectors)
++    ir = directory / "texture_lod_gpu_test.air"
++    library = directory / "texture_lod_gpu_test.metallib"
++    executable = directory / "texture_lod_gpu_test"
++    commands = [
++        ["xcrun", "metal", "-c", str(source), "-o", str(ir)],
++        ["xcrun", "metallib", str(ir), "-o", str(library)],
++        ["xcrun", "clang++", "-std=c++17", "-fobjc-arc",
++         str(Path(__file__).with_name("texture_lod_gpu_test.mm")),
++         "-framework", "Foundation", "-framework", "Metal", "-o", str(executable)],
++        [str(executable), str(library), str(vector_path)],
++    ]
++    for command in commands:
++        subprocess.run(command, check=True, timeout=120)
 +
 +
 +if __name__ == "__main__":
 +    main()
+diff --git a/tests/texture_lod_gpu_test.mm b/tests/texture_lod_gpu_test.mm
+new file mode 100644
+index 0000000..25923a6
+--- /dev/null
++++ b/tests/texture_lod_gpu_test.mm
+@@ -0,0 +1,116 @@
++// Run with a metallib containing lodTestVertex and lodTestFragment, plus the
++// Python-generated test vectors. Exercises the actual shared sampling helpers.
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <vector>
++
++struct Params {
++  float register_lod, sampler_bias, instruction_bias, uv_scale;
++  uint32_t implicit_control;
++};
++struct TestVector { Params params; float expected; };
++static_assert(sizeof(Params) == 20 && sizeof(TestVector) == 24,
++              "GPU test layout must match Python's <4fIf vectors");
++
++int main(int argc, const char** argv) {
++  @autoreleasepool {
++    if (argc != 3) { std::fprintf(stderr, "usage: texture_lod_gpu_test shader.metallib vectors.bin\n"); return 2; }
++    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
++    if (!device) { std::fprintf(stderr, "no Metal device\n"); return 2; }
++    NSError* error = nil;
++    id<MTLLibrary> library = [device newLibraryWithURL:[NSURL fileURLWithPath:@(argv[1])] error:&error];
++    if (!library) { NSLog(@"library: %@", error); return 2; }
++    id<MTLFunction> vertex = [library newFunctionWithName:@"lodTestVertex"];
++    id<MTLFunction> fragment = [library newFunctionWithName:@"lodTestFragment"];
++    MTLRenderPipelineDescriptor* pipelineDesc = [MTLRenderPipelineDescriptor new];
++    pipelineDesc.vertexFunction = vertex;
++    pipelineDesc.fragmentFunction = fragment;
++    pipelineDesc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA32Float;
++    id<MTLRenderPipelineState> pipeline = [device newRenderPipelineStateWithDescriptor:pipelineDesc error:&error];
++    if (!pipeline) { NSLog(@"pipeline: %@", error); return 2; }
++    id<MTLCommandQueue> queue = [device newCommandQueue];
++    MTLTextureDescriptor* inputDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float width:8 height:8 mipmapped:YES];
++    inputDesc.storageMode = MTLStorageModeShared;
++    inputDesc.usage = MTLTextureUsageShaderRead;
++    id<MTLTexture> input = [device newTextureWithDescriptor:inputDesc];
++    if (!input) return 2;
++    for (NSUInteger level = 0; level < input.mipmapLevelCount; ++level) {
++      const NSUInteger extent = std::max(NSUInteger(1), input.width >> level);
++      std::vector<std::array<float, 4>> texels(extent * extent, {float(level), float(level), float(level), 1.0f});
++      [input replaceRegion:MTLRegionMake2D(0, 0, extent, extent) mipmapLevel:level withBytes:texels.data() bytesPerRow:extent * sizeof(texels[0])];
++    }
++    MTLSamplerDescriptor* samplerDesc = [MTLSamplerDescriptor new];
++    samplerDesc.minFilter = MTLSamplerMinMagFilterLinear;
++    samplerDesc.magFilter = MTLSamplerMinMagFilterLinear;
++    samplerDesc.mipFilter = MTLSamplerMipFilterLinear;
++    samplerDesc.sAddressMode = MTLSamplerAddressModeRepeat;
++    samplerDesc.tAddressMode = MTLSamplerAddressModeRepeat;
++    samplerDesc.supportArgumentBuffers = YES;
++    id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:samplerDesc];
++    id<MTLArgumentEncoder> textures = [fragment newArgumentEncoderWithBufferIndex:0];
++    id<MTLArgumentEncoder> samplers = [fragment newArgumentEncoderWithBufferIndex:1];
++    id<MTLBuffer> textureArguments = [device newBufferWithLength:textures.encodedLength options:MTLResourceStorageModeShared];
++    id<MTLBuffer> samplerArguments = [device newBufferWithLength:samplers.encodedLength options:MTLResourceStorageModeShared];
++    [textures setArgumentBuffer:textureArguments offset:0];
++    [textures setTexture:input atIndex:0];
++    [samplers setArgumentBuffer:samplerArguments offset:0];
++    [samplers setSamplerState:sampler atIndex:0];
++    MTLTextureDescriptor* outputDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float width:16 height:16 mipmapped:NO];
++    outputDesc.storageMode = MTLStorageModeShared;
++    outputDesc.usage = MTLTextureUsageRenderTarget;
++    id<MTLTexture> output = [device newTextureWithDescriptor:outputDesc];
++    if (!output) return 2;
++    std::ifstream file(argv[2], std::ios::binary);
++    std::vector<TestVector> vectors;
++    TestVector item{};
++    for (; file.read(reinterpret_cast<char*>(&item), sizeof(item));) vectors.push_back(item);
++    if (!file.eof() || file.gcount() != 0 || vectors.empty()) { std::fprintf(stderr, "invalid test vectors\n"); return 2; }
++    size_t passed = 0, negativeControls = 0;
++    for (const TestVector& test : vectors) {
++      MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
++      pass.colorAttachments[0].texture = output;
++      pass.colorAttachments[0].loadAction = MTLLoadActionClear;
++      pass.colorAttachments[0].storeAction = MTLStoreActionStore;
++      pass.colorAttachments[0].clearColor = MTLClearColorMake(-99, -99, -99, -99);
++      id<MTLCommandBuffer> command = [queue commandBuffer];
++      id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:pass];
++      [encoder setRenderPipelineState:pipeline];
++      [encoder setFragmentBuffer:textureArguments offset:0 atIndex:0];
++      [encoder setFragmentBuffer:samplerArguments offset:0 atIndex:1];
++      [encoder setFragmentBytes:&test.params length:sizeof(test.params) atIndex:2];
++      [encoder useResource:input usage:MTLResourceUsageRead stages:MTLRenderStageFragment];
++      [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
++      [encoder endEncoding];
++      [command commit];
++      [command waitUntilCompleted];
++      if (command.status == MTLCommandBufferStatusError) { NSLog(@"GPU: %@", command.error); return 2; }
++      std::array<std::array<float, 4>, 256> pixels{};
++      [output getBytes:pixels.data() bytesPerRow:16 * sizeof(pixels[0]) fromRegion:MTLRegionMake2D(0, 0, 16, 16) mipmapLevel:0];
++      bool matches = true;
++      for (const auto& pixel : pixels) {
++        for (size_t channel = 0; channel < 3; ++channel) {
++          matches &= std::isfinite(pixel[channel]) && std::abs(pixel[channel] - test.expected) <= 0.002f;
++        }
++        matches &= std::abs(pixel[3] - 1.0f) <= 0.002f;
++      }
++      if (test.params.implicit_control) {
++        if (!matches) ++negativeControls;
++      } else if (matches) {
++        ++passed;
++      } else {
++        std::fprintf(stderr, "FAILED reg=%g sampler=%g instruction=%g scale=%g expected=%g actual=%g\n", test.params.register_lod, test.params.sampler_bias, test.params.instruction_bias, test.params.uv_scale, test.expected, pixels[0][0]);
++        return 1;
++      }
++    }
++    if (!negativeControls) { std::fprintf(stderr, "implicit negative control failed to reproduce the mismatch\n"); return 1; }
++    std::printf("metal_lod_gpu=passed device=%s explicit_cases=%zu implicit_mismatch_controls=%zu\n", device.name.UTF8String, passed, negativeControls);
++  }
++  return 0;
++}
+diff --git a/tests/run_deferred_alpha_gpu_test.py b/tests/run_deferred_alpha_gpu_test.py
+new file mode 100644
+index 0000000..0941ffc
+--- /dev/null
++++ b/tests/run_deferred_alpha_gpu_test.py
+@@ -0,0 +1,87 @@
++#!/usr/bin/env python3
++"""Render the original GTA IV deferred pixel shader before and after translation.
++
++This test leaves fragment shader arithmetic and its stage interface unchanged.
++It verifies all pixels of three float render targets for independent vertex and
++pixel Boolean-bank values. A small test vertex shader supplies controlled data;
++this is not a complete-game visual acceptance test.
++"""
++from pathlib import Path
++import argparse
++import hashlib
++import itertools
++import json
++import math
++import struct
++import subprocess
++
++ROOT=Path(__file__).resolve().parents[3]
++VERTEX=r'''
++vertex Interpolators deferredAlphaTestVertex(uint index [[vertex_id]],
++    constant float& alpha [[buffer(9)]]) {
++    const float2 positions[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};
++    Interpolators value={};
++    value.iPos=float4(positions[index],0,1);
++    value.iTexCoord0=float4(0.5,0.5,0,0);
++    value.iTexCoord1=float4(0,0,1,1);
++    value.iTexCoord4=float4(1,0,0,0);
++    value.iTexCoord5=float4(0,1,0,0);
++    value.iColor0=float4(1,1,1,alpha);
++    return value;
++}
++'''
++
++def run(command):
++    result = subprocess.run([str(x) for x in command], capture_output=True,
++                            text=True, timeout=120)
++    if result.returncode:
++        raise RuntimeError(f'command failed ({result.returncode}): {command}\n'
++                           + result.stdout + result.stderr)
++    return result
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--before-translator',type=Path,required=True)
++    parser.add_argument('--translator',type=Path,default=ROOT/'out/build/xenosrecomp-macos/XenosRecomp/XenosRecomp')
++    parser.add_argument('--output-directory',type=Path,required=True)
++    args=parser.parse_args()
++    out=args.output_directory.resolve();out.mkdir(parents=True,exist_ok=True)
++    rows=[];vectors=bytearray()
++    for alpha,scalar,vertex_bool,pixel_bool in itertools.product((0,0.125,0.5,1),(0.5,1),(False,True),(False,True)):
++        booleans=(int(vertex_bool)<<1)|(int(pixel_bool)<<17)
++        expected0=alpha*scalar;expected12=expected0*int(pixel_bool)
++        vectors.extend(struct.pack('<ffIff',alpha,scalar,booleans,expected0,expected12))
++        rows.append(dict(alpha=alpha,scalar=scalar,vertex_bool=vertex_bool,pixel_bool=pixel_bool,packed_booleans=booleans,expected=[expected0,expected12,expected12]))
++    (out/'cases.bin').write_bytes(vectors)
++    executable=out/'deferred_alpha_gpu_test'
++    run(['xcrun','clang++','-std=c++17','-fobjc-arc',Path(__file__).with_name('deferred_alpha_gpu_test.mm'),'-framework','Foundation','-framework','Metal','-o',executable])
++    source=ROOT/'LibertyRecompLib/shader/rage_shaders/gta_normal/gta_normal_ps2.bin'
++    common=ROOT/'tools/XenosRecomp/XenosRecomp/shader_common.h'
++    variants={}
++    for variant,translator in [('before',args.before_translator),('fixed',args.translator)]:
++        hlsl=out/(variant+'.hlsl');run([translator,source,hlsl,common])
++        metal=out/(variant+'.metal');metal.write_text(hlsl.read_text()+'\n'+VERTEX)
++        air=out/(variant+'.air');library=out/(variant+'.metallib')
++        run(['xcrun','metal','-c','-D__air__','-DGTA4_RECOMP','-Wno-unused-variable',metal,'-o',air])
++        run(['xcrun','metallib',air,'-o',library])
++        binary=out/(variant+'.bin')
++        receipt=run([executable,library,out/'cases.bin',binary]);print(variant,receipt.stdout.strip())
++        data=binary.read_bytes();pixels=list(struct.iter_unpack('<4f',data))
++        assert len(pixels)==len(rows)*3*256
++        failures=[]
++        for index,row in enumerate(rows):
++            for target,expected in enumerate(row['expected']):
++                actual=pixels[(index*3+target)*256:(index*3+target+1)*256]
++                assert all(all(math.isfinite(x) for x in p) for p in actual)
++                mismatch=sum(abs(p[3]-expected)>0.00001 for p in actual)
++                if mismatch: failures.append(dict(case=index,target=target,mismatching_pixels=mismatch,target_expected_alpha=expected,actual_alpha=actual[0][3],**row))
++        variants[variant]=dict(cases=len(rows),failures=failures,completed=True,source_sha256=hashlib.sha256(hlsl.read_bytes()).hexdigest(),output_sha256=hashlib.sha256(data).hexdigest())
++    assert not variants['fixed']['failures'],variants['fixed']['failures']
++    assert variants['before']['failures'],'baseline did not expose the ignored pixel Boolean'
++    assert all(f['target'] in (1,2) and not f['pixel_bool'] for f in variants['before']['failures'])
++    report=dict(status='passed',cases=rows,results=variants,original_container_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
++    (out/'verified-pixel-gpu-results.json').write_text(json.dumps(report,indent=2)+'\n')
++    print('DEFERRED_ALPHA_GPU=PASS','fixed_cases',len(rows),'baseline_case_target_mismatches',len(variants['before']['failures']))
++
++if __name__=='__main__':
++    main()
+diff --git a/tests/deferred_alpha_gpu_test.mm b/tests/deferred_alpha_gpu_test.mm
+new file mode 100644
+index 0000000..1971f4c
+--- /dev/null
++++ b/tests/deferred_alpha_gpu_test.mm
+@@ -0,0 +1,98 @@
++// Differential test for the original deferred pixel shader's Boolean EXEC.
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <vector>
++
++struct Push { uint64_t vertex, pixel, shared; };
++struct Case { float alpha, scalar; uint32_t booleans; float expected_color_alpha, expected_data_alpha; };
++static_assert(sizeof(Push) == 24 && sizeof(Case) == 20);
++
++int main(int argc, const char** argv) {
++  @autoreleasepool {
++    if (argc != 4) { std::fprintf(stderr,"usage: deferred_alpha_gpu_test library vectors.bin output.bin\n"); return 2; }
++    std::ifstream casesFile(argv[2],std::ios::binary);
++    std::vector<Case> cases; Case item{};
++    for (; casesFile.read(reinterpret_cast<char*>(&item),sizeof(item));) cases.push_back(item);
++    if (!casesFile.eof() || casesFile.gcount()!=0 || cases.empty()) return 2;
++    id<MTLDevice> device=MTLCreateSystemDefaultDevice(); if (!device) return 2;
++    NSError* error=nil;
++    id<MTLLibrary> library=[device newLibraryWithURL:[NSURL fileURLWithPath:@(argv[1])] error:&error];
++    if (!library) { NSLog(@"library: %@",error); return 2; }
++    id<MTLFunction> vertex=[library newFunctionWithName:@"deferredAlphaTestVertex"];
++    // The retail pixel entry point requires the same specialization constant
++    // that the application supplies. Zero disables optional alpha testing here.
++    MTLFunctionConstantValues* specialization=[MTLFunctionConstantValues new];
++    const uint32_t specBits=0;
++    [specialization setConstantValue:&specBits type:MTLDataTypeUInt atIndex:0];
++    id<MTLFunction> pixel=[library newFunctionWithName:@"shaderMain" constantValues:specialization error:&error];
++    if (!pixel) { NSLog(@"pixel specialization: %@",error); return 2; }
++    MTLRenderPipelineDescriptor* desc=[MTLRenderPipelineDescriptor new];
++    desc.vertexFunction=vertex; desc.fragmentFunction=pixel;
++    for (NSUInteger target=0;target<3;++target) desc.colorAttachments[target].pixelFormat=MTLPixelFormatRGBA32Float;
++    id<MTLRenderPipelineState> pipeline=[device newRenderPipelineStateWithDescriptor:desc error:&error];
++    if (!pipeline) { NSLog(@"pipeline: %@",error); return 2; }
++    id<MTLCommandQueue> queue=[device newCommandQueue];
++    MTLTextureDescriptor* textureDesc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float width:1 height:1 mipmapped:NO];
++    textureDesc.storageMode=MTLStorageModeShared; textureDesc.usage=MTLTextureUsageShaderRead;
++    id<MTLTexture> diffuse=[device newTextureWithDescriptor:textureDesc];
++    id<MTLTexture> normal=[device newTextureWithDescriptor:textureDesc];
++    const std::array<float,4> color={0.25f,0.5f,0.75f,1.0f}, bump={0.5f,0.5f,1.0f,0.5f};
++    [diffuse replaceRegion:MTLRegionMake2D(0,0,1,1) mipmapLevel:0 withBytes:color.data() bytesPerRow:sizeof(color)];
++    [normal replaceRegion:MTLRegionMake2D(0,0,1,1) mipmapLevel:0 withBytes:bump.data() bytesPerRow:sizeof(bump)];
++    MTLSamplerDescriptor* samplerDesc=[MTLSamplerDescriptor new];
++    samplerDesc.supportArgumentBuffers=YES; samplerDesc.minFilter=MTLSamplerMinMagFilterLinear;
++    samplerDesc.magFilter=MTLSamplerMinMagFilterLinear; samplerDesc.sAddressMode=MTLSamplerAddressModeRepeat;
++    samplerDesc.tAddressMode=MTLSamplerAddressModeRepeat;
++    id<MTLSamplerState> sampler=[device newSamplerStateWithDescriptor:samplerDesc];
++    id<MTLArgumentEncoder> textureEncoder=[pixel newArgumentEncoderWithBufferIndex:0];
++    id<MTLArgumentEncoder> samplerEncoder=[pixel newArgumentEncoderWithBufferIndex:4];
++    const NSUInteger textureStride=textureEncoder.encodedLength;
++    id<MTLBuffer> textures=[device newBufferWithLength:textureStride*2 options:MTLResourceStorageModeShared];
++    id<MTLBuffer> samplers=[device newBufferWithLength:samplerEncoder.encodedLength options:MTLResourceStorageModeShared];
++    [textureEncoder setArgumentBuffer:textures offset:0]; [textureEncoder setTexture:diffuse atIndex:0];
++    [textureEncoder setArgumentBuffer:textures offset:textureStride]; [textureEncoder setTexture:normal atIndex:0];
++    [samplerEncoder setArgumentBuffer:samplers offset:0]; [samplerEncoder setSamplerState:sampler atIndex:0];
++    id<MTLBuffer> constants=[device newBufferWithLength:4096 options:MTLResourceStorageModeShared];
++    id<MTLBuffer> shared=[device newBufferWithLength:1024 options:MTLResourceStorageModeShared];
++    id<MTLTexture> outputs[3];
++    MTLTextureDescriptor* outDesc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float width:16 height:16 mipmapped:NO];
++    outDesc.storageMode=MTLStorageModeShared; outDesc.usage=MTLTextureUsageRenderTarget;
++    for (NSUInteger target=0;target<3;++target) outputs[target]=[device newTextureWithDescriptor:outDesc];
++    if (!diffuse || !normal || !sampler || !textures || !samplers || !constants || !shared || !outputs[2]) return 2;
++    std::ofstream output(argv[3],std::ios::binary); if (!output) return 2;
++    for (const Case& test:cases) {
++      std::memset(constants.contents,0,constants.length); std::memset(shared.contents,0,shared.length);
++      auto floats=static_cast<float*>(constants.contents); floats[39*4]=test.scalar; floats[210*4]=0.9f;
++      auto sharedWords=static_cast<uint32_t*>(shared.contents); sharedWords[1]=1; sharedWords[528/4]=test.booleans;
++      auto sharedFloats=static_cast<float*>(shared.contents); sharedFloats[744/4]=1; sharedFloats[748/4]=1;
++      Push push={constants.gpuAddress,constants.gpuAddress,shared.gpuAddress};
++      MTLRenderPassDescriptor* pass=[MTLRenderPassDescriptor renderPassDescriptor];
++      for (NSUInteger target=0;target<3;++target) {
++        pass.colorAttachments[target].texture=outputs[target]; pass.colorAttachments[target].loadAction=MTLLoadActionClear;
++        pass.colorAttachments[target].storeAction=MTLStoreActionStore; pass.colorAttachments[target].clearColor=MTLClearColorMake(-99,-99,-99,-99);
++      }
++      id<MTLCommandBuffer> command=[queue commandBuffer]; id<MTLRenderCommandEncoder> encoder=[command renderCommandEncoderWithDescriptor:pass];
++      [encoder setRenderPipelineState:pipeline]; [encoder setVertexBytes:&test.alpha length:sizeof(test.alpha) atIndex:9];
++      [encoder setFragmentBuffer:textures offset:0 atIndex:0]; [encoder setFragmentBuffer:samplers offset:0 atIndex:4];
++      [encoder setFragmentBytes:&push length:sizeof(push) atIndex:8];
++      for (id<MTLResource> resource in @[diffuse,normal,constants,shared]) [encoder useResource:resource usage:MTLResourceUsageRead stages:MTLRenderStageFragment];
++      [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [encoder endEncoding];
++      [command commit]; [command waitUntilCompleted];
++      if (command.status==MTLCommandBufferStatusError) { NSLog(@"GPU: %@",command.error); return 2; }
++      std::array<std::array<float,4>,256> pixels{};
++      for (NSUInteger target=0;target<3;++target) {
++        [outputs[target] getBytes:pixels.data() bytesPerRow:16*sizeof(pixels[0]) fromRegion:MTLRegionMake2D(0,0,16,16) mipmapLevel:0];
++        output.write(reinterpret_cast<const char*>(pixels.data()),sizeof(pixels));
++      }
++    }
++    if (!output) return 2;
++    std::printf("deferred_pixel_gpu device=%s cases=%zu completed=true\n",device.name.UTF8String,cases.size());
++  }
++  return 0;
++}

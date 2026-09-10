@@ -185,7 +185,11 @@ vec4 resolve_color() {
 }
 
 void main() {
-  vec4 color = resolve_color();
+  // Resolve exponent is distinct from render-target output exponent. The game
+  // requests its reciprocal when moving from the stored scene to a sampled image.
+  int exponent = int((resolve_constants.flags >> 8u) & 31u) -
+                 int((resolve_constants.flags >> 8u) & 32u);
+  vec4 color = resolve_color() * exp2(float(exponent));
   output_color = (resolve_constants.flags & kFlagXenosFloat16Pack) != 0u
                      ? sanitize_float16_color(color) : color;
 #ifdef GTA4_RESOLVE_HDR_MIRROR

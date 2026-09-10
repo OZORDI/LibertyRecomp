@@ -84,10 +84,21 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
             "without the optional game-install key resource")
     endif()
 
+    set(LIBERTY_DESKTOP_ICON
+        "${LIBERTY_RECOMP_WORKSPACE_ROOT}/LibertyRecomp/res/macos/game_icon.icns")
+    set_source_files_properties("${LIBERTY_DESKTOP_ICON}" PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
+
     add_executable(LibertyRecomp MACOSX_BUNDLE
+        "${LIBERTY_DESKTOP_ICON}"
         src/main.cpp
         src/gta4_app.cpp
         src/gta4_frontend_hooks.cpp
+        src/gta4_font_selection_trace.cpp
+        src/gta4_presentation_options.cpp
+        src/gta4_presentation_hooks.cpp
+        src/gta4_aspect_hooks.cpp
+        src/gta4_quicksave_hooks.cpp
         src/gta4_input_hooks.cpp
         src/gta4_loading_parallax_fix.cpp
         src/gta4_motion_bridge.cpp
@@ -194,10 +205,18 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
             "${CMAKE_CURRENT_SOURCE_DIR}/res/macos/MacOSXBundleInfo.plist.in"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${LIBERTY_MACOS_BUNDLE_IDENTIFIER}"
         MACOSX_BUNDLE_BUNDLE_NAME "Liberty Recompiled"
+        MACOSX_BUNDLE_ICON_FILE "game_icon.icns"
         MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${LIBERTY_MACOS_BUNDLE_IDENTIFIER}"
     )
+
+    # An icon-only update must rerun the bundle signing step too.
+    set_property(TARGET LibertyRecomp APPEND PROPERTY LINK_DEPENDS "${LIBERTY_DESKTOP_ICON}")
+    # Atlas-only updates also change the bundle seal. Relink so the existing
+    # post-build signing step runs after CMake copies the new font resources.
+    set_property(TARGET LibertyRecomp APPEND PROPERTY LINK_DEPENDS
+        ${LIBERTY_VECTOR_FONT_RESOURCES})
 
     if(LIBERTY_MACOS_CODE_SIGN_IDENTITY)
         set_target_properties(LibertyRecomp PROPERTIES

@@ -66,6 +66,7 @@ add_executable(unit_tests
     input/gta4_vehicle_weapon_policy_test.cpp
     input/gta4_vehicle_mouse_policy_test.cpp
     input/context_touch_layout_test.cpp
+    input/controls_reliability_test.cpp
     input/input_rumble_routing_test.cpp
     input/input_state_polling_test.cpp
     input/mnk_input_driver_test.cpp
@@ -79,6 +80,8 @@ add_executable(unit_tests
     ppc/stack_test.cpp
     system/guest_path_test.cpp
     system/gta4_frontend_menu_policy_test.cpp
+    system/gta4_aspect_policy_test.cpp
+    system/gta4_quicksave_policy_test.cpp
     system/gta4_draw_distance_policy_test.cpp
     system/gta4_frame_limiter_test.cpp
     system/gta4_touch_policy_test.cpp
@@ -91,6 +94,7 @@ add_executable(unit_tests
     system/achievement_manager_test.cpp
     system/arbitration_async_test.cpp
     system/community_profile_policy_test.cpp
+    system/community_transport_reliability_test.cpp
     system/function_dispatcher_test.cpp
     system/live_compatibility_test.cpp
     system/multiplayer_validation_test.cpp
@@ -176,6 +180,28 @@ target_include_directories(native_lighting_tests PRIVATE
 target_link_libraries(native_lighting_tests PRIVATE Catch2::Catch2WithMain volk_headers)
 endif()
 
+# Exercise presentation policies and the real cvar registration/persistence path.
+add_executable(presentation_options_tests
+    system/gta4_presentation_options_test.cpp
+    system/gta4_frontend_menu_policy_test.cpp
+    ${PROJECT_SOURCE_DIR}/gta4-recomp/src/gta4_presentation_options.cpp
+)
+target_include_directories(presentation_options_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/gta4-recomp/src
+)
+target_link_libraries(presentation_options_tests PRIVATE rexcore Catch2::Catch2WithMain)
+set_target_properties(presentation_options_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>
+)
+
+# Font instrumentation policies have no game or GPU dependency.
+add_executable(font_selection_tests system/gta4_font_selection_policy_test.cpp)
+target_include_directories(font_selection_tests PRIVATE ${PROJECT_SOURCE_DIR}/gta4-recomp/src)
+target_link_libraries(font_selection_tests PRIVATE Catch2::Catch2WithMain)
+set_target_properties(font_selection_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+
 # Keep the failure recorder testable without linking the game or a GPU driver.
 add_executable(gpu_flight_recorder_tests
     core/gpu_flight_recorder_test.cpp
@@ -217,6 +243,7 @@ set_target_properties(xgi_stats_abi_tests PROPERTIES
 
 add_executable(community_stats_policy_tests
     system/community_stats_policy_test.cpp
+    system/community_transport_reliability_test.cpp
 )
 target_include_directories(community_stats_policy_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/gta4-recomp/src
@@ -302,6 +329,10 @@ catch_discover_tests(community_stats_policy_tests
         LABELS "unit"
         TIMEOUT 60
 )
+catch_discover_tests(presentation_options_tests
+    TEST_PREFIX "unit.presentation-options."
+    PROPERTIES LABELS "unit" TIMEOUT 60
+)
 catch_discover_tests(profile_scalar_setting_tests
     TEST_PREFIX "unit.profile-scalar-setting."
     PROPERTIES
@@ -330,6 +361,14 @@ add_test(
 )
 set_tests_properties(unit.gta4-frontend-advanced-menu-layout
     PROPERTIES LABELS "unit" TIMEOUT 60)
+
+add_test(
+    NAME unit.gta4-presentation-original-contracts
+    COMMAND ${Python3_EXECUTABLE} -B
+            ${PROJECT_SOURCE_DIR}/gta4-recomp/tools/verify_presentation_contracts.py
+)
+set_tests_properties(unit.gta4-presentation-original-contracts
+    PROPERTIES LABELS "unit;presentation" TIMEOUT 60)
 
 add_test(
     NAME unit.gta4-touch-layout
@@ -381,3 +420,43 @@ add_test(
 )
 set_tests_properties(unit.gta4-arbitration-async-contract
     PROPERTIES LABELS "unit" TIMEOUT 60)
+
+# Compile the real community adapter for isolated loopback acceptance tests.
+# It creates temporary identities and never starts generated game code.
+if(UNIX AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT ANDROID)
+  find_package(CURL QUIET)
+  find_package(OpenSSL 3.0 QUIET COMPONENTS Crypto)
+  if(TARGET CURL::libcurl AND TARGET OpenSSL::Crypto)
+    if(CURL_INCLUDE_DIR MATCHES "/MacOSX[^/]*/usr/include$")
+      set_property(TARGET CURL::libcurl PROPERTY INTERFACE_INCLUDE_DIRECTORIES "")
+    endif()
+    add_executable(community_backend_integration
+        ../regression/community_backend_integration.cpp
+        ${PROJECT_SOURCE_DIR}/gta4-recomp/src/network/community_multiplayer.cpp)
+    target_include_directories(community_backend_integration PRIVATE
+        ${PROJECT_SOURCE_DIR}/gta4-recomp/src
+        ${PROJECT_SOURCE_DIR}/thirdparty/inja/third_party/include)
+    target_link_libraries(community_backend_integration PRIVATE
+        rexruntime CURL::libcurl OpenSSL::Crypto utf8cpp)
+    set_target_properties(community_backend_integration PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+  endif()
+endif()
+
+# Live menu settings, shader-family selection, frame latching and TLAD precedence.
+add_executable(modern_shader_tests
+    graphics/modern_shader_policy_test.cpp
+    graphics/shader_override_policy_test.cpp
+    graphics/native_pipeline_lookup_memo_test.cpp
+    system/gta4_frontend_menu_policy_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/graphics/gta4_native/modern_shader_options.cpp
+    ${PROJECT_SOURCE_DIR}/gta4-recomp/src/gta4_presentation_options.cpp
+)
+target_include_directories(modern_shader_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/gta4-recomp/src
+)
+target_link_libraries(modern_shader_tests PRIVATE rexcore Catch2::Catch2WithMain)
+set_target_properties(modern_shader_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)

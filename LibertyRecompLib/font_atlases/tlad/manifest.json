@@ -8,7 +8,7 @@
       "map_entries": 159,
       "other_cells": "GTA IV shared atlas; stock alpha verified",
       "prop_entries": 159,
-      "sha256": "8f61a5547958600abb00a8ab1cc11b061cfd420fdf1533cb90cc2a46a3997814",
+      "sha256": "dda96310580d417e8365772cdb22ea5c231cb646ce7a7cc584b3a2ccacc51433",
       "shared_from_profile": "gta4",
       "source_prop_entries": 159,
       "space_between_chars": [
@@ -19,17 +19,16 @@
       "unproportional_width": 26,
       "vector_ranges": [
         {
-          "baseline": 126,
+          "baseline": 122,
           "first_cell": 0,
-          "font": "Neue Helvetica 67 Condensed Medium.otf",
-          "horizontal_scale": 0.9333333333333333,
+          "font": "din1451alt.ttf",
+          "font_key": "din_mittelschrift",
+          "font_sha256": "3cdbdd35c7637ff4a15d22bdcb8b952f48afadd2e41edb5ab29d80eaad8d48fd",
+          "horizontal_scale": 0.8536585365853658,
           "last_cell_exclusive": 134,
           "point_size": 152,
           "preserved_edge_cells": [
-            1,
-            2,
             3,
-            4,
             30,
             86,
             87,
@@ -54,33 +53,21 @@
             107,
             108,
             109,
-            111,
-            112,
-            113,
             116,
-            117,
-            118,
-            119,
-            121,
-            122,
-            123,
-            126,
-            127,
-            128,
-            130,
-            131,
-            132
+            123
           ],
-          "redrawn_cells": 90,
+          "redrawn_cells": 107,
           "reference_glyphs": 18,
           "reference_height": 110.0,
-          "role": "HELECOND",
-          "traced_fallback_cells": 44
+          "role": "STANDARD / DIN 1451 MITTELSCHRIFT",
+          "traced_fallback_cells": 27
         },
         {
           "baseline": 143,
           "first_cell": 134,
           "font": "Pricedown Bl.otf",
+          "font_key": "pricedown",
+          "font_sha256": "19f8cd90ce76992c565debe80d167f58e6e1e79a6e0b86f24bd9dce12052b256",
           "horizontal_scale": 1.0,
           "last_cell_exclusive": 150,
           "point_size": 161,
@@ -115,6 +102,8 @@
           "baseline": 127,
           "first_cell": 0,
           "font": "HelveticaNeue-Heavy.otf",
+          "font_key": "helvetica_heavy",
+          "font_sha256": "e9478e5a32af0c7f9d2e8e03c59def1e650e3659edddcab46cb8d9b5b6298885",
           "horizontal_scale": 1.0,
           "last_cell_exclusive": 134,
           "point_size": 112,
@@ -129,6 +118,8 @@
           "baseline": 131,
           "first_cell": 135,
           "font": "Neue Helvetica 55 Roman.otf",
+          "font_key": "helvetica_roman",
+          "font_sha256": "da4db1fb02590be515d1a0701a1b72d17d3b9904f24d6443156c45f88ea09cac",
           "horizontal_scale": 1.0,
           "last_cell_exclusive": 195,
           "point_size": 102,
@@ -166,6 +157,8 @@
           "baseline": 132,
           "first_cell": 93,
           "font": "MesquiteStd.otf",
+          "font_key": "mesquite",
+          "font_sha256": "8309dcd93481232d07cc5c894f84d8cea46cfa08ee8b554c2f9f665b2ee55ace",
           "horizontal_scale": 0.9090909090909091,
           "last_cell_exclusive": 167,
           "point_size": 146,
@@ -204,7 +197,7 @@
     }
   },
   "faces": {
-    "helvetica_condensed_medium": "Neue Helvetica 67 Condensed Medium.otf",
+    "din_mittelschrift": "din1451alt.ttf",
     "helvetica_heavy": "HelveticaNeue-Heavy.otf",
     "helvetica_roman": "Neue Helvetica 55 Roman.otf",
     "mesquite": "MesquiteStd.otf",
@@ -219,6 +212,38 @@
       "vertical": 4
     },
     "vertical_metrics": "sub_821F5028/sub_821F1EE0 sample window"
+  },
+  "font_sources": {
+    "din_mittelschrift": {
+      "family": "Alte DIN 1451 Mittelschrift",
+      "file": "din1451alt.ttf",
+      "sha256": "3cdbdd35c7637ff4a15d22bdcb8b952f48afadd2e41edb5ab29d80eaad8d48fd",
+      "style": "Regular"
+    },
+    "helvetica_heavy": {
+      "family": "Helvetica Neue",
+      "file": "HelveticaNeue-Heavy.otf",
+      "sha256": "e9478e5a32af0c7f9d2e8e03c59def1e650e3659edddcab46cb8d9b5b6298885",
+      "style": "Heavy"
+    },
+    "helvetica_roman": {
+      "family": "Helvetica Neue LT Pro",
+      "file": "Neue Helvetica 55 Roman.otf",
+      "sha256": "da4db1fb02590be515d1a0701a1b72d17d3b9904f24d6443156c45f88ea09cac",
+      "style": "Regular"
+    },
+    "mesquite": {
+      "family": "Mesquite Std",
+      "file": "MesquiteStd.otf",
+      "sha256": "8309dcd93481232d07cc5c894f84d8cea46cfa08ee8b554c2f9f665b2ee55ace",
+      "style": "Medium"
+    },
+    "pricedown": {
+      "family": "Pricedown",
+      "file": "Pricedown Bl.otf",
+      "sha256": "19f8cd90ce76992c565debe80d167f58e6e1e79a6e0b86f24bd9dce12052b256",
+      "style": "Black"
+    }
   },
   "format": 4,
   "grid_extent": 16,

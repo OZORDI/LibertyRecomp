@@ -326,11 +326,19 @@ class VulkanPresenter final : public Presenter {
         GuestOutputProvenance provenance{};
         uint64_t paint_attempt = 0;
         uint64_t paint_submission = 0;
-        uint32_t swapchain_epoch = 0;
+        uint64_t swapchain_epoch = 0;
         uint32_t swapchain_image = UINT32_MAX;
         VkFormat format = VK_FORMAT_UNDEFINED;
         bool guest_pass = false;
         bool full_black_fallback = false;
+        FramePixelProbe frame_probe{};
+        FramePixelProbeRegion frame_region{};
+        uint64_t frame_guest_view = 0, frame_mailbox_version = 0, frame_swapchain_handle = 0;
+        uint32_t frame_mailbox = UINT32_MAX, frame_paint_slot = 0;
+        uint32_t frame_swap_width = 0, frame_swap_height = 0;
+        uint32_t frame_effect_count = 0, frame_final_effect = UINT32_MAX;
+        bool frame_ui_drawers = false;
+        int32_t frame_acquire_result = 0, frame_submit_result = 0, frame_present_result = VK_NOT_READY;
       };
 
       static std::unique_ptr<Submission> Create(const VulkanDevice* const vulkan_device) {
@@ -576,6 +584,7 @@ class VulkanPresenter final : public Presenter {
   // recent traced provenance is a fixed-size value, never a retained image.
   GuestOutputProvenance diagnostic_tv_provenance_{};
   uint32_t diagnostic_tv_paint_carry_remaining_ = 0;
+  FramePixelProbeBudget frame_pixel_probe_budget_;
   uint64_t diagnostic_tv_paint_sequence_ = 0;
   uint64_t diagnostic_swapchain_epoch_ = 0;
 

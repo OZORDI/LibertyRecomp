@@ -32,6 +32,7 @@
 #include <rex/types.h>
 #include <rex/ui/flags.h>
 #include <rex/ui/guest_output_transform.h>
+#include <rex/ui/frame_pixel_probe.h>
 #include <rex/ui/surface.h>
 #include <rex/ui/ui_drawer.h>
 
@@ -124,6 +125,7 @@ struct GuestOutputProvenance {
   uint32_t native_command_count = 0;
   uint32_t tv_bink_result = 0;
   bool diagnostic_trace = false;
+  FramePixelProbe frame_pixel_probe{};
 };
 
 // The presenter displays up to two layers of content on a host surface:
@@ -222,6 +224,8 @@ class Presenter {
     // (though the image provided by the refresher may still have a higher
     // storage precision). If never called, assuming it's false.
     void SetIs8bpc(bool is_8bpc) { is_8bpc_out_ref_ = is_8bpc; }
+    void SetFramePixelProbe(const FramePixelProbe& probe) { frame_pixel_probe_ = probe; }
+    const FramePixelProbe& frame_pixel_probe() const { return frame_pixel_probe_; }
     void SetCompletion(std::shared_ptr<Completion> completion) {
       completion_ = std::move(completion);
     }
@@ -233,6 +237,7 @@ class Presenter {
     }
 
    private:
+    FramePixelProbe frame_pixel_probe_{};
     bool& is_8bpc_out_ref_;
     std::shared_ptr<Completion> completion_;
   };

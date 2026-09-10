@@ -7,6 +7,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -93,9 +94,11 @@ struct StreamReadResult {
 class Connection {
  public:
   explicit Connection(Socket socket, SSL_CTX* tls_context = nullptr);
+  Connection(Connection&& other) noexcept;
   Connection(const Connection&) = delete;
   Connection& operator=(const Connection&) = delete;
   ~Connection();
+  std::shared_ptr<Connection> Detach();
 
   bool valid() const;
   bool encrypted() const;
@@ -108,6 +111,9 @@ class Connection {
   void Shutdown(std::chrono::milliseconds deadline = kDefaultSocketDeadline);
 
  private:
+  friend class WorkerPool;
+  std::function<void()> on_detach_;
+  bool owns_socket_ = false;
   Socket socket_ = kInvalidSocket;
   SSL* ssl_ = nullptr;
   bool tls_requested_ = false;

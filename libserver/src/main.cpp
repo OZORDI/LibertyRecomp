@@ -33,6 +33,9 @@
 #include "gta4_stat_schema.h"
 #include "multiplayer_64_vectors.h"
 #include "persistent_state.h"
+#include "identity_contract.h"
+#include "deferred_responses.h"
+#include "qos_probe_state.h"
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -328,6 +331,8 @@ std::string StatusText(int status) {
     case 413: return "Payload Too Large";
     case 414: return "URI Too Long";
     case 431: return "Request Header Fields Too Large";
+    case 429: return "Too Many Requests";
+    case 202: return "Accepted";
     case 501: return "Not Implemented";
     case 503: return "Service Unavailable";
     case 505: return "HTTP Version Not Supported";
@@ -340,7 +345,7 @@ Response Error(int status, std::string code, std::string message) {
           .body = {{"error", {{"code", std::move(code)}, {"message", std::move(message)}}}}};
 }
 
-bool SendResponse(Connection& connection, const Response& response) {
+std::string EncodeResponse(const Response& response) {
   const std::string body = response.status == 204 ? std::string{} : response.body.dump();
   std::ostringstream stream;
   stream << "HTTP/1.1 " << response.status << ' ' << StatusText(response.status) << "\r\n"
@@ -349,13 +354,19 @@ bool SendResponse(Connection& connection, const Response& response) {
          << "Cache-Control: no-store\r\n"
          << "X-Content-Type-Options: nosniff\r\n"
          << "Connection: close\r\n\r\n" << body;
-  const std::string wire = stream.str();
-  return libserver::http::SendAll(connection, wire);
+  return stream.str();
+}
+
+bool SendResponse(Connection& connection, const Response& response) {
+  return libserver::http::SendAll(connection, EncodeResponse(response));
 }
 
 std::optional<json> ParseBody(const Request& request) {
   try {
-    return request.body.empty() ? std::optional(json::object()) : std::optional(json::parse(request.body));
+    json body = request.body.empty() ? json::object() : json::parse(request.body);
+    std::string error;
+    if (!libserver::NormalizeIdentities(body, error)) return std::nullopt;
+    return body;
   } catch (...) {
     return std::nullopt;
   }
@@ -470,6 +481,7 @@ struct RelayRoute {
 };
 
 struct QosListener {
+  std::uint64_t generation = 0;
   std::string host_xuid;
   std::string exchange_key;
   bool enabled = false;
@@ -517,6 +529,7 @@ struct RealtimeEvent {
 
 struct ArbitrationState {
   json snapshot;
+  std::unordered_set<std::string> registered_xuids;
   std::unordered_set<std::string> expected_machine_ids;
   std::unordered_set<std::string> registered_machine_ids;
   std::unordered_map<std::string, std::string> authorized_xuid_machines;
@@ -1368,8 +1381,10 @@ bool ParseIdentity(const json& value, Identity& identity) {
          identity.player_name.size() <= 128;
 }
 
-bool DeserializeDurable(const json& payload, DurableData& result, std::string& error) {
+bool DeserializeDurable(const json& wire_payload, DurableData& result, std::string& error) {
   try {
+  json payload = wire_payload;
+  if (!libserver::NormalizeIdentities(payload, error, {}, true)) return false;
   static constexpr std::array<std::string_view, 12> kLegacyKeys = {
       "payload_schema", "enrollment_mode", "devices", "refresh_sessions", "player_names",
       "relationships", "invites", "stats", "progression", "mode_stats", "ranked_results",
@@ -1463,7 +1478,7 @@ bool DeserializeDurable(const json& payload, DurableData& result, std::string& e
       return false;
     }
     const std::string xuid = value.at("xuid").get<std::string>();
-    if (!bound_xuids.insert(xuid).second) {
+    if (xuid == "0x0000000000000000" || !bound_xuids.insert(xuid).second) {
       error = "xuid has more than one device owner";
       return false;
     }
@@ -1573,7 +1588,8 @@ bool DeserializeDurable(const json& payload, DurableData& result, std::string& e
     parsed.invites.emplace(id, std::move(normalized));
   }
   for (const auto& [xuid, views] : payload.at("stats").items()) {
-    if (!IsHex(xuid, 16) || !views.is_object() || views.size() > kMaximumStatViews) {
+    if (!IsHex(xuid, 16) || !views.is_object() ||
+        views.size() > libserver::Gta4StatViewCount()) {
       error = "stats owner is invalid";
       return false;
     }
@@ -1936,6 +1952,7 @@ bool DeserializeDurable(const json& payload, DurableData& result, std::string& e
 }
 
 class Service {
+  friend struct ServiceRegression;
  public:
   explicit Service(libserver::PersistentState* persistent_state = nullptr,
                    std::string public_url = "http://127.0.0.1:8080")
@@ -1971,6 +1988,12 @@ class Service {
         loaded.stat_write_receipts.clear();
         loaded.stat_next_sequences.clear();
         if (!persistent_state_->Save(SerializeDurable(loaded))) return false;
+      }
+      // Canonicalize collision-free legacy identities before serving any account.
+      // Deserialize rejects aliases with multiple owners without changing disk.
+      const json canonical = SerializeDurable(loaded);
+      if (persistent_state_->payload() != canonical && !persistent_state_->Save(canonical)) {
+        return false;
       }
       CommitDurableLocked(std::move(loaded));
     }
@@ -2010,15 +2033,36 @@ class Service {
     return SaveAndCommitLocked(std::move(staged));
   }
 
-  Response Dispatch(const Request& request) {
+  std::uint64_t ActivityGeneration() const noexcept { return activity_generation_.load(); }
+  std::string InitializationError() const { return initialization_error_; }
+  std::optional<std::string> WaitingOwner(const Request& request) {
+    const auto identity = Authenticate(request);
+    return identity ? std::optional(identity->xuid) : std::nullopt;
+  }
+
+  Response Dispatch(const Request& wire_request, bool polling = false) {
+    Request request = wire_request;
+    request.path = libserver::CanonicalIdentityPath(std::move(request.path));
+    for (auto& [key, value] : request.query) {
+      if (libserver::IdentityValueField(key) || key == "cursor") {
+        value = libserver::CanonicalIdentity(std::move(value));
+      }
+    }
+    Response response = DispatchCanonical(request);
+    if (!polling && request.method != "GET") ++activity_generation_;
+    return response;
+  }
+
+  Response DispatchCanonical(const Request& request) {
     if (request.method == "GET" && request.path == "/health/live") {
       return {.body = {{"status", "live"}, {"service", "libserver"}, {"maximum_session_members", 64}}};
     }
     if (request.method == "GET" && request.path == "/health/ready") {
+      std::lock_guard lock(mutex_);
       const bool ready = initialized_ &&
-                         (!persistent_state_ || persistent_state_->health() ==
-                                                   libserver::PersistentState::Health::kReady);
+                         (!persistent_state_ || persistent_state_->readable());
       json body = {{"status", ready ? "ready" : "error"}, {"public_url", public_url_}};
+      if (persistent_state_) body["storage"] = persistent_state_->HealthJson();
       if (!ready) {
         body["error"] = persistent_state_
                             ? libserver::PersistentState::ErrorCodeName(
@@ -2028,10 +2072,11 @@ class Service {
       }
       return {.status = ready ? 200 : 503, .body = std::move(body)};
     }
-    if (!initialized_ ||
-        (persistent_state_ && persistent_state_->health() !=
-                                  libserver::PersistentState::Health::kReady)) {
-      return Error(503, "storage_unavailable", "durable storage is not ready");
+    {
+      std::lock_guard lock(mutex_);
+      if (!initialized_ || (persistent_state_ && !persistent_state_->readable())) {
+        return Error(503, "storage_unavailable", "durable storage is not ready");
+      }
     }
     if (request.path == "/api/v2/devices/challenge" && request.method == "POST") return ChallengeDevice(request);
     if (request.path == "/api/v2/devices/enroll" && request.method == "POST") return EnrollDevice(request);
@@ -2065,6 +2110,10 @@ class Service {
     if (request.path == "/api/v2/qos/listeners") return QosListeners(request, *identity);
     if (request.path == "/api/v2/qos/lookup" && request.method == "POST") {
       return QosLookup(request, *identity);
+    }
+    if (request.path == "/api/v3/qos/probes") return QosProbes(request, *identity);
+    if (request.path == "/api/v3/qos/ack" && request.method == "POST") {
+      return QosAcknowledge(request, *identity);
     }
     if (request.path == "/api/v2/friends/check" && request.method == "POST") return FriendsCheck(request, *identity);
     if (request.path == "/api/v2/friends" && request.method == "GET") {
@@ -2409,6 +2458,21 @@ class Service {
                      {"0x20000037", {{"type", "i64"}, {"value", 50}}}}}};
     const json mismatched_stat_row = {
         {"xuid", peer.xuid}, {"columns", {{"0x2000000d", second_stat_column}}}};
+    // Aggregation tests start from an already registered match. HTTP tests
+    // independently exercise registration, invalid starts and result admission.
+    const json lobby_before_stat_tests = sessions_.at(session_id);
+    sessions_.at(session_id)["lifecycle_state"] = 2;
+    sessions_.at(session_id)["state"] = "in_game";
+    ArbitrationState stats_registration;
+    for (const auto& participant : {host, peer, third}) {
+      stats_registration.expected_machine_ids.insert(participant.machine_id);
+      stats_registration.registered_machine_ids.insert(participant.machine_id);
+      stats_registration.registered_xuids.insert(participant.xuid);
+      stats_registration.authorized_xuid_machines.emplace(participant.xuid, participant.machine_id);
+    }
+    stats_registration.snapshot = sessions_.at(session_id);
+    arbitration_snapshots_[session_id] = std::move(stats_registration);
+    ranked_started_.insert(session_id);
     Request allocate_stats{.method = "POST", .path = "/api/v2/stats/sequences",
                            .body = json({{"session_id", session_id}}).dump()};
     const auto single_stat_write_body = [&](std::string_view sequence_value,
@@ -2437,7 +2501,7 @@ class Service {
     json valid_stats_body = {
         {"session_id", session_id}, {"sequence", "2"},
         {"mode", "deathmatch"}, {"ranked", true}, {"procedure_index", 0},
-        {"flags", 1086}, {"lifecycle_state", 1},
+        {"flags", 1086}, {"lifecycle_state", 2},
         {"expected_revision", 1}, {"expected_host_epoch", 1},
         {"contexts", {{"0x00000001", 7}}},
         {"properties", {{"0x00000002", "AQ=="}}},
@@ -2639,7 +2703,7 @@ class Service {
                                  {"expected_revision", 1}, {"expected_host_epoch", 1},
                                  {"mode", "deathmatch"}, {"ranked", true},
                                  {"procedure_index", 0}, {"flags", 1086},
-                                 {"lifecycle_state", 1},
+                                 {"lifecycle_state", 2},
                                  {"contexts", {{"0x00000001", 7}}},
                                  {"properties", {{"0x00000002", "AQ=="}}},
                                  {"rows", json::array({{{"xuid", host.xuid}, {"cash_delta", 10000},
@@ -2830,6 +2894,10 @@ class Service {
             std::numeric_limits<std::int64_t>::max() ||
         ranked_results_.contains("result_overflow_later")) return false;
 
+    sessions_[session_id] = lobby_before_stat_tests;
+    ranked_started_.erase(session_id);
+    arbitration_snapshots_.erase(session_id);
+
     Request ready{.method = "POST", .path = "/api/v2/lobbies/" + session_id + "/ready",
                   .body = json({{"expected_session_revision", 1}, {"ready", true}}).dump()};
     Request spectator{.method = "POST", .path = "/api/v2/lobbies/" + session_id + "/spectator",
@@ -2954,7 +3022,7 @@ class Service {
                            .body = json({{"expected_revision", 2}}).dump()};
     Request immutable_patch{.method = "PATCH", .path = "/api/v2/sessions/" + session_id,
                             .body = json({{"expected_revision", 2},
-                                          {"session_id", "0x000000000000FFFF"}}).dump()};
+                                          {"session_id", "0x000000000000ffff"}}).dump()};
     json injected_members = sessions_.at(session_id).at("members");
     injected_members.push_back(json{{"xuid", host.xuid}, {"private", false}});
     Request membership_injection{.method = "PATCH", .path = "/api/v2/sessions/" + session_id,
@@ -3290,6 +3358,10 @@ class Service {
     json migration_source = sessions_.at(session_id);
     migration_source["session_id"] = migration_id;
     migration_source["mode"] = "deathmatch";
+    // Join-in-progress behavior is tested in a Player Match, not by skipping
+    // ranked registration or reopening an already certified ranked game.
+    migration_source["flags"] = 1070;
+    migration_source["ranked"] = false;
     migration_source["revision"] = 1;
     migration_source["host_epoch"] = 1;
     migration_source["contexts"] = {{"migration_policy", 1}};
@@ -3399,7 +3471,7 @@ class Service {
 
     Request allow_in_progress{
         .method = "PATCH", .path = "/api/v2/sessions/" + replacement_id,
-        .body = json({{"expected_revision", 3}, {"flags", 62},
+        .body = json({{"expected_revision", 3}, {"flags", 46},
                       {"join_in_progress", false}}).dump()};
     if (SessionOperation(allow_in_progress, peer).status != 200) return false;
     json alternate_procedure_body = search_body;
@@ -3411,7 +3483,7 @@ class Service {
     Request wrong_mode = search;
     wrong_mode.body = wrong_mode_body.dump();
     json wrong_ranked_body = search_body;
-    wrong_ranked_body["ranked"] = false;
+    wrong_ranked_body["ranked"] = true;
     Request wrong_ranked = search;
     wrong_ranked.body = wrong_ranked_body.dump();
     const Response matching_search = SearchSessions(search, third);
@@ -3422,7 +3494,7 @@ class Service {
         matching_search.body.at("sessions").front().value("session_id", "") !=
             replacement_id ||
         matching_search.body.at("sessions").front().value("mode", "") != "deathmatch" ||
-        !matching_search.body.at("sessions").front().value("ranked", false) ||
+        matching_search.body.at("sessions").front().value("ranked", true) ||
         matching_search.body.value("procedure_index", 0u) != 1 ||
         alternate_procedure_search.body.at("sessions").size() != 1 ||
         alternate_procedure_search.body.value("procedure_index", 0u) != 2 ||
@@ -3461,8 +3533,8 @@ class Service {
   bool VerifyDurableAuthSelfTest() {
     if (!persistent_state_) return false;
     const Identity identity{.device_id = "durable-device",
-                            .xuid = "0x00000000000000D1",
-                            .machine_id = "0x00000000000000E1",
+                            .xuid = "0x00000000000000d1",
+                            .machine_id = "0x00000000000000e1",
                             .player_name = "Durable Player"};
     if (!GrantEntitlement(identity.xuid, "TLAD") ||
         !GrantEntitlement(identity.xuid, "TLAD") ||
@@ -3662,8 +3734,8 @@ class Service {
 
   bool VerifyRestartedStateSelfTest() {
     const Identity identity{.device_id = "durable-device",
-                            .xuid = "0x00000000000000D1",
-                            .machine_id = "0x00000000000000E1",
+                            .xuid = "0x00000000000000d1",
+                            .machine_id = "0x00000000000000e1",
                             .player_name = "Durable Player"};
     const std::string durable_session = "0x0000000000000d01";
     {
@@ -3738,6 +3810,7 @@ class Service {
       sessions_[session_id] = {
           {"session_id", session_id},
           {"members", json::array({json{{"xuid", identity.xuid}}})}};
+      session_leases_[session_id] = Clock::now() + kSessionLease;
       stat_next_sequences_[StatSequenceOwnerKey(identity.xuid, session_id)] = 2;
     }
     Request stat_write{
@@ -3792,20 +3865,21 @@ class Service {
             .body.at("achievement_ids").size() != 0) {
       return false;
     }
-    return Dispatch({.method = "GET", .path = "/health/ready"}).status == 503;
+    const auto health = Dispatch({.method = "GET", .path = "/health/ready"});
+    return health.status == 200 && health.body.at("storage").value("status", "") == "degraded";
   }
 
   bool VerifyResourceLeaseSelfTest() {
     const Identity host{.device_id = "lease-host",
-                        .xuid = "0x0000000000000A01",
-                        .machine_id = "0x0000000000000A11",
+                        .xuid = "0x0000000000000a01",
+                        .machine_id = "0x0000000000000a11",
                         .player_name = "Lease Host"};
     const Identity peer{.device_id = "lease-peer",
-                        .xuid = "0x0000000000000A02",
-                        .machine_id = "0x0000000000000A12",
+                        .xuid = "0x0000000000000a02",
+                        .machine_id = "0x0000000000000a12",
                         .player_name = "Lease Peer"};
-    const std::string expired_id = "0x0000000000000B01";
-    const std::string live_id = "0x0000000000000B02";
+    const std::string expired_id = "0x0000000000000b01";
+    const std::string live_id = "0x0000000000000b02";
     const auto session = [&](const std::string& id) {
       return json{{"session_id", id}, {"host_xuid", host.xuid},
                   {"title_id", "0x545407F2"}, {"media_id", "0x00000000"},
@@ -3904,7 +3978,7 @@ class Service {
 
   bool VerifyMultiplayer64Simulation() {
     const auto make_identity = [](std::string_view xuid) {
-      const std::string value(xuid);
+      const std::string value = libserver::CanonicalIdentity(std::string(xuid));
       return Identity{.device_id = "bot-" + value,
                       .xuid = value,
                       .machine_id = value,
@@ -4216,112 +4290,57 @@ class Service {
   }
 
   bool VerifyQosSelfTest() {
-    const Identity host{.device_id = "qos-host-device",
-                        .xuid = "0x0000000000000a01",
-                        .machine_id = "0x0000000000000b01",
-                        .player_name = "QoS Host"};
-    const Identity peer{.device_id = "qos-peer-device",
-                        .xuid = "0x0000000000000a02",
-                        .machine_id = "0x0000000000000b02",
-                        .player_name = "QoS Peer"};
-    const std::string session_id = "0xa100000000000001";
-    const std::string exchange_key = "0x000102030405060708090a0b0c0d0e0f";
-    const std::string wrong_key = "0xf00102030405060708090a0b0c0d0e0f";
-    const std::string challenge = "0x000102030405060708090a0b0c0d0e0f";
-    const std::string title_data = "AAECAwQFBgcICQoL";
-    {
-      std::lock_guard lock(mutex_);
-      sessions_[session_id] = {{"session_id", session_id},
-                               {"host_xuid", host.xuid},
-                               {"exchange_key", exchange_key}};
-      session_leases_[session_id] = Clock::now() + kSessionLease;
-      relay_routes_["qos-host-route"] = {.xuid = host.xuid,
-                                          .session_id = session_id,
-                                          .port = 3074,
-                                          .virtual_ipv4 = "192.168.100.1",
-                                          .expires = Clock::now() + kRelayRouteLease};
-    }
-    Request listen{.method = "PUT",
-                   .path = "/api/v2/qos/listeners",
-                   .body = json({{"session_id", session_id},
-                                 {"exchange_key", exchange_key},
-                                 {"enabled", true},
-                                 {"title_data", title_data}})
-                               .dump()};
-    if (QosListeners(listen, peer).status != 403 || QosListeners(listen, host).status != 204) {
-      return false;
-    }
-    Request malformed = listen;
-    malformed.body = json({{"session_id", session_id},
-                            {"exchange_key", exchange_key},
-                            {"title_data", "AAECAwQFBgcICQ=="}})
-                          .dump();
-    if (QosListeners(malformed, host).status != 400) return false;
-
-    Request bandwidth_update{
-        .method = "PUT",
-        .path = "/api/v2/qos/listeners",
-        .body = json({{"session_id", session_id},
-                      {"exchange_key", exchange_key},
-                      {"enabled", true},
-                      {"bits_per_second", 16384}})
-                    .dump()};
-    if (QosListeners(bandwidth_update, host).status != 204) return false;
-
-    const auto lookup_request = [&](const std::string& key) {
-      return Request{.method = "POST",
-                     .path = "/api/v2/qos/lookup",
-                     .body = json({{"targets", json::array({{{"session_id", session_id},
-                                                                {"exchange_key", key},
-                                                                {"challenge", challenge}}})}})
-                                 .dump()};
+    const Identity host{"qos-host", "0x0000000000000a01", "0x0000000000000b01", "Host"};
+    const Identity peer{"qos-peer", "0x0000000000000a02", "0x0000000000000b02", "Peer"};
+    const std::string id = "0xa100000000000001";
+    const std::string key = "0x000102030405060708090a0b0c0d0e0f";
+    const std::string title = "AAECAwQFBgcICQoL";
+    sessions_[id] = {{"session_id", id}, {"host_xuid", host.xuid},
+                    {"host_epoch", 1}, {"exchange_key", key}, {"visibility", "public"},
+                    {"members", json::array({{{"xuid", host.xuid},
+                                               {"virtual_ipv4", "192.168.100.1"}}})}};
+    session_leases_[id] = Clock::now() + kSessionLease;
+    relay_routes_["qos-test-route"] = {.xuid = host.xuid, .session_id = id,
+        .port = 3074, .virtual_ipv4 = "192.168.100.1", .expires = Clock::now() + kRelayRouteLease};
+    Request listen{.method = "PUT", .path = "/api/v2/qos/listeners",
+                   .body = json({{"session_id", id}, {"exchange_key", key},
+                                 {"enabled", true}, {"title_data", title}}).dump()};
+    if (QosListeners(listen, peer).status != 403 || QosListeners(listen, host).status != 204) return false;
+    const auto make_lookup = [&] {
+      return Request{.method = "POST", .path = "/api/v2/qos/lookup",
+          .body = json({{"targets", json::array({{{"session_id", id}, {"exchange_key", key},
+                                                 {"challenge", RandomToken("0x", 16)}}})}}).dump()};
     };
-    const Response reachable = QosLookup(lookup_request(exchange_key), peer);
-    if (reachable.status != 200 || reachable.body.at("results").size() != 1 ||
-        !reachable.body.at("results").at(0).value("reachable", false) ||
-        reachable.body.at("results").at(0).value("title_data", "") != title_data ||
-        reachable.body.at("results").at(0).value("challenge", "") != challenge) {
-      return false;
-    }
-    const Response wrong = QosLookup(lookup_request(wrong_key), peer);
-    if (wrong.status != 200 || wrong.body.at("results").at(0).value("reachable", true)) {
-      return false;
-    }
-
-    Request disable = bandwidth_update;
-    disable.body = json({{"session_id", session_id},
-                         {"exchange_key", exchange_key},
-                         {"enabled", false}})
-                       .dump();
-    if (QosListeners(disable, host).status != 204 ||
-        QosLookup(lookup_request(exchange_key), peer)
-            .body.at("results").at(0).value("reachable", true)) {
-      return false;
-    }
-    if (QosListeners(bandwidth_update, host).status != 204 ||
-        QosLookup(lookup_request(exchange_key), peer)
-                .body.at("results").at(0).value("title_data", "") != title_data) {
-      return false;
-    }
-    json too_many = json::array();
-    for (std::size_t index = 0; index < kOversizeQosTargets; ++index) {
-      too_many.push_back({{"session_id", session_id},
-                          {"exchange_key", exchange_key},
-                          {"challenge", challenge}});
-    }
-    Request oversized{.method = "POST",
-                      .path = "/api/v2/qos/lookup",
-                      .body = json({{"targets", std::move(too_many)}}).dump()};
-    if (QosLookup(oversized, peer).status != 400) return false;
-    {
-      std::lock_guard lock(mutex_);
-      relay_routes_.at("qos-host-route").expires = Clock::now();
-    }
-    const Response unreachable = QosLookup(lookup_request(exchange_key), peer);
-    if (unreachable.body.at("results").at(0).value("reachable", true)) return false;
-    std::lock_guard lock(mutex_);
-    RemoveSessionResourcesLocked(session_id);
-    return !qos_listeners_.contains(session_id);
+    const Request lookup = make_lookup();
+    if (QosLookup(lookup, peer).status != 202) return false;
+    const auto pending = QosProbes({.method = "GET"}, host);
+    if (pending.body.at("probes").size() != 1) return false;
+    const auto& probe = pending.body.at("probes").front();
+    Request ack{.method = "POST", .body = json({{"probe_id", probe.at("probe_id")},
+                                                {"challenge", probe.at("challenge")}}).dump()};
+    if (QosAcknowledge(ack, peer).status != 403 || QosAcknowledge(ack, host).status != 204 ||
+        QosAcknowledge(ack, host).status != 204) return false;
+    const auto reachable = QosLookup(lookup, peer);
+    if (reachable.status != 200 || !reachable.body.at("results").front().value("reachable", false) ||
+        reachable.body.at("results").front().value("title_data", "") != title ||
+        reachable.body.value("measurement", "") != "relay-host-ack-v1") return false;
+    auto disable = json::parse(listen.body);
+    disable["enabled"] = false;
+    Request disabled = listen; disabled.body = disable.dump();
+    if (QosListeners(disabled, host).status != 204 || QosAcknowledge(ack, host).status != 403 ||
+        QosLookup(lookup, peer).body.at("results").front().value("reachable", true)) return false;
+    if (QosListeners(listen, host).status != 204) return false;
+    const auto no_response = make_lookup();
+    if (QosLookup(no_response, peer).status != 202) return false;
+    for (auto& [digest, batch] : qos_probe_batches_) { (void)digest; batch.deadline = Clock::now(); }
+    if (QosLookup(no_response, peer).body.at("results").front().value("reachable", true)) return false;
+    relay_routes_.at("qos-test-route").expires = Clock::now();
+    if (QosLookup(make_lookup(), peer).body.at("results").front().value("reachable", true)) return false;
+    json oversize = json::array();
+    for (std::size_t i = 0; i < kOversizeQosTargets; ++i) oversize.push_back(json::parse(lookup.body).at("targets").front());
+    if (QosLookup({.body = json({{"targets", oversize}}).dump()}, peer).status != 400) return false;
+    RemoveSessionResourcesLocked(id);
+    return !qos_listeners_.contains(id);
   }
 
   bool VerifySessionMutationIdempotencySelfTest() {
@@ -4642,6 +4661,12 @@ class Service {
     }
 
     Response response = std::forward<Mutation>(mutation)(pending_retry);
+    if (prepared.enabled && (response.status >= 500 || response.status == 429)) {
+      // A pre-commit transient failure is not a committed terminal receipt.
+      // Retry the identical intent after storage/network recovery. Ambiguous
+      // durability still fails closed at Dispatch, before mutation retries.
+      return response;
+    }
     if (prepared.enabled) {
       SessionMutationReceipt& receipt =
           session_mutation_receipts_[prepared.receipt_key];
@@ -4724,6 +4749,7 @@ class Service {
       }
     }
     lobbies_.erase(session_id);
+    ranked_started_.erase(session_id);
     qos_listeners_.erase(session_id);
     arbitration_snapshots_.erase(session_id);
     for (auto route = relay_routes_.begin(); route != relay_routes_.end();) {
@@ -4794,6 +4820,15 @@ class Service {
     std::unordered_set<std::string> expired_session_ids(expired_sessions.begin(),
                                                         expired_sessions.end());
 
+    expired_session_ids.insert(pending_durable_session_cleanup_.begin(),
+                               pending_durable_session_cleanup_.end());
+    const bool has_expired_durable = !expired_session_ids.empty() ||
+        std::ranges::any_of(refresh_sessions_, [unix_now](const auto& entry) {
+          return entry.second.expires_at_unix <= unix_now;
+        }) || std::ranges::any_of(invites_, [unix_now](const auto& entry) {
+          return entry.second.value("expires_at_unix", std::int64_t{0}) <= unix_now;
+        });
+    if (has_expired_durable) {
     DurableData durable = CaptureDurableLocked();
     bool durable_changed = false;
     for (auto refresh = durable.refresh_sessions.begin();
@@ -4814,12 +4849,24 @@ class Service {
         ++invite;
       }
     }
-    for (const std::string& session_id : expired_sessions) {
+    for (const std::string& session_id : expired_session_ids) {
       RemoveSessionScopedDurable(durable, session_id, true);
       durable_changed = true;
     }
-    if (durable_changed && !SaveAndCommitLocked(std::move(durable))) return false;
+    if (durable_changed && !SaveAndCommitLocked(std::move(durable))) {
+      // Keep the last committed durable snapshot, but do not turn a disk error
+      // into renewed membership, authentication, or transport leases.
+      for (const std::string& session_id : expired_sessions) {
+        pending_durable_session_cleanup_.insert(session_id);
+      }
+    } else {
+      pending_durable_session_cleanup_.clear();
+    }
+    }
 
+    std::erase_if(qos_probe_batches_, [now](const auto& entry) {
+      return entry.second.expires <= now;
+    });
     std::erase_if(challenges_, [now](const auto& entry) {
       return entry.second.expires <= now;
     });
@@ -4877,6 +4924,7 @@ class Service {
         break;
       }
       (void)SweepExpiredLocked(Clock::now(), UnixSecondsAfter());
+      ++activity_generation_;
     }
   }
 
@@ -4939,7 +4987,7 @@ class Service {
     const std::string xuid = body->value("xuid", "");
     const std::string public_key = body->value("public_key", "");
     const auto decoded_key = DecodeBase64Url(public_key);
-    if (!ValidIdentifier(device_id) || !IsHex(xuid, 16) || !decoded_key ||
+    if (!ValidIdentifier(device_id) || !IsHex(xuid, 16) || xuid == "0x0000000000000000" || !decoded_key ||
         decoded_key->size() != kSha256Bytes) {
       return Error(400, "invalid_device", "device identity is malformed");
     }
@@ -5004,9 +5052,12 @@ class Service {
 
   Response IssueTokens(Identity identity, int status, const std::string& enrollment_public_key,
                        const std::string& rotated_refresh_hash) {
+    identity.xuid = libserver::CanonicalIdentity(std::move(identity.xuid));
+    identity.machine_id = libserver::CanonicalIdentity(std::move(identity.machine_id));
     if (rotated_refresh_hash.empty()) {
       const auto key = DecodeBase64Url(enrollment_public_key);
       if (!ValidIdentifier(identity.device_id) || !IsHex(identity.xuid, 16) ||
+          identity.xuid == "0x0000000000000000" ||
           !IsHex(identity.machine_id, 16) || identity.player_name.empty() ||
           identity.player_name.size() > 128 || !key || key->size() != kSha256Bytes) {
         return Error(400, "invalid_identity", "enrollment identity is invalid");
@@ -5442,6 +5493,7 @@ class Service {
     visible["open_private_slots"] =
         private_members <= private_slots ? private_slots - private_members : 0;
     visible["members"] = json::array();
+    visible.erase("platform_stat_reports");
     // XSessionSearch results are join descriptors. GTA copies the nonce and
     // XSESSION_INFO into its own state before XSessionJoinLocal, then reuses
     // that nonce for ranked arbitration. Keep individual roster entries
@@ -5771,6 +5823,7 @@ class Service {
         RemoveMemberTransportState(id, member.value("xuid", ""));
       }
       lobbies_.erase(id);
+      ranked_started_.erase(id);
       qos_listeners_.erase(id);
       arbitration_snapshots_.erase(id);
       for (auto& [ticket_id, ticket] : tickets_) {
@@ -5844,6 +5897,20 @@ class Service {
       if (!ValidSession(replacement)) {
         return Error(400, "invalid_session", "modified session would violate session invariants");
       }
+      const auto next_lifecycle = replacement.value("lifecycle_state", std::uint32_t{0});
+      const auto previous_lifecycle = session.value("lifecycle_state", std::uint32_t{0});
+      const bool starting_ranked = replacement.value("ranked", false) && next_lifecycle == 2;
+      if (starting_ranked && !ranked_started_.contains(id)) {
+        const auto arb = arbitration_snapshots_.find(id);
+        if (previous_lifecycle > 1 || arb == arbitration_snapshots_.end() ||
+            arb->second.failed || arb->second.registered_machine_ids != arb->second.expected_machine_ids) {
+          return Error(409, "ranked_registration_required", "ranked start requires completed registration");
+        }
+      }
+      if (ranked_started_.contains(id) &&
+          (replacement.value("ranked", false) != session.value("ranked", false) || next_lifecycle < 2)) {
+        return Error(409, "ranked_match_frozen", "a started ranked match cannot reopen or change ranking policy");
+      }
       NormalizeMembers(replacement);
       replacement["revision"] = session.value("revision", 0ll) + 1;
       if (body->contains("members")) {
@@ -5861,6 +5928,7 @@ class Service {
         if (!SaveAndCommitLocked(std::move(staged))) return StorageFailure();
       }
       session = std::move(replacement);
+      if (starting_ranked) ranked_started_.insert(id);
       if (body->contains("members")) {
         for (const auto& member : removed_members) {
           const std::string removed_xuid = member.value("xuid", "");
@@ -6000,13 +6068,17 @@ class Service {
       const bool already_complete =
           state.registered_machine_ids.size() ==
           state.expected_machine_ids.size();
-      if (already_complete) return {.body = state.snapshot};
+      if (already_complete) {
+        state.registered_xuids.insert(identity.xuid);
+        return {.body = state.snapshot};
+      }
       if (Clock::now() >= state.deadline) {
         state.failed = true;
         return Error(408, "arbitration_timeout",
                      "not every frozen machine registered before the title deadline");
       }
       state.registered_machine_ids.insert(identity.machine_id);
+    state.registered_xuids.insert(identity.xuid);
       const bool registration_complete =
           state.registered_machine_ids.size() ==
           state.expected_machine_ids.size();
@@ -6308,9 +6380,27 @@ class Service {
         ticket.matched_session_id = replacement_id;
         ticket.updated_at = UtcIsoAfter();
       }
+      // Removed identities lose transport and pending deliveries in the same
+      // locked transaction that changes the roster. Retained sockets adopt the
+      // new key domain with empty UDP queues, never packets from the old key.
+      for (const auto& [xuid, private_slot] : old_members) {
+        (void)private_slot;
+        if (!new_members.contains(xuid)) RemoveMemberTransportState(id, xuid);
+      }
       for (auto& [route_key, route] : relay_routes_) {
-        (void)route_key;
-        if (route.session_id == id) route.session_id = replacement_id;
+        if (route.session_id != id) continue;
+        route.session_id = replacement_id;
+        relay_queues_.erase(route_key);
+        for (const auto& member : replacement.at("members")) {
+          if (member.value("xuid", "") == route.xuid) {
+            route.virtual_ipv4 = member.value("virtual_ipv4", "");
+            break;
+          }
+        }
+      }
+      if (ranked_started_.erase(id)) ranked_started_.insert(replacement_id);
+      if (session.contains("platform_stat_reports")) {
+        replacement["platform_stat_reports"] = session.at("platform_stat_reports");
       }
       for (auto& [route_token, route] : voice_routes_) {
         (void)route_token;
@@ -6755,10 +6845,17 @@ class Service {
     }
     if (address.empty()) return Error(403, "not_member", "identity is not a session member");
     const std::string key = identity.xuid + ":" + std::to_string(port);
+    const auto existing = relay_routes_.find(key);
     if (request.method == "DELETE") {
+      if (existing != relay_routes_.end() && existing->second.session_id != session_id) {
+        return Error(409, "route_rebound", "a stale unregister cannot delete a newer route");
+      }
       relay_routes_.erase(key);
       relay_queues_.erase(key);
       return {.status = 204};
+    }
+    if (existing != relay_routes_.end() && existing->second.session_id != session_id) {
+      relay_queues_.erase(key);
     }
     relay_routes_[key] = {.xuid = identity.xuid, .session_id = session_id,
                           .port = static_cast<std::uint16_t>(port), .virtual_ipv4 = address,
@@ -6823,6 +6920,17 @@ class Service {
     }
 
     auto& listener = qos_listeners_[session_id];
+    const bool changed = !listener.generation || listener.host_xuid != identity.xuid ||
+        listener.exchange_key != exchange_key ||
+        (has_enabled && listener.enabled != body->at("enabled").get<bool>()) ||
+        (title_data && listener.title_data != title_data) ||
+        (bits_per_second && listener.bits_per_second != *bits_per_second);
+    if (changed) {
+      if (next_qos_listener_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+        return Error(409, "qos_generation_exhausted", "QoS listener generation exhausted");
+      }
+      listener.generation = ++next_qos_listener_generation_;
+    }
     listener.host_xuid = identity.xuid;
     listener.exchange_key = exchange_key;
     if (has_enabled) listener.enabled = body->at("enabled").get<bool>();
@@ -6831,52 +6939,16 @@ class Service {
     return {.status = 204};
   }
 
-  Response QosLookup(const Request& request, const Identity& identity) {
-    (void)identity;
-    const auto body = ParseBody(request);
-    if (!body || !body->is_object() || !body->contains("targets") ||
-        !body->at("targets").is_array() || body->at("targets").empty() ||
-        body->at("targets").size() > kMaximumQosTargets) {
-      return Error(400, "invalid_qos_lookup", "QoS lookup target list is malformed");
-    }
-    json results = json::array();
-    std::lock_guard lock(mutex_);
-    const auto now = Clock::now();
-    for (const auto& target : body->at("targets")) {
-      if (!target.is_object()) {
-        return Error(400, "invalid_qos_target", "QoS target is malformed");
-      }
-      const std::string session_id = target.value("session_id", "");
-      const std::string exchange_key = target.value("exchange_key", "");
-      const std::string challenge = target.value("challenge", "");
-      if (!IsHex(session_id, 16) || !IsHex(exchange_key, 32) ||
-          !IsHex(challenge, kQosChallengeHexDigits) ||
-          challenge.size() != kQosChallengeHexCharacters) {
-        return Error(400, "invalid_qos_target", "QoS target identity or challenge is malformed");
-      }
-      json result = {{"reachable", false}};
-      const auto session = sessions_.find(session_id);
-      const auto listener = qos_listeners_.find(session_id);
-      if (session != sessions_.end() && SessionLiveLocked(session_id, now) &&
-          listener != qos_listeners_.end() && listener->second.enabled &&
-          listener->second.exchange_key == exchange_key &&
-          session->second.value("exchange_key", "") == exchange_key &&
-          listener->second.host_xuid == session->second.value("host_xuid", "")) {
-        const bool live_host_route = std::any_of(
-            relay_routes_.begin(), relay_routes_.end(), [&](const auto& entry) {
-              return entry.second.session_id == session_id &&
-                     entry.second.xuid == listener->second.host_xuid && entry.second.expires > now;
-            });
-        if (live_host_route) {
-          result = {{"reachable", true}, {"challenge", challenge}};
-          if (listener->second.title_data) {
-            result["title_data"] = *listener->second.title_data;
-          }
-        }
-      }
-      results.push_back(std::move(result));
-    }
-    return {.body = {{"results", std::move(results)}}};
+#include "qos_probe_service.inc"
+
+  bool RelayRouteLiveLocked(const RelayRoute& route, Clock::time_point now) const {
+    const auto session = sessions_.find(route.session_id);
+    if (route.expires <= now || session == sessions_.end() ||
+        !SessionLiveLocked(route.session_id, now)) return false;
+    return std::ranges::any_of(session->second.at("members"), [&](const json& member) {
+      return member.value("xuid", "") == route.xuid &&
+             member.value("virtual_ipv4", "") == route.virtual_ipv4;
+    });
   }
 
   Response RelayDatagrams(const Request& request, const Identity& identity) {
@@ -6885,7 +6957,7 @@ class Service {
       const int port = QueryInt(request, "local_port", 0);
       const std::string key = identity.xuid + ":" + std::to_string(port);
       auto route = relay_routes_.find(key);
-      if (route == relay_routes_.end() || route->second.expires <= Clock::now()) {
+      if (route == relay_routes_.end() || !RelayRouteLiveLocked(route->second, Clock::now())) {
         if (route != relay_routes_.end()) {
           relay_routes_.erase(route);
           relay_queues_.erase(key);
@@ -6893,6 +6965,12 @@ class Service {
         }
         return Error(404, "route_not_found", "relay route does not exist");
       }
+      const auto requested_session = request.query.find("session_id");
+      if (requested_session != request.query.end() &&
+          requested_session->second != route->second.session_id) {
+        return Error(409, "route_rebound", "poll belongs to an older session route");
+      }
+      const std::string polled_session = route->second.session_id;
       route->second.expires = Clock::now() + kRelayRouteLease;
       const int wait_ms = std::clamp(QueryInt(request, "wait_ms", 0), 0, 1000);
       if (relay_queues_[key].empty() && wait_ms != 0) {
@@ -6900,8 +6978,12 @@ class Service {
           return !relay_routes_.contains(key) || !relay_queues_[key].empty();
         });
       }
-      if (!relay_routes_.contains(key)) {
+      route = relay_routes_.find(key);
+      if (route == relay_routes_.end() || !RelayRouteLiveLocked(route->second, Clock::now())) {
         return Error(404, "route_not_found", "relay route does not exist");
+      }
+      if (route->second.session_id != polled_session) {
+        return Error(409, "route_rebound", "poll route changed before delivery");
       }
       json output = json::array();
       std::size_t bytes = 0;
@@ -6923,12 +7005,15 @@ class Service {
       const std::string source_key = identity.xuid + ":" + std::to_string(source_port);
       auto source = relay_routes_.find(source_key);
       if (source == relay_routes_.end()) continue;
-      if (source->second.expires <= Clock::now()) {
+      if (!RelayRouteLiveLocked(source->second, Clock::now())) {
         relay_routes_.erase(source);
         relay_queues_.erase(source_key);
         relay_condition_.notify_all();
         continue;
       }
+      if (wire.contains("session_id") &&
+          (!wire.at("session_id").is_string() ||
+           wire.at("session_id").get<std::string>() != source->second.session_id)) continue;
       source->second.expires = Clock::now() + kRelayRouteLease;
       const std::string destination = wire.value("destination_ipv4", "");
       const int destination_port = wire.value("destination_port", 0);
@@ -6938,7 +7023,8 @@ class Service {
           decoded->size() > kMaximumRelayBatchBytes - batch_bytes) continue;
       batch_bytes += decoded->size();
       for (const auto& [key, route] : relay_routes_) {
-        if (route.session_id == source->second.session_id && route.virtual_ipv4 == destination && route.port == destination_port) {
+        if (RelayRouteLiveLocked(route, Clock::now()) &&
+            route.session_id == source->second.session_id && route.virtual_ipv4 == destination && route.port == destination_port) {
           auto& queue = relay_queues_[key];
           if (queue.size() == 256) queue.pop_front();
           queue.push_back({.source_ipv4 = source->second.virtual_ipv4,
@@ -7454,6 +7540,7 @@ class Service {
       json columns;
     };
     std::vector<PendingStatRow> pending;
+    bool platform_report = false;
     std::unordered_set<std::string> pending_views;
     std::optional<std::string> target_xuid;
     for (const auto& view : body->at("views")) {
@@ -7465,6 +7552,10 @@ class Service {
       const std::string view_id = Lower(view.at("view_id").get<std::string>());
       const auto parsed_view_id = ParseHex32(view_id);
       if (!parsed_view_id) return Error(400, "invalid_stats", "stat view id is malformed");
+      platform_report = *parsed_view_id == UINT32_C(0xFFFF0000);
+      if (platform_report && body->at("views").size() != 1) {
+        return Error(400, "invalid_stats", "platform reports cannot mix with title views");
+      }
       for (const auto& row : view.at("rows")) {
         if (!row.is_object() || !row.contains("xuid") || !row.at("xuid").is_string() ||
             !row.contains("columns") || !row.at("columns").is_object() ||
@@ -7487,10 +7578,23 @@ class Service {
                                        ? libserver::FindGta4StatField(*parsed_view_id,
                                                                      *parsed_stat_id)
                                        : nullptr;
+          const libserver::Gta4StatFieldDescriptor platform_descriptor{
+              UINT32_C(0xFFFF0000), parsed_stat_id.value_or(0),
+              libserver::StatWireType::kInt32, libserver::StatAggregation::kLast};
+          const bool known_platform_field = platform_report && parsed_stat_id &&
+              (*parsed_stat_id == UINT32_C(0x1000800A) ||
+               *parsed_stat_id == UINT32_C(0x1000800B));
+          if (known_platform_field) descriptor = &platform_descriptor;
           if (!descriptor || !StatValueMatchesDescriptor(stat_value, *descriptor)) {
             return Error(400, "invalid_stats", "stat column is malformed");
           }
+          if (normalized_columns.contains(stat_id)) {
+            return Error(400, "invalid_stats", "duplicate numeric property id");
+          }
           normalized_columns[stat_id] = stat_value;
+        }
+        if (platform_report && normalized_columns.size() != 2) {
+          return Error(400, "invalid_stats", "platform report requires both generated properties");
         }
         pending.push_back({.view_id = view_id, .columns = std::move(normalized_columns)});
       }
@@ -7509,7 +7613,7 @@ class Service {
       return {.status = existing_receipt->second.status};
     }
     const auto session = sessions_.find(session_id);
-    if (session == sessions_.end()) {
+    if (session == sessions_.end() || !SessionLiveLocked(session_id, Clock::now())) {
       return Error(403, "invalid_stats_session", "stat session does not exist");
     }
     if (!SessionContainsXuid(session->second, identity.xuid)) {
@@ -7543,7 +7647,33 @@ class Service {
                    "stat sequence was not allocated by this session writer");
     }
 
+    if (!platform_report && session->second.value("ranked", false)) {
+      const auto arb = arbitration_snapshots_.find(session_id);
+      const auto lifecycle = session->second.value("lifecycle_state", std::uint32_t{0});
+      if (arb == arbitration_snapshots_.end() || arb->second.failed ||
+          arb->second.registered_machine_ids != arb->second.expected_machine_ids ||
+          !arb->second.authorized_xuid_machines.contains(identity.xuid) ||
+          !arb->second.authorized_xuid_machines.contains(*target_xuid) ||
+          !arb->second.registered_xuids.contains(identity.xuid) ||
+          !arb->second.registered_xuids.contains(*target_xuid) ||
+          !ranked_started_.contains(session_id) || (lifecycle != 2 && lifecycle != 3)) {
+        return Error(409, "ranked_match_not_reportable",
+                     "ranked title results require a registered match that has started");
+      }
+    }
     DurableData staged = CaptureDurableLocked();
+    if (platform_report) {
+      // Generated .77 sub_829F1D88 submits these two Int32s via .80
+      // sub_82A373B8. They are a session-scoped platform report, not XLAST
+      // title leaderboard columns. Preserve exact typed values and receipt;
+      // do not invent a rating formula or change cash/rank.
+      json replacement = session->second;
+      replacement["platform_stat_reports"][*target_xuid] = pending.front().columns;
+      staged.stat_write_receipts[receipt_key] = StatWriteReceipt{*request_digest, 204};
+      if (!SaveAndCommitLocked(std::move(staged))) return StorageFailure();
+      session->second = std::move(replacement);
+      return {.status = 204};
+    }
     // XSessionWriteStats is also issued by title code in non-ranked sessions,
     // but Player Match/Free Mode results must not enter the persistent ranked
     // store. The live session flags are authoritative; client-supplied labels
@@ -8918,6 +9048,7 @@ class Service {
     return {.status = 204};
   }
 
+  std::atomic<std::uint64_t> activity_generation_{0};
   std::mutex mutex_;
   std::condition_variable relay_condition_;
   std::condition_variable voice_condition_;
@@ -8936,12 +9067,16 @@ class Service {
   std::unordered_map<std::string, RefreshSession> refresh_sessions_;
   std::map<std::string, json> sessions_;
   std::unordered_map<std::string, ArbitrationState> arbitration_snapshots_;
+  std::unordered_set<std::string> ranked_started_;
   std::unordered_map<std::string, SessionMutationReceipt> session_mutation_receipts_;
   std::unordered_map<std::string, Clock::time_point> session_leases_;
+  std::unordered_set<std::string> pending_durable_session_cleanup_;
   std::unordered_map<std::string, LobbyState> lobbies_;
   std::unordered_map<std::string, MatchmakingTicket> tickets_;
   std::unordered_map<std::string, RelayRoute> relay_routes_;
   std::unordered_map<std::string, QosListener> qos_listeners_;
+  std::uint64_t next_qos_listener_generation_ = 0;
+  std::unordered_map<std::string, libserver::QosProbeBatch> qos_probe_batches_;
   std::unordered_map<std::string, std::deque<Datagram>> relay_queues_;
   std::unordered_map<std::string, json> invites_;
   std::unordered_map<std::string, std::unordered_map<std::string, json>> stats_;
@@ -8971,12 +9106,78 @@ class Service {
   std::unordered_map<std::string, std::deque<RealtimeEvent>> realtime_events_;
 };
 
-void HandleClient(Connection& connection, Service& service) {
+bool EmptyPollResult(const Request& request, const Response& response) {
+  if (request.path == "/api/v2/qos/lookup") return response.status == 202;
+  if (response.status != 200 || !response.body.is_object()) return false;
+  const std::string_view field = request.path == "/api/v2/events" ? "events" :
+      request.path == "/api/v2/relay/datagrams" ? "datagrams" :
+      request.path == "/api/v2/voice/packets" ? "packets" :
+      request.path == "/api/v3/qos/probes" ? "probes" : "";
+  return !field.empty() && response.body.contains(field) &&
+         response.body.at(field).is_array() && response.body.at(field).empty();
+}
+
+void HandleClient(Connection& connection, Service& service,
+                  libserver::http::DeferredResponses* deferred = nullptr) {
   if (!connection.Handshake()) return;
   const auto result = libserver::http::ReadRequest(connection);
   if (result) {
     try {
-      SendResponse(connection, service.Dispatch(*result.request));
+      Request request = *result.request;
+      std::uint64_t wait_ms = 0;
+      const bool qos = request.method == "POST" && request.path == "/api/v2/qos/lookup";
+      const bool get_poll = request.method == "GET" &&
+          (request.path == "/api/v2/events" || request.path == "/api/v2/relay/datagrams" ||
+           request.path == "/api/v2/voice/packets" || request.path == "/api/v3/qos/probes");
+      if (deferred && qos) wait_ms = 2500;
+      if (deferred && get_poll && request.query.contains("wait_ms")) {
+        const auto parsed = ParseDecimalUint64(request.query.at("wait_ms"));
+        const std::uint64_t maximum = request.path == "/api/v2/events" ? 30000 : 1000;
+        if (!parsed || *parsed > maximum) {
+          SendResponse(connection, Error(400, "invalid_poll_wait", "poll wait is outside its bound"));
+          connection.Shutdown(std::chrono::milliseconds::zero());
+          return;
+        }
+        wait_ms = *parsed;
+        request.query["wait_ms"] = "0";
+      }
+      Response response = service.Dispatch(request);
+      // Authenticate and validate BEFORE allocating any waiting connection.
+      if (deferred && wait_ms && EmptyPollResult(request, response)) {
+        const auto owner = service.WaitingOwner(request);
+        if (!owner) {
+          response = Error(401, "unauthorized", "poll identity expired");
+        } else {
+          std::string key = *owner + ':' + request.path;
+          for (const std::string field : {"local_port", "route_token"}) {
+            if (request.query.contains(field)) key += ':' + request.query.at(field);
+          }
+          if (qos) key += ':' + Sha256Hex(request.body).value_or("");
+          const auto admission = deferred->Submit(connection, *owner, key,
+              std::chrono::milliseconds(wait_ms),
+              [request, &service, generation = service.ActivityGeneration(),
+               next_check = Clock::now() + std::chrono::seconds(1)](bool expired) mutable
+                  -> std::optional<std::string> {
+                const auto current = service.ActivityGeneration();
+                if (!expired && current == generation && Clock::now() < next_check) return {};
+                generation = current;
+                next_check = Clock::now() + std::chrono::seconds(1);
+                try {
+                  Response polled = service.Dispatch(request, true);
+                  if (!expired && EmptyPollResult(request, polled)) return {};
+                  if (expired && polled.status == 202) {
+                    polled = Error(408, "probe_timeout", "QoS probe deadline expired");
+                  }
+                  return EncodeResponse(polled);
+                } catch (const json::exception&) {
+                  return EncodeResponse(Error(400, "invalid_json", "malformed poll data"));
+                }
+              });
+          if (admission == libserver::http::DeferredResponses::Admission::kAccepted) return;
+          response = Error(429, "poll_limit", "waiting subscription limit reached");
+        }
+      }
+      SendResponse(connection, response);
     } catch (const json::exception&) {
       SendResponse(connection,
                    Error(400, "invalid_json", "JSON body contains a value of the wrong type"));
@@ -8984,7 +9185,7 @@ void HandleClient(Connection& connection, Service& service) {
   } else if (result.error_status != 0) {
     SendResponse(connection, Error(result.error_status, result.error_code, result.error_message));
   }
-  connection.Shutdown();
+  connection.Shutdown(std::chrono::milliseconds::zero());
 }
 
 struct EntitlementGrant {
@@ -9044,7 +9245,7 @@ int RunServer(const ServerOptions& options) {
   }
   Service service(&persistent_state, options.public_url);
   if (!service.Initialize()) {
-    std::cerr << "libserver: durable payload validation failed\n";
+    std::cerr << "libserver: durable payload validation failed: " << service.InitializationError() << '\n';
     return 1;
   }
   for (const auto& grant : options.entitlement_grants) {
@@ -9081,10 +9282,15 @@ int RunServer(const ServerOptions& options) {
 #endif
     return 1;
   }
+  libserver::http::DeferredResponses deferred;
+  if (!deferred.Start()) {
+    libserver::http::CloseSocket(server);
+    return 1;
+  }
   libserver::http::WorkerPool workers(
       libserver::http::kDefaultWorkerThreads,
       libserver::http::kDefaultQueuedConnections,
-      [&](Connection& client) { HandleClient(client, service); }, tls_context.get());
+      [&](Connection& client) { HandleClient(client, service, &deferred); }, tls_context.get());
   if (!workers.Start()) {
     libserver::http::CloseSocket(server);
     std::cerr << "libserver: could not start HTTP worker pool\n";
@@ -9127,6 +9333,7 @@ int RunServer(const ServerOptions& options) {
   }
   libserver::http::CloseSocket(server);
   workers.Shutdown();
+  deferred.Shutdown();
 #if defined(_WIN32)
   WSACleanup();
 #endif
@@ -9316,8 +9523,8 @@ bool SelfTest() {
     passed = fault_state.Open() && fault_service.Initialize();
     inject_save_fault = true;
     const Identity identity{.device_id = "fault-device",
-                            .xuid = "0x00000000000000F1",
-                            .machine_id = "0x00000000000000F2",
+                            .xuid = "0x00000000000000f1",
+                            .machine_id = "0x00000000000000f2",
                             .player_name = "Fault Player"};
     passed = passed && fault_service.VerifyFaultAtomicitySelfTest(identity);
     if (!passed) std::cerr << "libserver self-test: durable fault atomicity failed\n";

@@ -9,6 +9,9 @@
 #include <rex/logging.h>
 
 #include "gta4_init.h"
+#include "gta4_aspect_hooks.h"
+#include "gta4_help_trace.h"
+#include "gta4_font_selection_trace.h"
 #include "gta4_touch_coordinator.h"
 
 REXCVAR_DEFINE_BOOL(gta4_trace_legal_screen, true, "GTA IV/Diagnostics",
@@ -74,6 +77,7 @@ uint32_t CurrentFrame(uint8_t* base, uint32_t device) {
 }  // namespace
 
 extern "C" void sub_82144800(PPCContext& ctx, uint8_t* base) {
+  const gta4::aspect::Scope artwork_scope(gta4::aspect::UiRole::kFixed);
   if (!rex::diagnostics::IsEnabled(rex::diagnostics::Category::kLegal) ||
       !REXCVAR_GET(gta4_trace_legal_screen)) {
     __imp__sub_82144800(ctx, base);
@@ -109,7 +113,9 @@ extern "C" void sub_82144800(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_821F6E38(PPCContext& ctx, uint8_t* base) {
+  const gta4::aspect::Scope layout_scope(gta4::aspect::TextUi(ctx, base));
   GTA4_TouchObserveHudSubmit(ctx, base);
+  GTA4_FontSelectionTraceText(ctx, base);
   if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kLegal) &&
       REXCVAR_GET(gta4_trace_legal_screen) && g_legal_trace_depth) {
     ++g_legal_text_submits;
@@ -122,5 +128,5 @@ extern "C" void sub_821F6E38(PPCContext& ctx, uint8_t* base) {
         CurrentFrame(base, device), g_legal_text_submits, ctx.r5.u32, text.length,
         text.hash, ctx.f1.f64, ctx.f2.f64, ctx.r6.u32, ctx.r7.u32);
   }
-  __imp__sub_821F6E38(ctx, base);
+  GTA4_HelpTraceTextSubmit(ctx, base, __imp__sub_821F6E38);
 }

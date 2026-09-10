@@ -31,6 +31,8 @@
 #include <rex/graphics/video_mode_util.h>
 #include <rex/graphics/gta4_native/light_trace_context.h>
 #include "rex/graphics/gta4_native/phone_trace.h"
+#include <rex/graphics/gta4_native/tv_trace.h>
+#include <rex/graphics/gta4_native/fire_escape_trace.h>
 #include <rex/graphics/gta4_native/shadow_distance_util.h>
 #include <rex/graphics/gta4_native/surface_view.h>
 #include <rex/graphics/gta4_native/title_commands.h>
@@ -40,6 +42,10 @@
 #include <rex/ui/window.h>
 
 #include "gta4_init.h"
+#include "gta4_aspect_hooks.h"
+#include "gta4_aspect_resolution.h"
+#include "gta4_help_trace.h"
+#include "gta4_font_selection_trace.h"
 #include "gta4_draw_distance_policy.h"
 #include "gta4_frame_limiter.h"
 
@@ -442,6 +448,7 @@ struct CapturedDrawSnapshot {
 };
 
 struct CapturedNativeCommand {
+  std::shared_ptr<FireTraceContext> fire_capture;
   CommandType type = CommandType::kPresent;
   uint32_t selector_mask = 0;
   std::vector<uint8_t> bytes;
@@ -2689,15 +2696,6 @@ struct NativeResolutionOverride {
   bool active() const { return override_width || override_height; }
 };
 
-std::pair<uint32_t, uint32_t> FitOriginalAspectRatio(uint32_t width, uint32_t height) {
-  // Fit the Xbox 360 title's 16:9 image inside the selected output bounds.
-  // Cross-products avoid floating-point rounding when deciding which edge limits the fit.
-  if (uint64_t(width) * 9 > uint64_t(height) * 16) {
-    return {uint32_t(uint64_t(height) * 16 / 9), height};
-  }
-  return {width, uint32_t(uint64_t(width) * 9 / 16)};
-}
-
 NativeResolutionOverride GetNativeResolutionOverride(uint32_t requested_width,
                                                      uint32_t requested_height) {
   int32_t configured_width = REXCVAR_GET(video_mode_width);
@@ -2740,22 +2738,29 @@ NativeResolutionOverride GetNativeResolutionOverride(uint32_t requested_width,
       requested_width, requested_height, requested_width,   requested_height,
       override_width,  override_height,  automatic_display, false};
   if (override_width) {
-    result.display_width = uint32_t(std::clamp(configured_width, 640, 0x0FFF));
+    result.display_width = uint32_t(std::max(configured_width, 640));
   }
   if (override_height) {
-    result.display_height = uint32_t(std::clamp(configured_height, 480, 0x0FFF));
+    result.display_height = uint32_t(std::max(configured_height, 480));
   }
   result.width = result.display_width;
   result.height = result.display_height;
 
-  if (REXCVAR_GET(gta4_aspect_ratio) == "original") {
-    const auto [aspect_width, aspect_height] =
-        FitOriginalAspectRatio(result.display_width, result.display_height);
-    result.display_width = aspect_width;
-    result.display_height = aspect_height;
-    result.width = aspect_width;
-    result.height = aspect_height;
-  }
+  // Resolution selects a pixel budget; aspect selects a shape within it. Auto
+  // follows the drawable even with an explicit resolution preset. Limit both
+  // dimensions uniformly before fitting, avoiding independent 4095px clamps.
+  auto* aspect_runtime = rex::Runtime::instance();
+  auto* aspect_window = aspect_runtime ? aspect_runtime->display_window() : nullptr;
+  const gta4::aspect::Extent drawable{
+      aspect_window ? aspect_window->GetActualPhysicalWidth() : 0,
+      aspect_window ? aspect_window->GetActualPhysicalHeight() : 0};
+  const auto selected = gta4::aspect::resolution::Select(
+      gta4::aspect::resolution::Limit({result.display_width, result.display_height}, 0x0FFF),
+      REXCVAR_GET(gta4_aspect_ratio), drawable);
+  result.display_width = result.width = selected.width;
+  result.display_height = result.height = selected.height;
+  result.override_width |= selected.width != requested_width;
+  result.override_height |= selected.height != requested_height;
 
   const uint32_t requested_ssaa_factor =
       GetAntiAliasingRoute(GetActiveAntiAliasingMode()).supersampling_pixel_factor;
@@ -2832,6 +2837,8 @@ NativeResolutionOverride GetNativeResolutionOverride(uint32_t requested_width,
     g_native_resolution.display_width = result.display_width;
     g_native_resolution.display_height = result.display_height;
   }
+  gta4::aspect::Publish({result.width, result.height},
+                             {result.display_width, result.display_height});
   return result;
 }
 
@@ -3180,6 +3187,8 @@ bool IsCachedListCommandType(CommandType type) {
 }
 
 #include "gta4_phone_trace.inc"
+#include "gta4_tv_trace.inc"
+#include "gta4_fire_escape_trace.inc"
 
 template <typename Command>
 bool CaptureNativeCommand(const Command& command) {
@@ -3274,19 +3283,24 @@ bool CaptureNativeCommand(const Command& command) {
       phone.applied = CapturePhoneGuestState(g_active_native_capture.base, command.device);
     }
   }
+  if (g_fire_context.occurrence) captured.fire_capture = std::make_shared<FireTraceContext>(g_fire_context);
   g_active_native_capture.commands.push_back(std::move(captured));
   return true;
 }
 
 template <typename Command>
 bool SubmitNativeCommand(const Command& command) {
+  uint32_t help_device = 0;
+  if constexpr (requires { command.device; }) help_device = command.device;
   if (CaptureNativeCommand(command)) {
+    GTA4_HelpTraceNativeSubmission(uint32_t(command.header.type), help_device, true, true);
     return true;
   }
   if (auto* graphics = GetNativeGraphicsSystem()) {
     uint32_t phone_device = 0;
     if constexpr (requires { command.device; }) phone_device = command.device;
-    const bool accepted = SubmitPhoneTracedCommand(&command, sizeof(command), phone_device);
+    const bool accepted = SubmitFireTracedCommand(&command, sizeof(command), phone_device);
+    GTA4_HelpTraceNativeSubmission(uint32_t(command.header.type), help_device, accepted, false);
     if (!accepted && rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks)) {
       static std::atomic<uint64_t> rejection_count{0};
       const uint64_t count = NextNativeHookDiagnosticCall(rejection_count);
@@ -3297,6 +3311,7 @@ bool SubmitNativeCommand(const Command& command) {
     }
     return accepted;
   }
+  GTA4_HelpTraceNativeSubmission(uint32_t(command.header.type), help_device, false, false);
   return false;
 }
 
@@ -3454,6 +3469,13 @@ template <typename Command, typename Result>
 bool ExecuteNativeCommand(const Command& command, Result& result) {
   if (auto* graphics = GetNativeGraphicsSystem()) {
     if constexpr (std::is_same_v<Command, TextureLockCommand>) {
+      if (TvDetailActive()) {
+        auto* base = g_tv_detail_base.load(std::memory_order_relaxed);
+        const auto context = NewTvTraceContext(base ? LoadU32(base, kDeferredDeviceGlobal) : 0);
+        const auto bytes = PackTvTraceEnvelope(&command,sizeof(command),kTitleCommandAbi,context);
+        TvTraceLog("sync-lock",fmt::format("run={} event={} texture={:08X}",context.run,context.event,command.texture));
+        return graphics->ExecuteTitleCommand(kTitleId,kTvTraceEnvelopeAbi,bytes.data(),bytes.size(),&result,sizeof(result));
+      }
       if (PhoneCaptureActive()) {
         uint8_t* base = g_phone_guest_base.load(std::memory_order_relaxed);
         const auto context = NewPhoneContext(base ? LoadU32(base, kDeferredDeviceGlobal) : 0);
@@ -3901,8 +3923,11 @@ bool SubmitCapturedNativeCommand(PPCContext& ctx, uint8_t* base, uint32_t device
       log_replay_state("cached-draw-replay-applied", CaptureLiveVertexTransform(base, device),
                        constants_hash, transform_hash, false);
     }
-    accepted = SubmitPhoneTracedCommand(bytes.data(), bytes.size(), device,
-                                        trace_phone_replay ? &phone_replay : nullptr);
+    accepted = (g_fire_context.occurrence || captured.fire_capture)
+        ? SubmitFireTracedCommand(bytes.data(), bytes.size(), device, captured.fire_capture.get(), command_list, replay_command_ordinal)
+        : TvDetailActive() ? SubmitTvTracedCommand(bytes.data(), bytes.size(), device)
+        : SubmitPhoneTracedCommand(bytes.data(), bytes.size(), device,
+                                   trace_phone_replay ? &phone_replay : nullptr);
   }
   if (trace_gbuffer_replay) {
     const auto [constants_hash, transform_hash] = capture_live_hashes();
@@ -4358,11 +4383,13 @@ extern "C" void sub_828C64C8(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_828C6620(PPCContext& ctx, uint8_t* base) {
+  ScopedFireMaterial fire_scope(ctx, base);
   TraceKnownOffscreenTransformTransition("offscreen-transition-material-list-render", ctx, base,
                                          __imp__sub_828C6620);
 }
 
 extern "C" void sub_828C4338(PPCContext& ctx, uint8_t* base) {
+  FireModelEntry(ctx, base);
   TraceKnownOffscreenTransformTransition("offscreen-transition-model-materials", ctx, base,
                                          __imp__sub_828C4338);
 }
@@ -4446,8 +4473,10 @@ extern "C" void sub_828C8E80(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_828C8F38(PPCContext& ctx, uint8_t* base) {
+  FireMaterialPass(ctx, base, false);
   LogKnownOffscreenTransformBoundary("offscreen-boundary-material-apply", ctx, base, ctx.r3.u32);
   __imp__sub_828C8F38(ctx, base);
+  FireMaterialPass(ctx, base, true);
 }
 
 extern "C" void sub_828DFF00(PPCContext& ctx, uint8_t* base) {
@@ -5363,6 +5392,7 @@ extern "C" void sub_82A44B78(PPCContext& ctx, uint8_t* base) {
   command.stage = stage;
   command.texture = texture;
   command.vector_font_id = g_vector_font_id;
+  GTA4_FontSelectionTraceBinding(g_vector_font_id, g_vector_font_owner, texture, stage);
   SubmitNativeCommand(command);
 }
 
@@ -5929,6 +5959,7 @@ extern "C" void sub_828DC7F0(PPCContext& ctx, uint8_t* base) {
     if (wrapper) {
       const bool registered = RegisterNativeRenderTargetWrapper(base, wrapper, requested_width,
                                                                 requested_height, ctx.lr);
+      IdentifyTvTarget(base, name, wrapper);
       REXLOG_INFO(
           "gta4-native-architecture: point=title-target-created name={:08X} "
           "wrapper={:08X} surface={:08X} texture={:08X} requested={}x{} "
@@ -6047,7 +6078,7 @@ extern "C" void sub_821BD0A0(PPCContext& ctx, uint8_t* base) {
   ScopedNativeLightingExecution lighting_scope(
       base, 0x821BD0A0, RenderExecutionStage::kRadarMap, LightPassRole::kNone);
   ScopedRenderPhaseMarker phase_scope(device, RenderPhase::kRadarMap, radar_map_section, caller);
-  __imp__sub_821BD0A0(ctx, base);
+  gta4::aspect::DrawRadarSection(ctx, base, __imp__sub_821BD0A0);
 }
 
 extern "C" void sub_8267D528(PPCContext& ctx, uint8_t* base) {
@@ -6080,7 +6111,9 @@ extern "C" void sub_8267D750(PPCContext& ctx, uint8_t* base) {
   __imp__sub_8267D750(ctx, base);
 }
 
-extern "C" void sub_822077D8(PPCContext& ctx, uint8_t* base) {
+// Shared original-call path: the bulb observer wraps this without duplicating
+// the existing world-light provenance scope or invoking the game twice.
+void CallBulbSourceOriginalWithProvenance(PPCContext& ctx, uint8_t* base) {
   if (!IsNativeLightProvenanceTraceEnabled()) {
     __imp__sub_822077D8(ctx, base);
     return;
@@ -6152,12 +6185,16 @@ extern "C" void sub_821671F8(PPCContext& ctx, uint8_t* base) {
   }
 }
 
+#include "gta4_bulb_source_trace.inc"
+
 extern "C" void sub_822072D0(PPCContext& ctx, uint8_t* base) {
   ScopedNativeLightingExecution lighting_scope(
       base, 0x822072D0, RenderExecutionStage::kDeferredLighting, LightPassRole::kCorona,
       LightSourceKind::kEffectBatch);
   ScopedNativeLocalLightLoop trace(NativeLocalLightLoopKind::kCorona, ctx, base);
+  const auto bulb_corona_event = BeginBulbCoronaBatch(base);
   __imp__sub_822072D0(ctx, base);
+  TraceBulbCoronaBatch(base, "after-original", bulb_corona_event);
 }
 
 extern "C" void sub_822B0B90(PPCContext& ctx, uint8_t* base) {
@@ -6528,6 +6565,7 @@ extern "C" void sub_82A3CC68(PPCContext& ctx, uint8_t* base) {
     ++g_tv_final_resolve_count;
   }
   if (g_tv_watching.load(std::memory_order_relaxed) && ctx.lr == kScriptRtResolveCaller &&
+      (!TvTraceConfig().enabled || ctx.r6.u32 == TvDetailScriptTexture()) &&
       ConsumeTvEventTraceBudget()) {
     REXLOG_INFO(
         "gta4-tv-script-rt-resolve: session={} final={} movie={} rect={} bink={}:{} "
@@ -6956,6 +6994,8 @@ extern "C" void sub_827BB138(PPCContext& ctx, uint8_t* base) {
 
   const bool watching = g_tv_watching.load(std::memory_order_relaxed);
   const uint32_t player = ctx.r3.u32;
+  const uint32_t binding_caller = uint32_t(ctx.lr);
+  ObserveTvBinding(base, player, binding_caller, false, 0);
   const uint32_t decoder = player ? LoadU32(base, player) : 0;
   const uint32_t frame_table = player ? LoadU32(base, player + 8) : 0;
   const uint32_t draw_parameters = player ? LoadU32(base, player + 104) : 0;
@@ -6974,12 +7014,13 @@ extern "C" void sub_827BB138(PPCContext& ctx, uint8_t* base) {
   __imp__sub_827BB138(ctx, base);
 
   const uint32_t result = ctx.r3.u32;
+  ObserveTvBinding(base, player, binding_caller, true, result);
   if (watching) {
     g_tv_last_bink_sequence.store(sequence, std::memory_order_relaxed);
     g_tv_last_bink_result.store(result, std::memory_order_relaxed);
   }
   if (watching && ConsumeTvEventTraceBudget()) {
-    const char* reason = result       ? "submitted"
+    const char* reason = result       ? "effect-binding-applied"
                          : !player    ? "no-player"
                          : !decoder   ? "no-decoder"
                          : !state_100 ? "not-ready"
@@ -6987,7 +7028,7 @@ extern "C" void sub_827BB138(PPCContext& ctx, uint8_t* base) {
     REXLOG_INFO(
         "gta4-tv-bink-draw-result: session={} sequence={} movie={} caller={:08X} "
         "player={:08X} decoder={:08X} frame-table={:08X} parameters={:08X} "
-        "state={},{},{},{},{} planes={:08X},{:08X},{:08X},{:08X} "
+        "state={},{},{},{},{} parameter-ids={:08X},{:08X},{:08X},{:08X} "
         "result={} reason={}",
         g_tv_session_id.load(std::memory_order_relaxed), sequence,
         g_tv_last_movie_sequence.load(std::memory_order_relaxed), uint32_t(ctx.lr), player, decoder,
@@ -7174,5 +7215,6 @@ extern "C" void sub_82A467D8(PPCContext& ctx, uint8_t* base) {
   ctx.r3.u32 = device;
 }
 
+#include "gta4_help_trace_hooks.inc"
 #include "gta4_fade_trace_hooks.inc"
 #include "gta4_phone_trace_hooks.inc"

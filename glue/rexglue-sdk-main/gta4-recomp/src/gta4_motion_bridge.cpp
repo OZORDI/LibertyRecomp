@@ -8,6 +8,7 @@
 #include <rex/cvar.h>
 #include <rex/input/input_system.h>
 #include <rex/input/motion.h>
+#include <rex/input/motion_sample_cache.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
 
@@ -59,6 +60,10 @@ REXCVAR_DEFINE_INT32(gta4_motion_reload_window_ms, 800, "GTA IV/Motion Sensor/Tu
 REXCVAR_DEFINE_INT32(gta4_motion_reload_cooldown_ms, 600, "GTA IV/Motion Sensor/Tuning",
                      "Minimum time before another reload gesture")
     .range(100, 3000);
+
+REXCVAR_DEFINE_INT32(gta4_motion_reload_expiry_ms, 250, "GTA IV/Motion Sensor/Tuning",
+                     "Maximum lifetime of an unconsumed completed reload gesture")
+    .range(50, 2000);
 
 namespace gta4 {
 namespace {
@@ -135,6 +140,7 @@ void GTA4MotionBridge::SetAllPreferences(bool enabled) {
 void GTA4MotionBridge::Calibrate(uint32_t user_index) {
   std::lock_guard lock(mutex_);
   UpdateLocked(user_index);
+  reload_gesture_.Reset();
   if (snapshot_.fresh) {
     neutral_pitch_radians_ += snapshot_.pitch_radians;
     neutral_roll_radians_ += snapshot_.roll_radians;
@@ -149,7 +155,19 @@ void GTA4MotionBridge::Calibrate(uint32_t user_index) {
   }
 }
 
+void GTA4MotionBridge::SetReloadContextActive(bool active) {
+  std::lock_guard lock(mutex_);
+  if (reload_context_active_ != active) {
+    reload_gesture_.Reset();
+    reload_context_active_ = active;
+  }
+}
+
 void GTA4MotionBridge::NotifyVehicleEntry(uint32_t user_index) {
+  {
+    std::lock_guard lock(mutex_);
+    reload_gesture_.Reset();
+  }
   if (IsPreferenceEnabled(MotionPreference::kCalibration)) {
     Calibrate(user_index);
   }
@@ -158,13 +176,12 @@ void GTA4MotionBridge::NotifyVehicleEntry(uint32_t user_index) {
 bool GTA4MotionBridge::ConsumeReloadGesture(MotionReloadConsumer consumer, uint32_t user_index) {
   std::lock_guard lock(mutex_);
   UpdateLocked(user_index);
-  const size_t index = static_cast<size_t>(consumer);
-  if (index >= reload_completed_.size()) {
+  if (!snapshot_.fresh || !snapshot_.controls_enabled || !reload_context_active_ ||
+      !IsPreferenceEnabled(MotionPreference::kReload)) {
+    reload_gesture_.Reset();
     return false;
   }
-  const bool completed = reload_completed_[index];
-  reload_completed_[index] = false;
-  return completed;
+  return reload_gesture_.Consume(static_cast<size_t>(consumer), std::chrono::steady_clock::now());
 }
 
 void GTA4MotionBridge::ResetDeviceLocked() {
@@ -178,9 +195,7 @@ void GTA4MotionBridge::ResetDeviceLocked() {
   calibration_pending_ = false;
   neutral_pitch_radians_ = 0.0f;
   neutral_roll_radians_ = 0.0f;
-  reload_phase_ = ReloadPhase::kIdle;
-  reload_deadline_ = {};
-  reload_completed_.fill(false);
+  reload_gesture_.Reset();
 }
 
 void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
@@ -206,6 +221,10 @@ void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
       runtime ? static_cast<rex::input::InputSystem*>(runtime->input_system()) : nullptr;
   rex::input::MotionState motion = {};
   const auto now = std::chrono::steady_clock::now();
+  reload_gesture_.Expire(now);
+  if (!reload_context_active_ || !IsPreferenceEnabled(MotionPreference::kReload)) {
+    reload_gesture_.Reset();
+  }
   if (!input_system || !input_system->TryGetMotionState(user_index, &motion) ||
       !(motion.valid_samples & rex::input::kMotionSensorAccelerometer) ||
       !IsFiniteVector(motion.acceleration_m_s2)) {
@@ -221,21 +240,36 @@ void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
   }
 
   const auto stale_timeout = MillisecondsFromCVar(REXCVAR_GET(gta4_motion_stale_timeout_ms));
+  const auto timeout_ns = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(stale_timeout).count());
+  // Both times use the driver's host clock, not the sensor-native clock.
+  if (!rex::input::MotionSampleIsFresh(motion.accelerometer_host_timestamp_ns,
+                                       motion.poll_host_timestamp_ns, timeout_ns)) {
+    snapshot_.sensor_available = true;
+    snapshot_.fresh = false;
+    snapshot_.controls_enabled = false;
+    snapshot_.pitch_axis = snapshot_.roll_axis = 0.0f;
+    snapshot_.angular_velocity_rad_s = {};
+    filter_initialized_ = false;
+    reload_gesture_.Reset();
+    return;
+  }
+  const bool gyro_fresh = (motion.valid_samples & rex::input::kMotionSensorGyroscope) &&
+      IsFiniteVector(motion.angular_velocity_rad_s) &&
+      rex::input::MotionSampleIsFresh(motion.gyroscope_host_timestamp_ns,
+                                      motion.poll_host_timestamp_ns, timeout_ns);
   const bool new_sample =
       motion.accelerometer_host_timestamp_ns != last_accelerometer_timestamp_ns_;
   if (!new_sample) {
+    // Re-reading a previously rejected packet cannot make it valid.
+    if (!filter_initialized_ || !snapshot_.sensor_available) {
+      return;
+    }
     snapshot_.sequence = motion.sequence;
-    if (motion.valid_samples & rex::input::kMotionSensorGyroscope) {
-      snapshot_.angular_velocity_rad_s = motion.angular_velocity_rad_s;
-    }
-    snapshot_.fresh = last_sample_seen_ != std::chrono::steady_clock::time_point{} &&
-                      now - last_sample_seen_ <= stale_timeout;
-    snapshot_.controls_enabled = snapshot_.fresh;
-    if (!snapshot_.fresh) {
-      snapshot_.pitch_axis = 0.0f;
-      snapshot_.roll_axis = 0.0f;
-      reload_phase_ = ReloadPhase::kIdle;
-    }
+    snapshot_.angular_velocity_rad_s = gyro_fresh ? motion.angular_velocity_rad_s
+                                                  : std::array<float, 3>{};
+    snapshot_.fresh = true;
+    snapshot_.controls_enabled = true;
     return;
   }
 
@@ -255,7 +289,7 @@ void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
     snapshot_.pitch_axis = 0.0f;
     snapshot_.roll_axis = 0.0f;
     filter_initialized_ = false;
-    reload_phase_ = ReloadPhase::kIdle;
+    reload_gesture_.Reset();
     last_accelerometer_timestamp_ns_ = motion.accelerometer_host_timestamp_ns;
     last_sample_seen_ = {};
     return;
@@ -269,7 +303,7 @@ void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
     filtered_acceleration_ = normalized;
     filter_initialized_ = true;
     calibrated_ = false;
-    reload_phase_ = ReloadPhase::kIdle;
+    reload_gesture_.Reset();
   } else {
     const auto elapsed_ns = std::chrono::nanoseconds(motion.accelerometer_host_timestamp_ns -
                                                      last_accelerometer_timestamp_ns_);
@@ -298,7 +332,7 @@ void GTA4MotionBridge::UpdateLocked(uint32_t user_index) {
   snapshot_.controls_enabled = true;
   snapshot_.sequence = motion.sequence;
   snapshot_.acceleration_m_s2 = acceleration;
-  if (motion.valid_samples & rex::input::kMotionSensorGyroscope) {
+  if (gyro_fresh) {
     snapshot_.angular_velocity_rad_s = motion.angular_velocity_rad_s;
   } else {
     snapshot_.angular_velocity_rad_s = {};
@@ -333,39 +367,20 @@ float GTA4MotionBridge::ApplyAxisCurve(float angle_radians, bool invert) const {
 }
 
 void GTA4MotionBridge::UpdateReloadLocked(std::chrono::steady_clock::time_point now) {
-  if (!snapshot_.controls_enabled || !IsPreferenceEnabled(MotionPreference::kReload)) {
-    reload_phase_ = ReloadPhase::kIdle;
-    reload_completed_.fill(false);
+  if (!snapshot_.controls_enabled || !snapshot_.fresh || !reload_context_active_ ||
+      !IsPreferenceEnabled(MotionPreference::kReload)) {
+    reload_gesture_.Reset();
     return;
   }
-
-  const double pitch = snapshot_.pitch_radians;
-  const double up = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_up_degrees));
-  const double down = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_down_degrees));
-  const double neutral = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_neutral_degrees));
-
-  switch (reload_phase_) {
-    case ReloadPhase::kIdle:
-      if (pitch >= up) {
-        reload_phase_ = ReloadPhase::kAwaitingDown;
-        reload_deadline_ = now + MillisecondsFromCVar(REXCVAR_GET(gta4_motion_reload_window_ms));
-      }
-      break;
-    case ReloadPhase::kAwaitingDown:
-      if (now > reload_deadline_) {
-        reload_phase_ = ReloadPhase::kIdle;
-      } else if (pitch <= down) {
-        reload_completed_.fill(true);
-        reload_phase_ = ReloadPhase::kCooldown;
-        reload_deadline_ = now + MillisecondsFromCVar(REXCVAR_GET(gta4_motion_reload_cooldown_ms));
-      }
-      break;
-    case ReloadPhase::kCooldown:
-      if (now >= reload_deadline_ && std::abs(pitch) <= neutral) {
-        reload_phase_ = ReloadPhase::kIdle;
-      }
-      break;
-  }
+  const MotionReloadConfig config{
+      .up_radians = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_up_degrees)),
+      .down_radians = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_down_degrees)),
+      .neutral_radians = DegreesToRadians(REXCVAR_GET(gta4_motion_reload_neutral_degrees)),
+      .window = MillisecondsFromCVar(REXCVAR_GET(gta4_motion_reload_window_ms)),
+      .cooldown = MillisecondsFromCVar(REXCVAR_GET(gta4_motion_reload_cooldown_ms)),
+      .completion_lifetime = MillisecondsFromCVar(REXCVAR_GET(gta4_motion_reload_expiry_ms)),
+  };
+  reload_gesture_.Observe(snapshot_.pitch_radians, now, config);
 }
 
 }  // namespace gta4

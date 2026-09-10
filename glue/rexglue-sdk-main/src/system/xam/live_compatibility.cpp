@@ -8,6 +8,7 @@
 #include <rex/system/xam/live_compatibility.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -2210,6 +2211,10 @@ bool LiveCompatibilityRuntime::SetUserContext(uint32_t id, uint32_t value) {
   if (!user_contexts_.contains(id) && user_contexts_.size() >= kMaximumContexts) {
     return false;
   }
+  if (std::getenv("REX_GTA4_SESSION_ATTRIBUTE_TRACE")) {
+    REXSYS_INFO("gta4-session-attributes point=context-set session={:016X} id={:08X} value={}",
+                active_session_id(), id, value);
+  }
   user_contexts_[id] = value;
   return true;
 }
@@ -2235,6 +2240,14 @@ bool LiveCompatibilityRuntime::SetUserProperty(uint32_t id, std::span<const uint
   if (value.size() > kMaximumPropertySize ||
       (!user_properties_.contains(id) && user_properties_.size() >= kMaximumProperties)) {
     return false;
+  }
+  if (std::getenv("REX_GTA4_SESSION_ATTRIBUTE_TRACE")) {
+    uint32_t scalar = 0;
+    if (value.size() == sizeof(scalar)) {
+      for (uint8_t byte : value) scalar = (scalar << 8) | byte;
+    }
+    REXSYS_INFO("gta4-session-attributes point=property-set session={:016X} id={:08X} bytes={} scalar={}",
+                active_session_id(), id, value.size(), scalar);
   }
   user_properties_[id] = std::vector<uint8_t>(value.begin(), value.end());
   return true;
