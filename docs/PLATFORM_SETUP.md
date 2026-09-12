@@ -5,7 +5,7 @@ Desktop platforms (Windows, Linux, macOS) are covered in [BUILDING.md](BUILDING.
 
 ---
 
-## Table of Contents
+## Table of Contents help me pls
 
 1. [iOS (Metal)](#ios-metal)
 2. [Android (Vulkan)](#android-vulkan)
