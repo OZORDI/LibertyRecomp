@@ -53,6 +53,16 @@ enum class GpuRange : uint8_t {
   kPresent,
   kFrameRelease,
   kUnattributed,
+  kDirectionalShadowShaders,
+  kLocalShadowShaders,
+  kMaterialShaders,
+  kSkyShaders,
+  kImmediateShaders,
+  kParticleShaders,
+  kRetailSceneToGBuffer,kRetailLightsToScreen,kRetailDrawScene,kRetailScript2d,
+  kRetailFrontendPhone,kRetailHtml,kRetailBlit,kRetailViewport,kRetailTreeImposters,
+  kRetailWaterSurface,kRetailCloudGeneration,kRetailRainUpdate,kRetailWarpShadow,
+  kRetailInteriorReflection,kRetailPlayerSettings,
   kCount,
 };
 
@@ -130,6 +140,18 @@ enum class Counter : uint8_t {
   kDroppedGpuRanges,
   kCoarseGpuTiming,
   kPipelineRequestReuses,
+  kIndexedDescriptorPages,
+  kTextureAllocationReuses,
+  kTextureAllocationPoolBytes,
+  kPipelineSnapshotReuses,
+  kShaderSnapshotReuses,
+  kZeroDofSkips,
+  kPostFxDirectWrites,
+  kConstantVersionHits,
+  kConstantContentHits,
+  kConstantBindingUploads,
+  kTextureBindingReuses,
+  kConstantBindingOwners,
   kCount,
 };
 
@@ -138,8 +160,12 @@ constexpr size_t kCpuRangeCount = size_t(CpuRange::kCount);
 constexpr size_t kCounterCount = size_t(Counter::kCount);
 // The profiler records one timestamp at frame start and one at every exclusive
 // range boundary. This deliberately bounded pool keeps profiling overhead
-// independent of draw count while still allowing 255 pass/category slices.
-constexpr size_t kMaximumGpuQueriesPerFrame = 256;
+// independent of draw count; each capture selects a limit within this capacity.
+constexpr size_t kMaximumGpuQueriesPerFrame = 1024;
+constexpr uint32_t kProfileSchemaVersion = 2;
+constexpr uint32_t kFrameFlagCaptureStart = 1u << 0;
+constexpr uint32_t kFrameFlagGpuPartial = 1u << 1;
+constexpr uint32_t kFrameFlagInternalFlush = 1u << 2;
 constexpr size_t kQueriesPerGpuSpan = 2;
 constexpr size_t kMaximumGpuSpansPerFrame = kMaximumGpuQueriesPerFrame / kQueriesPerGpuSpan;
 constexpr size_t kFrameSampleCapacity = 600;
@@ -166,6 +192,9 @@ struct GpuSpanToken {
 struct FrameSample {
   uint32_t frame = 0;
   uint32_t flags = 0;
+  uint64_t capture_sequence = 0, native_submission = 0;
+  uint32_t frame_slot = 0;
+  std::array<uint32_t, kGpuRangeCount> gpu_unavailable_counts{};
   std::array<uint64_t, kGpuRangeCount> gpu_ticks{};
   std::array<uint32_t, kGpuRangeCount> gpu_range_counts{};
   std::array<uint64_t, kCpuRangeCount> cpu_ticks{};
@@ -193,6 +222,10 @@ class FrameBuilder {
   void AddCpuRange(CpuRange range, uint64_t elapsed_ticks);
   void AddCounter(Counter counter, uint64_t value = 1);
   void SetCounter(Counter counter, uint64_t value);
+  void SetIdentity(uint64_t sequence, uint64_t submission, uint32_t slot) {
+    sample_.capture_sequence=sequence;sample_.native_submission=submission;sample_.frame_slot=slot;
+  }
+  void SetFlags(uint32_t flags) { sample_.flags |= flags; }
 
   const FrameSample& sample() const { return sample_; }
   const std::array<GpuSpan, kMaximumGpuSpansPerFrame>& spans() const { return spans_; }
@@ -253,6 +286,8 @@ class FrameSampleCompletionQueue {
 };
 
 const char* GpuRangeName(GpuRange range);
+// Source phase IDs read from the executing retail draw-list header/task.
+GpuRange PerformanceRangeForRetailPhase(uint32_t phase);
 const char* CpuRangeName(CpuRange range);
 const char* CounterName(Counter counter);
 bool CalculateTimestampDelta(uint64_t begin, uint64_t end, uint32_t valid_bits, uint64_t* delta);

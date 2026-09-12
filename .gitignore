@@ -727,3 +727,8 @@ scripts/
 # Reproducible desktop application icon generation and verification.
 !tools/generate_desktop_icons.py
 !tools/test_desktop_icons.py
+
+# Reproducible audio regression tools (not disposable research scripts).
+!/tools/run_xma_audio_regressions.py
+!/tools/extract_xma_loop_fixtures.py
+!/tools/generate_xma_loop_cases.py

@@ -42,6 +42,7 @@
 #include <rex/ui/window.h>
 
 #include "gta4_init.h"
+#include "gta4_gpu_pass_context.h"
 #include "gta4_aspect_hooks.h"
 #include "gta4_aspect_resolution.h"
 #include "gta4_help_trace.h"
@@ -6486,6 +6487,7 @@ extern "C" void sub_824F6AF0(PPCContext& ctx, uint8_t* base) {
   };
 
   const uint32_t depth_output = get_surface(outputs[3]);
+  if (IsNativeLightProvenanceTraceEnabled()) {
   REXLOG_WARN(
       "gta4-native-cause: point=deferred-depth-lifecycle-submit "
       "attachment-wrapper={:08X} attachment-surface={:08X} "
@@ -6493,6 +6495,7 @@ extern "C" void sub_824F6AF0(PPCContext& ctx, uint8_t* base) {
       "forward-wrapper={:08X} forward-surface={:08X} caller={:08X}",
       deferred_depth_wrapper, deferred_depth_surface, outputs[3], depth_output,
       primary_depth_surface, primary_depth_surface, uint32_t(ctx.lr));
+  }
   SubmitNativeResolve(base, device, 20, &full_rectangle, depth_output, &origin, 0, 0,
                       clear_color_bits, 0.0, 0, 0, 3, uint32_t(ctx.lr), outputs[3],
                       deferred_depth_wrapper);

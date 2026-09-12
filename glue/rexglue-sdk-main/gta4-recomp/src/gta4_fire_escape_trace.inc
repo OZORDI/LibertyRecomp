@@ -122,7 +122,7 @@ bool SubmitFireTracedCommand(const void* bytes, size_t size, uint32_t device,
   if (g_fire_base) c.guest_frame = FireGuestFrame(g_fire_base);
   auto packed = PackFireTraceEnvelope(bytes,size,kTitleCommandAbi,c);
   auto* graphics = GetNativeGraphicsSystem();
-  const bool ok = graphics && !packed.empty() && graphics->SubmitTitleCommand(kTitleId,kFireTraceEnvelopeAbi,packed.data(),packed.size());
+  const bool ok = graphics && !packed.empty() && gta4::gpu_pass::Submit(graphics,kFireTraceEnvelopeAbi,packed.data(),packed.size());
   ++g_fire_submissions;
   if (!ok || c.guest_frame % FireTraceConfig().interval == 0) {
     CommandHeader h{}; if (size >= sizeof(h)) std::memcpy(&h,bytes,sizeof(h));

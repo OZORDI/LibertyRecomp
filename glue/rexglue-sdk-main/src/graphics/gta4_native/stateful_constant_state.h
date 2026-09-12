@@ -124,6 +124,7 @@ struct ConstantStateVersion {
   uint64_t content_hash = 0;
   size_t byte_size = 0;
   ConstantPayloadDelta delta;
+  uint32_t deferred_ancestor_count = 0;
   // The parent and materialized bytes are render-worker-owned memoization.
   // State bytes and token are immutable once the version is published.
   mutable std::shared_ptr<const ConstantStateVersion> parent;
@@ -150,6 +151,7 @@ struct ConstantApplyResult {
 // is reconstructed lazily on first consumer use and then memoized.
 class AuthoritativeConstantState {
  public:
+  static constexpr uint32_t kMaximumDeferredAncestors = 64;
   explicit AuthoritativeConstantState(size_t byte_size = 0,
                                       StateVersionStamp initial_version = {})
       : canonical_(byte_size), version_(initial_version) {}
@@ -200,8 +202,25 @@ class AuthoritativeConstantState {
     next->token = version_;
     next->content_hash = hash_callback(std::span<const uint8_t>(canonical_));
     next->byte_size = canonical_.size();
+    // Updates without a consuming draw must not retain an unlimited chain.
+    // A complete copied base is equivalent to replaying all prior deltas.
+    const bool complete_bytes = changed_delta.ranges.size() == 1 &&
+        changed_delta.ranges[0].destination_offset == 0 &&
+        changed_delta.ranges[0].payload_offset == 0 &&
+        changed_delta.ranges[0].byte_count == canonical_.size() &&
+        changed_delta.payload.size() == canonical_.size();
+    if (complete_bytes) {
+      changed_delta.complete_snapshot = true;
+    } else if (current_ && current_->deferred_ancestor_count >= kMaximumDeferredAncestors) {
+      if (!CaptureCompleteConstantSnapshot(canonical_, changed_delta)) {
+        return {ConstantApplyStatus::kInvalidDelta, false, current_};
+      }
+    }
     next->delta = std::move(changed_delta);
-    next->parent = current_;
+    if (!next->delta.complete_snapshot) {
+      next->parent = current_;
+      next->deferred_ancestor_count = current_ ? (current_->materialized ? 1 : current_->deferred_ancestor_count + 1) : 0;
+    }
     current_ = std::move(next);
     return {ConstantApplyStatus::kApplied, true, current_};
   }
@@ -227,6 +246,20 @@ class AuthoritativeConstantState {
       return {};
     }
     if (version->materialized) {
+      return version->materialized;
+    }
+
+    // The common ordered-draw case has a memoized direct parent. Avoid a
+    // temporary owning chain and its allocator traffic for a single delta.
+    if (version->parent && version->parent->materialized &&
+        version->parent->materialized->size() == version->byte_size &&
+        ValidateConstantPayloadDelta(version->delta, version->byte_size)) {
+      auto bytes = std::make_shared<std::vector<uint8_t>>(*version->parent->materialized);
+      for (const auto& range : version->delta.ranges)
+        std::memcpy(bytes->data() + range.destination_offset,
+                    version->delta.payload.data() + range.payload_offset, range.byte_count);
+      version->materialized = std::move(bytes);
+      version->parent.reset();
       return version->materialized;
     }
 

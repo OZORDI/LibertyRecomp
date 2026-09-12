@@ -8,18 +8,19 @@
 #include <span>
 #include <type_traits>
 #include <vector>
+#include <rex/graphics/gta4_native/gpu_pass_origin.h>
 
 namespace rex::graphics::gta4_native::attribution {
 
-// The flat profiler owns 256 queries. One query is written at each frame end,
-// and the frame-begin query is shared with the first flat range. Python
-// verification: 48 + 16 = 64 optional detail boundaries, leaving
-// 256 - 2 - 64 = 190 queries for the existing flat boundaries.
+// Attribution borrows a bounded set of optional endpoints from the caller's
+// per-frame query budget. Coarse transitions and the closing frame timestamp
+// always reserve their own space before detail is admitted.
 constexpr uint32_t kRegularDetailBoundaryBudget = 48;
 constexpr uint32_t kDrilldownBoundaryBudget = 16;
 constexpr uint32_t kMaximumExtraDetailBoundaries =
     kRegularDetailBoundaryBudget + kDrilldownBoundaryBudget;
 constexpr uint32_t kFrameEndpointQueryCount = 2;
+constexpr uint32_t kHardDetailBoundaryLimit = 512;
 constexpr size_t kMaximumPendingDrilldownTargets = 4;
 constexpr size_t kAttributionCompletionSlotCount = 2;
 constexpr uint32_t kDrilldownExpiryFrames = 8;
@@ -73,6 +74,7 @@ struct NativePassKey {
   NativePassSurfaceKey depth_target{};
   uint32_t reflection_family = UINT32_MAX;
   uint32_t render_phase = 0;
+  GpuPassOrigin origin{};
   uint64_t shader_family = 0;
   uint64_t vertex_shader_hash = 0;
   uint64_t pixel_shader_hash = 0;
@@ -90,6 +92,7 @@ struct NativePassKeyInput {
   NativePassSurfaceKey depth_target{};
   uint32_t reflection_family = UINT32_MAX;
   uint32_t render_phase = 0;
+  GpuPassOrigin origin{};
   uint64_t shader_family = 0;
   uint64_t vertex_shader_hash = 0;
   uint64_t pixel_shader_hash = 0;
@@ -159,6 +162,9 @@ struct NativeAttributionPlanBudget {
   uint32_t regular_detail_boundaries = kRegularDetailBoundaryBudget;
   uint32_t drilldown_boundaries = kDrilldownBoundaryBudget;
   uint32_t total_detail_boundaries = kMaximumExtraDetailBoundaries;
+  // Explicitly authorized by CalculateNativeAttributionQueryBudget. Defaults
+  // retain the original legacy contract; hostile callers still have a cap.
+  uint32_t hard_detail_boundaries = kMaximumExtraDetailBoundaries;
 };
 
 struct NativeAttributionQueryBudgetInput {
@@ -169,6 +175,7 @@ struct NativeAttributionQueryBudgetInput {
   uint32_t queries_already_used = 1;
   uint32_t remaining_frame_endpoint_queries = 1;
   uint32_t current_coarse_range = UINT32_MAX;
+  uint32_t maximum_detail_boundaries = kMaximumExtraDetailBoundaries;
 };
 
 struct NativeAttributionQueryBudget {

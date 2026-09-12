@@ -42,11 +42,18 @@ add_executable(unit_tests
     graphics/native_black_anomaly_test.cpp
     graphics/native_buffer_arena_test.cpp
     graphics/native_owner_retirement_test.cpp
+    graphics/native_optimization_lifetime_test.cpp
     graphics/native_buffer_metadata_test.cpp
     graphics/native_descriptor_backend_test.cpp
+    graphics/native_working_set_test.cpp
+    graphics/native_hotpath_policy_test.cpp
+    graphics/native_hotpath_cache_test.cpp
+    graphics/native_texture_eviction_index_test.cpp
+    graphics/native_working_set_vulkan_contract_test.cpp
     graphics/native_descriptor_tuple_cache_test.cpp
     graphics/native_frame_context_test.cpp
     graphics/native_gpu_attribution_test.cpp
+    graphics/native_gpu_pass_origin_test.cpp
     graphics/native_reflection_registry_test.cpp
     graphics/native_resolve_policy_test.cpp
     graphics/native_submission_lifetime_test.cpp
@@ -55,6 +62,7 @@ add_executable(unit_tests
     graphics/shadow_distance_util_test.cpp
     graphics/gta4_native_surface_view_test.cpp
     graphics/native_performance_samples_test.cpp
+  graphics/native_cpu_profile_test.cpp
     graphics/native_memory_samples_test.cpp
     graphics/pipeline_cache_file_test.cpp
     graphics/primitive_restart_test.cpp

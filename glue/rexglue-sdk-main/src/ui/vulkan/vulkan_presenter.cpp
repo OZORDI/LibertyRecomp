@@ -3036,8 +3036,13 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
                 frame_probe.run, frame_probe.frame, frame_probe.source_sequence, current_paint_submission_index, int32_t(present_result));
   }
   paint_present_ticks = rex::chrono::Clock::QueryHostTickCount() - paint_present_begin;
+  const uint64_t paint_timing_end=rex::chrono::Clock::QueryHostTickCount();
   PublishPaintTiming(paint_acquire_ticks, paint_submit_ticks, paint_present_ticks,
-                     rex::chrono::Clock::QueryHostTickCount() - paint_timing_begin);
+                     paint_timing_end-paint_timing_begin, paint_timing_begin, paint_timing_end,
+                     current_paint_submission_index,
+                     guest_output_mailbox_index==UINT32_MAX ? 0 : guest_output_images_[guest_output_mailbox_index].version,
+                     guest_output_image ? guest_output_properties.provenance.submitted_frame : 0,
+                     int32_t(present_result));
 
   if (log_tv_paint) {
     const auto& provenance = tv_trace_provenance;

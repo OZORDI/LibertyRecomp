@@ -27,7 +27,9 @@ struct FireTraceConfiguration {
   bool enabled = false;
   uint32_t interval = 120, image_interval_seconds = 20;
   uint32_t image_frame_mib = 192, disk_mib = 640;
-  std::string directory;
+  std::string directory, request_file;
+  bool elevated_rails = false;
+  uint32_t crop_x = 0, crop_y = 0, crop_width = 0, crop_height = 0;
 };
 inline const FireTraceConfiguration& FireTraceConfig() {
   static const auto c = [] {
@@ -38,11 +40,30 @@ inline const FireTraceConfiguration& FireTraceConfig() {
     x.image_frame_mib = std::max(32u, FireTraceUnsigned("REX_GTA4_FIRE_FRAME_MIB", 192, 512));
     x.disk_mib = FireTraceUnsigned("REX_GTA4_FIRE_DISK_MIB", 640, 2048);
     if (const auto* p = std::getenv("REX_GTA4_FIRE_OUTPUT")) x.directory = p;
+    if (const auto* p = std::getenv("REX_GTA4_RAIL_REQUEST_FILE")) x.request_file = p;
+    x.elevated_rails = FireTraceUnsigned("REX_GTA4_RAIL_TRACE", 0, 1) != 0;
+    x.crop_x = FireTraceUnsigned("REX_GTA4_PROBE_CROP_X", 0, 32768);
+    x.crop_y = FireTraceUnsigned("REX_GTA4_PROBE_CROP_Y", 0, 32768);
+    x.crop_width = FireTraceUnsigned("REX_GTA4_PROBE_CROP_WIDTH", 0, 32768);
+    x.crop_height = FireTraceUnsigned("REX_GTA4_PROBE_CROP_HEIGHT", 0, 32768);
     return x;
   }();
   return c;
 }
+// Names verified in installed brook_s/east_xr rail drawables. Shared metal
+// names are weak candidates; only a rail-specific name arms a scene capture.
+inline bool ElevatedRailTextureName(std::string_view name) {
+  return name.starts_with("ks_eltrak") || name.starts_with("bks_tracks") ||
+         name.starts_with("grn_railks03") || name == "bkn_elfoot" ||
+         name == "bks_eltr_foot" || name == "bkn_eltr_strut" ||
+         name == "cm_el_girder";
+}
 inline bool FireTextureName(std::string_view name) {
+  if (FireTraceConfig().elevated_rails)
+    return ElevatedRailTextureName(name) || name == "darkmetal512" ||
+           name == "grytarn_512" || name == "sl_watertnk_wood01" ||
+           name == "pris_fence2pris_fence2b" || name == "cm_platform" ||
+           name == "cm_pwrlines";
   return name.find("sl_rustedmtl_rail01") != std::string_view::npos ||
          name.find("sl_rustedmtl_msh01") != std::string_view::npos ||
          name.find("sl_rustedmetal01_256") != std::string_view::npos ||
@@ -50,6 +71,7 @@ inline bool FireTextureName(std::string_view name) {
          name.find("fire_esc") != std::string_view::npos;
 }
 inline bool FireStrongTextureName(std::string_view name) {
+  if (FireTraceConfig().elevated_rails) return ElevatedRailTextureName(name);
   return name.find("sl_rustedmtl_rail01") != std::string_view::npos ||
          name.find("sl_rustedmtl_msh01") != std::string_view::npos ||
          name.find("fire_esc") != std::string_view::npos;

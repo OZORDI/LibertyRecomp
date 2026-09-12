@@ -89,8 +89,7 @@ bool SubmitTvTracedCommand(const void* command, size_t size, uint32_t device) {
   if (!TvDetailActive()) return SubmitPhoneTracedCommand(command, size, device);
   const auto context = NewTvTraceContext(device);
   const auto envelope = PackTvTraceEnvelope(command,size,kTitleCommandAbi,context);
-  const bool accepted = GetNativeGraphicsSystem()->SubmitTitleCommand(
-      kTitleId,kTvTraceEnvelopeAbi,envelope.data(),envelope.size());
+  const bool accepted = gta4::gpu_pass::Submit(GetNativeGraphicsSystem(),kTvTraceEnvelopeAbi,envelope.data(),envelope.size());
   if (!accepted) TvTraceLog("incomplete",fmt::format("run={} event={} reason=submit-rejected",
       context.run,context.event));
   const auto& header = *static_cast<const CommandHeader*>(command);

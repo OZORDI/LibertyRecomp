@@ -6,6 +6,7 @@
 #include <rex/ui/vulkan/api.h>
 
 #include "postfx_resource_pool.h"
+#include "native_postfx_plan.h"
 #include "native_gpu_timing.h"
 
 namespace rex::ui::vulkan {

@@ -139,12 +139,12 @@ bool SubmitPhoneTracedCommand(const void* bytes, size_t size, uint32_t device,
   auto* graphics = GetNativeGraphicsSystem();
   if (!graphics) return false;
   if (!PhoneCaptureActive())
-    return graphics->SubmitTitleCommand(kTitleId, kTitleCommandAbi, bytes, size);
+    return gta4::gpu_pass::Submit(graphics, kTitleCommandAbi, bytes, size);
   const uint32_t count = g_phone_command_count.fetch_add(1, std::memory_order_relaxed);
   if (count >= PhoneTraceConfig().command_limit) {
     if (g_phone_frames_remaining.exchange(0))
       PhoneTraceLog("incomplete", fmt::format("run={} reason=command-budget-exhausted count={}", g_phone_run.load(), count));
-    return graphics->SubmitTitleCommand(kTitleId, kTitleCommandAbi, bytes, size);
+    return gta4::gpu_pass::Submit(graphics, kTitleCommandAbi, bytes, size);
   }
   PhoneTraceContext context = replay ? *replay : NewPhoneContext(device);
   if (replay) context.applied = CapturePhoneGuestState(g_phone_guest_base.load(), device);
@@ -159,7 +159,7 @@ bool SubmitPhoneTracedCommand(const void* bytes, size_t size, uint32_t device,
       header.type == CommandType::kDrawPrimitiveUp || header.type == CommandType::kDrawIndexedPrimitive)
     PhoneTraceLog("guest-applied", fmt::format("run={} event={} {}", context.run, context.event, PhoneGuestStateText(context.applied)));
   const auto envelope = PackPhoneTraceEnvelope(bytes, size, kTitleCommandAbi, context);
-  const bool accepted = graphics->SubmitTitleCommand(kTitleId, kPhoneTraceEnvelopeAbi, envelope.data(), envelope.size());
+  const bool accepted = gta4::gpu_pass::Submit(graphics, kPhoneTraceEnvelopeAbi, envelope.data(), envelope.size());
   PhoneTraceLog("guest-result", fmt::format("run={} event={} accepted={}", context.run, context.event, accepted));
   if (accepted && header.type == CommandType::kPresent) {
     uint32_t remaining = g_phone_frames_remaining.load();

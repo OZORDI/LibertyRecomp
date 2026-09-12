@@ -93,6 +93,7 @@ bool FrameBuilder::ResolveGpuRange(GpuSpanToken token, uint64_t elapsed_ticks, b
   span.resolved = true;
   if (!available) {
     AddCounter(Counter::kUnavailableGpuRanges);
+    ++sample_.gpu_unavailable_counts[EnumIndex(span.range)];
     return true;
   }
   const size_t index = EnumIndex(span.range);
@@ -107,6 +108,7 @@ void FrameBuilder::AddGpuRange(GpuRange range, uint64_t elapsed_ticks, bool avai
   }
   if (!available) {
     AddCounter(Counter::kUnavailableGpuRanges);
+    ++sample_.gpu_unavailable_counts[EnumIndex(range)];
     return;
   }
   const size_t index = EnumIndex(range);
@@ -227,6 +229,22 @@ bool FrameSampleCompletionQueue::occupied(size_t slot) const {
   return slot < slots_.size() && slots_[slot].has_value();
 }
 
+GpuRange PerformanceRangeForRetailPhase(uint32_t phase) {
+  switch(phase){
+    case 1:return GpuRange::kRetailLightsToScreen;case 2:return GpuRange::kRadar;
+    case 3:return GpuRange::kRetailBlit;
+    case 6:case 9:case 10:return GpuRange::kRetailViewport;
+    case 13:return GpuRange::kRetailScript2d;case 14:return GpuRange::kRetailTreeImposters;
+    case 15:return GpuRange::kRetailDrawScene;case 16:return GpuRange::kRetailWaterSurface;
+    case 17:return GpuRange::kWaterReflections;case 19:return GpuRange::kEnvironmentReflections;
+    case 20:return GpuRange::kRetailInteriorReflection;case 21:return GpuRange::kRetailWarpShadow;
+    case 23:return GpuRange::kRetailFrontendPhone;case 24:return GpuRange::kRetailHtml;
+    case 31:return GpuRange::kRetailSceneToGBuffer;case 32:return GpuRange::kRetailCloudGeneration;
+    case 34:return GpuRange::kRetailPlayerSettings;case 35:return GpuRange::kRetailRainUpdate;
+    case 36:return GpuRange::kMirrorReflections;default:return GpuRange::kUnattributed;
+  }
+}
+
 const char* GpuRangeName(GpuRange range) {
   static constexpr std::array<const char*, kGpuRangeCount> kNames = {
       "frame",
@@ -269,7 +287,12 @@ const char* GpuRangeName(GpuRange range) {
       "smaa-neighborhood",
       "present",
       "frame-release",
-      "unattributed",
+      "unattributed", "directional-shadow-shaders", "local-shadow-shaders", "material-shaders",
+      "sky-shaders", "immediate-shaders", "particle-shaders",
+      "retail-scene-to-gbuffer","retail-lights-to-screen","retail-draw-scene","retail-script-2d",
+      "retail-frontend-or-phone-model","retail-html","retail-blit","retail-viewport",
+      "retail-tree-imposters","retail-water-surface","retail-cloud-generation","retail-rain-update",
+      "retail-warp-shadow","retail-interior-reflection","retail-player-settings",
   };
   const size_t index = EnumIndex(range);
   return index < kNames.size() ? kNames[index] : "unknown";
@@ -335,6 +358,13 @@ const char* CounterName(Counter counter) {
       "dropped-gpu-ranges",
       "coarse-gpu-timing",
       "pipeline-request-reuses",
+      "indexed-descriptor-pages",
+      "texture-allocation-reuses",
+      "texture-allocation-pool-bytes",
+      "pipeline-snapshot-reuses",
+      "shader-snapshot-reuses",
+      "zero-dof-skips",
+      "postfx-direct-writes", "constant-version-hits", "constant-content-hits", "constant-binding-uploads", "texture-binding-reuses", "constant-binding-owners",
   };
   const size_t index = EnumIndex(counter);
   return index < kNames.size() ? kNames[index] : "unknown";

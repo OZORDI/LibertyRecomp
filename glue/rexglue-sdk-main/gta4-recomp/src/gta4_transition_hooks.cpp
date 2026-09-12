@@ -9,6 +9,7 @@
 #include <rex/thread.h>
 
 #include "gta4_init.h"
+#include "gta4_gpu_pass_context.h"
 
 namespace {
 
@@ -140,6 +141,20 @@ extern "C" void sub_821BB3D8(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_821BB2D0(PPCContext& ctx, uint8_t* base) {
+  // This is the real deferred-DC execution boundary. The producer's phase
+  // scope may have ended long before this list runs on the consuming thread.
+  const gta4::gpu_pass::ScopedExecutedList gpu_pass_scope(
+      ctx.r3.u32,ctx.r4.u32,ctx.r5.u32,ctx.r6.u32,ctx.r13.u32,
+      [base](uint32_t address)->std::optional<uint32_t> {
+        auto* kernel=REX_KERNEL_STATE();auto* memory=kernel?kernel->memory():nullptr;
+        auto* heap=memory?memory->LookupHeap(address):nullptr;
+        if(!base||!heap||address>UINT32_MAX-3||heap!=memory->LookupHeap(address+3))return {};
+        const auto access=heap->QueryRangeAccess(address,address+3);
+        using rex::memory::PageAccess;
+        if(access!=PageAccess::kReadOnly&&access!=PageAccess::kReadWrite&&
+           access!=PageAccess::kExecuteReadOnly&&access!=PageAccess::kExecuteReadWrite)return {};
+        return REX_LOAD_U32(address);
+      });
   const uint32_t caller = static_cast<uint32_t>(ctx.lr);
   const uint32_t argument3 = ctx.r3.u32;
   const uint32_t argument4 = ctx.r4.u32;

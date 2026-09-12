@@ -84,6 +84,7 @@ NativePassKey BuildNativePassKey(const NativePassKeyInput& input) {
   key.depth_target = input.depth_target;
   key.reflection_family = input.reflection_family;
   key.render_phase = input.render_phase;
+  key.origin = input.origin;
   key.shader_family = input.shader_family;
   key.vertex_shader_hash = input.vertex_shader_hash;
   key.pixel_shader_hash = input.pixel_shader_hash;
@@ -92,6 +93,7 @@ NativePassKey BuildNativePassKey(const NativePassKeyInput& input) {
 }
 
 bool NativePassKeyLess(const NativePassKey& left, const NativePassKey& right) {
+  if(left.origin!=right.origin)return left.origin<right.origin;
   if (left.command_class != right.command_class) {
     return left.command_class < right.command_class;
   }
@@ -137,6 +139,17 @@ uint64_t EstimateNativePrimitiveCount(uint32_t primitive_type, uint32_t element_
     default:
       return 0;
   }
+}
+
+// A new invocation must remain a separate observed region, but a targeted
+// next-frame drill-down must match the same source phase in the new invocation.
+static bool SameNativePassForDrilldown(NativePassKey left, NativePassKey right) {
+  const auto normalize=[](GpuPassOrigin& origin){
+    const auto phase=origin.retail_phase;const bool known=origin.attributed();
+    origin={};origin.retail_phase=phase;
+    origin.source=known?GpuPassOriginSource::kListHeader:GpuPassOriginSource::kNone;
+  };
+  normalize(left.origin);normalize(right.origin);return left==right;
 }
 
 std::vector<NativePassGroup> GroupNativePassObservations(
@@ -204,12 +217,20 @@ NativeAttributionQueryBudget CalculateNativeAttributionQueryBudget(
       result.mandatory_boundaries_fit ? uint64_t(input.query_capacity) - result.required_query_count
                                       : 0;
   result.maximum_detail_boundaries =
-      uint32_t(std::min<uint64_t>(available_query_count, kMaximumExtraDetailBoundaries));
+      uint32_t(std::min<uint64_t>(available_query_count, std::min(input.maximum_detail_boundaries, kHardDetailBoundaryLimit)));
   const uint32_t attribution_start_boundaries =
       std::min(result.mandatory_attribution_boundaries, result.maximum_detail_boundaries);
   result.available_detail_boundaries =
       result.maximum_detail_boundaries - attribution_start_boundaries;
   result.plan_budget.total_detail_boundaries = result.available_detail_boundaries;
+  result.plan_budget.hard_detail_boundaries = std::min(input.maximum_detail_boundaries, kHardDetailBoundaryLimit);
+  result.plan_budget.drilldown_boundaries = result.plan_budget.hard_detail_boundaries / 4;
+  result.plan_budget.regular_detail_boundaries =
+      result.plan_budget.hard_detail_boundaries - result.plan_budget.drilldown_boundaries;
+  if(input.maximum_detail_boundaries > kMaximumExtraDetailBoundaries) {
+    result.plan_budget.drilldown_boundaries=std::min(input.maximum_detail_boundaries/4,64u);
+    result.plan_budget.regular_detail_boundaries=input.maximum_detail_boundaries-result.plan_budget.drilldown_boundaries;
+  }
   result.maximum_planned_query_count =
       SaturatingAdd(result.required_query_count, uint64_t(result.maximum_detail_boundaries));
   return result;
@@ -245,8 +266,8 @@ NativeAttributionPlan BuildNativeAttributionPlan(
       selected[observation_index] = true;
       continue;
     }
-    const bool previous_target = drilldown_target && previous.key == drilldown_target->key;
-    const bool current_target = drilldown_target && current.key == drilldown_target->key;
+    const bool previous_target = drilldown_target && SameNativePassForDrilldown(previous.key, drilldown_target->key);
+    const bool current_target = drilldown_target && SameNativePassForDrilldown(current.key, drilldown_target->key);
     if (previous_target || current_target) {
       target_candidates.push_back({observation_index,
                                    std::max(ClassificationPriority(previous.classification),
@@ -258,6 +279,7 @@ NativeAttributionPlan BuildNativeAttributionPlan(
       continue;
     }
     regular_candidates.push_back({observation_index,
+                                  (previous.key.origin!=current.key.origin ? 4 : 0) +
                                   std::max(ClassificationPriority(previous.classification),
                                            ClassificationPriority(current.classification)),
                                   false});
@@ -270,9 +292,10 @@ NativeAttributionPlan BuildNativeAttributionPlan(
                      }
                      return left.observation_index < right.observation_index;
                    });
-  const uint32_t total_budget =
-      std::min(budget.total_detail_boundaries, kMaximumExtraDetailBoundaries);
-  const uint32_t target_budget = std::min(budget.drilldown_boundaries, kDrilldownBoundaryBudget);
+  const uint32_t hard_budget = std::min(budget.hard_detail_boundaries, kHardDetailBoundaryLimit);
+  const uint32_t total_budget = std::min(budget.total_detail_boundaries, hard_budget);
+  const uint32_t hard_target_budget = hard_budget / 4;
+  const uint32_t target_budget = std::min(budget.drilldown_boundaries, hard_target_budget);
   const uint32_t target_candidate_count =
       uint32_t(std::min<size_t>(target_candidates.size(), std::numeric_limits<uint32_t>::max()));
   const uint32_t target_limit = std::min({target_budget, target_candidate_count, total_budget});
@@ -290,7 +313,7 @@ NativeAttributionPlan BuildNativeAttributionPlan(
                      return left.observation_index < right.observation_index;
                    });
   const uint32_t regular_budget =
-      std::min(budget.regular_detail_boundaries, kRegularDetailBoundaryBudget);
+      std::min(budget.regular_detail_boundaries, hard_budget - hard_target_budget);
   const uint32_t remaining_budget = total_budget - plan.drilldown_boundaries;
   const uint32_t regular_candidate_count =
       uint32_t(std::min<size_t>(regular_candidates.size(), std::numeric_limits<uint32_t>::max()));
@@ -305,7 +328,7 @@ NativeAttributionPlan BuildNativeAttributionPlan(
     plan.target_id = drilldown_target->target_id;
     plan.target_matched = std::any_of(observations.begin(), observations.end(),
                                       [&](const NativePassObservation& observation) {
-                                        return observation.key == drilldown_target->key;
+                                        return SameNativePassForDrilldown(observation.key, drilldown_target->key);
                                       });
   }
 
@@ -327,7 +350,7 @@ NativeAttributionPlan BuildNativeAttributionPlan(
     region.pass_key_count = 1;
     NativePassKey previous_key = first.key;
     NativePassClassification previous_classification = first.classification;
-    bool all_target = drilldown_target && first.key == drilldown_target->key;
+    bool all_target = drilldown_target && SameNativePassForDrilldown(first.key, drilldown_target->key);
     for (size_t observation_index = region_begin; observation_index < region_end;
          ++observation_index) {
       const NativePassObservation& observation = observations[observation_index];
@@ -336,13 +359,16 @@ NativeAttributionPlan BuildNativeAttributionPlan(
            observation.classification != previous_classification)) {
         ++region.pass_key_count;
       }
+      if(observation.key.origin!=region.key.origin){
+        region.key.origin={};region.key.origin.source=GpuPassOriginSource::kMixed;
+      }
       previous_key = observation.key;
       previous_classification = observation.classification;
       region.classification =
           StrongerClassification(region.classification, observation.classification);
       region.draw_count = SaturatingAdd(region.draw_count, uint64_t(observation.draw_count));
       region.primitive_count = SaturatingAdd(region.primitive_count, observation.primitive_count);
-      all_target &= drilldown_target && observation.key == drilldown_target->key;
+      all_target &= drilldown_target && SameNativePassForDrilldown(observation.key, drilldown_target->key);
     }
     if (region.pass_key_count > 1) {
       region.detail = NativePassRegionDetail::kCoalesced;
@@ -450,7 +476,7 @@ void NativeDrilldownScheduler::ObserveCompleted(uint32_t frame, uint64_t sequenc
     }
 
     auto existing = std::find_if(pending_.begin(), pending_.end(), [&](const auto& pending) {
-      return pending && pending->key == region.region.key;
+      return pending && SameNativePassForDrilldown(pending->key, region.region.key);
     });
     if (existing != pending_.end()) {
       PendingTarget& pending = **existing;

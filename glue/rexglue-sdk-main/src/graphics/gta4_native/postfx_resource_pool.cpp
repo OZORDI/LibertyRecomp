@@ -120,21 +120,21 @@ bool PostFxResourcePool::RequiresSceneSnapshotRecreation(VkFormat format,
 }
 
 bool PostFxResourcePool::EnsureSplitPostFxImages(const ui::vulkan::VulkanDevice* device,
-                                                 VkFormat format, PostFxExtent extent) {
+                                                 VkFormat format, PostFxExtent extent, bool needs_dof) {
+  if (!needs_dof) return true;
   const PostFxExtent half_extent = CalculatePostFxExtent(extent.width, extent.height, 2);
   return EnsureImage(device, format, extent, split_full_ping_) &&
          EnsureImage(device, format, half_extent, split_half_ping_) &&
-         EnsureImage(device, format, half_extent, split_half_pong_) &&
-         EnsureImage(device, format, extent, split_full_output_);
+         EnsureImage(device, format, half_extent, split_half_pong_);
 }
 
 bool PostFxResourcePool::RequiresSplitPostFxRecreation(VkFormat format,
-                                                       PostFxExtent extent) const {
+                                                       PostFxExtent extent, bool needs_dof) const {
+  if (!needs_dof) return false;
   const PostFxExtent half_extent = CalculatePostFxExtent(extent.width, extent.height, 2);
   return RequiresImageRecreation(format, extent, split_full_ping_) ||
          RequiresImageRecreation(format, half_extent, split_half_ping_) ||
-         RequiresImageRecreation(format, half_extent, split_half_pong_) ||
-         RequiresImageRecreation(format, extent, split_full_output_);
+         RequiresImageRecreation(format, half_extent, split_half_pong_);
 }
 
 bool PostFxResourcePool::EnsureSunShaftImages(const ui::vulkan::VulkanDevice* device,

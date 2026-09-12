@@ -16,6 +16,7 @@
 #include <rex/audio/handoff_trace.h>
 #include <rex/audio/xma/decoder.h>
 #include <rex/audio/xma/helpers.h>
+#include "xma_decoder_lifecycle.h"
 #include <rex/dbg.h>
 #include <rex/logging.h>
 #include <rex/memory/ring_buffer.h>
@@ -106,6 +107,8 @@ bool XmaContext::Work() {
   }
 
   std::lock_guard<std::mutex> lock(lock_);
+  // A release/disable may have occurred after the initial worker check.
+  if (!is_allocated() || !is_enabled()) return false;
   set_is_enabled(false);
 
   auto context_ptr = memory()->TranslateVirtual(guest_ptr());
@@ -117,6 +120,13 @@ bool XmaContext::Work() {
     return true;
   }
 
+  // Reject malformed output state before RingBuffer normalizes its offsets.
+  // A zero-capacity ring would divide by zero rather than report an audio error.
+  if (!data.output_buffer_block_count) {
+    data.error_status = 4;
+    StoreContextMerged(data, initial_data, context_ptr);
+    return true;
+  }
   memory::RingBuffer output_rb = PrepareOutputRingBuffer(&data);
 
   // Consume-only context: no input, just drain remaining subframes.
@@ -142,9 +152,23 @@ bool XmaContext::Work() {
   }
 
   while (remaining_subframe_blocks_in_output_buffer_ >= minimum_subframe_decode_count) {
+    const auto old_offset = data.input_buffer_read_offset;
+    const auto old_buffer = data.current_buffer;
+    const auto old_valid = data.IsAnyInputBufferValid();
+    const auto old_remaining = current_frame_remaining_subframes_;
+    const auto old_capacity = remaining_subframe_blocks_in_output_buffer_;
     Decode(&data);
     Consume(&output_rb, &data);
 
+    // Invalid packets must not leave the decoder worker spinning forever.
+    if (data.IsAnyInputBufferValid() && data.error_status != 4 &&
+        data.input_buffer_read_offset == old_offset && data.current_buffer == old_buffer &&
+        data.IsAnyInputBufferValid() == old_valid &&
+        current_frame_remaining_subframes_ == old_remaining &&
+        remaining_subframe_blocks_in_output_buffer_ == old_capacity) {
+      data.error_status = 4;
+      handoff::Record("xma-error", id_, {old_offset, old_buffer}, "decode-no-progress");
+    }
     if (!data.IsAnyInputBufferValid() || data.error_status == 4) {
       break;
     }
@@ -189,7 +213,7 @@ void XmaContext::Clear() {
 void XmaContext::ClearLocked(XMA_CONTEXT_DATA* data) {
   if (handoff::Enabled()) {
     ++handoff_generation_;
-    handoff::Record("xma-clear", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_, data->input_buffer_0_ptr, data->input_buffer_1_ptr, data->output_buffer_ptr, data->input_buffer_read_offset}, "codec-history-unchanged");
+    handoff::Record("xma-clear", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_, data->input_buffer_0_ptr, data->input_buffer_1_ptr, data->output_buffer_ptr, data->input_buffer_read_offset}, "codec-reset-pending");
     handoff_frame_=0;
   }
   data->input_buffer_0_valid = 0;
@@ -200,9 +224,22 @@ void XmaContext::ClearLocked(XMA_CONTEXT_DATA* data) {
   data->output_buffer_read_offset = 0;
   data->output_buffer_write_offset = 0;
 
+  ResetDecoderStreamLocked();
+}
+
+void XmaContext::ResetDecoderStreamLocked() {
+  // Invalidate the complete stream, including decoded-but-unconsumed samples.
+  // Actual codec allocation occurs lazily, after the new format is known.
+  decoder_reset_pending_ = true;
   current_frame_remaining_subframes_ = 0;
+  remaining_subframe_blocks_in_output_buffer_ = 0;
   loop_frame_output_limit_ = 0;
   loop_start_skip_pending_ = false;
+  raw_frame_.fill(0);
+  input_buffer_.fill(0);
+  xma_frame_.fill(0);
+  if (av_frame_) av_frame_unref(av_frame_);
+  if (av_packet_) av_packet_unref(av_packet_);
 }
 
 void XmaContext::Disable() {
@@ -214,7 +251,9 @@ void XmaContext::Release() {
   std::lock_guard<std::mutex> lock(lock_);
   assert_true(is_allocated());
 
-  handoff::Record("xma-release", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_}, "codec-history-unchanged");
+  handoff::Record("xma-release", id_, {handoff_generation_, handoff_codec_epoch_, handoff_frame_, uint64_t(reinterpret_cast<uintptr_t>(av_context_)), uint64_t(av_context_?av_context_->frame_number:0), current_frame_remaining_subframes_}, "codec-reset-pending");
+  set_is_enabled(false);
+  ResetDecoderStreamLocked();
   set_is_allocated(false);
   auto context_ptr = memory()->TranslateVirtual(guest_ptr());
   std::memset(context_ptr, 0, sizeof(XMA_CONTEXT_DATA));
@@ -353,6 +392,17 @@ kPacketInfo XmaContext::GetPacketInfo(uint8_t* packet, uint32_t frame_offset) {
 
   while (true) {
     if (stream.BitsRemaining() < kBitsPerFrameHeader) {
+      // A preceding continuation bit can announce a frame whose 15-bit
+      // header straddles the packet edge. Count that frame even though its
+      // length must be read from both packets. Otherwise the previous frame
+      // is falsely classified as last and this one is skipped entirely.
+      if (stream.BitsRemaining()) {
+        if (stream.offset_bits() == frame_offset) {
+          packet_info.current_frame_ = packet_info.frame_count_;
+          packet_info.current_frame_size_ = 0;
+        }
+        ++packet_info.frame_count_;
+      }
       break;
     }
 
@@ -417,76 +467,69 @@ void XmaContext::StoreContextMerged(const XMA_CONTEXT_DATA& data,
 }
 
 void XmaContext::Consume(memory::RingBuffer* output_rb, const XMA_CONTEXT_DATA* data) {
-  if (!current_frame_remaining_subframes_) {
+  if (!current_frame_remaining_subframes_) return;
+
+  // Units here are 256-byte output blocks: a stereo subframe occupies two.
+  // Keep the raw-frame cursor independent from the inclusive loop-end bound.
+  const uint32_t total_blocks = 4u << data->is_stereo;
+  const uint32_t first_block = total_blocks - current_frame_remaining_subframes_;
+  const uint32_t end_block = loop_frame_output_limit_
+      ? std::min<uint32_t>(loop_frame_output_limit_, total_blocks) : total_blocks;
+  const uint32_t available = first_block < end_block ? end_block - first_block : 0;
+  const uint32_t quantum = std::max<uint32_t>(1, data->subframe_decode_count);
+  const uint32_t blocks = std::min(available, quantum);
+  const uint32_t bytes = blocks * kOutputBytesPerBlock;
+  const bool finished = first_block + blocks >= end_block;
+  const uint32_t required_blocks = blocks + (finished ? data->output_buffer_padding : 0);
+  // Consume-only work drains decoded tails without passing the normal decode
+  // capacity gate. Leave the pending PCM and its loop limit intact until the
+  // game makes enough room; never truncate a write or retire unwritten samples.
+  if (remaining_subframe_blocks_in_output_buffer_ < 0 ||
+      required_blocks > static_cast<uint32_t>(remaining_subframe_blocks_in_output_buffer_) ||
+      bytes > output_rb->write_count()) {
     return;
   }
-
-  if (loop_frame_output_limit_ > 0) {
-    const uint8_t total_subframes = (kBytesPerFrameChannel / kOutputBytesPerBlock)
-                                    << data->is_stereo;
-    const uint8_t consumed = total_subframes - current_frame_remaining_subframes_;
-    if (consumed >= loop_frame_output_limit_) {
-      remaining_subframe_blocks_in_output_buffer_ -= data->output_buffer_padding;
-      current_frame_remaining_subframes_ = 0;
-      loop_frame_output_limit_ = 0;
-      return;
-    }
+  if (bytes) {
+    const size_t written = output_rb->Write(
+        raw_frame_.data() + first_block * kOutputBytesPerBlock, bytes);
+    assert_true(written == bytes);
   }
-
-  const uint8_t effective_sdc = std::max(static_cast<uint32_t>(1), data->subframe_decode_count);
-  int8_t subframes_to_write = std::min(static_cast<int8_t>(current_frame_remaining_subframes_),
-                                       static_cast<int8_t>(effective_sdc));
-
-  if (loop_frame_output_limit_ > 0) {
-    const uint8_t total_subframes = (kBytesPerFrameChannel / kOutputBytesPerBlock)
-                                    << data->is_stereo;
-    const uint8_t consumed = total_subframes - current_frame_remaining_subframes_;
-    const int8_t remaining_until_limit = static_cast<int8_t>(loop_frame_output_limit_ - consumed);
-    if (subframes_to_write > remaining_until_limit) {
-      subframes_to_write = remaining_until_limit;
-    }
+  remaining_subframe_blocks_in_output_buffer_ -=
+      static_cast<int32_t>(blocks + (finished ? data->output_buffer_padding : 0));
+  if (finished) {
+    // Discard only the tail outside the loop, once. A later work call must
+    // not reinterpret it as fresh samples or charge the padding again.
+    current_frame_remaining_subframes_ = 0;
+    loop_frame_output_limit_ = 0;
+  } else {
+    current_frame_remaining_subframes_ -= static_cast<uint8_t>(blocks);
   }
-
-  const int8_t raw_frame_read_offset =
-      ((kBytesPerFrameChannel / kOutputBytesPerBlock) << data->is_stereo) -
-      current_frame_remaining_subframes_;
-
-  output_rb->Write(raw_frame_.data() + (kOutputBytesPerBlock * raw_frame_read_offset),
-                   subframes_to_write * kOutputBytesPerBlock);
-
-  const int8_t headroom = (current_frame_remaining_subframes_ - subframes_to_write == 0)
-                              ? data->output_buffer_padding
-                              : 0;
-
-  remaining_subframe_blocks_in_output_buffer_ -= subframes_to_write + headroom;
-  current_frame_remaining_subframes_ -= subframes_to_write;
 }
 
 int XmaContext::PrepareDecoder(int sample_rate, bool is_two_channel) {
   sample_rate = GetSampleRate(sample_rate);
-
-  uint32_t channels = is_two_channel ? 2 : 1;
-  if (av_context_->sample_rate != sample_rate ||
-      av_context_->channels != static_cast<int>(channels)) {
-    REXAPU_NOISY_DEBUG("XmaContext {}: Codec reinit: rate {} -> {}, channels {} -> {}", id(),
-                       av_context_->sample_rate, sample_rate, av_context_->channels, channels);
-    avcodec_free_context(&av_context_);
-    av_context_ = avcodec_alloc_context3(av_codec_);
-
-    av_context_->sample_rate = sample_rate;
-    av_context_->channels = channels;
-    if (handoff::Enabled()) {
-      ++handoff_codec_epoch_;
-      handoff::Record("xma-reopen", id_, {handoff_generation_, handoff_codec_epoch_, uint64_t(sample_rate), channels, uint64_t(reinterpret_cast<uintptr_t>(av_context_))});
-    }
-
-    if (avcodec_open2(av_context_, av_codec_, NULL) < 0) {
-      REXAPU_ERROR("XmaContext: Failed to reopen FFmpeg context");
-      return -1;
-    }
-    return 1;
+  const int channels = is_two_channel ? 2 : 1;
+  const bool reset_requested = decoder_reset_pending_;
+  const int result = PrepareXmaDecoderForStream(
+      av_codec_, av_context_, av_frame_, decoder_reset_pending_, sample_rate, channels);
+  if (result < 0) {
+    char error[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(result, error, sizeof(error));
+    REXAPU_ERROR("XmaContext {}: cannot prepare fresh decoder: {} ({})", id(), error, result);
+    handoff::Record("xma-error", id_,
+                    {uint64_t(int64_t(result)), 2, handoff_generation_, handoff_codec_epoch_},
+                    "prepare-decoder");
+    return result;
   }
-  return 0;
+  if (result == 1 && handoff::Enabled()) {
+    ++handoff_codec_epoch_;
+    handoff::Record("xma-reopen", id_,
+                    {handoff_generation_, handoff_codec_epoch_, uint64_t(sample_rate),
+                     uint64_t(channels), uint64_t(reinterpret_cast<uintptr_t>(av_context_)),
+                     uint64_t(reset_requested)},
+                    reset_requested ? "stream-reset" : "format-change");
+  }
+  return result;
 }
 
 void XmaContext::PreparePacket(uint32_t frame_size, uint32_t frame_padding) {
@@ -547,17 +590,9 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
 
   input_buffer_.fill(0);
 
-  // Detect loop end frame before UpdateLoopStatus resets the offset.
-  bool is_loop_end_frame = false;
-  if (data->loop_count > 0) {
-    const uint32_t loop_end = std::max(kBitsPerPacketHeader, data->loop_end);
-    is_loop_end_frame = (data->input_buffer_read_offset == loop_end);
-  }
-
-  UpdateLoopStatus(data);
-
   if (!data->output_buffer_block_count) {
     REXAPU_ERROR("XmaContext {}: Error - Received 0 for output_buffer_block_count!", id());
+    data->error_status = 4;
     return;
   }
 
@@ -568,6 +603,12 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
   const uint32_t current_input_size = GetCurrentInputBufferSize(data);
   const uint32_t current_input_packet_count = current_input_size / kBytesPerPacket;
 
+  if (!current_input_size || data->input_buffer_read_offset >= uint64_t(current_input_size) * 8) {
+    data->error_status = 4;
+    handoff::Record("xma-error", id_, {data->input_buffer_read_offset, current_input_size},
+                    "input-offset-out-of-range");
+    return;
+  }
   const int16_t packet_index = GetPacketNumber(current_input_size, data->input_buffer_read_offset);
 
   if (packet_index == -1) {
@@ -585,6 +626,20 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
     relative_offset = packet_first_frame_offset;
   }
 
+  // LoopEnd identifies a frame that must be decoded, not a position to jump
+  // away from before decoding. Rewind only after its PCM has been staged.
+  const bool is_loop_end_frame = data->loop_count &&
+      data->input_buffer_read_offset == std::max(kBitsPerPacketHeader, data->loop_end);
+  if (is_loop_end_frame &&
+      (data->loop_subframe_end > 3 || data->loop_subframe_skip > 4 ||
+       data->loop_start > data->loop_end ||
+       (std::max(kBitsPerPacketHeader, data->loop_start) == data->input_buffer_read_offset &&
+        data->loop_subframe_skip >= data->loop_subframe_end + 1))) {
+    data->error_status = 4;
+    handoff::Record("xma-error", id_, {data->loop_start, data->loop_end,
+                    data->loop_subframe_skip, data->loop_subframe_end}, "invalid-loop-interval");
+    return;
+  }
   const uint8_t skip_count = xma::GetPacketSkipCount(packet);
 
   // Full packet skip (0xFF) -- no new frames begin in this packet.
@@ -617,7 +672,8 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
     combined.SetOffset(relative_offset - kBitsPerPacketHeader);
 
     uint64_t frame_size = combined.Peek(kBitsPerFrameHeader);
-    if (frame_size == xma::kMaxFrameLength) {
+    if (frame_size < kBitsPerFrameHeader || frame_size == xma::kMaxFrameLength ||
+        frame_size > combined.BitsRemaining()) {
       data->error_status = 4;
       return;
     }
@@ -653,6 +709,13 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
 
   stream = BitStream(input_buffer_.data(), (kBitsPerPacket - kBitsPerPacketHeader) * 2);
   stream.SetOffset(relative_offset - kBitsPerPacketHeader);
+  if (packet_info.current_frame_size_ < kBitsPerFrameHeader ||
+      packet_info.current_frame_size_ > stream.BitsRemaining()) {
+    data->error_status = 4;
+    handoff::Record("xma-error", id_, {packet_info.current_frame_size_,
+                    stream.BitsRemaining()}, "frame-exceeds-assembled-packets");
+    return;
+  }
 
   xma_frame_.fill(0);
 
@@ -662,7 +725,11 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
   raw_frame_.fill(0);
 
   const uint64_t handoff_decode_start=handoff::Enabled()?handoff::Clock():0;
-  PrepareDecoder(data->sample_rate, bool(data->is_stereo));
+  if (PrepareDecoder(data->sample_rate, bool(data->is_stereo)) < 0) {
+    // Do not submit a new voice to the previous voice's codec on init failure.
+    data->error_status = 4;
+    return;
+  }
   PreparePacket(packet_info.current_frame_size_, padding_start);
   const bool handoff_decoded = DecodePacket(av_context_, av_packet_, av_frame_);
   if (handoff_decode_start) {
@@ -676,6 +743,12 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
     handoff::Record(handoff_decoded?"xma-frame":"xma-no-frame",id_,{handoff_generation_,handoff_codec_epoch_,handoff_frame_,uint64_t(reinterpret_cast<uintptr_t>(av_context_)),data->input_buffer_0_ptr,data->input_buffer_1_ptr,data->current_buffer,data->input_buffer_read_offset,data->output_buffer_ptr,uint64_t(data->sample_rate),channels,data->error_status,uint64_t(av_frame_->nb_samples),uint64_t(av_context_?av_context_->frame_number:0),decode_ns,handoff::Clock()-handoff_decode_start-decode_ns},nullptr,&signal);
     if(valid_frame && (handoff_frame_<=4 || signal.nonfinite || (signal.clipped && handoff_frame_%32==0)))
       handoff::Capture(handoff::Stage::Decoded,nullptr,kSamplesPerFrame,channels,GetSampleRate(data->sample_rate),id_,handoff_frame_,handoff_generation_,handoff_codec_epoch_,false,planes);
+  }
+  if (!handoff_decoded || av_frame_->nb_samples != int(kSamplesPerFrame) ||
+      !av_frame_->data[0] || (data->is_stereo && !av_frame_->data[1])) {
+    // No loop count/cursor change is committed for a failed decode.
+    data->error_status = 4;
+    return;
   }
   if (handoff_decoded) {
     ConvertFrame(reinterpret_cast<const uint8_t**>(&av_frame_->data), bool(data->is_stereo),
@@ -692,11 +765,25 @@ void XmaContext::Decode(XMA_CONTEXT_DATA* data) {
     // Loop start: skip leading subframes per loop_subframe_skip.
     if (loop_start_skip_pending_) {
       const uint8_t skip = data->loop_subframe_skip << data->is_stereo;
-      if (skip < current_frame_remaining_subframes_) {
-        current_frame_remaining_subframes_ -= skip;
-      }
+      // Four is valid: decode the complete priming frame for its overlap
+      // history, then emit none of it. It is not a request to play the frame.
+      current_frame_remaining_subframes_ -=
+          std::min<uint8_t>(skip, current_frame_remaining_subframes_);
       loop_start_skip_pending_ = false;
     }
+  }
+
+  if (is_loop_end_frame) {
+    handoff::Record("xma-loop-end", id_, {handoff_generation_, handoff_codec_epoch_,
+                    data->input_buffer_read_offset, data->loop_start, data->loop_count,
+                    data->loop_subframe_end, data->loop_subframe_skip,
+                    current_frame_remaining_subframes_, loop_frame_output_limit_},
+                    "end-frame-decoded-before-rewind");
+    // The ending PCM remains in raw_frame_ until Consume finishes it.
+    // Decode will not overwrite it, even across separate Work invocations.
+    // Only the NEXT decoded frame receives the beginning-of-loop skip.
+    UpdateLoopStatus(data);
+    return;
   }
 
   // Compute where to go next.

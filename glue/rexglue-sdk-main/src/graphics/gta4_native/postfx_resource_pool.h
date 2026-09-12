@@ -90,8 +90,9 @@ class PostFxResourcePool {
                            VkImage source, VkFormat format, VkImageLayout source_layout,
                            PostFxExtent extent);
   bool EnsureSplitPostFxImages(const ui::vulkan::VulkanDevice* device, VkFormat format,
-                               PostFxExtent extent);
-  bool RequiresSplitPostFxRecreation(VkFormat format, PostFxExtent extent) const;
+                               PostFxExtent extent, bool needs_dof = true);
+  bool RequiresSplitPostFxRecreation(VkFormat format, PostFxExtent extent,
+                                     bool needs_dof = true) const;
   bool EnsureSunShaftImages(const ui::vulkan::VulkanDevice* device, VkFormat format,
                             PostFxExtent extent);
   bool RequiresSunShaftRecreation(VkFormat format, PostFxExtent extent) const;

@@ -10,7 +10,13 @@ void Gta4NativeGraphicsSystem::BeginFireFrame(VkCommandBuffer cb, uint32_t frame
   fire_frame_bytes_ = 0; fire_checkpoints_.clear(); fire_input_images_.clear();
   if (!FireTraceConfig().enabled) return;
   static bool announced = false;
-  if (!announced) { announced = true; FireTraceLog("armed", "selection=fire-escape-rail-or-mesh-materials expiry=none observation-only=true"); }
+  if (!announced) {
+    announced = true;
+    FireTraceLog("armed", fmt::format("selection={} request-file={} crop={},{},{},{} expiry=none observation-only=true",
+      FireTraceConfig().elevated_rails ? "elevated-rail-materials" : "fire-escape-materials",
+      FireTraceConfig().request_file, FireTraceConfig().crop_x, FireTraceConfig().crop_y,
+      FireTraceConfig().crop_width, FireTraceConfig().crop_height));
+  }
   fire_first_draw_index_ = fire_last_ui_index_ = SIZE_MAX;
   size_t matches = 0;
   for (size_t index = 0; index < current_frame_.size(); ++index) {
@@ -27,13 +33,24 @@ void Gta4NativeGraphicsSystem::BeginFireFrame(VkCommandBuffer cb, uint32_t frame
   if (matches) fire_last_seen_ = now;
   const bool recent = fire_last_seen_.time_since_epoch().count() &&
       now - fire_last_seen_ < std::chrono::seconds(60);
-  if (!recent) return;
+  uint64_t requested = 0;
+  if (!FireTraceConfig().request_file.empty()) {
+    std::ifstream request(FireTraceConfig().request_file);
+    if (!(request >> requested)) requested = 0;
+  }
+  const bool requested_capture = requested > fire_capture_request_;
+  if (!recent && !requested_capture) return;
   fire_frame_ = frame % FireTraceConfig().interval == 0 || !fire_last_logged_frame_;
   if (!fire_frame_) return;
   fire_last_logged_frame_ = frame ? frame : 1;
   fire_images_ = recent && (fire_last_images_.time_since_epoch().count() == 0 ||
       now - fire_last_images_ >= std::chrono::seconds(FireTraceConfig().image_interval_seconds));
-  if (fire_images_) fire_last_images_ = now;
+  if (!FireTraceConfig().request_file.empty()) fire_images_ = requested_capture;
+  if (fire_images_) {
+    fire_last_images_ = now;
+    fire_capture_request_ = std::max(fire_capture_request_, requested);
+    FireTraceLog("capture-request", fmt::format("frame={} request={} rail-draws={}", frame, requested, matches));
+  }
   FireTraceLog("frame-plan",fmt::format("frame={} commands={} fire-draws={} images={} slot={} observation-only=true",
     frame,current_frame_.size(),matches,fire_images_,active_frame_slot_));
   auto* provider = static_cast<ui::vulkan::VulkanProvider*>(provider_.get());
@@ -115,8 +132,16 @@ void Gta4NativeGraphicsSystem::FireImage(VkCommandBuffer cb,std::string_view rol
   VkImage image=surface?surface->resource.image:texture?texture->resource.image:direct;
   const auto format=surface?surface->format:texture?texture->format:direct_format;
   const auto layout=surface?surface->layout:texture?texture->layout:direct_layout;
-  const auto width=CalculateNativeMipExtent(surface?surface->width:texture?texture->width:direct_width,mip);
-  const auto height=CalculateNativeMipExtent(surface?surface->height:texture?texture->height:direct_height,mip);
+  const auto original_width=CalculateNativeMipExtent(surface?surface->width:texture?texture->width:direct_width,mip);
+  const auto original_height=CalculateNativeMipExtent(surface?surface->height:texture?texture->height:direct_height,mip);
+  // Sampled input textures keep their complete mip data. Only attachment and
+  // presentation copies use the same explicit screen-region crop.
+  const bool crop = !texture && (FireTraceConfig().crop_width || FireTraceConfig().crop_height);
+  const auto region = MakeNativeProbeRegion(original_width, original_height,
+      crop ? FireTraceConfig().crop_x : 0, crop ? FireTraceConfig().crop_y : 0,
+      crop ? FireTraceConfig().crop_width : 0, crop ? FireTraceConfig().crop_height : 0);
+  if (!region) {skip("crop-outside-image");return;}
+  const auto width=region->width, height=region->height;
   const auto samples=surface?surface->samples:texture?texture->samples:VK_SAMPLE_COUNT_1_BIT;
   if (!image || !width || !height || layout==VK_IMAGE_LAYOUT_UNDEFINED) {skip("image-undefined");return;}
   if (texture && (!(texture->usage&VK_IMAGE_USAGE_TRANSFER_SRC_BIT) || mip>=texture->mip_levels || texture->view_type!=VK_IMAGE_VIEW_TYPE_2D)) {skip("usage-view-or-mip");return;}
@@ -128,7 +153,8 @@ void Gta4NativeGraphicsSystem::FireImage(VkCommandBuffer cb,std::string_view rol
   const uint64_t budget=uint64_t(FireTraceConfig().image_frame_mib)*1024*1024;
   const uint64_t reserve=role.starts_with("present-")?0:std::min(budget/4,uint64_t{48}*1024*1024);
   auto& probes=fire_probes_[active_frame_slot_];
-  if (!bytes || bytes>budget-reserve || fire_frame_bytes_>budget-reserve-bytes || probes.size()>=80) {skip("format-or-frame-budget");return;}
+  const size_t probe_limit = role.starts_with("present-") ? 128 : 126;
+  if (!bytes || bytes>budget-reserve || fire_frame_bytes_>budget-reserve-bytes || probes.size()>=probe_limit) {skip("format-or-frame-budget");return;}
   std::error_code disk_error;
   const auto space=std::filesystem::space(FireTraceConfig().directory,disk_error);
   if (disk_error || space.available<uint64_t{768}*1024*1024) {skip("disk-headroom");return;}
@@ -139,9 +165,10 @@ void Gta4NativeGraphicsSystem::FireImage(VkCommandBuffer cb,std::string_view rol
   p.width=width;p.height=height;p.format=uint32_t(format);p.aspect=aspect;p.bytes=bytes;
   p.block_extent=block;p.bytes_per_block=bpt;p.layout=uint32_t(layout);p.image=NativeVulkanHandleIdentity(image);
   probe.mip=mip;probe.samples=uint32_t(samples);
+  probe.crop_x=region->x;probe.crop_y=region->y;probe.original_width=original_width;probe.original_height=original_height;
   if (surface) {p.handle=surface->descriptor.handle;p.lifetime=surface->lifetime_id;MarkNativeSurfaceImageUsed(*surface);}
   if (texture) {p.handle=texture->source?texture->source->handle:0;p.generation=texture->source?texture->source->generation:0;p.lifetime=texture->descriptor_lifetime;p.view=NativeVulkanHandleIdentity(texture->resource.view);p.components={uint32_t(texture->view_components.r),uint32_t(texture->view_components.g),uint32_t(texture->view_components.b),uint32_t(texture->view_components.a)}; texture->last_used_frame=std::max(texture->last_used_frame,active_texture_frame_); texture->last_used_submission=std::max(texture->last_used_submission,submission_tracker_?submission_tracker_->GetCurrentSubmission():0);StageNativeTextureFlightResources(*texture);}
-  probes.reserve(80);
+  probes.reserve(128);
   const auto& dfn=device->functions();const auto vk_device=device->device();
   if (!ui::vulkan::util::CreateDedicatedAllocationBuffer(device,bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT,ui::vulkan::util::MemoryPurpose::kReadback,p.buffer,p.memory,&p.memory_type,&p.allocation_size)) {skip("buffer-allocation");return;}
   auto release=[&] {if(p.mapping)dfn.vkUnmapMemory(vk_device,p.memory);if(p.buffer)dfn.vkDestroyBuffer(vk_device,p.buffer,nullptr);if(p.memory)dfn.vkFreeMemory(vk_device,p.memory,nullptr);};
@@ -158,13 +185,14 @@ void Gta4NativeGraphicsSystem::FireImage(VkCommandBuffer cb,std::string_view rol
   if (probe.scratch) {
     VkImageMemoryBarrier scratch{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};scratch.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;scratch.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;scratch.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;scratch.srcQueueFamilyIndex=scratch.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;scratch.image=probe.scratch;scratch.subresourceRange=ui::vulkan::util::InitializeSubresourceRange();
     dfn.vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&scratch);
-    VkImageResolve r{};r.srcSubresource={aspect,mip,0,1};r.dstSubresource={aspect,0,0,1};r.extent={width,height,1};
+    VkImageResolve r{};r.srcSubresource={aspect,mip,0,1};r.dstSubresource={aspect,0,0,1};r.srcOffset={int32_t(region->x),int32_t(region->y),0};r.extent={width,height,1};
     dfn.vkCmdResolveImage(cb,image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,probe.scratch,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&r);
     scratch.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;scratch.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;scratch.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;scratch.newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     dfn.vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&scratch);
     copy_image=probe.scratch;copy_mip=0;
   }
   VkBufferImageCopy copy{};copy.imageSubresource={aspect,copy_mip,0,1};copy.imageExtent={width,height,1};
+  if (!probe.scratch) copy.imageOffset={int32_t(region->x),int32_t(region->y),0};
   dfn.vkCmdCopyImageToBuffer(cb,copy_image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,p.buffer,1,&copy);
   auto restore=before;restore.srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT;restore.dstAccessMask=sync.access;restore.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;restore.newLayout=layout;
   VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};host.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;host.dstAccessMask=VK_ACCESS_HOST_READ_BIT;host.srcQueueFamilyIndex=host.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;host.buffer=p.buffer;host.size=bytes;
@@ -251,7 +279,7 @@ void Gta4NativeGraphicsSystem::PublishFireProbes(uint32_t slot,uint64_t submissi
       const auto stem=fmt::format("f{}-c{}-s{}-{}-m{}-a{}",p.frame,p.command_index,p.sequence,p.role,meta.mip,p.aspect);
       std::ofstream binary(directory/(stem+".bin.zst"),std::ios::binary);binary.write(reinterpret_cast<const char*>(compressed.data()),std::streamsize(size));binary.close();
       std::ofstream json(directory/(stem+".json"));
-      json<<fmt::format("{{\"schema\":1,\"frame\":{},\"command\":{},\"sequence\":{},\"occurrence\":{},\"event\":{},\"role\":\"{}\",\"image\":{},\"view\":{},\"lifetime\":{},\"generation\":{},\"handle\":{},\"format\":{},\"aspect\":{},\"width\":{},\"height\":{},\"mip\":{},\"source_samples\":{},\"bytes\":{},\"compressed_bytes\":{},\"block_extent\":{},\"bytes_per_block\":{},\"components\":[{},{},{},{}],\"submission\":{},\"completed_submission\":{},\"slot\":{},\"gpu_completed\":true,\"xxh3\":\"{:016X}\",\"binary\":\"{}.bin.zst\"}}\n",p.frame,p.command_index,p.sequence,meta.occurrence,meta.event,p.role,p.image,p.view,p.lifetime,p.generation,p.handle,p.format,p.aspect,p.width,p.height,meta.mip,meta.samples,p.bytes,size,p.block_extent,p.bytes_per_block,p.components[0],p.components[1],p.components[2],p.components[3],p.submission,submission,slot,XXH3_64bits(bytes->data(),bytes->size()),stem);json.close();
+      json<<fmt::format("{{\"schema\":2,\"crop_x\":{},\"crop_y\":{},\"original_width\":{},\"original_height\":{},\"frame\":{},\"command\":{},\"sequence\":{},\"occurrence\":{},\"event\":{},\"role\":\"{}\",\"image\":{},\"view\":{},\"lifetime\":{},\"generation\":{},\"handle\":{},\"format\":{},\"aspect\":{},\"width\":{},\"height\":{},\"mip\":{},\"source_samples\":{},\"bytes\":{},\"compressed_bytes\":{},\"block_extent\":{},\"bytes_per_block\":{},\"components\":[{},{},{},{}],\"submission\":{},\"completed_submission\":{},\"slot\":{},\"gpu_completed\":true,\"xxh3\":\"{:016X}\",\"binary\":\"{}.bin.zst\"}}\n",meta.crop_x,meta.crop_y,meta.original_width,meta.original_height,p.frame,p.command_index,p.sequence,meta.occurrence,meta.event,p.role,p.image,p.view,p.lifetime,p.generation,p.handle,p.format,p.aspect,p.width,p.height,meta.mip,meta.samples,p.bytes,size,p.block_extent,p.bytes_per_block,p.components[0],p.components[1],p.components[2],p.components[3],p.submission,submission,slot,XXH3_64bits(bytes->data(),bytes->size()),stem);json.close();
       FireTraceLog(binary&&json?"gpu-complete":"incomplete",fmt::format("frame={} cmd={} seq={} occurrence={} event={} role={} mip={} submission={} compressed-bytes={} metadata={}",p.frame,p.command_index,p.sequence,meta.occurrence,meta.event,p.role,meta.mip,p.submission,size,(directory/(stem+".json")).string()));
     };
     if(!EnqueueDeferredDiagnosticTask(publish)) RunLightProbeAnalysisInline(publish);

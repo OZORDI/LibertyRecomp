@@ -147,6 +147,9 @@ class VulkanPresenter final : public Presenter {
     uint64_t present_ticks = 0;
     uint64_t total_ticks = 0;
     uint64_t sequence = 0;
+    uint64_t begin_tick = 0, end_tick = 0, submission = 0, mailbox_version = 0, overwritten = 0;
+    uint32_t guest_frame = 0;
+    int32_t result = 0;
   };
 
   bool ConsumeLastPaintTiming(PaintTimingSnapshot& snapshot) {
@@ -524,8 +527,14 @@ class VulkanPresenter final : public Presenter {
   bool InitializeSurfaceIndependent();
 
   void PublishPaintTiming(uint64_t acquire_ticks, uint64_t submit_ticks,
-                          uint64_t present_ticks, uint64_t total_ticks) {
+                          uint64_t present_ticks, uint64_t total_ticks,
+                          uint64_t begin_tick, uint64_t end_tick, uint64_t submission,
+                          uint64_t mailbox_version, uint32_t guest_frame, int32_t result) {
     std::lock_guard lock(paint_timing_mutex_);
+    paint_timing_latest_.overwritten = paint_timing_latest_.sequence ? paint_timing_latest_.overwritten+1 : 0;
+    paint_timing_latest_.begin_tick=begin_tick;paint_timing_latest_.end_tick=end_tick;
+    paint_timing_latest_.submission=submission;paint_timing_latest_.mailbox_version=mailbox_version;
+    paint_timing_latest_.guest_frame=guest_frame;paint_timing_latest_.result=result;
     paint_timing_latest_.acquire_ticks = acquire_ticks;
     paint_timing_latest_.submit_ticks = submit_ticks;
     paint_timing_latest_.present_ticks = present_ticks;

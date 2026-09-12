@@ -294,9 +294,11 @@ bool SplitPostFxPass::Record(VkCommandBuffer command_buffer, const ui::vulkan::V
                              const SplitPostFxParameters& parameters,
                              PostFxResourcePool& resources,
                              const NativeGpuTimingSink* timing) {
+  const bool needs_dof = !NativeDofCanBeElided(parameters.dof_projection,
+                                              parameters.dof_distance, parameters.dof_blur);
   if (!destination_image || !destination_view || !depth_view || !stipple_mask_view ||
       !resources.scene_snapshot().view ||
-      !resources.EnsureSplitPostFxImages(device, color_format, extent)) {
+      !resources.EnsureSplitPostFxImages(device, color_format, extent, needs_dof)) {
     return false;
   }
   VkPipeline pipeline = GetOrCreatePipeline(device, pipeline_cache, color_format);
@@ -306,16 +308,24 @@ bool SplitPostFxPass::Record(VkCommandBuffer command_buffer, const ui::vulkan::V
   auto& full_ping = resources.split_full_ping();
   auto& half_ping = resources.split_half_ping();
   auto& half_pong = resources.split_half_pong();
-  auto& full_output = resources.split_full_output();
+  // Borrow the original, single-mip output attachment; ownership stays with
+  // the title texture. Inputs are separate snapshot/intermediate images.
+  PostFxResourcePool::Image output;
+  output.image = destination_image;
+  output.view = destination_view;
+  output.format = color_format;
+  output.extent = extent;
+  output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   const VkImageView snapshot = resources.scene_snapshot().view;
   if (timing) {
     timing->Switch(command_buffer, performance::GpuRange::kPostFxStipple);
   }
   if (!RecordPass(command_buffer, device, descriptor_pool, pipeline,
-                  {snapshot, snapshot, depth_view, stipple_mask_view}, full_ping, 0, extent,
-                  parameters)) {
+                  {snapshot, snapshot, depth_view, stipple_mask_view}, needs_dof ? full_ping : output,
+                  0, extent, parameters)) {
     return false;
   }
+  if (!needs_dof) return true;
   if (timing) {
     timing->Switch(command_buffer, performance::GpuRange::kPostFxBokeh);
   }
@@ -336,56 +346,13 @@ bool SplitPostFxPass::Record(VkCommandBuffer command_buffer, const ui::vulkan::V
     timing->Switch(command_buffer, performance::GpuRange::kPostFxDofCombine);
   }
   if (!RecordPass(command_buffer, device, descriptor_pool, pipeline,
-                  {full_ping.view, half_pong.view, depth_view, stipple_mask_view}, full_output, 3,
+                  {full_ping.view, half_pong.view, depth_view, stipple_mask_view}, output, 3,
                   extent, parameters)) {
     return false;
   }
 
-  if (timing) {
-    timing->Switch(command_buffer, performance::GpuRange::kPostFxCopyBack);
-  }
-  const auto& dfn = device->functions();
-  std::array<VkImageMemoryBarrier, 2> barriers{};
-  for (VkImageMemoryBarrier& barrier : barriers) {
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange =
-        ui::vulkan::util::InitializeSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1);
-  }
-  barriers[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  barriers[0].image = full_output.image;
-  barriers[1].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  barriers[1].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  barriers[1].image = destination_image;
-  dfn.vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                           uint32_t(barriers.size()), barriers.data());
-  VkImageCopy copy{};
-  copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  copy.srcSubresource.layerCount = 1;
-  copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  copy.dstSubresource.layerCount = 1;
-  copy.extent = {extent.width, extent.height, 1};
-  dfn.vkCmdCopyImage(command_buffer, full_output.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                     destination_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-  barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-  barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  barriers[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  dfn.vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
-                           uint32_t(barriers.size()), barriers.data());
-  full_output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  // The combination already landed in the original scene image. The old
+  // full-resolution output allocation, two transitions and copy-back are gone.
   return true;
 }
 

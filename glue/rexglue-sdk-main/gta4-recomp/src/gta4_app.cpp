@@ -1,4 +1,5 @@
 #include "gta4_app.h"
+#include "gta4_present_mode_policy.h"
 
 #include <array>
 #include <atomic>
@@ -512,16 +513,12 @@ void SetStartupFlag(std::string_view name, std::string_view value) {
 }
 
 void ApplyPresentationMode() {
-  const std::string mode = REXCVAR_GET(gta4_present_mode);
-  if (mode == "auto") {
-    return;
-  }
-
-  const bool immediate = mode == "immediate";
-  const bool mailbox = mode == "mailbox";
-  SetStartupFlag("vsync", immediate ? "false" : "true");
-  SetStartupFlag("vulkan_allow_present_mode_immediate", immediate ? "true" : "false");
-  SetStartupFlag("vulkan_allow_present_mode_mailbox", mailbox ? "true" : "false");
+  const auto policy = gta4::presentation::ResolveMode(REXCVAR_GET(gta4_present_mode));
+  if (!policy.explicit_mode) return;
+  SetStartupFlag("vsync", policy.vsync ? "true" : "false");
+  SetStartupFlag("vulkan_prefer_present_mode_fifo", policy.prefer_fifo ? "true" : "false");
+  SetStartupFlag("vulkan_allow_present_mode_immediate", policy.immediate ? "true" : "false");
+  SetStartupFlag("vulkan_allow_present_mode_mailbox", policy.mailbox ? "true" : "false");
   SetStartupFlag("vulkan_allow_present_mode_fifo_relaxed", "false");
 }
 

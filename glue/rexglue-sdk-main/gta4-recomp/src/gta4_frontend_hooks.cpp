@@ -96,7 +96,7 @@ enum class TextId : uint8_t {
   kModernShadersLabel,
   kMotionControlsLabel,
   kSkipIntroLabel,
-  kDisableTladGrainLabel,
+  kFilmGrainLabel,
   kAdvancedLabel,
   kSaveLabel,
   kBackLabel,
@@ -173,8 +173,6 @@ enum class TextId : uint8_t {
   k60Fps,
   k120Fps,
   kUnlocked,
-  kOffNextLaunch,
-  kOnNextLaunch,
   kCount,
 };
 
@@ -223,9 +221,9 @@ constexpr std::array kToggleChoices = {
     Choice{"false", TextId::kOff},
     Choice{"true", TextId::kOn},
 };
-constexpr std::array kNextLaunchChoices = {
-    Choice{"false", TextId::kOffNextLaunch},
-    Choice{"true", TextId::kOnNextLaunch},
+constexpr std::array kFilmGrainChoices = {
+    Choice{"true", TextId::kOff},
+    Choice{"false", TextId::kOn},
 };
 constexpr std::array kHdrChoices = {
     Choice{"off", TextId::kOff},
@@ -360,9 +358,9 @@ constexpr std::array kSettings = {
     Setting{"LR_MOTION", TextId::kMotionControlsLabel, "gta4_motion_enabled",
             kToggleChoices.data(), kToggleChoices.size()},
     Setting{"LR_SKIPINTRO", TextId::kSkipIntroLabel, "gta4_skip_intro",
-            kNextLaunchChoices.data(), kNextLaunchChoices.size(), true},
-    Setting{"LR_TLAD_GRAIN", TextId::kDisableTladGrainLabel, "gta4_disable_tlad_film_grain",
-            kToggleChoices.data(), kToggleChoices.size()},
+            kToggleChoices.data(), kToggleChoices.size(), true},
+    Setting{"LR_TLAD_GRAIN", TextId::kFilmGrainLabel, "gta4_disable_tlad_film_grain",
+            kFilmGrainChoices.data(), kFilmGrainChoices.size()},
 };
 
 constexpr std::string_view kAdvancedKey = "LR_ADVANCED";
@@ -392,7 +390,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "Modern shaders",
     "Motion Controls",
     "Skip Intro",
-    "Disable Film Grain (TLAD)",
+    "Film Grain",
     "Advanced",
     "Save",
     "Back",
@@ -469,8 +467,6 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "60 FPS",
     "120 FPS",
     "Unlocked",
-    "Off (Next Launch)",
-    "On (Next Launch)",
 };
 
 struct NativePageState {

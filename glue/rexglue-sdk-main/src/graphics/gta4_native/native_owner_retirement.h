@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -25,34 +27,35 @@ class NativeOwnerRetirementQueue {
   NativeOwnerRetirementQueue& operator=(const NativeOwnerRetirementQueue&) = delete;
 
   template <typename Submission, typename Release>
-  void DrainCompleted(uint64_t completed_submission, Submission last_submission, Release release) {
-    std::unique_ptr<Batch> expired;
+  void DrainCompleted(uint64_t completed_submission, Submission last_submission, Release release,
+                      size_t maximum_work = std::numeric_limits<size_t>::max()) {
     {
       std::lock_guard lock(mutex_);
-      if (closed_) {
-        return;
-      }
-      expired = std::move(expired_);
+      if (closed_) return;
+      if (!pending_) pending_ = std::move(expired_);
     }
-    while (expired) {
-      auto batch = std::move(expired);
-      expired = std::move(batch->next);
-      for (Entry* entry : batch->entries) {
-        // Once its CPU owner is gone, this entry cannot gain another GPU use.
-        const uint64_t submission = last_submission(*entry);
-        if (submission <= completed_submission) {
-          release(*entry);
-        } else {
-          waiting_[submission].push_back(entry);
-        }
+    size_t work=0;
+    // Already-classified entries are released first so ongoing streaming cannot
+    // starve an older, completed GPU submission.
+    for (; !waiting_.empty() && waiting_.begin()->first <= completed_submission && work<maximum_work;) {
+      auto completed=waiting_.begin(); auto& entries=completed->second;
+      for (; !entries.empty() && work<maximum_work; ++work) {
+        Entry* entry=entries.back(); entries.pop_back(); release(*entry);
       }
+      if(entries.empty())waiting_.erase(completed);
     }
-    while (!waiting_.empty() && waiting_.begin()->first <= completed_submission) {
-      auto completed = waiting_.begin();
-      for (Entry* entry : completed->second) {
-        release(*entry);
+    for (; pending_ && work<maximum_work;) {
+      if(pending_index_==pending_->entries.size()) {
+        auto consumed=std::move(pending_); pending_=std::move(consumed->next);pending_index_=0;
+        continue;
       }
-      waiting_.erase(completed);
+      Entry* entry=pending_->entries[pending_index_++];++work;
+      const uint64_t submission=last_submission(*entry);
+      if(submission<=completed_submission)release(*entry);
+      else waiting_[submission].push_back(entry);
+    }
+    if(pending_ && pending_index_==pending_->entries.size()) {
+      auto consumed=std::move(pending_);pending_=std::move(consumed->next);pending_index_=0;
     }
   }
 
@@ -71,6 +74,8 @@ class NativeOwnerRetirementQueue {
       abandoned = std::move(batch->next);
     }
     waiting_.clear();
+    for (; pending_;) {auto batch=std::move(pending_);pending_=std::move(batch->next);}
+    pending_index_=0;
   }
 
  private:
@@ -91,6 +96,8 @@ class NativeOwnerRetirementQueue {
   std::mutex mutex_;
   bool closed_ = false;
   std::unique_ptr<Batch> expired_;
+  std::unique_ptr<Batch> pending_;
+  size_t pending_index_=0;
   std::map<uint64_t, std::vector<Entry*>> waiting_;
 };
 

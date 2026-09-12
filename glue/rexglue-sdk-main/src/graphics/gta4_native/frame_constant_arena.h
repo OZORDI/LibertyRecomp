@@ -92,6 +92,11 @@ class FrameGenerationMap {
     return true;
   }
 
+  // Inspect only this generation; stale POD buckets retain no owners.
+  template <typename Visitor> void ForEach(Visitor&& visitor) const {
+    for (const auto& bucket : buckets_) if (bucket.generation == generation_) visitor(bucket.key, bucket.value);
+  }
+
   size_t size() const { return size_; }
   size_t bucket_count() const { return buckets_.size(); }
 
