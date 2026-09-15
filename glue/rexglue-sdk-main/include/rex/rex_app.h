@@ -119,7 +119,7 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   // The flag is atomic because the input driver queries it from its poll
   // thread while title dialogs are opened and closed on the UI thread.
   void SetTitleInputCaptured(bool captured) {
-    title_input_captured_.store(captured, std::memory_order_release);
+    input_capture_->title.store(captured, std::memory_order_release);
   }
 
   /// Called after path defaults are computed, before Runtime is constructed.
@@ -280,6 +280,7 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   // independently of how the presenter/drawer were obtained. `presenter` may be
   // null (detached mode).
   void SetupOverlays(ui::Presenter* presenter, ui::ImmediateDrawer* drawer);
+  void PublishInputOverlayState();
 
   // WindowedApp overrides
   bool OnInitialize() override;
@@ -313,8 +314,13 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   std::unique_ptr<ui::Window> window_;
   std::thread module_thread_;
   std::atomic<bool> shutting_down_{false};
-  std::atomic<bool> title_input_captured_{false};
-  std::atomic<int32_t> input_trace_last_active_state_{-1};
+  struct InputCaptureState {
+    std::atomic<bool> title{false};
+    std::atomic<bool> overlay{false};
+    std::atomic<bool> stopping{false};
+    std::atomic<int32_t> last_trace{-1};
+  };
+  std::shared_ptr<InputCaptureState> input_capture_ = std::make_shared<InputCaptureState>();
   std::unique_ptr<ui::ImmediateDrawer> immediate_drawer_;
   std::unique_ptr<ui::ImGuiDrawer> imgui_drawer_;
 

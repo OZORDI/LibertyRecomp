@@ -46,13 +46,12 @@ struct Driver {
     for (uint32_t i = 0; i < count; ++i) {
       const auto& update = updates[i];
       REQUIRE(update.sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-      REQUIRE(update.dstArrayElement == 0);
       REQUIRE(update.descriptorCount > 0);
       auto& copy = descriptors[NativeVulkanHandleIdentity(update.dstSet)];
       // Vulkan updates only the requested range; an unwritten tail retains
       // its previous resource references. Do not let the fake driver erase it.
-      copy.resize(std::max(copy.size(), size_t(update.descriptorCount)));
-      std::copy_n(update.pImageInfo, update.descriptorCount, copy.begin());
+      copy.resize(std::max(copy.size(), size_t(update.dstArrayElement) + update.descriptorCount));
+      std::copy_n(update.pImageInfo, update.descriptorCount, copy.begin() + update.dstArrayElement);
       for (const auto& value : copy) {
         if (update.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER)
           REQUIRE(value.sampler != VK_NULL_HANDLE);
@@ -101,6 +100,9 @@ struct Gta4NativeGraphicsSystem {
     uint32_t published_image_count = 0, published_sampler_count = 0;
     bool images_dirty = false, samplers_dirty = false;
     std::vector<VkDescriptorImageInfo> update_scratch;
+    std::vector<NativeDescriptorImageSlot> published_images;
+    std::vector<NativeDescriptorSamplerSlot> published_samplers;
+    std::vector<VkWriteDescriptorSet> update_writes;
   };
   struct View {
     VkImageView view;
@@ -309,4 +311,66 @@ TEST_CASE("completed indexed pages clear stale tails and unused pages without to
   REQUIRE(renderer.BeginIndexedWorkingSet());
   REQUIRE(renderer.PublishIndexedWorkingSet());
   REQUIRE(driver.calls == stable_calls);
+}
+
+TEST_CASE("indexed bindings survive draw reorder and update one changed view", "[pacing]") {
+  using namespace descriptor_runtime_contract;
+  Gta4NativeGraphicsSystem renderer;
+  auto& driver = renderer.provider_->gpu.driver;
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  Gta4NativeGraphicsSystem::NativeCommand a, b;
+  auto key_a = MakeKey(0, 0), key_b = MakeKey(1, 0);
+  REQUIRE(renderer.AssignIndexedWorkingSet(a, key_a));
+  REQUIRE(renderer.AssignIndexedWorkingSet(b, key_b));
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  const auto calls = driver.calls;
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  Gta4NativeGraphicsSystem::NativeCommand b_next, a_next;
+  REQUIRE(renderer.AssignIndexedWorkingSet(b_next, key_b));
+  REQUIRE(renderer.AssignIndexedWorkingSet(a_next, key_a));
+  REQUIRE(a_next.texture_descriptor_indices == a.texture_descriptor_indices);
+  REQUIRE(b_next.texture_descriptor_indices == b.texture_descriptor_indices);
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  REQUIRE(driver.calls == calls);
+
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  key_a.images_2d[0] = Handle<VkImageView>(9000);
+  REQUIRE(renderer.AssignIndexedWorkingSet(a_next, key_a));
+  REQUIRE(renderer.AssignIndexedWorkingSet(b_next, key_b));
+  const auto entries = renderer.frame_descriptor_entries_written_;
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  REQUIRE(renderer.frame_descriptor_entries_written_ == entries + 1);
+}
+TEST_CASE("new image lifetimes republish even when Vulkan handle values repeat", "[pacing]") {
+  using namespace descriptor_runtime_contract;
+  Gta4NativeGraphicsSystem renderer;
+  auto& driver = renderer.provider_->gpu.driver;
+  Gta4NativeGraphicsSystem::NativeCommand a;
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  REQUIRE(renderer.AssignIndexedWorkingSet(a, MakeKey(0, 0)));
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  const auto calls = driver.calls;
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  REQUIRE(renderer.AssignIndexedWorkingSet(a, MakeKey(0, 1)));
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  REQUIRE(driver.calls > calls);
+}
+TEST_CASE("persistent pages null holes left by omitted draws", "[pacing]") {
+  using namespace descriptor_runtime_contract;
+  Gta4NativeGraphicsSystem renderer;
+  Gta4NativeGraphicsSystem::NativeCommand a, b;
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  REQUIRE(renderer.AssignIndexedWorkingSet(a, MakeKey(0, 0)));
+  REQUIRE(renderer.AssignIndexedWorkingSet(b, MakeKey(1, 0)));
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  REQUIRE(renderer.BeginIndexedWorkingSet());
+  REQUIRE(renderer.AssignIndexedWorkingSet(b, MakeKey(1, 0)));
+  REQUIRE(renderer.PublishIndexedWorkingSet());
+  const auto& page = renderer.native_descriptor_pages_[0];
+  for (size_t dimension = 0; dimension < 4; ++dimension) {
+    const auto& values = renderer.provider_->gpu.driver.descriptors.at(
+        NativeVulkanHandleIdentity(page.descriptor_sets[dimension]));
+    for (auto index : a.texture_descriptor_indices)
+      REQUIRE(values[index].imageView == Handle<VkImageView>(11 + dimension));
+  }
 }

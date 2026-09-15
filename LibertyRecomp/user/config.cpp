@@ -1077,6 +1077,14 @@ void Config::Save()
 {
     LOGN("Saving configuration...");
 
+#if GTA4_TOUCH_LEGACY_HOST
+    // The native menu and CLI share the runtime CVar. Persist its current value
+    // instead of restoring the value originally loaded by the legacy host.
+    const auto touchMode = rex::cvar::GetFlagByName("touch_controls");
+    if (touchMode == "auto" || touchMode == "on" || touchMode == "off")
+        TouchControls.Value = touchMode;
+#endif
+
     auto userPath = GetUserPath();
 
     if (!std::filesystem::exists(userPath))

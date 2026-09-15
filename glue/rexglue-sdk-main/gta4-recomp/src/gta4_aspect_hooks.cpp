@@ -1,4 +1,5 @@
 #include "gta4_aspect_hooks.h"
+#include "gta4_frontend_hooks.h"
 
 #include <atomic>
 #include <bit>
@@ -11,8 +12,12 @@
 
 #include <rex/cvar.h>
 #include <rex/diagnostics/policy.h>
+#include <rex/input/absolute_pointer.h>
 #include <rex/runtime.h>
 #include "gta4_init.h"
+#include "input/context_touch_context.h"
+#include "input/context_touch_controls.h"
+#include "input/context_touch_radar.h"
 
 REXCVAR_DEFINE_BOOL(gta4_trace_aspect, false, "GTA IV/Diagnostics",
                     "Bounded camera, UI-layout, and fixed-artwork aspect observations");
@@ -189,13 +194,16 @@ UiContext DcContext(PPCContext& ctx, uint8_t* base) {
 struct HudAnchor {
   bool specified = false, world_position = false;
   Point anchor;
+  bool radar = false;
 };
 std::mutex hud_mutex;
 std::unordered_map<uint32_t, HudAnchor> hud_anchors;
 HudAnchor NameAnchor(std::string_view name) {
   if (name.starts_with("HUD_MP_NAME"))
     return {false, true, {}};
-  if (name.starts_with("HUD_RADAR") || name.starts_with("HUD_PHONE_MESSAGE") ||
+  if (name.starts_with("HUD_RADAR"))
+    return {true, false, {0, 1}, true};
+  if (name.starts_with("HUD_PHONE_MESSAGE") ||
       name == "HUD_TEXT_MESSAGE_ICON" || name == "HUD_SLEEP_MODE_ICON")
     return {true, false, {0, 1}};
   if (name.starts_with("HUD_HELP"))
@@ -226,13 +234,17 @@ UiContext HudContext(PPCContext& ctx, uint8_t* base) {
     if (it != hud_anchors.end())
       policy = it->second;
   }
+  if (policy.radar) return RadarUi(base);
   return MakeContext(UiRole::kComponent, policy.world_position ? point
                                          : policy.specified    ? policy.anchor
                                                                : ComponentAnchor(point));
 }
 void DrawHud(PPCContext& ctx, uint8_t* base, GuestFunction original) {
   const Scope scope(HudContext(ctx, base));
-  original(ctx, base);
+  if (original == __imp__sub_821C5148)
+    gta4::input::DrawTouchWeaponHudSprite(ctx, base, original);
+  else
+    original(ctx, base);
 }
 uint32_t FontState(PPCContext& ctx, uint8_t* base) {
   if (!Span(base, kFontStateIndex, 4))
@@ -280,6 +292,8 @@ UiContext CurrentUi(uint8_t* base) {
   if (ui_context.active)
     return ui_context;
   const auto state = Output();
+  if (state.ready && gta4::input::TouchRadarLocalViewport(base))
+    return {{}, state.render, UiRole::kRadar, true, state.generation};
   if (!state.ready || !Span(base, kCurrentViewport, 4))
     return {};
   const uint32_t viewport = Read(base, kCurrentViewport);
@@ -303,6 +317,16 @@ UiContext MenuBodyUi(uint8_t* base) {
       divider_y = Float(base, style);
   }
   return MakeContext(UiRole::kMenuBody, {0.5, divider_y});
+}
+UiContext RadarUi(uint8_t* base) {
+  const auto state = Output();
+  const auto transform = gta4::input::TouchRadarLocalViewport(base) ? Transform{} :
+      RadarLayout(state.output);
+  return {transform, state.render, UiRole::kRadar, state.ready, state.generation};
+}
+UiContext RadarLocalUi() {
+  const auto state = Output();
+  return {{}, state.render, UiRole::kRadar, state.ready, state.generation};
 }
 UiContext TextUi(const PPCContext& ctx, uint8_t* base) {
   if (ui_context.active)
@@ -435,8 +459,14 @@ void DrawQuad(PPCContext& ctx, uint8_t* base, GuestFunction original, bool textu
 }
 void DrawRadarSection(PPCContext& ctx, uint8_t* base, GuestFunction original) {
   const DcScope dc(ctx, base);
-  const auto layout = CurrentUi(base);
-  const EmitScope emit({layout.transform, layout.active && !layout.transform.identity()});
+  const auto current = CurrentUi(base);
+  const auto layout = current.active && current.role == UiRole::kRadar ? current : RadarUi(base);
+  const auto transform = layout.transform;
+  // These are radar-section emitters, not generic UI sections. Some retail
+  // callers reach them without the enclosing HUD_RADAR scope; falling back to
+  // CurrentUi() in that case centered the route while the radar itself stayed
+  // bottom-left anchored, visibly separating the GPS line from the minimap.
+  const EmitScope emit({transform, layout.active && !transform.identity()});
   original(ctx, base);
 }
 void DrawWindow(PPCContext& ctx, uint8_t* base, GuestFunction original) {
@@ -701,7 +731,7 @@ extern "C" void sub_822551E0(PPCContext& ctx, uint8_t* base) {
   // phases must use the same divider-anchored body coordinates, including
   // immediate draw calls and queued text.
   const gta4::aspect::Scope scope(gta4::aspect::MenuBodyUi(base));
-  __imp__sub_822551E0(ctx, base);
+  gta4::frontend_menu::DrawSliders(ctx, base);
 }
 
 extern "C" void sub_828BF708(PPCContext& ctx, uint8_t* base) {

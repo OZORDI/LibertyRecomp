@@ -7,6 +7,7 @@ namespace frame_limiter = gta4::frame_limiter;
 TEST_CASE("GTA IV frame limiter accepts only menu-supported rates") {
   REQUIRE(frame_limiter::IsSupportedLimit(0));
   REQUIRE(frame_limiter::IsSupportedLimit(30));
+  REQUIRE(frame_limiter::IsSupportedLimit(40));
   REQUIRE(frame_limiter::IsSupportedLimit(60));
   REQUIRE(frame_limiter::IsSupportedLimit(120));
   REQUIRE_FALSE(frame_limiter::IsSupportedLimit(1));
@@ -55,4 +56,22 @@ TEST_CASE("GTA IV frame limiter resets after a complete missed interval") {
   REQUIRE(recovered.late_reset);
   REQUIRE(recovered.wait_until_ns == 0);
   REQUIRE(recovered.next_state.next_deadline_ns > severely_late);
+}
+
+TEST_CASE("Every selectable GTA IV cap constrains producer cadence") {
+  for (uint32_t fps : {30u, 40u, 60u, 120u}) {
+    frame_limiter::State state{};
+    const int64_t origin = 1000;
+    int64_t now = origin;
+    const uint32_t frames = fps * 10;
+    for (uint32_t frame = 0; frame < frames; ++frame) {
+      const auto decision = frame_limiter::Plan(state, fps, now);
+      REQUIRE(decision.next_state.frames_per_second == fps);
+      REQUIRE_FALSE(decision.late_reset);
+      now = decision.wait_until_ns > now ? decision.wait_until_ns : now;
+      state = decision.next_state;
+      now += 700'000;
+    }
+    REQUIRE(state.next_deadline_ns == origin + 10'000'000'000);
+  }
 }

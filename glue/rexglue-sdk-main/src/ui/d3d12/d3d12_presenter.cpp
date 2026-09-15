@@ -1161,6 +1161,7 @@ Presenter::PaintResult D3D12Presenter::PaintAndPresentImpl(bool execute_ui_drawe
   // Even if presentation has failed, work might have been enqueued anyway
   // internally before the failure according to Jesse Natalie from the DirectX
   // Discord server.
+  if (SUCCEEDED(present_result)) AcceptPacedPublication(guest_output_properties.provenance.publication_serial);
   paint_context_.present_submission_tracker.NextSubmission();
   switch (present_result) {
     case DXGI_ERROR_DEVICE_REMOVED:

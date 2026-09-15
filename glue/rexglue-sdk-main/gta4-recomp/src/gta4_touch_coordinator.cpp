@@ -1,4 +1,6 @@
+#if !defined(GTA4_TOUCH_LEGACY_HOST)
 #include "gta4_aspect_hooks.h"
+#endif
 #include "gta4_touch_coordinator.h"
 
 #include <algorithm>
@@ -22,6 +24,9 @@
 #include "gta4_init.h"
 #include "gta4_map_pan_policy.h"
 #include "gta4_touch_policy.h"
+#include "input/context_touch_context.h"
+#include "input/context_touch_controls.h"
+#include "input/context_touch_radar.h"
 
 REXCVAR_DEFINE_BOOL(gta4_touch_trace, false, "GTA IV/Input/Touch",
                     "Trace joined touch pointer, layout, and retail action transactions");
@@ -91,6 +96,8 @@ struct RadarGeometry {
 
 struct ReplaySnapshot {
   uint64_t epoch = 0;
+  uint32_t input_user = 0;
+  bool input_user_known = false;
   int32_t map_x = 0;
   int32_t map_y = 0;
   int32_t zoom_steps = 0;
@@ -131,10 +138,15 @@ VirtualKeySnapshot g_virtual_keys;
 
 gta4::touch::FrontendTransaction g_frontend_transaction;
 gta4::touch::TapTransaction g_minimap_transaction;
+uint64_t g_hud_presentation_revision = 0;
+gta4::touch::TapTransaction g_weapon_transaction;
+RadarGeometry g_weapon_geometry;
+uint64_t g_weapon_context_generation = 0;
 gta4::touch::MapGesture g_map_gesture;
 ReplaySnapshot g_replay;
 bool g_context_controls_were_active = false;
 std::atomic<bool> g_title_input_owned{false};
+std::atomic<uint64_t> g_poll_epoch{0};
 
 uint8_t LoadU8(uint8_t* base, uint32_t address) noexcept {
   return *reinterpret_cast<volatile uint8_t*>(base + address);
@@ -426,9 +438,52 @@ bool ProcessMinimapEvent(const AbsolutePointerEvent& event, uint64_t epoch,
   return true;
 }
 
+void UpdateWeaponGeometry(const gta4::input::TouchContextSnapshot& context, bool admitted) {
+  Rect bounds;
+  if (admitted && context.weapon_hud_bounds) {
+    const auto& hud = *context.weapon_hud_bounds;
+    bounds = {hud.left, hud.top, hud.right, hud.bottom};
+    if (!bounds.valid() || bounds.left < 0.0f || bounds.top < 0.0f ||
+        bounds.right > 1.0f || bounds.bottom > 1.0f) bounds = {};
+  }
+  if (context.generation != g_weapon_context_generation ||
+      !RectNearlyEqual(bounds, g_weapon_geometry.bounds)) {
+    g_weapon_geometry.bounds = bounds;
+    g_weapon_context_generation = context.generation;
+    ++g_weapon_geometry.generation;
+  }
+}
+
+bool ProcessWeaponHudEvent(const AbsolutePointerEvent& event, uint64_t epoch) {
+  const Point point = NormalizedPoint(event);
+  const auto& geometry = g_weapon_geometry;
+  if (event.phase == AbsolutePointerPhase::kDown) {
+    if (!g_weapon_transaction.Begin(event.pointer_id, event.generation,
+                                    geometry.generation, point, 1.0f, 1.0f,
+                                    geometry.bounds)) {
+      // A second finger on the occupied HUD region must not start a camera
+      // gesture underneath the first finger's tap transaction.
+      return geometry.bounds.contains(point);
+    }
+  } else if (!g_weapon_transaction.active() ||
+             g_weapon_transaction.pointer_id() != event.pointer_id) {
+    return false;
+  } else if (event.phase == AbsolutePointerPhase::kMove) {
+    g_weapon_transaction.Move(event.pointer_id, event.generation, geometry.generation, point);
+  } else if (event.phase == AbsolutePointerPhase::kUp) {
+    if (g_weapon_transaction.End(event.pointer_id, event.generation, geometry.generation, point)) {
+      gta4::input::QueueContextTouchWeaponCycle(epoch, event.pointer_id);
+    }
+  } else {
+    g_weapon_transaction.Reset();
+  }
+  return true;
+}
+
 void ResetTransactions() noexcept {
   g_frontend_transaction.Reset();
   g_minimap_transaction.Reset();
+  g_weapon_transaction.Reset();
   g_map_gesture.Reset();
 }
 
@@ -453,16 +508,24 @@ void ApplyMapZoom(uint8_t* base, uint64_t epoch) noexcept {
 
 void FreezeVirtualKeys(const GTA4TouchExtension& extension, uint64_t epoch,
                        bool controls_active) noexcept {
+  const uint64_t revision = gta4::input::ContextTouchPresentationRevision();
   VirtualKeySnapshot snapshot;
   snapshot.epoch = epoch;
   if (controls_active && extension.collect_virtual_keys) {
     extension.collect_virtual_keys(epoch, snapshot.down, snapshot.pressed);
   }
+  const bool gameplay_admitted = gta4::input::ContextTouchGameplayInputAdmitted();
+  if (!gameplay_admitted) snapshot = {};
   std::lock_guard lock(g_extension_mutex);
-  if (GTA4_TouchTitleInputOwned()) snapshot = {};
+  // A presentation transition can cancel input while collection is in flight.
+  // Recheck under the same lock used by immediate cancellation so an old poll
+  // cannot republish held keys after the cancellation has completed.
+  const bool current = revision == gta4::input::ContextTouchPresentationRevision();
+  const bool active = controls_active && gameplay_admitted && current &&
+      !GTA4_TouchTitleInputOwned();
+  if (!active) snapshot = {};
   g_virtual_keys = snapshot;
-  rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, snapshot.down,
-      controls_active && !GTA4_TouchTitleInputOwned());
+  rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, snapshot.down, active);
 }
 
 void DisableContextControls(const GTA4TouchExtension& extension,
@@ -483,9 +546,32 @@ void GTA4_RegisterTouchExtension(GTA4TouchExtension extension) noexcept {
 
 void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
   g_replay = {.epoch = epoch};
+  g_poll_epoch.store(epoch, std::memory_order_release);
   const GTA4TouchExtension extension = ReadExtension();
+  const uint32_t screen = LoadU32(base, kCurrentScreenAddress);
+  const bool frontend_active = FrontendActive(context, base);
+  const bool map_active = frontend_active && screen == kMapScreen;
+  gta4::input::CaptureTouchContext(context, base, epoch, frontend_active, map_active);
+  const uint64_t presentation_revision = gta4::input::ContextTouchPresentationRevision();
+  if (g_hud_presentation_revision != presentation_revision) {
+    // A complete loading/cutscene transition may occur between input polls.
+    // An old HUD Down must never pair with a release in the resumed game.
+    g_minimap_transaction.Reset();
+    g_weapon_transaction.Reset();
+    g_hud_presentation_revision = presentation_revision;
+  }
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
+  g_replay.input_user = touch_context.input_user;
+  g_replay.input_user_known = touch_context.input_user_known;
+  const bool pointer_input_active = rex::input::TouchPointerInputActive();
   const bool controls_active = rex::input::TouchControlsActive();
-  if (!controls_active) {
+  const bool title_input_owned = GTA4_TouchTitleInputOwned();
+  const bool editor_captures = gta4::input::ContextTouchEditorCapturesInput();
+  // Native menu rows stay directly touchable when the gameplay overlay is
+  // Off, including the native setting needed to turn it back on. Focus and
+  // host/title modal ownership still gate every guest pointer transaction.
+  if (!pointer_input_active || title_input_owned ||
+      (!controls_active && !frontend_active && !editor_captures)) {
     AbsolutePointerEvent discarded;
     while (rex::input::TryDequeueAbsolutePointerEvent(&discarded)) {
     }
@@ -495,46 +581,42 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
     return;
   }
 
-  const uint32_t screen = LoadU32(base, kCurrentScreenAddress);
-  const bool frontend_active = FrontendActive(context, base);
-  const bool map_active = frontend_active && screen == kMapScreen;
-  const bool frontend_navigation_active = frontend_active && !map_active;
-  const bool gameplay_active = !frontend_active;
-  const bool title_input_owned = GTA4_TouchTitleInputOwned();
-  const bool context_controls_active = !title_input_owned;
+  const bool frontend_navigation_active = frontend_active && !map_active && !editor_captures;
+  const bool context_controls_active = editor_captures || (!frontend_active && controls_active);
+  if (context_controls_active && extension.begin_poll) {
+    extension.begin_poll(context, base, epoch, frontend_active, map_active);
+  }
+  const bool gameplay_active = !frontend_active && controls_active && !editor_captures &&
+      gta4::input::ContextTouchGameplayInputAdmitted();
   g_replay.frontend_active = frontend_navigation_active;
-  g_replay.map_active = map_active;
+  g_replay.map_active = map_active && !editor_captures;
   g_replay.context_controls_active = context_controls_active;
   const FrontendGeometry frontend =
       frontend_navigation_active ? ReadFrontendGeometry() : FrontendGeometry{};
   const RadarGeometry radar = gameplay_active ? ReadRadarGeometry() : RadarGeometry{};
+  UpdateWeaponGeometry(touch_context, gameplay_active &&
+      gta4::input::ContextTouchWeaponCycleAdmitted());
 
   if (!frontend_navigation_active) {
     g_frontend_transaction.Reset();
   }
-  if (!map_active) {
+  if (!map_active || editor_captures) {
     g_map_gesture.Reset();
   }
   if (!gameplay_active) {
     g_minimap_transaction.Reset();
-  }
-  if (title_input_owned) {
-    ResetTransactions();
+    g_weapon_transaction.Reset();
   }
   if (!context_controls_active) {
     DisableContextControls(extension, context, base, epoch);
   }
 
-  if (context_controls_active && extension.begin_poll) {
-    extension.begin_poll(context, base, epoch, frontend_active, map_active);
-  }
   AbsolutePointerEvent event;
   while (rex::input::TryDequeueAbsolutePointerEvent(&event)) {
-    if (title_input_owned) {
-      continue;
-    }
-    if (frontend_active && extension.on_pointer_event &&
-        extension.on_pointer_event(event, context, base, epoch)) {
+    if (editor_captures) {
+      // The whole gesture belongs to the editor, including unused screen
+      // space and the noninteractive fade after Done.
+      if (extension.on_pointer_event) extension.on_pointer_event(event, context, base, epoch);
       continue;
     }
     if (map_active) {
@@ -548,7 +630,10 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
     if (gameplay_active && ProcessMinimapEvent(event, epoch, radar)) {
       continue;
     }
-    if (gameplay_active && extension.on_pointer_event) {
+    if (gameplay_active && ProcessWeaponHudEvent(event, epoch)) {
+      continue;
+    }
+    if (!frontend_active && context_controls_active && extension.on_pointer_event) {
       extension.on_pointer_event(event, context, base, epoch);
     }
   }
@@ -562,12 +647,18 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
 
 void GTA4_TouchObserveControlReplay(PPCContext& context, uint8_t* base, uint32_t control,
                                     uint32_t caller, uint64_t epoch) {
-  if (!control) {
+  if (!base || !control || uint64_t{control} + 3412 + sizeof(uint32_t) >
+                              uint64_t{UINT32_MAX} + 1) {
     return;
   }
 
   const bool touch_replay_enabled =
-      g_replay.epoch == epoch && !GTA4_TouchTitleInputOwned();
+      g_replay.epoch == epoch && g_replay.input_user_known &&
+      LoadU32(base, control + 3412) == g_replay.input_user &&
+      rex::input::TouchPointerInputActive() && !GTA4_TouchTitleInputOwned() &&
+      (g_replay.frontend_active || g_replay.map_active ||
+       gta4::input::ContextTouchGameplayInputAdmitted()) &&
+      !gta4::input::ContextTouchEditorCapturesInput();
   const bool controller_navigation =
       ReadAction(base, control, Action::kFrontendDown) ||
       ReadAction(base, control, Action::kFrontendUp) ||
@@ -589,7 +680,7 @@ void GTA4_TouchObserveControlReplay(PPCContext& context, uint8_t* base, uint32_t
     changed |= MergeButton(base, control, Action::kFrontendAccept,
                            g_replay.accept ? kPressed : 0);
     changed |= MergeButton(base, control, Action::kFrontendPause,
-                           g_replay.pause ? kPressed : 0);
+                           g_replay.pause && rex::input::TouchControlsActive() ? kPressed : 0);
   }
   if (changed) {
     StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
@@ -611,30 +702,42 @@ void GTA4_TouchObserveControlReplay(PPCContext& context, uint8_t* base, uint32_t
   }
 }
 
+uint64_t GTA4_TouchCurrentEpoch() noexcept {
+  return g_poll_epoch.load(std::memory_order_acquire);
+}
+
 bool GTA4_TouchVirtualKeyDown(uint16_t key) noexcept {
-  if (GTA4_TouchTitleInputOwned()) {
+  const uint64_t revision = gta4::input::ContextTouchPresentationRevision();
+  if (GTA4_TouchTitleInputOwned() || !rex::input::TouchControlsActive() ||
+      !gta4::input::ContextTouchGameplayInputAdmitted()) {
     return false;
   }
   std::lock_guard lock(g_extension_mutex);
-  return key < g_virtual_keys.down.size() && g_virtual_keys.down[key] != 0;
+  return revision == gta4::input::ContextTouchPresentationRevision() &&
+      key < g_virtual_keys.down.size() && g_virtual_keys.down[key] != 0;
 }
 
 bool GTA4_TouchVirtualKeyPressed(uint64_t epoch, uint16_t key) noexcept {
-  if (GTA4_TouchTitleInputOwned()) {
+  const uint64_t revision = gta4::input::ContextTouchPresentationRevision();
+  if (GTA4_TouchTitleInputOwned() || !rex::input::TouchControlsActive() ||
+      !gta4::input::ContextTouchGameplayInputAdmitted()) {
     return false;
   }
   std::lock_guard lock(g_extension_mutex);
-  return g_virtual_keys.epoch == epoch && key < g_virtual_keys.pressed.size() &&
+  return revision == gta4::input::ContextTouchPresentationRevision() &&
+         g_virtual_keys.epoch == epoch && key < g_virtual_keys.pressed.size() &&
          g_virtual_keys.pressed[key] != 0;
+}
+
+void GTA4_CancelTouchGameplayReplay() noexcept {
+  std::lock_guard lock(g_extension_mutex);
+  g_virtual_keys = {};
+  rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, {}, false);
 }
 
 void GTA4_SetTouchTitleInputOwned(bool owned) noexcept {
   g_title_input_owned.store(owned, std::memory_order_release);
-  if (owned) {
-    std::lock_guard lock(g_extension_mutex);
-    g_virtual_keys = {};
-    rex::input::mnk::PublishVirtualControllerCompatibilityKeys(0, {}, false);
-  }
+  if (owned) GTA4_CancelTouchGameplayReplay();
 }
 
 bool GTA4_TouchTitleInputOwned() noexcept {
@@ -687,10 +790,12 @@ void GTA4_TouchObserveHudSubmit(const PPCContext& context, uint8_t* base) noexce
       .right = std::max({cell_left, cell_right, text_x}) + padding,
       .bottom = text_y + row_height * 0.5f,
   };
+#if !defined(GTA4_TOUCH_LEGACY_HOST)
   const auto layout = gta4::aspect::CurrentUi(base);
   const auto mapped = layout.transform.Map(gta4::aspect::Rect{cell.left, cell.top, cell.right, cell.bottom});
   cell = {.left = float(mapped.left), .top = float(mapped.top),
           .right = float(mapped.right), .bottom = float(mapped.bottom)};
+#endif
   if (!cell.valid()) {
     return;
   }
@@ -712,8 +817,10 @@ void GTA4_TouchObserveHudSubmit(const PPCContext& context, uint8_t* base) noexce
 
 void GTA4_TouchCaptureFrontendDraw(PPCContext& context, uint8_t* base,
                                    GTA4GuestFunction draw_function) {
+#if !defined(GTA4_TOUCH_LEGACY_HOST)
   const gta4::aspect::Scope aspect_scope(gta4::aspect::MenuBodyUi(base));
   const gta4::aspect::FrontendLayoutScope adaptive_columns(context, base);
+#endif
   RowCapture previous = std::move(g_row_capture);
   g_row_capture = {};
   if (context.r3.u32 == kFrontendChannel) {
@@ -751,10 +858,12 @@ extern "C" void sub_821BF050(PPCContext& context, uint8_t* base) {
       }
     }
     if (!first && quad.valid()) {
+#if !defined(GTA4_TOUCH_LEGACY_HOST)
       const auto layout = gta4::aspect::CurrentUi(base);
       const auto mapped = layout.transform.Map(gta4::aspect::Rect{quad.left, quad.top, quad.right, quad.bottom});
       quad = {.left = float(mapped.left), .top = float(mapped.top),
               .right = float(mapped.right), .bottom = float(mapped.bottom)};
+#endif
       IncludeRect(g_radar_capture.bounds, quad);
       g_radar_capture.has_quad = true;
     }
@@ -762,11 +871,23 @@ extern "C" void sub_821BF050(PPCContext& context, uint8_t* base) {
   __imp__sub_821BF050(context, base);
 }
 
-extern "C" void sub_8233ABF0(PPCContext& context, uint8_t* base) {
-  const gta4::aspect::Scope aspect_scope(gta4::aspect::UiRole::kRadar);
+extern "C" void sub_8239C468(PPCContext& context, uint8_t* base) {
+  const auto pass = gta4::input::ConsumeTouchRadarPass(base, context.r3.u32);
   RadarCapture previous = g_radar_capture;
   g_radar_capture = {.active = true};
-  __imp__sub_8233ABF0(context, base);
-  PublishRadarGeometry(g_radar_capture.has_quad ? g_radar_capture.bounds : Rect{});
+#if !defined(GTA4_TOUCH_LEGACY_HOST)
+  // Apply display layout once, to the queued viewport. Its tiles, blips,
+  // circles and callback-drawn mask/frame all retain their local coordinates.
+  // A native pause-map phase keeps the pre-existing frontend drawing context.
+  const gta4::aspect::Scope aspect_scope(pass.gameplay ? gta4::aspect::RadarLocalUi() :
+                                         gta4::aspect::CurrentUi(base));
+#endif
+  __imp__sub_8239C468(context, base);
+  const auto bounds = pass.bounds;
+  const bool visible = pass.gameplay && g_radar_capture.has_quad &&
+      bounds.right > bounds.left && bounds.bottom > bounds.top;
+  PublishRadarGeometry(visible ? Rect{.left = float(bounds.left), .top = float(bounds.top),
+                                     .right = float(bounds.right), .bottom = float(bounds.bottom)} :
+                                Rect{});
   g_radar_capture = previous;
 }

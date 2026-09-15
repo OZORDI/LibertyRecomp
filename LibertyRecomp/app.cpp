@@ -11,6 +11,12 @@
 #include <user/config.h>
 #include <user/paths.h>
 #include <user/registry.h>
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+#include <hid/context_touch_host.h>
+#endif
+#if defined(GTA4_SONY_LEGACY_OWNER)
+#include <hid/hid.h>
+#endif
 
 // =============================================================================
 // GTA IV Application Layer
@@ -32,11 +38,17 @@ void App::Exit()
 {
     DIAG_EMIT("[APP-EXIT] App::Exit() called!\n");
     Config::Save();
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+    TouchHost::Shutdown();
+#endif
 
 #ifdef _WIN32
     timeEndPeriod(1);
 #endif
 
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    hid::ShutdownSonyFeedback();
+#endif
     std::_Exit(0);
 }
 
@@ -87,6 +99,9 @@ namespace GTA4FrameHooks
         {
 #if !REX_PLATFORM_CONSOLE
             SDL_PumpEvents();
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+            TouchHost::PumpSDLEvents();
+#endif
             SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
 #endif
             GameWindow::Update();

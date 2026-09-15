@@ -4,6 +4,18 @@
 
 namespace policy = gta4::frontend_menu::policy;
 
+TEST_CASE("GTA IV frontend slider follows the visible rows",
+          "[system][gta4][frontend][draw-distance]") {
+  CHECK(policy::IsSliderRowVisible(3, 0, 12));
+  CHECK(policy::IsSliderRowVisible(3, 3, 12));
+  CHECK_FALSE(policy::IsSliderRowVisible(3, 4, 12));
+  CHECK_FALSE(policy::IsSliderRowVisible(12, 0, 12));
+  CHECK_FALSE(policy::IsSliderRowVisible(-1, 0, 12));
+  CHECK_FALSE(policy::IsSliderRowVisible(0, 0, 0));
+  CHECK(policy::SliderStartY(0.03125, 0.125, 0) == 0.15625);
+  CHECK(policy::SliderStartY(0.03125, 0.125, 3) == 0.0625);
+}
+
 TEST_CASE("GTA IV frontend native keys fit the retail inline field",
           "[system][gta4][frontend]") {
   CHECK(policy::FitsInlineKey(0));

@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include <rex/input/flags.h>
+#include <rex/input/absolute_pointer.h>
 #include <rex/logging.h>
 
 namespace rex::input::nx {
@@ -98,7 +99,7 @@ X_STATUS SwitchInputDriver::Setup() {
   hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal);
 
   initialized_ = true;
-  REX_LOG_INFO("[input.nx] Switch HID driver online");
+  REXLOG_INFO("[input.nx] Switch HID driver online");
   return X_STATUS_SUCCESS;
 }
 
@@ -242,10 +243,24 @@ X_RESULT SwitchInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_sta
   uint8_t lt = MapTrigger(raw_buttons, HidNpadButton_ZL);
   uint8_t rt = MapTrigger(raw_buttons, HidNpadButton_ZR);
 
-  if (mapped != slot.last_buttons) {
+  const auto moved = [](const HidAnalogStickState& current, const HidAnalogStickState& previous) {
+    return (std::abs(current.x) > 8192 && current.x != previous.x) ||
+           (std::abs(current.y) > 8192 && current.y != previous.y);
+  };
+  if (mapped != slot.last_buttons || lt != slot.last_left_trigger || rt != slot.last_right_trigger ||
+      moved(l, slot.last_left_stick) || moved(r, slot.last_right_stick)) {
+    GetAbsolutePointerService().NotifyPhysicalInput();
+  }
+  if (mapped != slot.last_buttons || lt != slot.last_left_trigger || rt != slot.last_right_trigger ||
+      l.x != slot.last_left_stick.x || l.y != slot.last_left_stick.y ||
+      r.x != slot.last_right_stick.x || r.y != slot.last_right_stick.y) {
     slot.packet_number++;
     slot.last_buttons = mapped;
   }
+  slot.last_left_trigger = lt;
+  slot.last_right_trigger = rt;
+  slot.last_left_stick = l;
+  slot.last_right_stick = r;
 
   if (out_state) {
     std::memset(out_state, 0, sizeof(*out_state));

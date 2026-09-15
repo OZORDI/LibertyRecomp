@@ -10,6 +10,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <rex/ui/frame_pacer.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -111,6 +112,9 @@ struct RawImage {
 };
 
 struct GuestOutputProvenance {
+  uint32_t frame_rate_limit = 0;
+  bool producer_backpressure = false;
+  uint64_t publication_serial = 0;
   uint64_t tv_session_id = 0;
   uint64_t title_present_id = 0;
   uint64_t selected_generation = 0;
@@ -397,6 +401,7 @@ class Presenter {
   // multiple at the same time, and it should acquire the latest guest output
   // image via ConsumeGuestOutput.
   virtual bool CaptureGuestOutput(RawImage& image_out) = 0;
+  void CancelFramePacingWaits() { frame_publication_gate_.Stop(); }
   const GuestOutputPaintConfig& GetGuestOutputPaintConfigFromUIThread() const {
     return guest_output_paint_config_;
   }
@@ -758,6 +763,11 @@ class Presenter {
   //
   // Call via PaintAndPresent.
   virtual PaintResult PaintAndPresentImpl(bool execute_ui_drawers) = 0;
+  virtual void PollPresentationTiming() {}
+  // Backend calls this after a successful queue-present with the exact consumed image.
+  void AcceptPacedPublication(uint64_t serial) { frame_publication_gate_.Accept(serial); }
+  const FramePacer::Attempt& pacing_attempt() const { return pacing_attempt_; }
+  FramePacer& frame_pacer() { return frame_pacer_; }
 
   // For calling from the painting implementations if requested.
   void ExecuteUIDrawersFromUIThread(UIDrawContext& ui_draw_context);
@@ -1031,6 +1041,13 @@ class Presenter {
   // Accessible only by refreshing, whether the last refresh contained an image
   // rather than being blank.
   bool guest_output_active_last_refresh_ = false;
+  std::atomic<uint32_t> host_frame_rate_limit_{0};
+  FramePacer frame_pacer_;  // Existing exclusive paint owner.
+  FramePacer::Attempt pacing_attempt_{};
+  FramePublicationGate frame_publication_gate_;
+  const std::thread::id ui_thread_id_ = std::this_thread::get_id();
+  std::atomic<uint64_t> paint_retry_delay_ns_{1'000'000};
+  uint64_t host_rate_trace_count_ = 0;
 
   // Ordered by the Z order, and then by the time of addition.
   // Note: All the iteration logic involving this Z ordering must be the same as

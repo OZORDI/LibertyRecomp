@@ -21,6 +21,9 @@ class TextChatDialog final : public rex::ui::ImGuiDialog {
   void AttachLive(rex::system::xam::LiveCompatibilityRuntime* live);
   void RequestOpen(rex::system::xam::TextChatChannel channel);
   void Stop();
+  bool WantsContinuousRepaint() const override {
+    return composing_ || requested_channel_.load(std::memory_order_acquire) != 0;
+  }
 
  protected:
   void OnDraw(ImGuiIO& io) override;

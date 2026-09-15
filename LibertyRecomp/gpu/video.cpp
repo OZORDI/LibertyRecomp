@@ -6,6 +6,11 @@
 #include "postprocess_renderer.h"
 #include "upscaler.h"
 #include "camera_extract.h"
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+#include "context_touch_renderer.h"
+#include <hid/context_touch_host.h>
+#include <user/paths.h>
+#endif
 
 // Forward declarations for GTAIV renderer resource registration
 namespace GTAIV {
@@ -1730,6 +1735,9 @@ static constexpr size_t TEXTURE_DESCRIPTOR_SIZE = 32768;
 static constexpr size_t SAMPLER_DESCRIPTOR_SIZE = 1024;
 
 static std::unique_ptr<GuestTexture> g_imFontTexture;
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+static ContextTouchRenderer g_contextTouchRenderer;
+#endif
 static std::unique_ptr<RenderPipelineLayout> g_imPipelineLayout;
 static std::unique_ptr<RenderPipeline> g_imPipeline;
 static std::unique_ptr<RenderPipeline> g_imAdditivePipeline;
@@ -1768,6 +1776,20 @@ struct ImGuiPushConstants
 };
 
 extern ImFontBuilderIO g_fontBuilderIO;
+
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+static std::shared_ptr<void> LoadContextTouchIconTexture(const uint8_t* png, size_t size,
+                                                       uint32_t width, uint32_t height)
+{
+    // The common loader uploads synchronously on the copy queue. Ownership
+    // stays in the touch renderer's cache for every frame using this descriptor.
+    auto texture = LoadTexture(png, size);
+    if (!texture || !texture->texture) return {};
+    texture->width = width;
+    texture->height = height;
+    return std::shared_ptr<GuestTexture>(std::move(texture));
+}
+#endif
 
 static void CreateImGuiBackend()
 {
@@ -1864,6 +1886,13 @@ static void CreateImGuiBackend()
 #endif
 
     io.Fonts->SetTexID(g_imFontTexture.get());
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+    if (!io.Fonts->Fonts.empty())
+    {
+        g_contextTouchRenderer.ConfigureIcons(GetUserPath() / "touch-icons", &LoadContextTouchIconTexture);
+        g_contextTouchRenderer.Initialize(*io.Fonts->Fonts.front(), *io.Fonts);
+    }
+#endif
 
     RenderPipelineLayoutBuilder pipelineLayoutBuilder;
     pipelineLayoutBuilder.begin(false, true);
@@ -1941,7 +1970,7 @@ static void CreateImGuiBackend()
 
 static void CheckSwapChain()
 {
-#if defined(__ANDROID__)
+#if REX_PLATFORM_ANDROID || REX_PLATFORM_IOS
     // When Android sends the app to the background the ANativeWindow is
     // destroyed and the Vulkan surface becomes invalid.  Touching the
     // swapchain in that state will crash; just mark it invalid and bail.
@@ -3258,7 +3287,7 @@ static void DrawImGui()
 
 static void SetFramebuffer(GuestSurface *renderTarget, GuestSurface *depthStencil, bool settingForClear);
 
-static void ProcDrawImGui(const RenderCommand& cmd)
+static void ProcDrawImGuiData(const ImDrawData& drawData, bool bindGuestBackBuffer)
 {
     // Safety check: skip ImGui if backbuffer not ready
     if (g_backBuffer == nullptr || g_backBuffer->texture == nullptr)
@@ -3267,9 +3296,12 @@ static void ProcDrawImGui(const RenderCommand& cmd)
     }
 
     // Make sure the backbuffer is the current target.
-    AddBarrier(g_backBuffer, RenderTextureLayout::COLOR_WRITE);
-    FlushBarriers();
-    SetFramebuffer(g_backBuffer, nullptr, false);
+    if (bindGuestBackBuffer)
+    {
+        AddBarrier(g_backBuffer, RenderTextureLayout::COLOR_WRITE);
+        FlushBarriers();
+        SetFramebuffer(g_backBuffer, nullptr, false);
+    }
 
     auto& commandList = g_commandLists[g_frame];
     auto pipeline = g_imPipeline.get();
@@ -3279,7 +3311,6 @@ static void ProcDrawImGui(const RenderCommand& cmd)
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 0);
     commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 1);
 
-    auto& drawData = *ImGui::GetDrawData();
     commandList->setViewports(RenderViewport(drawData.DisplayPos.x, drawData.DisplayPos.y, drawData.DisplaySize.x, drawData.DisplaySize.y));
 
     ImGuiPushConstants pushConstants{};
@@ -3408,6 +3439,25 @@ static void ProcDrawImGui(const RenderCommand& cmd)
         }
     }
 }
+
+static void ProcDrawImGui(const RenderCommand&)
+{
+    ProcDrawImGuiData(*ImGui::GetDrawData(), true);
+}
+
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+static void ProcDrawContextTouch()
+{
+    // This runs after the final guest-output composite, on the render worker,
+    // with the physical swapchain framebuffer already bound. Safe-area controls
+    // therefore remain correctly placed even with letterboxing or resolution scaling.
+    TouchHost::UpdatePresentation(g_swapChain->getWidth(), g_swapChain->getHeight(),
+                                  Video::s_viewportWidth, Video::s_viewportHeight);
+    if (const auto* drawData = g_contextTouchRenderer.Draw(g_swapChain->getWidth(),
+                                                          g_swapChain->getHeight()))
+        ProcDrawImGuiData(*drawData, false);
+}
+#endif
 
 // We have to check for this to properly handle the following situation:
 // 1. Wait on swap chain.
@@ -3844,10 +3894,19 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
             commandList->setViewports(RenderViewport(0.0f, 0.0f, g_swapChain->getWidth(), g_swapChain->getHeight()));
             commandList->setScissors(RenderRect(0, 0, g_swapChain->getWidth(), g_swapChain->getHeight()));
             commandList->drawInstanced(6, 1, 0, 0);
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+            ProcDrawContextTouch();
+#endif
             commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(swapChainTexture, RenderTextureLayout::PRESENT));
         }
         else
         {
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+            AddBarrier(g_backBuffer, RenderTextureLayout::COLOR_WRITE);
+            FlushBarriers();
+            SetFramebuffer(g_backBuffer, nullptr, false);
+            ProcDrawContextTouch();
+#endif
             AddBarrier(g_backBuffer, RenderTextureLayout::PRESENT);
             FlushBarriers();
         }

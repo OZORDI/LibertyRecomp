@@ -132,6 +132,19 @@ struct SelectionViewport {
   constexpr std::size_t Size() const noexcept { return end - first; }
 };
 
+constexpr bool IsSliderRowVisible(int32_t row, std::size_t first,
+                                  std::size_t visible_capacity) noexcept {
+  return row >= 0 && static_cast<std::size_t>(row) >= first &&
+         static_cast<std::size_t>(row) - first < visible_capacity;
+}
+
+inline double SliderStartY(double row_height, double top,
+                           std::size_t first) noexcept {
+  // Match retail's single-precision row arithmetic before the draw helper
+  // applies the screen/aspect transform to the slider rectangles.
+  return double(float(float(row_height + top) - float(row_height * double(first))));
+}
+
 constexpr SelectionViewport FollowSelectionViewport(std::size_t item_count,
                                                      std::size_t visible_capacity,
                                                      std::size_t selected,

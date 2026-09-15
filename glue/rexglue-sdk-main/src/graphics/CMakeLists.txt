@@ -290,6 +290,9 @@ if(REXGLUE_USE_VULKAN)
         "${GTA4_NATIVE_SHADER_CACHE_ROOT}/shader/shader_cache.cpp"
         PROPERTIES COMPILE_OPTIONS "-Wno-missing-field-initializers"
     )
+    if(APPLE)
+        target_sources(rexgpu-gta4-native PRIVATE gta4_native/native_resource_reclaimer_mac.mm)
+    endif()
     add_library(rex::gpu-gta4-native ALIAS rexgpu-gta4-native)
     rexgpu_configure_plugin(rexgpu-gta4-native gpu-gta4-native)
     target_include_directories(rexgpu-gta4-native PRIVATE

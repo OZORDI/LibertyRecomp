@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <atomic>
 #include <cctype>
 #include <utility>
@@ -289,6 +290,7 @@ void Presenter::FatalErrorHostGpuLossCallback([[maybe_unused]] bool is_responsib
 }
 
 Presenter::~Presenter() {
+  CancelFramePacingWaits();
   // No intrusive lifetime management must be performed from UI drawers - defer
   // it if needed.
   assert_false(is_executing_ui_drawers_);
@@ -461,6 +463,7 @@ void Presenter::PaintFromUIThread(bool force_paint) {
   // OS (which will still be live even if the window goes outside any monitor).
   // But a surface check still won't cause harm, for simplicity.
   if (!InSurfaceOnMonitorFromUIThread()) {
+    frame_publication_gate_.SetAvailable(false);
     return;
   }
 
@@ -647,6 +650,12 @@ bool Presenter::RefreshGuestOutput(
     }
     guest_output_active_last_refresh_ = false;
   }
+
+  const uint64_t publication_serial = frame_publication_gate_.Publish(
+      is_active ? provenance.frame_rate_limit : 0);
+  writable_properties.provenance.publication_serial = publication_serial;
+  host_frame_rate_limit_.store(is_active ? provenance.frame_rate_limit : 0,
+                               std::memory_order_relaxed);
 
   // Make the new image the next to present on the host (the "ready" one),
   // replacing the one already specified as the next (dropping it instead of
@@ -845,6 +854,17 @@ bool Presenter::RefreshGuestOutput(
         connection_name(connection_state_after), action_name(paint_action),
         paint_result_name(paint_result));
   }
+  }
+  if (is_active && provenance.producer_backpressure && provenance.frame_rate_limit &&
+      std::this_thread::get_id() != ui_thread_id_ &&
+      paint_result != PaintResult::kGpuLostResponsible &&
+      paint_result != PaintResult::kGpuLostExternally) {
+    const uint64_t begin = FramePacerNowNs();
+    const bool accepted = frame_publication_gate_.Wait(publication_serial);
+    if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kPresenter)) {
+      REXLOG_INFO("FramePacer point=handoff serial={} frame={} released={} wait-ns={}",
+                  publication_serial, provenance.submitted_frame, accepted, FramePacerNowNs()-begin);
+    }
   }
   // Handle GPU loss when not in the middle of the function anymore, and
   // lifecycle management from the GPU loss callback is fine on the UI thread.
@@ -1536,6 +1556,7 @@ void Presenter::ExecuteUIDrawersFromUIThread(UIDrawContext& ui_draw_context) {
 }
 
 void Presenter::SetPaintModeFromUIThread(PaintMode new_mode) {
+  frame_publication_gate_.SetAvailable(new_mode != PaintMode::kNone);
   // Can be modified only from the UI thread, so can skip locking if it's the
   // same.
   if (paint_mode_ == new_mode) {
@@ -1575,6 +1596,8 @@ Presenter::PaintMode Presenter::GetDesiredPaintModeFromUIThread(bool is_paintabl
 
 void Presenter::DisconnectPaintingFromSurfaceFromUIThread(SurfacePaintConnectionState new_state) {
   assert_false(IsConnectedSurfacePaintConnectionState(new_state));
+  frame_publication_gate_.SetAvailable(false);
+  frame_pacer_.Reset();
   if (IsConnectedSurfacePaintConnectionState(surface_paint_connection_state_)) {
     DisconnectPaintingFromSurfaceFromUIThreadImpl();
   }
@@ -1672,15 +1695,15 @@ bool Presenter::RequestPaintOrConnectionRecoveryViaWindow(bool force_ui_thread_p
   // theoretically. For safety, check whether the window exists unconditionally.
   assert_not_null(window_);
   assert_not_null(surface_);
-  if (ui_thread_paint_requested_.exchange(true, std::memory_order_relaxed)) {
-    // Invalidation pending already, no need to do it twice.
-    return false;
-  }
+  const bool already_requested = ui_thread_paint_requested_.exchange(true, std::memory_order_relaxed);
+  if (already_requested && defer_until_ui_tick) return false;
+  // An immediate request may supersede a future timer. WindowSDL coalesces
+  // matching tickets; the pacer still rejects an attempt before its one deadline.
   if (force_ui_thread_paint_tick) {
     ForceUIThreadPaintTick();
   }
   if (defer_until_ui_tick) {
-    window_->RequestPaintAtUITick();
+    window_->RequestPaintAfterNanoseconds(paint_retry_delay_ns_.load(std::memory_order_relaxed));
   } else {
     window_->RequestPaint();
   }
@@ -1760,7 +1783,29 @@ Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
   assert_false(execute_ui_drawers && !is_in_ui_thread_paint_);
   assert_true(surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable);
   SurfacePaintConnectionState connection_state_before = surface_paint_connection_state_;
+  const uint32_t fps = host_frame_rate_limit_.load(std::memory_order_relaxed);
+  frame_pacer_.Configure(fps, FramePacerNowNs());
+  PollPresentationTiming();
+  pacing_attempt_ = frame_pacer_.Plan(FramePacerNowNs());
+  if (pacing_attempt_.delay_ns) {
+    paint_retry_delay_ns_.store(pacing_attempt_.delay_ns, std::memory_order_relaxed);
+    return PaintResult::kNotPresentedRetry;
+  }
+  paint_retry_delay_ns_.store(1'000'000, std::memory_order_relaxed);
+  const uint64_t paint_begin_ns = FramePacerNowNs();
   PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
+  if (result == PaintResult::kPresented || result == PaintResult::kPresentedSuboptimal) {
+    const uint64_t queue_end_ns = FramePacerNowNs();
+    frame_pacer_.Queued(queue_end_ns);
+    ++host_rate_trace_count_;
+    if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kPresenter)) {
+      REXLOG_INFO("FramePacer point=queued count={} fps={} slot-ns={} paint-begin-ns={} "
+                  "queue-end-ns={} display-target-host-ns={} ui={} missed-slots={}",
+                  host_rate_trace_count_, fps, pacing_attempt_.slot_ns, paint_begin_ns,
+                  queue_end_ns, pacing_attempt_.display_target_ns, execute_ui_drawers,
+                  frame_pacer_.missed_slots());
+    }
+  }
   switch (result) {
     case PaintResult::kPresented:
       surface_paint_connection_was_optimal_at_successful_paint_ = true;

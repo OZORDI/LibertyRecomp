@@ -48,7 +48,6 @@
 #include "gta4_help_trace.h"
 #include "gta4_font_selection_trace.h"
 #include "gta4_draw_distance_policy.h"
-#include "gta4_frame_limiter.h"
 
 REXCVAR_DECLARE(uint32_t, gta4_shadow_map_base_size);
 REXCVAR_DECLARE(double, gta4_shadow_distance_scale);
@@ -344,49 +343,7 @@ const char* TvPresentOriginName(uint32_t origin) {
   }
 }
 
-std::mutex g_native_frame_limiter_mutex;
-gta4::frame_limiter::State g_native_frame_limiter_state;
-uint64_t g_native_frame_limiter_present_count = 0;
 
-void PaceNativePresent(uint32_t submitted_frame) {
-  using Clock = std::chrono::steady_clock;
-  using Nanoseconds = std::chrono::nanoseconds;
-
-  const uint32_t requested_limit = rex::cvar::Query<uint32_t>("gta4_frame_limit");
-  std::lock_guard lock(g_native_frame_limiter_mutex);
-  const int64_t now_ns =
-      std::chrono::duration_cast<Nanoseconds>(Clock::now().time_since_epoch()).count();
-  const auto decision =
-      gta4::frame_limiter::Plan(g_native_frame_limiter_state, requested_limit, now_ns);
-  g_native_frame_limiter_state = decision.next_state;
-  ++g_native_frame_limiter_present_count;
-
-  if (decision.mode_changed) {
-    REXLOG_INFO(
-        "GTA4FrameLimiter point=mode-change frame={} requested-fps={} applied-fps={} "
-        "next-deadline-ns={}",
-        submitted_frame, requested_limit, g_native_frame_limiter_state.frames_per_second,
-        g_native_frame_limiter_state.next_deadline_ns);
-  }
-
-  if (decision.should_wait(now_ns)) {
-    std::this_thread::sleep_until(Clock::time_point(Nanoseconds(decision.wait_until_ns)));
-  }
-
-  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kGuestHooks) &&
-      (g_native_frame_limiter_present_count <= 8 ||
-       !(g_native_frame_limiter_present_count % 120))) {
-    const int64_t completed_ns =
-        std::chrono::duration_cast<Nanoseconds>(Clock::now().time_since_epoch()).count();
-    REXLOG_INFO(
-        "GTA4FrameLimiter point=present frame={} sequence={} fps={} wait-requested={} "
-        "late-reset={} call-begin-ns={} call-end-ns={} wait-until-ns={} next-deadline-ns={}",
-        submitted_frame, g_native_frame_limiter_present_count,
-        g_native_frame_limiter_state.frames_per_second, decision.should_wait(now_ns),
-        decision.late_reset, now_ns, completed_ns, decision.wait_until_ns,
-        g_native_frame_limiter_state.next_deadline_ns);
-  }
-}
 
 struct VectorFontOwnerBinding {
   uint32_t owner_slot;
@@ -581,6 +538,38 @@ class ScopedReplayDrawState {
       return;
     }
 
+    // Replay publishes the temporary constants to the renderer. Restoring the
+    // CPU bytes alone leaves its delta state at the replay value. Mark exactly
+    // the restored float groups and booleans for the next ordinary submission.
+    // These are the same MSB-first, four-register groups as NativeConstantDirtyLayout.
+    constexpr size_t kVertexBytes = 0x1000;
+    constexpr size_t kPixelBytes = 0xE00;
+    constexpr size_t kGroupBytes = 64;
+    static_assert(kReplayShaderConstantsSize == kVertexBytes + kPixelBytes);
+    std::array<uint64_t, 5> restored_dirty{};
+    const uint8_t* applied = GuestPointer(base_, device_ + kReplayShaderConstantsOffset);
+    const auto changed_groups = [&](size_t start, size_t size) {
+      const uint8_t* before = applied + start;
+      const uint8_t* after = backup_.shader_constants.data() + start;
+      uint64_t mask = 0;
+      if (std::memcmp(before, after, size) != 0) {
+        for (size_t offset = 0; offset < size; offset += kGroupBytes) {
+          if (std::memcmp(before + offset, after + offset, kGroupBytes) != 0) {
+            mask |= (uint64_t{1} << 63) >> (offset / kGroupBytes);
+          }
+        }
+      }
+      return mask;
+    };
+    restored_dirty[0] = changed_groups(0, kVertexBytes);
+    restored_dirty[1] = changed_groups(kVertexBytes, kPixelBytes);
+    if (std::memcmp(GuestPointer(base_, device_ + kReplayVertexBooleansOffset),
+                    backup_.vertex_booleans.data(), backup_.vertex_booleans.size()) != 0 ||
+        std::memcmp(GuestPointer(base_, device_ + kReplayPixelBooleansOffset),
+                    backup_.pixel_booleans.data(), backup_.pixel_booleans.size()) != 0) {
+      restored_dirty[4] = uint64_t{1} << 56;
+    }
+
     std::memcpy(GuestPointer(base_, device_ + kReplayFetchStateOffset), backup_.fetch_state.data(),
                 backup_.fetch_state.size());
     std::memcpy(GuestPointer(base_, device_ + kReplayShaderConstantsOffset),
@@ -591,6 +580,17 @@ class ScopedReplayDrawState {
                 backup_.pixel_booleans.data(), backup_.pixel_booleans.size());
     std::memcpy(GuestPointer(base_, device_ + kReplayFixedStateOffset), backup_.fixed_state.data(),
                 backup_.fixed_state.size());
+
+    // Keep pre-existing dirty work. The packed guest words are big-endian;
+    // memcpy avoids adding alignment assumptions to the restoration scope.
+    for (size_t word = 0; word < restored_dirty.size(); ++word) {
+      if (!restored_dirty[word]) continue;
+      uint8_t* destination = GuestPointer(base_, device_ + uint32_t(word * sizeof(uint64_t)));
+      uint64_t guest_word;
+      std::memcpy(&guest_word, destination, sizeof(guest_word));
+      guest_word |= __builtin_bswap64(restored_dirty[word]);
+      std::memcpy(destination, &guest_word, sizeof(guest_word));
+    }
   }
 
   ScopedReplayDrawState(const ScopedReplayDrawState&) = delete;
@@ -4727,6 +4727,10 @@ extern "C" void sub_824F3418(PPCContext& ctx, uint8_t* base) {
   }
 }
 
+// Complete local lifts keep the stock 300-unit remapping boundary in step
+// with the distance input. No shared guest constant is modified.
+#include "gta4_draw_distance_guest.inc"
+
 extern "C" void sub_821DFFE8(PPCContext& ctx, uint8_t* base) {
   const double configured_scale = REXCVAR_GET(gta4_draw_distance_scale);
   if (!IsNativeMode()) {
@@ -4839,11 +4843,15 @@ extern "C" void sub_82A47E28(PPCContext& ctx, uint8_t* base) {
     InvokeGuest(ctx, base, __imp__sub_82A46EA8, live_fence, selector_tree, replay_mask);
   }
 
-  StoreU64(base, device + 32, ~LoadU64(base, command_list + 96));
-  StoreU64(base, device, ~LoadU64(base, command_list + 64));
-  StoreU64(base, device + 8, ~LoadU64(base, command_list + 72));
-  StoreU64(base, device + 16, ~LoadU64(base, command_list + 80));
-  StoreU64(base, device + 24, ~LoadU64(base, command_list + 88));
+  // Unlike the original GPU-list prefix, native replay has not consumed the
+  // inherited CPU changes here. Keep them pending, including restoration from
+  // a previous replay. An empty or selector-filtered list must not erase them.
+  for (uint32_t word = 0; word < NativeDirtyState{}.words.size(); ++word) {
+    const uint32_t dirty_address = device + word * sizeof(uint64_t);
+    StoreU64(base, dirty_address,
+             LoadU64(base, dirty_address) |
+                 ~LoadU64(base, command_list + 64 + word * sizeof(uint64_t)));
+  }
 
   uint64_t selected_count = 0;
   uint64_t submitted_count = 0;
@@ -7212,9 +7220,7 @@ extern "C" void sub_82A467D8(PPCContext& ctx, uint8_t* base) {
         command.diagnostic_device_flag_10942, command.diagnostic_force_content_probe);
   }
   g_last_present_frontbuffer.store(command.frontbuffer_texture, std::memory_order_relaxed);
-  if (SubmitNativeCommand(command)) {
-    PaceNativePresent(submitted_frame);
-  }
+  SubmitNativeCommand(command);
   ctx.r3.u32 = device;
 }
 

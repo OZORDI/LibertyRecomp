@@ -19,6 +19,7 @@ namespace rex {
 namespace ui {
 
 ImGuiDialog::ImGuiDialog(ImGuiDrawer* imgui_drawer) : imgui_drawer_(imgui_drawer) {
+  request_repaint_ = imgui_drawer_->CreateRepaintRequester();
   imgui_drawer_->AddDialog(this);
 }
 

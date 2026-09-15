@@ -28,7 +28,18 @@
 #include <TargetConditionals.h>
 #endif
 
-#if defined(TARGET_OS_MAC) && TARGET_OS_MAC
+#if defined(__SWITCH__)
+#define REX_PLATFORM_NX 1
+#define REX_PLATFORM_CONSOLE 1
+#elif defined(__ORBIS__)
+#define REX_PLATFORM_PS4 1
+#define REX_PLATFORM_CONSOLE 1
+#elif defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#define REX_PLATFORM_IOS 1
+// Darwin's POSIX, Mach, and byte-order code is shared with iOS. AppKit and
+// other desktop-only consumers must additionally exclude REX_PLATFORM_IOS.
+#define REX_PLATFORM_MAC 1
+#elif defined(TARGET_OS_MAC) && TARGET_OS_MAC
 #define REX_PLATFORM_MAC 1
 #elif defined(WIN32) || defined(_WIN32)
 #define REX_PLATFORM_WIN32 1
@@ -46,6 +57,18 @@
 // so they can be used in static_assert and regular expressions.
 #ifndef REX_PLATFORM_MAC
 #define REX_PLATFORM_MAC 0
+#endif
+#ifndef REX_PLATFORM_IOS
+#define REX_PLATFORM_IOS 0
+#endif
+#ifndef REX_PLATFORM_NX
+#define REX_PLATFORM_NX 0
+#endif
+#ifndef REX_PLATFORM_PS4
+#define REX_PLATFORM_PS4 0
+#endif
+#ifndef REX_PLATFORM_CONSOLE
+#define REX_PLATFORM_CONSOLE 0
 #endif
 #ifndef REX_PLATFORM_WIN32
 #define REX_PLATFORM_WIN32 0

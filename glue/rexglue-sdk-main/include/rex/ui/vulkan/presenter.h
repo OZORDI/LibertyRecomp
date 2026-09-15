@@ -21,8 +21,10 @@
 
 #include <rex/assert.h>
 #include <rex/ui/presenter.h>
+#include <rex/ui/presentation_clock.h>
 #include <rex/ui/surface.h>
 #include <rex/ui/vulkan/device.h>
+#include <rex/ui/vulkan/present_mode_policy.h>
 #include <rex/ui/vulkan/instance.h>
 #include <rex/ui/vulkan/submission_tracker.h>
 #include <rex/ui/vulkan/ui_samplers.h>
@@ -438,6 +440,7 @@ class VulkanPresenter final : public Presenter {
     static VkSwapchainKHR CreateSwapchainForVulkanSurface(
         const VulkanDevice* vulkan_device, VkSurfaceKHR surface, uint32_t width, uint32_t height,
         VkSwapchainKHR old_swapchain, bool hdr_requested, bool swapchain_probe_requested,
+        const PresentModeOptions& present_options,
         uint32_t& present_queue_family_out, VkFormat& image_format_out,
         VkColorSpaceKHR& image_color_space_out, VkExtent2D& image_extent_out,
         bool& is_fifo_out, bool& is_hdr_out, bool& swapchain_probe_enabled_out,
@@ -503,6 +506,7 @@ class VulkanPresenter final : public Presenter {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkExtent2D swapchain_extent = {};
     bool swapchain_is_fifo = false;
+    PresentModeOptions present_options;
     bool swapchain_probe_requested = false;
     bool swapchain_probe_enabled = false;
     VkColorSpaceKHR swapchain_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -525,6 +529,15 @@ class VulkanPresenter final : public Presenter {
   }
 
   bool InitializeSurfaceIndependent();
+  void PollPresentationTiming() override;
+  PresentationClockMapping presentation_clock_;
+  PresentationFeedbackHistory presentation_feedback_;
+  bool display_timing_available_ = false;
+  uint64_t display_refresh_ns_ = 0;
+  uint64_t last_feedback_actual_ns_ = 0;
+  uint64_t last_feedback_queue_ns_ = 0;
+  uint64_t last_feedback_generation_ = 0;
+  uint64_t last_refresh_query_host_ns_ = 0;
 
   void PublishPaintTiming(uint64_t acquire_ticks, uint64_t submit_ticks,
                           uint64_t present_ticks, uint64_t total_ticks,

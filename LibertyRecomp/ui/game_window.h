@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rex/platform.h>
+#include <atomic>
 #include <plume_render_interface_types.h>
 #include <user/config.h>
 
@@ -32,7 +33,7 @@ public:
 
     static inline EPlayerCharacter s_playerCharacter;
 
-    static inline bool s_isFocused
+    static inline std::atomic<bool> s_isFocused
 #if REX_PLATFORM_CONSOLE
         = true // Console is always focused
 #endif

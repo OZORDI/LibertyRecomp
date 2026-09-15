@@ -14,11 +14,16 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <vector>
+#include <condition_variable>
+#include <thread>
 
 #include <rex/input/input_driver.h>
 #include <rex/input/motion_sample_cache.h>
+#include <rex/input/sony_feedback.h>
+#include <rex/input/sdl/physical_device_inventory.h>
 
 #include <SDL3/SDL.h>
 
@@ -64,6 +69,19 @@ class SDLInputDriver final : public InputDriver,
     bool state_changed = false;
     bool is_active = false;
     bool trace_initialized = false;
+    uint32_t user_index = 0;
+    sony::Model sony_model = sony::Model::kNone;
+    uint16_t applied_low_motor = 0;
+    uint16_t applied_high_motor = 0;
+    bool sony_light_set = false;
+    bool sony_triggers_set = false;
+    std::array<uint8_t, 3> sony_color{};
+    sony::EffectPacket sony_packet{};
+    uint8_t sony_light_failures = 0;
+    uint8_t sony_trigger_failures = 0;
+    uint8_t sony_rumble_failures = 0;
+    uint64_t sony_rumble_retry_ms = 0;
+    uint64_t sony_retry_ms = 0;
   };
 
   enum class RepeatState {
@@ -92,8 +110,7 @@ class SDLInputDriver final : public InputDriver,
 
   static bool SDLCALL EventWatch(void* userdata, SDL_Event* event);
   void HandleEvent(const SDL_Event& event);
-  void RefreshDeviceInventoryFromUIThread(uint64_t timestamp_ns);
-  void RefreshAndroidKeyboardFromUIThread(uint64_t timestamp_ns, bool force);
+  void RefreshDeviceInventoryFromUIThread(uint64_t timestamp_ns, bool force = false);
   void RefreshPointerPresentation(uint64_t timestamp_ns);
   std::optional<std::vector<SDL_JoystickID>> QueryControllerInventory();
   std::unique_lock<std::mutex> DrainAndLock(bool refresh_rumble = true);
@@ -112,13 +129,20 @@ class SDLInputDriver final : public InputDriver,
                              uint16_t right_motor, bool is_refresh);
   void RefreshRumbleLocked();
   void QueueControllerUpdate();
+  void StartSonyWorker();
+  void StopSonyWorker();
+  void RefreshSonyFeedbackLocked();
 
   rex::ui::Window* attached_window_ = nullptr;
+  rex::ui::WindowedAppContext* attached_app_context_ = nullptr;
+  std::shared_ptr<std::atomic<bool>> ui_callback_alive_ =
+      std::make_shared<std::atomic<bool>>(true);
   const bool expose_gamepad_state_;
   bool sdl_events_initialized_;
   bool SDL_Gamepad_initialized_;
   bool event_watch_installed_ = false;
-  uint64_t next_android_keyboard_refresh_ms_ = 0;
+  PhysicalDeviceInventory physical_device_inventory_;
+  std::atomic<bool> pointer_foreground_refresh_pending_{false};
   std::atomic<bool> accepting_input_requests_{false};
   std::atomic<bool> sdl_pumpevents_queued_;
   std::atomic<uint64_t> next_motion_device_generation_{1};
@@ -126,6 +150,10 @@ class SDLInputDriver final : public InputDriver,
   std::mutex controllers_mutex_;
   MotionSampleCache motion_samples_;
   std::array<KeystrokeState, HID_SDL_USER_COUNT> keystroke_states_;
+  std::thread sony_worker_;
+  std::atomic<bool> sony_stopping_{true};
+  std::mutex sony_wait_mutex_;
+  std::condition_variable sony_wait_;
 };
 
 }  // namespace rex::input::sdl

@@ -34,6 +34,7 @@ struct GTA4TouchExtension {
 
 void GTA4_RegisterTouchExtension(GTA4TouchExtension extension) noexcept;
 void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch);
+uint64_t GTA4_TouchCurrentEpoch() noexcept;
 void GTA4_TouchObserveControlReplay(PPCContext& context, uint8_t* base,
                                     uint32_t control, uint32_t caller,
                                     uint64_t epoch);
@@ -43,6 +44,9 @@ void GTA4_TouchCaptureFrontendDraw(PPCContext& context, uint8_t* base,
                                    GTA4GuestFunction draw_function);
 bool GTA4_TouchVirtualKeyDown(uint16_t key) noexcept;
 bool GTA4_TouchVirtualKeyPressed(uint64_t epoch, uint16_t key) noexcept;
+// Clear host snapshots immediately when presentation stops admitting gameplay.
+// This is safe from the presentation thread and does not modify guest replay.
+void GTA4_CancelTouchGameplayReplay() noexcept;
 // UI-thread-safe ownership signal. It only publishes host state; cancellation
 // and all guest interaction remain on the next guest input poll.
 void GTA4_SetTouchTitleInputOwned(bool owned) noexcept;

@@ -81,6 +81,28 @@ TEST_CASE("Uniform UI scaling preserves edge anchors and pointer round trips", "
   REQUIRE(a::Layout({1280,720}).identity());
   REQUIRE(a::Layout({}).identity());
 }
+TEST_CASE("Radar layers share one bottom-left transform", "[gta4-aspect]") {
+  for (a::Extent out : {a::Extent{1280,720}, {2560,1600}, {3456,2234},
+                         {1024,768}, {3440,1440}, {3840,1080}}) {
+    const auto radar = a::RadarLayout(out);
+    const auto authored = a::Layout(out, {0,1});
+    REQUIRE(radar.sx == Approx(authored.sx));
+    REQUIRE(radar.sy == Approx(authored.sy));
+    REQUIRE(radar.ox == Approx(authored.ox));
+    REQUIRE(radar.oy == Approx(authored.oy));
+    const a::Point anchor{0,1};
+    const auto fixed = radar.Map(anchor);
+    REQUIRE(fixed.x == Approx(anchor.x));
+    REQUIRE(fixed.y == Approx(anchor.y));
+    for (a::Point point : {a::Point{0.1,0.9}, {0.25,0.8}, {0.5,0.75}}) {
+      const auto map_layer = radar.Map(point);
+      const auto route_layer = a::RadarLayout(out).Map(point);
+      REQUIRE(route_layer.x == Approx(map_layer.x));
+      REQUIRE(route_layer.y == Approx(map_layer.y));
+    }
+  }
+}
+
 TEST_CASE("Fixed artwork fits and solid covering backgrounds stay full screen", "[gta4-aspect]") {
   const auto t = a::Layout({2560,1600});
   REQUIRE(t.sx == 1); REQUIRE(t.sy == Approx(0.9)); REQUIRE(t.oy*1600 == Approx(80));
@@ -166,4 +188,40 @@ TEST_CASE("Menu divider layout handles unavailable or invalid frontend data", "[
     REQUIRE(actual.oy == expected.oy);
   }
   REQUIRE(a::MenuBodyLayout({}).identity());
+}
+
+
+TEST_CASE("Touch radar moves the whole viewport and preserves its existing scale", "[gta4-aspect][touch-radar]") {
+  constexpr a::Rect authored{0.04, 0.74, 0.24, 0.96};
+  for (const auto extent : {a::Extent{1280,720}, a::Extent{3440,1440}, a::Extent{390,844}}) {
+    for (const auto base : {a::Transform{}, a::RadarLayout(extent)}) {
+      const auto before = base.Map(authored);
+      for (const auto insets : {a::Point{0.0,1.0}, a::Point{0.08,0.94}}) {
+        const auto moved = a::TopLeftRadarViewport(authored, insets.x, insets.y, base);
+        const auto after = moved.Map(authored);
+        REQUIRE(moved.sx == base.sx);
+        REQUIRE(moved.sy == base.sy);
+        REQUIRE(moved.ox == base.ox);
+        REQUIRE(after.left == before.left);
+        REQUIRE(after.right == before.right);
+        REQUIRE(after.bottom - after.top == Approx(before.bottom - before.top));
+        REQUIRE(after.top >= insets.x);
+        REQUIRE(after.bottom <= insets.y);
+        // Every local layer point follows the relocated viewport. Applying a
+        // screen translation to a local vertex would only move a fraction of it.
+        for (double local_y : {0.03,0.5,0.97}) {
+          const auto source_y = before.top + local_y * (before.bottom - before.top);
+          const auto displayed_y = after.top + local_y * (after.bottom - after.top);
+          REQUIRE(displayed_y - source_y == Approx(moved.oy - base.oy));
+        }
+      }
+    }
+  }
+  const auto legacy = a::TopLeftRadarViewport(authored, 0.08, 0.94);
+  REQUIRE(legacy.Map(authored).top == Approx(0.12));
+  REQUIRE(legacy.sx == 1.0);
+  REQUIRE(legacy.sy == 1.0);
+  REQUIRE(legacy.ox == 0.0);
+  REQUIRE(a::TopLeftRadarViewport(authored, 0.9, 1.0).identity());
+  REQUIRE(a::TopLeftRadarViewport({}).identity());
 }

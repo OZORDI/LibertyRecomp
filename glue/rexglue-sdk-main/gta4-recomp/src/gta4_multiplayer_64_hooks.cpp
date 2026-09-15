@@ -1,5 +1,6 @@
 #include "gta4_multiplayer_64_policy.h"
 #include "gta4_player_info_alias_gate.h"
+#include "gta4_sony_event_hooks.h"
 #include "input/text_chat_team.h"
 
 #include <algorithm>
@@ -3215,7 +3216,9 @@ GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_821B42B8)
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_821B4380)
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_821B4768)
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_824C85B0)
-GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_824DC670)
+extern "C" void sub_824DC670(PPCContext& ctx, uint8_t* base) {
+  RunPrimaryPlayerInfoAlias(ctx, base, GTA4_SonyObserveDamage);
+}
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_824FF330)
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_82500C08)
 GTA4_PRIMARY_PLAYER_INFO_ALIAS_HOOK(sub_82500F10)

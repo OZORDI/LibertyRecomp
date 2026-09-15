@@ -25,10 +25,13 @@ class NativeImageReusePool {
   };
   NativeImageReusePool(uint64_t bytes, size_t entries)
       : byte_limit_(bytes), entry_limit_(entries) {}
+  bool CanRetain(uint64_t bytes, uint64_t last_submission, uint64_t completed_submission) const {
+    return bytes && last_submission <= completed_submission && entries_.size() < entry_limit_ &&
+           bytes <= byte_limit_ && bytes_ <= byte_limit_ - bytes;
+  }
   bool Retain(const NativeImageAllocationKey& key, Allocation allocation, uint64_t bytes,
               uint64_t last_submission, uint64_t completed_submission, uint32_t frame) {
-    if (!bytes || last_submission > completed_submission || entries_.size() >= entry_limit_ ||
-        bytes > byte_limit_ || bytes_ > byte_limit_ - bytes)
+    if (!CanRetain(bytes, last_submission, completed_submission))
       return false;
     entries_.push_back({key, std::move(allocation), bytes, frame});
     bytes_ += bytes;

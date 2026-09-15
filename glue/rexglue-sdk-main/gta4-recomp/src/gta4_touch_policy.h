@@ -215,10 +215,9 @@ class TapTransaction {
 
   bool End(uint64_t pointer_id, uint64_t pointer_generation, uint64_t geometry_generation,
            Point point) noexcept {
-    if (!Matches(pointer_id, pointer_generation, geometry_generation)) {
-      if (active_ && pointer_id == pointer_id_) {
-        Reset();
-      }
+    // Hosts may coalesce movement into the release event. Apply the same
+    // travel limit here before deciding whether this gesture was a tap.
+    if (!Move(pointer_id, pointer_generation, geometry_generation, point)) {
       return false;
     }
     const bool tapped = armed_ && bounds_.contains(point);

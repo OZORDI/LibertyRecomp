@@ -1,6 +1,9 @@
 #include "game_window.h"
 
 #include <os/diag.h>
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+#include <hid/context_touch_host.h>
+#endif
 
 #if !REX_PLATFORM_CONSOLE
 
@@ -12,7 +15,7 @@
 #include <sdl_listener.h>
 // SDL_syswm.h removed in SDL3
 
-#if defined(__APPLE__)
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
 #include <CoreGraphics/CoreGraphics.h>
 #endif
 
@@ -32,7 +35,10 @@ bool m_isResizing = false;
 
 bool Window_OnSDLEvent(void*, SDL_Event* event)
 {
-    if (ImGui::GetIO().BackendPlatformUserData != nullptr)
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+    TouchHost::OnSDLEvent(*event);
+#endif
+    if (ImGui::GetCurrentContext() && ImGui::GetIO().BackendPlatformUserData != nullptr)
         ImGui_ImplSDL3_ProcessEvent(event);
 
     for (auto listener : GetEventListeners())
@@ -158,8 +164,8 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
             GameWindow::SetIcon(GameWindow::s_playerCharacter);
             break;
 
-#if defined(__ANDROID__)
-        // ---- Android lifecycle events ----
+#if REX_PLATFORM_ANDROID || REX_PLATFORM_IOS
+        // ---- Mobile lifecycle events ----
         // When the app goes to the background the ANativeWindow is destroyed
         // by the OS.  SDL3 signals this via SDL_EVENT_DID_ENTER_BACKGROUND
         // and a matching SDL_EVENT_WILL_ENTER_FOREGROUND when the user
@@ -169,17 +175,17 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
         // CheckSwapChain() handles the swapchain resize on the next valid
         // acquireTexture.
         case SDL_EVENT_DID_ENTER_BACKGROUND:
-            LOGFN("Android: entered background — pausing rendering");
+            LOGFN("Mobile: entered background — pausing rendering");
             GameWindow::s_isFocused = false;
             break;
 
-        case SDL_EVENT_WILL_ENTER_FOREGROUND:
-            LOGFN("Android: entering foreground — resuming rendering");
-            GameWindow::s_isFocused = true;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            LOGFN("Mobile: entered foreground — resuming rendering");
+            GameWindow::s_isFocused = (SDL_GetWindowFlags(GameWindow::s_pWindow) & SDL_WINDOW_INPUT_FOCUS) != 0;
             break;
 
         case SDL_EVENT_TERMINATING:
-            LOGFN("Android: OS terminating — exiting");
+            LOGFN("Mobile: OS terminating — exiting");
             App::Exit();
             break;
 #endif
@@ -190,7 +196,7 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
 
 bool GameWindow::Init(const char* sdlVideoDriver)
 {
-#if defined(__APPLE__)
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
     uint32_t displayCount = 0;
     CGError cgErr = CGGetActiveDisplayList(0, nullptr, &displayCount);
     if (cgErr != kCGErrorSuccess || displayCount == 0)
@@ -350,10 +356,14 @@ bool GameWindow::Init(const char* sdlVideoDriver)
         s_renderWindow = { (Display*)x11Display, x11Window };
     }
 #elif defined(__APPLE__)
-    // SDL3: get the native NSWindow* via properties
+    // SDL3 provides a UIWindow on iOS and an NSWindow on macOS.
     s_renderWindow.window = SDL_GetPointerProperty(
         SDL_GetWindowProperties(s_pWindow),
+#if REX_PLATFORM_IOS
+        SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
+#else
         SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+#endif
     // Create Metal layer for rendering
     auto metalView = SDL_Metal_CreateView(s_pWindow);
     s_renderWindow.view = SDL_Metal_GetLayer(metalView);
@@ -364,6 +374,9 @@ bool GameWindow::Init(const char* sdlVideoDriver)
     SetTitleBarColour();
 
     SDL_ShowWindow(s_pWindow);
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+    TouchHost::AttachSDLWindow(s_pWindow);
+#endif
     return true;
 }
 
@@ -574,7 +587,9 @@ void GameWindow::ResetDimensions()
 
 uint32_t GameWindow::GetWindowFlags()
 {
-#if defined(__ANDROID__)
+#if REX_PLATFORM_IOS
+    return SDL_WINDOW_METAL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#elif defined(__ANDROID__)
     // Android: a single foreground window, always fullscreen, always Vulkan,
     // no resize / maximize / hide semantics. SDL_WINDOW_HIDDEN on Android
     // prevents the surface from ever being attached, so we drop it.
@@ -1026,6 +1041,18 @@ void GameWindow::Update()
         DIAG_EMIT("[NX][GameWindow] operation mode changed -> %dx%d\n", w, h);
     }
 }
+
+#if defined(GTA4_TOUCH_LEGACY_HOST)
+namespace TouchHost {
+void UpdateSwitchWindow(bool focused, int& width, int& height)
+{
+    GameWindow::s_isFocused = focused;
+    GameWindow::Update();
+    width = GameWindow::s_width;
+    height = GameWindow::s_height;
+}
+}
+#endif
 
 // ---------- Switch-specific helpers (not in the cross-platform header) ----------
 // These mirror the interface sketched in the task:

@@ -35,6 +35,9 @@
 #include <rex/logging.h>
 #include <rex/math.h>
 #include <rex/platform.h>
+#if REX_PLATFORM_MAC || REX_PLATFORM_GNU_LINUX || REX_PLATFORM_ANDROID
+#include <time.h>
+#endif
 #include <rex/ui/window.h>
 #include <rex/ui/vulkan/presenter.h>
 #include <rex/ui/vulkan/util.h>
@@ -101,6 +104,15 @@ REXCVAR_DEFINE_BOOL(
 static constexpr bool kVulkanHDRDefault = false;
 REXCVAR_DEFINE_BOOL(vulkan_hdr, kVulkanHDRDefault, "UI/Vulkan",
                     "Use an FP16 extended-linear HDR swapchain when supported");
+
+namespace {
+rex::ui::vulkan::PresentModeOptions ReadPresentModeOptions() {
+  return {rex::cvar::Query<bool>("vulkan_prefer_present_mode_fifo"),
+          rex::cvar::Query<bool>("vulkan_allow_present_mode_mailbox"),
+          rex::cvar::Query<bool>("vulkan_allow_present_mode_immediate"),
+          rex::cvar::Query<bool>("vulkan_allow_present_mode_fifo_relaxed")};
+}
+}  // namespace
 
 namespace rex {
 namespace gpu_flight = rex::diagnostics::gpu_flight;
@@ -900,6 +912,7 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
   VkColorSpaceKHR new_swapchain_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   bool new_swapchain_is_hdr = false;
   const bool new_swapchain_hdr_requested = REXCVAR_GET(vulkan_hdr);
+  const PresentModeOptions new_present_options = ReadPresentModeOptions();
   const bool new_swapchain_probe_requested =
       REXCVAR_GET(vulkan_presenter_probe_swapchain_pixels);
   bool new_swapchain_probe_resources_ready = true;
@@ -933,7 +946,7 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
         vulkan_device_, paint_context_.vulkan_surface, new_surface_width, new_surface_height,
         old_swapchain, new_swapchain_hdr_requested,
         new_swapchain_probe_requested && new_swapchain_probe_resources_ready,
-        paint_context_.present_queue_family, new_swapchain_format,
+        new_present_options, paint_context_.present_queue_family, new_swapchain_format,
         new_swapchain_color_space, paint_context_.swapchain_extent,
         paint_context_.swapchain_is_fifo, new_swapchain_is_hdr,
         new_swapchain_probe_enabled, surface_unusable);
@@ -1030,7 +1043,7 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
         vulkan_device_, paint_context_.vulkan_surface, new_surface_width, new_surface_height,
         VK_NULL_HANDLE, new_swapchain_hdr_requested,
         new_swapchain_probe_requested && new_swapchain_probe_resources_ready,
-        paint_context_.present_queue_family, new_swapchain_format,
+        new_present_options, paint_context_.present_queue_family, new_swapchain_format,
         new_swapchain_color_space, paint_context_.swapchain_extent,
         paint_context_.swapchain_is_fifo, new_swapchain_is_hdr,
         new_swapchain_probe_enabled, surface_unusable);
@@ -1050,6 +1063,15 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
   // returning.
 
   ++diagnostic_swapchain_epoch_;
+  frame_pacer().Reset();
+  presentation_clock_ = {};
+  presentation_feedback_.Clear();
+  last_feedback_actual_ns_ = last_feedback_queue_ns_ = last_feedback_generation_ = 0;
+  last_refresh_query_host_ns_ = display_refresh_ns_ = 0;
+  display_timing_available_ = vulkan_device_->extensions().ext_GOOGLE_display_timing &&
+      dfn.vkGetPastPresentationTimingGOOGLE && dfn.vkGetRefreshCycleDurationGOOGLE;
+  REXLOG_INFO("FramePacer swapchain-epoch={} display-timing={} source=presenter single-owner=true",
+              diagnostic_swapchain_epoch_, display_timing_available_);
 
   if (new_swapchain_probe_enabled &&
       !GetDiagnosticSwapchainProbePixelStride(new_swapchain_format)) {
@@ -1063,6 +1085,7 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
   paint_context_.swapchain_color_space = new_swapchain_color_space;
   paint_context_.swapchain_is_hdr = new_swapchain_is_hdr;
   paint_context_.swapchain_hdr_requested = new_swapchain_hdr_requested;
+  paint_context_.present_options = new_present_options;
   paint_context_.swapchain_probe_requested = new_swapchain_probe_requested;
   paint_context_.swapchain_probe_enabled = new_swapchain_probe_enabled;
 
@@ -1356,6 +1379,7 @@ bool VulkanPresenter::RefreshGuestOutputImpl(
 VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
     const VulkanDevice* vulkan_device, VkSurfaceKHR surface, uint32_t width, uint32_t height,
     VkSwapchainKHR old_swapchain, bool hdr_requested, bool swapchain_probe_requested,
+    const PresentModeOptions& present_options,
     uint32_t& present_queue_family_out, VkFormat& image_format_out,
     VkColorSpaceKHR& image_color_space_out, VkExtent2D& image_extent_out,
     bool& is_fifo_out, bool& is_hdr_out, bool& swapchain_probe_enabled_out,
@@ -1662,34 +1686,12 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
     swapchain_create_info.compositeAlpha =
         VkCompositeAlphaFlagBitsKHR(uint32_t(1) << composite_alpha_shift);
   }
-  // Strict FIFO is the macOS default for display-clock backpressure. Other
-  // platforms retain the lower-latency mailbox preference, with immediate
-  // presentation remaining an explicit platform policy.
-  if (REXCVAR_GET(vulkan_prefer_present_mode_fifo)) {
-    // FIFO is required by Vulkan and supplies display-clock backpressure rather
-    // than letting the guest-output producer continuously replace mailbox
-    // entries. On macOS this also keeps presentation on the AppKit/UI path.
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-  } else if (REXCVAR_GET(vulkan_allow_present_mode_mailbox) &&
-      std::find(present_modes.cbegin(), present_modes.cend(), VK_PRESENT_MODE_MAILBOX_KHR) !=
-          present_modes.cend()) {
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
-  } else if (REXCVAR_GET(vulkan_allow_present_mode_immediate) &&
-      std::find(present_modes.cbegin(), present_modes.cend(), VK_PRESENT_MODE_IMMEDIATE_KHR) !=
-          present_modes.cend()) {
-    // Allowing tearing to reduce latency, and possibly variable refresh rate
-    // (though on Windows with borderless fullscreen, GDI copying is used
-    // instead of independent flip, so it's not supported there).
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-  } else if (REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
-             std::find(present_modes.cbegin(), present_modes.cend(),
-                       VK_PRESENT_MODE_FIFO_RELAXED_KHR) != present_modes.cend()) {
-    // Limiting the frame rate, but lets too long frames cause tearing not to
-    // make the latency even worse.
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
-  } else {
-    // Highest latency (but always guaranteed to be available).
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+  swapchain_create_info.presentMode = SelectPresentMode(present_options, present_modes);
+  if (present_options.allow_immediate && !present_options.prefer_fifo &&
+      !present_options.allow_mailbox &&
+      swapchain_create_info.presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR) {
+    REXLOG_WARN("VulkanPresenter: VSync Off requested but immediate presentation is unsupported; "
+                "using required FIFO fallback");
   }
   swapchain_create_info.clipped = VK_TRUE;
   swapchain_create_info.oldSwapchain = old_swapchain;
@@ -1824,8 +1826,86 @@ bool VulkanPresenter::GuestOutputImage::Initialize() {
   return true;
 }
 
+namespace {
+uint64_t QueryWSIPresentationClockNs() {
+#if REX_PLATFORM_MAC
+  // MoltenVK uses MTLDrawable.presentedTime / presentAtTime, the Core Animation
+  // media clock. CLOCK_UPTIME_RAW is mach_absolute_time expressed in ns.
+  constexpr clockid_t clock_id = CLOCK_UPTIME_RAW;
+#elif REX_PLATFORM_GNU_LINUX || REX_PLATFORM_ANDROID
+  // VK_GOOGLE_display_timing's documented POSIX clock.
+  constexpr clockid_t clock_id = CLOCK_MONOTONIC;
+#else
+  return 0;  // No assumed epoch on an unknown WSI implementation.
+#endif
+#if REX_PLATFORM_MAC || REX_PLATFORM_GNU_LINUX || REX_PLATFORM_ANDROID
+  timespec value{};
+  if (clock_gettime(clock_id, &value) != 0 || value.tv_sec < 0) return 0;
+  return uint64_t(value.tv_sec) * FramePacer::kSecond + uint64_t(value.tv_nsec);
+#endif
+}
+}  // namespace
+
+void VulkanPresenter::PollPresentationTiming() {
+  if (!display_timing_available_ || paint_context_.swapchain == VK_NULL_HANDLE) return;
+  const auto& dfn = vulkan_device_->functions();
+  const uint64_t before = FramePacerNowNs();
+  const uint64_t driver_now = QueryWSIPresentationClockNs();
+  const uint64_t after = FramePacerNowNs();
+  if (!presentation_clock_.Sample(before, driver_now, after)) return;
+  if (!last_refresh_query_host_ns_ || after-last_refresh_query_host_ns_ >= FramePacer::kSecond) {
+    VkRefreshCycleDurationGOOGLE refresh{};
+    if (dfn.vkGetRefreshCycleDurationGOOGLE(vulkan_device_->device(), paint_context_.swapchain,
+                                           &refresh) == VK_SUCCESS)
+      display_refresh_ns_ = refresh.refreshDuration;
+    last_refresh_query_host_ns_ = after;
+  }
+  // Bounded, nonblocking query on the same owner that exclusively uses the
+  // swapchain. A partial result is valid; remaining history waits for next paint.
+  std::array<VkPastPresentationTimingGOOGLE, 32> timings{};
+  uint32_t count = uint32_t(timings.size());
+  const VkResult result = dfn.vkGetPastPresentationTimingGOOGLE(
+      vulkan_device_->device(), paint_context_.swapchain, &count, timings.data());
+  if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+    display_timing_available_ = false;
+    REXLOG_WARN("FramePacer timing feedback unavailable result={}; using software pacing", int(result));
+    return;
+  }
+  for (uint32_t i = 0; i < std::min(count, uint32_t(timings.size())); ++i) {
+    const auto& timing = timings[i];
+    const uint64_t actual_host = presentation_clock_.ToHost(timing.actualPresentTime);
+    const auto match = presentation_feedback_.Take(timing.presentID, timing.desiredPresentTime,
+                                                  actual_host, after);
+    if (!match || (timing.desiredPresentTime &&
+        timing.actualPresentTime < timing.desiredPresentTime)) continue;
+    if (match->generation == frame_pacer().generation() && match->fps == frame_pacer().fps())
+      frame_pacer().ObservePhase(actual_host, after);
+    // Driver-reported actual time is not GPU duration; retain both raw domains.
+    // MoltenVK may estimate unavailable/dropped timestamps, so never use its
+    // earliestPresentTime/presentMargin as a GPU execution-time measurement.
+    if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kPresenter)) {
+      const uint64_t delta = last_feedback_actual_ns_ && timing.actualPresentTime > last_feedback_actual_ns_ &&
+          match->generation == last_feedback_generation_ ? timing.actualPresentTime-last_feedback_actual_ns_ : 0;
+      REXLOG_INFO("FramePacer point=feedback epoch={} id={} serial={} frame={} fps={} desired-ns={} "
+                  "driver-actual-ns={} interval-ns={} host-queue-ns={} refresh-ns={} clock-error-ns={}",
+                  diagnostic_swapchain_epoch_, timing.presentID, match->serial, match->frame,
+                  match->fps, timing.desiredPresentTime, timing.actualPresentTime, delta,
+                  match->queue_host_ns, display_refresh_ns_, presentation_clock_.uncertainty());
+    }
+    if (match->queue_host_ns > last_feedback_queue_ns_) {
+      last_feedback_queue_ns_ = match->queue_host_ns;
+      last_feedback_actual_ns_ = timing.actualPresentTime;
+      last_feedback_generation_ = match->generation;
+    }
+  }
+}
+
 Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_drawers) {
   const uint64_t paint_timing_begin = rex::chrono::Clock::QueryHostTickCount();
+  if (paint_context_.present_options != ReadPresentModeOptions()) {
+    REXLOG_INFO("VulkanPresenter: VSync policy changed; recreating swapchain on the UI thread");
+    return PaintResult::kNotPresentedConnectionOutdated;
+  }
   const uint64_t tv_paint_attempt = ++diagnostic_tv_paint_sequence_;
   const bool tv_trace_carried = diagnostic_tv_paint_carry_remaining_ != 0;
   GuestOutputProvenance tv_trace_provenance = diagnostic_tv_provenance_;
@@ -3001,9 +3081,23 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
     swapchain_probe.full_black_fallback = full_black_fallback_recorded;
   }
 
+  const auto& pacing = pacing_attempt();
+  const uint64_t queue_host_ns = FramePacerNowNs();
+  VkPresentTimeGOOGLE present_time{};
+  VkPresentTimesInfoGOOGLE present_times{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
+  if (display_timing_available_) {
+    present_time.presentID = presentation_feedback_.NewID();
+    if (pacing.fps && frame_pacer().phase_observed() && presentation_clock_.valid() &&
+        pacing.display_target_ns > queue_host_ns &&
+        pacing.display_target_ns-queue_host_ns <= FramePacer::kSecond / pacing.fps) {
+      present_time.desiredPresentTime = presentation_clock_.ToDriver(pacing.display_target_ns);
+    }
+    present_times.swapchainCount = 1;
+    present_times.pTimes = &present_time;
+  }
   VkPresentInfoKHR present_info;
   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-  present_info.pNext = nullptr;
+  present_info.pNext = display_timing_available_ ? &present_times : nullptr;
   present_info.waitSemaphoreCount = 1;
   present_info.pWaitSemaphores = &present_semaphore;
   present_info.swapchainCount = 1;
@@ -3020,6 +3114,24 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
   }
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kPresenter)) {
+    REXLOG_INFO("FramePacer point=submit epoch={} id={} serial={} frame={} fps={} "
+                "slot-host-ns={} queue-host-ns={} desired-ns={} result={} fifo={}",
+                diagnostic_swapchain_epoch_, present_time.presentID,
+                guest_output_properties.provenance.publication_serial,
+                guest_output_properties.provenance.submitted_frame, pacing.fps,
+                pacing.slot_ns, queue_host_ns, present_time.desiredPresentTime,
+                int(present_result), paint_context_.swapchain_is_fifo);
+  }
+  if (present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR) {
+    AcceptPacedPublication(guest_output_properties.provenance.publication_serial);
+    if (display_timing_available_) {
+      presentation_feedback_.Insert({present_time.presentID,
+          guest_output_properties.provenance.submitted_frame, pacing.fps, pacing.generation,
+          queue_host_ns, present_time.desiredPresentTime,
+          guest_output_properties.provenance.publication_serial});
+    }
+  }
   gpu_flight::Record("present.queue-end", uint64_t(uintptr_t(paint_context_.swapchain)),
                      current_paint_submission_index, tv_trace_provenance.submitted_frame,
                      swapchain_image_index, diagnostic_swapchain_epoch_, int32_t(present_result));
@@ -3034,6 +3146,16 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
     swapchain_probe.frame_present_result = int32_t(present_result);
     REXLOG_INFO("gta4-frame-pixel: point=present-queued run={} frame={} source={} paint-submission={} result={} physical-scanout-verified=false",
                 frame_probe.run, frame_probe.frame, frame_probe.source_sequence, current_paint_submission_index, int32_t(present_result));
+  }
+  if (rex::diagnostics::IsEnabled(rex::diagnostics::Category::kPresenter) &&
+      (current_paint_submission_index <= 8 || current_paint_submission_index % 30 == 0)) {
+    REXLOG_INFO("FrameLimitTransport point=queued submission={} guest-frame={} limit={} "
+                "ui={} fifo={} result={} host-tick={} host-frequency={}",
+                current_paint_submission_index,
+                guest_output_image ? guest_output_properties.provenance.submitted_frame : 0,
+                guest_output_image ? guest_output_properties.provenance.frame_rate_limit : 0,
+                execute_ui_drawers, paint_context_.swapchain_is_fifo, int32_t(present_result),
+                rex::chrono::Clock::QueryHostTickCount(), rex::chrono::Clock::QueryHostTickFrequency());
   }
   paint_present_ticks = rex::chrono::Clock::QueryHostTickCount() - paint_present_begin;
   const uint64_t paint_timing_end=rex::chrono::Clock::QueryHostTickCount();

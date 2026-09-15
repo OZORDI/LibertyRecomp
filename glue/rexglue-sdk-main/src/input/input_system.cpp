@@ -21,8 +21,12 @@
 #include <rex/input/input_trace.h>
 #include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/input/nop/nop_input_driver.h>
+#if REX_PLATFORM_NX
+#include "switch/switch_input_driver.h"
+#else
 #include <rex/input/sdl/sdl_input_driver.h>
 #include <rex/input/xinput/xinput_input_driver.h>
+#endif
 #include <rex/logging.h>
 
 REXCVAR_DEFINE_STRING(input_backend, "sdl", "Input", "Input backend: sdl, xinput")
@@ -40,11 +44,32 @@ bool GamepadStatesEqual(const X_INPUT_GAMEPAD& lhs, const X_INPUT_GAMEPAD& rhs) 
          lhs.thumb_ry == rhs.thumb_ry;
 }
 
+bool ReadVirtualGamepad(uint32_t user_index, X_INPUT_GAMEPAD& gamepad) {
+  const bool native_active = ReadTouchGamepad(user_index, &gamepad);
+  X_INPUT_GAMEPAD compatibility{};
+  const bool compatibility_active = TouchControlsAvailable() &&
+      mnk::ReadVirtualControllerCompatibilityGamepad(user_index, compatibility);
+  if (compatibility_active) {
+    gamepad.buttons = static_cast<uint16_t>(gamepad.buttons) |
+                      static_cast<uint16_t>(compatibility.buttons);
+    gamepad.left_trigger = std::max(gamepad.left_trigger, compatibility.left_trigger);
+    gamepad.right_trigger = std::max(gamepad.right_trigger, compatibility.right_trigger);
+    const auto axis = [](int16_t a, int16_t b) -> int16_t {
+      return std::abs(int(a)) >= std::abs(int(b)) ? a : b;
+    };
+    gamepad.thumb_lx = axis(gamepad.thumb_lx, compatibility.thumb_lx);
+    gamepad.thumb_ly = axis(gamepad.thumb_ly, compatibility.thumb_ly);
+    gamepad.thumb_rx = axis(gamepad.thumb_rx, compatibility.thumb_rx);
+    gamepad.thumb_ry = axis(gamepad.thumb_ry, compatibility.thumb_ry);
+  }
+  return native_active || compatibility_active;
+}
+
 }  // namespace
 
 InputSystem::InputSystem(rex::ui::Window* window) : window_(window) {}
 
-InputSystem::~InputSystem() = default;
+InputSystem::~InputSystem() { SetTouchInputActiveCallback({}); }
 
 X_STATUS InputSystem::Setup() {
   return X_STATUS_SUCCESS;
@@ -68,6 +93,7 @@ void InputSystem::AttachWindow(rex::ui::Window* window) {
 
 void InputSystem::SetActiveCallback(std::function<bool()> callback) {
   is_active_callback_ = callback;
+  SetTouchInputActiveCallback(callback);
   for (auto& driver : drivers_) {
     driver->set_is_active_callback(callback);
   }
@@ -88,7 +114,7 @@ X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
     }
   }
   X_INPUT_GAMEPAD virtual_pad{};
-  if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad)) {
+  if (ReadVirtualGamepad(user_index, virtual_pad)) {
     if (out_caps) {
       *out_caps = {};
       out_caps->type = 1;
@@ -111,7 +137,7 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
     // ownership of transient input such as relative mouse motion. Capabilities
     // provide the same connection answer without sampling controller state.
     X_INPUT_GAMEPAD virtual_pad{};
-    if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad))
+    if (ReadVirtualGamepad(user_index, virtual_pad))
       return X_ERROR_SUCCESS;
     bool any_connected = false;
     for (auto& driver : drivers_) {
@@ -194,7 +220,7 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
   }
 
   X_INPUT_GAMEPAD virtual_pad{};
-  if (TouchControlsActive() && mnk::ReadVirtualControllerCompatibilityGamepad(user_index, virtual_pad)) {
+  if (ReadVirtualGamepad(user_index, virtual_pad)) {
     // Same host-UI ownership gate as every physical driver. Keep connectivity
     // but publish a neutral virtual source when the title cannot accept input.
     if (is_active_callback_ && !is_active_callback_()) virtual_pad = {};
@@ -207,6 +233,8 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
     };
     merged.gamepad.thumb_lx = axis(merged.gamepad.thumb_lx, virtual_pad.thumb_lx);
     merged.gamepad.thumb_ly = axis(merged.gamepad.thumb_ly, virtual_pad.thumb_ly);
+    merged.gamepad.thumb_rx = axis(merged.gamepad.thumb_rx, virtual_pad.thumb_rx);
+    merged.gamepad.thumb_ry = axis(merged.gamepad.thumb_ry, virtual_pad.thumb_ry);
     first_result = false;
   }
 
@@ -325,6 +353,10 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
   auto input = std::make_unique<InputSystem>(nullptr);
 
   if (!tool_mode) {
+#if REX_PLATFORM_NX
+    auto switch_driver = std::make_unique<nx::SwitchInputDriver>(nullptr, 0);
+    if (switch_driver->Setup() == X_STATUS_SUCCESS) input->AddDriver(std::move(switch_driver));
+#else
     const bool expose_sdl_gamepad_state = REXCVAR_GET(input_backend) == "sdl";
     auto sdl_driver = std::make_unique<sdl::SDLInputDriver>(nullptr, 0, expose_sdl_gamepad_state);
     if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
@@ -348,6 +380,7 @@ std::unique_ptr<InputSystem> CreateDefaultInputSystem(bool tool_mode) {
     if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
       input->AddDriver(std::move(mnk_driver));
     }
+#endif
   }
 
   // NOP driver (primary in tool mode, fallback otherwise)

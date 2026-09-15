@@ -21,6 +21,7 @@
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/ui_event.h>
 #include <rex/ui/window.h>
+#include <rex/ui/windowed_app_context.h>
 
 #include <imgui.h>
 
@@ -36,10 +37,16 @@ static_assert(sizeof(ImmediateVertex) == sizeof(ImDrawVert), "Vertex types must 
 
 ImGuiDrawer::ImGuiDrawer(rex::ui::Window* window, size_t z_order, FontSetupCallback font_setup)
     : window_(window), z_order_(z_order), font_setup_(std::move(font_setup)) {
+  repaint_request_->owner = this;
   Initialize();
 }
 
 ImGuiDrawer::~ImGuiDrawer() {
+  {
+    std::lock_guard lock(repaint_request_->mutex);
+    repaint_request_->owner = nullptr;
+  }
+  input_capture_snapshot_->store(true, std::memory_order_release);
   SetPresenter(nullptr);
   if (!dialogs_.empty()) {
     window_->RemoveInputListener(this);
@@ -371,6 +378,7 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   SetupFontTexture();
 
   if (dialogs_.empty()) {
+    input_capture_snapshot_->store(false, std::memory_order_release);
     return;
   }
 
@@ -393,6 +401,8 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   io.DisplaySize.y = window_->GetActualPhysicalHeight() * physical_to_logical;
 
   ImGui::NewFrame();
+  input_capture_snapshot_->store(io.WantCaptureMouse || io.WantCaptureKeyboard || io.WantTextInput,
+                                 std::memory_order_release);
 
   assert_true(!IsDrawingDialogs());
   dialog_loop_next_index_ = 0;
@@ -403,6 +413,7 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
 
   ImGui::Render();
   ImDrawData* draw_data = ImGui::GetDrawData();
+  visible_ui_last_frame_ = draw_data && draw_data->TotalVtxCount > 0;
   if (draw_data) {
     RenderDrawLists(draw_data, ui_draw_context);
   }
@@ -416,8 +427,9 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   // it now if needed.
   DetachIfLastDialogRemoved();
 
-  if (!dialogs_.empty()) {
-    // Repaint (and handle input) continuously if still active. In detached mode
+  if (std::any_of(dialogs_.begin(), dialogs_.end(),
+                  [](const ImGuiDialog* dialog) { return dialog->WantsContinuousRepaint(); })) {
+    // Only visible animation / active interaction needs a continuous repaint. In detached mode
     // there is no presenter; the app drives repaint via its own present loop.
     if (presenter_) {
       presenter_->RequestUIPaintFromUIThread();
@@ -467,6 +479,36 @@ ImGuiIO& ImGuiDrawer::GetIO() {
   return ImGui::GetIO();
 }
 
+std::function<void()> ImGuiDrawer::CreateRepaintRequester() {
+  // The UI context outlives the drawer. Cross-thread callbacks only hold this
+  // lease; the queued UI operation checks lifetime again before touching it.
+  auto state = repaint_request_;
+  auto* context = &window_->app_context();
+  return [state, context] {
+    std::lock_guard lock(state->mutex);
+    if (!state->owner || state->pending) return;
+    state->pending = true;
+    if (!context->CallInUIThreadDeferred([state] {
+          ImGuiDrawer* owner;
+          {
+            std::lock_guard lock(state->mutex);
+            state->pending = false;
+            owner = state->owner;
+          }
+          // Destruction and this callback are both UI-thread owned.
+          if (owner) owner->RequestPaint();
+        })) state->pending = false;
+  };
+}
+
+void ImGuiDrawer::RequestPaint() {
+  if (presenter_) presenter_->RequestUIPaintFromUIThread();
+}
+
+void ImGuiDrawer::RequestInputPaint() {
+  if (visible_ui_last_frame_) RequestPaint();
+}
+
 void ImGuiDrawer::OnKeyDown(KeyEvent& e) {
   OnKey(e, true);
 }
@@ -476,6 +518,7 @@ void ImGuiDrawer::OnKeyUp(KeyEvent& e) {
 }
 
 void ImGuiDrawer::OnKeyChar(KeyEvent& e) {
+  RequestInputPaint();
   auto& io = GetIO();
   unsigned int character = static_cast<unsigned int>(e.virtual_key());
   const bool surrogate = character >= 0xD800 && character <= 0xDFFF;
@@ -486,6 +529,7 @@ void ImGuiDrawer::OnKeyChar(KeyEvent& e) {
 }
 
 void ImGuiDrawer::OnMouseDown(MouseEvent& e) {
+  RequestInputPaint();
   SwitchToPhysicalMouseAndUpdateMousePosition(e);
   auto& io = GetIO();
   int button = -1;
@@ -514,10 +558,12 @@ void ImGuiDrawer::OnMouseDown(MouseEvent& e) {
 }
 
 void ImGuiDrawer::OnMouseMove(MouseEvent& e) {
+  RequestInputPaint();
   SwitchToPhysicalMouseAndUpdateMousePosition(e);
 }
 
 void ImGuiDrawer::OnMouseUp(MouseEvent& e) {
+  RequestInputPaint();
   SwitchToPhysicalMouseAndUpdateMousePosition(e);
   auto& io = GetIO();
   int button = -1;
@@ -546,6 +592,7 @@ void ImGuiDrawer::OnMouseUp(MouseEvent& e) {
 }
 
 void ImGuiDrawer::OnMouseWheel(MouseEvent& e) {
+  RequestInputPaint();
   SwitchToPhysicalMouseAndUpdateMousePosition(e);
   auto& io = GetIO();
   io.MouseWheel += float(e.scroll_y()) / float(MouseEvent::kScrollPerDetent);
@@ -562,7 +609,13 @@ void ImGuiDrawer::OnTouchEvent(TouchEvent& e) {
     if (!io.WantCaptureMouse) {
       return;
     }
-    // The latest pointer needs to be controlling the ImGui mouse.
+    // Keep one device/finger pair until release; a second touchscreen must
+    // not steal or release the first touchscreen's synthetic GUI mouse.
+    if (touch_pointer_id_ != TouchEvent::kPointerIDNone &&
+        (touch_pointer_id_ != pointer_id || touch_device_id_ != e.device_id())) {
+      e.set_handled(true);
+      return;
+    }
     if (touch_pointer_id_ == TouchEvent::kPointerIDNone) {
       // Switching from the mouse to touch input.
       if (ImGui::IsAnyMouseDown()) {
@@ -571,16 +624,19 @@ void ImGuiDrawer::OnTouchEvent(TouchEvent& e) {
       }
     }
     touch_pointer_id_ = pointer_id;
+    touch_device_id_ = e.device_id();
   } else {
-    if (pointer_id != touch_pointer_id_) {
+    if (pointer_id != touch_pointer_id_ || e.device_id() != touch_device_id_) {
       return;
     }
   }
   e.set_handled(true);
+  RequestInputPaint();
   UpdateMousePosition(e.x(), e.y());
   if (action == TouchEvent::Action::kUp || action == TouchEvent::Action::kCancel) {
     io.MouseDown[0] = false;
     touch_pointer_id_ = TouchEvent::kPointerIDNone;
+    touch_device_id_ = 0;
     // Make sure that after a touch, the ImGui mouse isn't hovering over
     // anything.
     reset_mouse_position_after_next_frame_ = true;
@@ -599,10 +655,12 @@ void ImGuiDrawer::ClearInput() {
   std::memset(io.MouseDown, 0, sizeof(io.MouseDown));
   io.ClearInputKeys();
   touch_pointer_id_ = TouchEvent::kPointerIDNone;
+  touch_device_id_ = 0;
   reset_mouse_position_after_next_frame_ = false;
 }
 
 void ImGuiDrawer::OnKey(KeyEvent& e, bool is_down) {
+  RequestInputPaint();
   auto& io = GetIO();
   const VirtualKey virtual_key = e.virtual_key();
   if (auto imGuiKey = VirtualKeyToImGuiKey(virtual_key); imGuiKey) {
@@ -637,6 +695,7 @@ void ImGuiDrawer::UpdateMousePosition(float x, float y) {
 void ImGuiDrawer::SwitchToPhysicalMouseAndUpdateMousePosition(const MouseEvent& e) {
   if (touch_pointer_id_ != TouchEvent::kPointerIDNone) {
     touch_pointer_id_ = TouchEvent::kPointerIDNone;
+    touch_device_id_ = 0;
     auto& io = GetIO();
     std::memset(io.MouseDown, 0, sizeof(io.MouseDown));
     // Nothing needs to be done regarding CaptureMouse and ReleaseMouse - all

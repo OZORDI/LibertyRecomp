@@ -15,7 +15,7 @@
 
 #include <rex/input/input.h>
 #include <rex/input/motion.h>
-#include <rex/kernel.h>
+#include <rex/system/xtypes.h>
 #include <rex/ui/window.h>
 
 namespace rex::ui {

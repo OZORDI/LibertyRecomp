@@ -31,6 +31,7 @@ class AchievementToastDialog : public AchievementNotificationDialog {
   AchievementToastDialog(ImGuiDrawer* drawer, ImmediateDrawer* immediate_drawer,
                          rex::Runtime* runtime);
   ~AchievementToastDialog() override;
+  bool WantsContinuousRepaint() const override;
 
   // Thread-safe: safe to call from any thread, including guest threads.
   void Push(const rex::system::AchievementEvent& event) override;
@@ -47,7 +48,7 @@ class AchievementToastDialog : public AchievementNotificationDialog {
     std::optional<std::chrono::steady_clock::time_point> visible_since;
   };
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::deque<PendingToast> queue_;
   AchievementIconCache icon_cache_;
 };

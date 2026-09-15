@@ -99,6 +99,36 @@ inline Transform MenuBodyLayout(Extent output, double divider_y = kDefaultMenuDi
     divider_y = kDefaultMenuDividerY;
   return Layout(output, {0.5, divider_y});
 }
+// The radar is authored as one bottom-left-anchored composition. Its map, blips,
+// GPS route and other section geometry must all use this same transform even
+// when a section is emitted outside the enclosing HUD_RADAR widget call.
+inline Transform RadarLayout(Extent output) noexcept {
+  return Layout(output, {0.0, 1.0});
+}
+// Move the complete authored radar composition vertically. The original
+// bottom margin becomes its top margin; X, scale and relative layer geometry
+// remain unchanged. Insets are normalized to the displayed guest rectangle.
+inline Transform TopLeftRadarViewport(Rect authored, double safe_top = 0.0,
+                                     double safe_bottom = 1.0, Transform transform = {}) noexcept {
+  if (!std::isfinite(authored.left) || !std::isfinite(authored.top) ||
+      !std::isfinite(authored.right) || !std::isfinite(authored.bottom) ||
+      authored.right <= authored.left || authored.bottom <= authored.top ||
+      !std::isfinite(safe_top) || !std::isfinite(safe_bottom)) return transform;
+  safe_top = std::clamp(safe_top, 0.0, 1.0);
+  safe_bottom = std::clamp(safe_bottom, safe_top, 1.0);
+  const auto bounds = transform.Map(authored);
+  const double height = bounds.bottom - bounds.top;
+  const double available = safe_bottom - safe_top;
+  if (height > available || height <= 0.0) return transform;
+  const double margin = std::clamp(1.0 - bounds.bottom, 0.0, available - height);
+  transform.oy += safe_top + margin - bounds.top;
+  return transform;
+}
+inline Transform TopLeftRadarLayout(Extent output, Rect authored,
+                                    double safe_top = 0.0, double safe_bottom = 1.0) noexcept {
+  return output.valid() ? TopLeftRadarViewport(authored, safe_top, safe_bottom, RadarLayout(output)) :
+                         Transform{};
+}
 inline double ExpandVerticalFov(double authored_degrees, double aspect) noexcept {
   if (!std::isfinite(authored_degrees) || !std::isfinite(aspect) || authored_degrees <= 0 ||
       authored_degrees >= 179 || aspect <= 0)

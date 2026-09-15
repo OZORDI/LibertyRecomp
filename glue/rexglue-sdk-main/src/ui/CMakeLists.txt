@@ -70,11 +70,15 @@ if(WIN32)
     )
 elseif(APPLE)
     set(REXUI_PLATFORM_SOURCES
-        accelerated_pointer_mac.mm
         metal_layer_config_mac.mm
         surface_mac.cpp
     )
-else()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        list(APPEND REXUI_PLATFORM_SOURCES accelerated_pointer_mac.mm)
+    endif()
+elseif(ANDROID)
+    set(REXUI_PLATFORM_SOURCES surface_android.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(REXUI_PLATFORM_SOURCES
         surface_gnulinux.cpp
     )
@@ -114,8 +118,12 @@ target_link_libraries(rexui PUBLIC
     SDL3::SDL3
 )
 target_link_libraries(rexui PRIVATE utf8cpp)
-if(APPLE)
-    target_link_libraries(rexui PRIVATE "-framework AppKit")
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_link_libraries(rexui PRIVATE "-framework AppKit" "-framework QuartzCore")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_link_libraries(rexui PRIVATE "-framework UIKit" "-framework QuartzCore")
+elseif(ANDROID)
+    target_link_libraries(rexui PRIVATE android)
 endif()
 
 # FSR 1 EASU/RCAS is implemented by checked-in shader bytecode and does not
@@ -152,7 +160,7 @@ if(REXGLUE_USE_VULKAN)
 endif()
 
 # Platform-specific dependencies
-if(UNIX AND NOT APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(X11_XCB REQUIRED x11-xcb)
 

@@ -50,6 +50,11 @@ if(WIN32)
     )
     target_compile_definitions(rexcore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 elseif(APPLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(REXCORE_APPLE_FIBER fiber_ios.cpp)
+    else()
+        set(REXCORE_APPLE_FIBER fiber_posix.cpp)
+    endif()
     target_sources(rexcore PRIVATE
         atomic_posix.cpp
         clock_posix.cpp
@@ -57,7 +62,7 @@ elseif(APPLE)
         dynlib_posix.cpp
         exception_handler_mac.cpp
         filesystem_mac.cpp
-        fiber_posix.cpp
+        ${REXCORE_APPLE_FIBER}
         mapped_memory_mac.cpp
         math_gcc.cpp
         memory_mac.cpp
@@ -69,6 +74,11 @@ elseif(APPLE)
         threading_mac.cpp
     )
 elseif(UNIX)
+    if(ANDROID)
+        set(REXCORE_POSIX_FIBER fiber_android.cpp)
+    else()
+        set(REXCORE_POSIX_FIBER fiber_posix.cpp)
+    endif()
     target_sources(rexcore PRIVATE
         atomic_posix.cpp
         clock_posix.cpp
@@ -76,7 +86,7 @@ elseif(UNIX)
         dynlib_posix.cpp
         exception_handler_posix.cpp
         filesystem_posix.cpp
-        fiber_posix.cpp
+        ${REXCORE_POSIX_FIBER}
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_posix.cpp

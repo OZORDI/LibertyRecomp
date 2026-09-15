@@ -114,7 +114,7 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
   }
   if (event.type == paint_event_type_) {
     if (WindowSDL* window = GetWindow(event.user.windowID)) {
-      window->HandlePaintEvent();
+      window->HandlePaintEvent(uint32_t(event.user.code));
     }
     return;
   }

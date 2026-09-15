@@ -36,6 +36,7 @@
 #include "input/text_chat_dialog.h"
 #include "input/context_touch_controls.h"
 #include "input/context_touch_overlay.h"
+#include "input/context_touch_settings.h"
 #include "rpf_button_prompts.h"
 #include <network/community_multiplayer.h>
 #include <network/gta4_voice_audio.h>
@@ -86,14 +87,13 @@ REXCVAR_DEFINE_STRING(gta4_aspect_ratio, "auto", "GTA IV/Graphics/Display",
                       "Render aspect: auto follows the display; fixed ratios fit without stretching")
     .allowed({"auto", "original", "16:9", "16:10", "3:2", "4:3", "5:4", "21:9", "43:18", "32:9", "32:10"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_STRING(gta4_present_mode, "auto", "GTA IV/Graphics/Display",
-                      "Presentation mode: auto, vsync, mailbox, or immediate")
-    .allowed({"auto", "vsync", "mailbox", "immediate"})
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_STRING(gta4_present_mode, "vsync", "GTA IV/Graphics/Display",
+                      "Vertical sync: vsync is On; immediate is Off; auto/mailbox are legacy modes")
+    .allowed({"auto", "vsync", "fifo", "mailbox", "immediate"});
 REXCVAR_DEFINE_UINT32(gta4_frame_limit, 60, "GTA IV/Graphics/Display",
-                      "Maximum guest frame rate: 0 is unlocked; supported caps are 30, 60, and "
+                      "Maximum game and host presentation rate: 0 is unlocked; caps are 30, 40, 60, and "
                       "120 FPS")
-    .allowed({"0", "30", "60", "120"});
+    .allowed({"0", "30", "40", "60", "120"});
 REXCVAR_DEFINE_STRING(gta4_native_hdr_mode, "off", "GTA IV/Graphics/HDR",
                       "HDR output: off, scRGB, or Auto HDR")
     .allowed({"off", "scrgb", "auto_hdr"});
@@ -513,13 +513,16 @@ void SetStartupFlag(std::string_view name, std::string_view value) {
 }
 
 void ApplyPresentationMode() {
-  const auto policy = gta4::presentation::ResolveMode(REXCVAR_GET(gta4_present_mode));
+  const auto configured = rex::cvar::GetFlagByName("gta4_present_mode");
+  const auto policy = gta4::presentation::ResolveMode(configured == "auto" ? "vsync" : configured);
   if (!policy.explicit_mode) return;
   SetStartupFlag("vsync", policy.vsync ? "true" : "false");
   SetStartupFlag("vulkan_prefer_present_mode_fifo", policy.prefer_fifo ? "true" : "false");
   SetStartupFlag("vulkan_allow_present_mode_immediate", policy.immediate ? "true" : "false");
   SetStartupFlag("vulkan_allow_present_mode_mailbox", policy.mailbox ? "true" : "false");
   SetStartupFlag("vulkan_allow_present_mode_fifo_relaxed", "false");
+  REXLOG_INFO("GTA4VSync requested={} enabled={} fifo={} immediate={} mailbox={} apply=live",
+              configured, policy.vsync, policy.prefer_fifo, policy.immediate, policy.mailbox);
 }
 
 void LogEpisodeInstallState(const std::filesystem::path& marketplace_root) {
@@ -619,6 +622,13 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
   }
 
   ApplyPresentationMode();
+  // This callback owns no application pointer. Registry setters serialize the
+  // flag group; swapchain recreation remains on the existing presenter path.
+  static std::once_flag presentation_callback;
+  std::call_once(presentation_callback, [] {
+    rex::cvar::RegisterChangeCallback("gta4_present_mode",
+        [](std::string_view, std::string_view) { ApplyPresentationMode(); });
+  });
   rex::graphics::gta4_native::InitializeHdrController();
 
   const bool ssaa_active =
@@ -680,6 +690,7 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
 void GTA4App::OnPostSetup() {
   gta4::presentation::InitializeOptions();
   rex::graphics::gta4_native::InitializeAntiAliasingController();
+  gta4::input::ConfigureContextTouchSettings(native_config_path_.parent_path() / "touch-controls.ini");
   gta4::input::InitializeContextTouchControls();
   if (REXCVAR_GET(gta4_diagnostics_skip_user_music)) {
     gta4::input::PublishUserMusicPlayer(nullptr);
@@ -985,7 +996,8 @@ void GTA4App::TitleProfileSyncWorkerMain() {
 void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
   gta4::game_center::Initialize();
   context_touch_overlay_ =
-      std::make_unique<gta4::input::ContextTouchOverlay>(drawer);
+      std::make_unique<gta4::input::ContextTouchOverlay>(
+          drawer, immediate_drawer(), native_config_path_.parent_path() / "touch-icons", window());
   text_chat_dialog_ = std::make_unique<gta4::input::TextChatDialog>(
       drawer, [this](bool captured) {
         SetTitleInputCaptured(captured);
@@ -1016,11 +1028,17 @@ bool GTA4App::RequiresSynchronizedInitialThreadResume() const {
              rex::graphics::gta4_native::kTitleCommandAbi;
 }
 
+bool GTA4App::OnWindowCloseRequested() {
+  (void)gta4::input::FlushContextTouchSettings();
+  return true;
+}
+
 void GTA4App::OnShutdown() {
   if (entitlement_service_) {
     entitlement_service_->SetConnectionRestoredHandler({});
     entitlement_service_ = nullptr;
   }
+  (void)gta4::input::FlushContextTouchSettings();
   gta4::input::ShutdownContextTouchControls();
   context_touch_overlay_.reset();
   rex::ui::UnregisterBind("bind_gta4_all_chat");

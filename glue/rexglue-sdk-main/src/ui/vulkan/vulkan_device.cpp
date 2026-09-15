@@ -230,6 +230,7 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
   if (with_swapchain) {
     // #2.
     XE_UI_VULKAN_STRUCT_EXTENSION(KHR_swapchain)
+    XE_UI_VULKAN_STRUCT_EXTENSION(GOOGLE_display_timing)
   }
 
   bool ext_1_2_KHR_sampler_mirror_clamp_to_edge = false;
@@ -944,6 +945,17 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
 #undef XE_UI_VULKAN_FUNCTION_PROMOTED
 
 #undef XE_UI_VULKAN_FUNCTION
+
+  if (device->extensions_.ext_GOOGLE_display_timing) {
+    dfn.vkGetRefreshCycleDurationGOOGLE = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(
+        ifn.vkGetDeviceProcAddr(device->device_, "vkGetRefreshCycleDurationGOOGLE"));
+    dfn.vkGetPastPresentationTimingGOOGLE = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
+        ifn.vkGetDeviceProcAddr(device->device_, "vkGetPastPresentationTimingGOOGLE"));
+    if (!dfn.vkGetRefreshCycleDurationGOOGLE || !dfn.vkGetPastPresentationTimingGOOGLE) {
+      device->extensions_.ext_GOOGLE_display_timing = false;
+      REXLOG_WARN("Presentation timing entry points unavailable; using software pacing");
+    }
+  }
 
   if (!functions_loaded) {
     REXLOG_ERROR("Failed to get all Vulkan device function pointers for '{}'",

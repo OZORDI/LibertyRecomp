@@ -3,12 +3,15 @@
 #include "gta4_input_action_routing.h"
 #include "gta4_map_pan_policy.h"
 #include "gta4_pc_input_bridge.h"
+#include "gta4_mouse_aim_policy.h"
 #include "gta4_vehicle_weapon_policy.h"
 #include "gta4_vehicle_mouse_policy.h"
 #include "gta4_touch_coordinator.h"
 #include "gta4_motion_bridge.h"
 #include "gta4_gyro_aim_policy.h"
+#include "gta4_sony_feedback.h"
 #include "input/context_touch_controls.h"
+#include "input/context_touch_context.h"
 #include "input/user_music_player.h"
 
 #include <rex/cvar.h>
@@ -24,6 +27,7 @@
 #include <rex/ui/virtual_key.h>
 
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +36,8 @@
 
 REXCVAR_DEFINE_BOOL(gta4_native_input_trace, false, "GTA IV/Input",
                     "Trace native keyboard/mouse poll epochs and action injection");
+REXCVAR_DEFINE_BOOL(gta4_mouse_aim_toggle, false, "GTA IV/Input",
+                    "Toggle firearm mouse aiming with RMB instead of holding it");
 REXCVAR_DEFINE_BOOL(gta4_motion_aim, false, "GTA IV/Motion Sensor",
                     "Enable gyroscope fine aiming when aiming on foot");
 REXCVAR_DEFINE_DOUBLE(gta4_motion_aim_full_scale, 2.0, "GTA IV/Motion Sensor/Tuning",
@@ -284,6 +290,10 @@ struct InputEpoch {
   uint32_t gamepad_packet = 0;
   int32_t mouse_x = 0;
   int32_t mouse_y = 0;
+  bool mouse_camera_candidate = false;
+  bool mouse_camera_allowed = false;
+  bool mouse_aim = false;
+  bool mouse_free_aim = false;
   int32_t gyro_x = 0;
   int32_t gyro_y = 0;
   int32_t map_mouse_x = 0;
@@ -309,6 +319,8 @@ struct InputEpoch {
 
 std::mutex g_epoch_mutex;
 InputEpoch g_epoch;
+MouseAimLatch g_mouse_aim_latch;
+std::atomic<uint64_t> g_last_supported_mouse_camera_epoch{0};
 MouseAxisQuantizer g_mouse_x_quantizer;
 MouseAxisQuantizer g_mouse_y_quantizer;
 MouseAxisQuantizer g_map_mouse_x_quantizer;
@@ -1427,6 +1439,7 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
   std::lock_guard lock(g_epoch_mutex);
   const bool controller_context_changed =
       g_epoch.helicopter_controls != helicopter_controls;
+  const uint64_t previous_sequence = g_epoch.sequence;
   ++g_epoch.sequence;
   g_epoch.helicopter_controls = helicopter_controls;
   g_epoch.valid = valid;
@@ -1447,6 +1460,10 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
   g_epoch.map_active = frontend_active && screen == kMapScreen;
   g_epoch.mouse_x = 0;
   g_epoch.mouse_y = 0;
+  g_epoch.mouse_camera_candidate = false;
+  g_epoch.mouse_camera_allowed = false;
+  g_epoch.mouse_aim = false;
+  g_epoch.mouse_free_aim = false;
   g_epoch.map_mouse_x = 0;
   g_epoch.map_mouse_y = 0;
   g_epoch.pressed_keys = {};
@@ -1459,6 +1476,7 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
                          gamepad_valid != g_trace_last_gamepad_valid ||
                          gamepad_buttons != g_trace_last_gamepad_buttons;
   if (!valid) {
+    g_mouse_aim_latch = {};
     g_epoch.state = {};
     g_last_functional_keys = {};
     g_escape_state = {};
@@ -1530,7 +1548,41 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
   }
   g_epoch.gyro_x = g_epoch.gyro_y = 0;
   const auto vehicle = ReadVehicleInputContext(base);
-  const bool aiming = IsDown(g_epoch.state, VirtualKey::kRButton) ||
+  // The phone can stay visible during gameplay and photography. Let the
+  // admitted retail camera handle look input; opening it only clears toggle aim.
+  const bool mouse_gameplay = native_valid && !frontend_active &&
+      !GTA4_TouchTitleInputOwned() && LoadU32(base, 0x82BA1D40) == 0 && vehicle.ped;
+  const bool physical_rmb = state.keys[static_cast<size_t>(VirtualKey::kRButton)] != 0;
+  // Match sub_82299AD0's bounded weapon-info lookup. Never use the broad
+  // IS_CHAR_ARMED predicate here: it includes melee weapons.
+  if (mouse_gameplay) {
+    const uint32_t manager = vehicle.ped + 640;
+    const uint32_t slot = LoadU32(base, manager);
+    if (slot <= 10) {
+      const uint32_t type = LoadU32(base, manager + 36 + slot * 8);
+      if (type < 60 && type != 0 && type != 46) {
+        g_epoch.mouse_free_aim = MouseFreeAimWeapon(
+            LoadU32(base, 0x82CB8AB0 + type * 272 + 12));
+      }
+    }
+  }
+  const bool toggle_aim = REXCVAR_GET(gta4_mouse_aim_toggle) &&
+      g_epoch.mouse_free_aim && !vehicle.vehicle && !phone.visible;
+  g_epoch.mouse_aim = g_mouse_aim_latch.Update(mouse_gameplay, toggle_aim,
+      physical_rmb, g_epoch.pressed_keys[static_cast<size_t>(VirtualKey::kRButton)] != 0,
+      state.mouse_reset_generation, vehicle.vehicle ? vehicle.vehicle : vehicle.ped);
+  g_epoch.mouse_camera_candidate = mouse_gameplay &&
+      !(helicopter_controls && !physical_rmb);
+  // Only withdraw the compatibility axes when a reviewed camera consumed
+  // the previous poll. Other camera modes keep their existing input path.
+  // A transition into a reviewed mode uses compatibility input for its first
+  // poll; the camera hook then admits direct displacement for the next one.
+  // Phone photography also has script-controlled camera modes. Preserve its
+  // compatibility axes even if a background gameplay camera is being updated.
+  g_epoch.mouse_camera_allowed = g_epoch.mouse_camera_candidate && !phone.visible &&
+      previous_sequence != 0 &&
+      g_last_supported_mouse_camera_epoch.load(std::memory_order_relaxed) == previous_sequence;
+  const bool aiming = g_epoch.mouse_aim || IsDown(g_epoch.state, VirtualKey::kRButton) ||
       (gamepad_valid && gamepad_state.gamepad.left_trigger > 30);
   const bool gyro_allowed = REXCVAR_GET(gta4_motion_aim) && aiming && !frontend_active &&
       !phone.visible && !vehicle.vehicle && !GTA4_TouchTitleInputOwned() &&
@@ -1618,6 +1670,18 @@ void InjectEpoch(uint8_t* base, uint32_t control, uint32_t active_gameplay_contr
     if (helicopter_driver &&
         (binding.action == Action::kVehicleAttack ||
          binding.action == Action::kVehicleAttack2)) {
+      continue;
+    }
+    if (binding.action == Action::kAim && owns_gameplay && !epoch.frontend_active) {
+      if (epoch.mouse_aim) {
+        gameplay_activity |= MergeButton(base, control, binding.action,
+            MouseAimPressure(epoch.mouse_free_aim, LoadU8(base, 0x82FD1E3C) != 0,
+                             LoadU8(base, 0x82AA1B0F)));
+      }
+      // Touch RMB retains the full trigger used by the console controls.
+      if (GTA4_TouchVirtualKeyDown(static_cast<size_t>(binding.key))) {
+        gameplay_activity |= MergeButton(base, control, binding.action, kPressed);
+      }
       continue;
     }
     if (IsNativeActionDown(epoch, binding.key) &&
@@ -1764,15 +1828,21 @@ void InjectEpoch(uint8_t* base, uint32_t control, uint32_t active_gameplay_contr
             rex::input::mnk::EncodeActionMagnitude(LoadU8(base, right), yaw.right));
     gameplay_activity = true;
   }
-  gameplay_activity |=
-      MergeAxis(base, control, Action::kLookLeft, Action::kLookRight, mouse.camera_x);
-  gameplay_activity |= MergeAxis(base, control, Action::kLookUp, Action::kLookDown, mouse.camera_y);
-  gameplay_activity |=
-      MergeAxis(base, control, Action::kVehicleGunLeft, Action::kVehicleGunRight, mouse.camera_x);
-  gameplay_activity |=
-      MergeAxis(base, control, Action::kVehicleGunUp, Action::kVehicleGunDown, mouse.camera_y);
-  gameplay_activity |=
-      MergeAxis(base, control, Action::kVehicleLookLeft, Action::kVehicleLookRight, mouse.camera_x);
+  // Camera displacement is consumed by the camera hooks after the controller
+  // response. Feeding it into these action bytes as well would apply it twice.
+  gameplay_activity |= epoch.mouse_camera_allowed && epoch.state.mouse_has_motion;
+  if (epoch.mouse_camera_candidate && !epoch.mouse_camera_allowed) {
+    gameplay_activity |= MergeAxis(base, control, Action::kLookLeft, Action::kLookRight,
+                                   mouse.camera_x);
+    gameplay_activity |= MergeAxis(base, control, Action::kLookUp, Action::kLookDown,
+                                   mouse.camera_y);
+    gameplay_activity |= MergeAxis(base, control, Action::kVehicleGunLeft,
+                                   Action::kVehicleGunRight, mouse.camera_x);
+    gameplay_activity |= MergeAxis(base, control, Action::kVehicleGunUp,
+                                   Action::kVehicleGunDown, mouse.camera_y);
+    gameplay_activity |= MergeAxis(base, control, Action::kVehicleLookLeft,
+                                   Action::kVehicleLookRight, mouse.camera_x);
+  }
 
   if (gameplay_activity || context_activity) {
     StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
@@ -2033,6 +2103,7 @@ extern "C" void sub_828CCD60(PPCContext& ctx, uint8_t* base) {
   __imp__sub_828CCD60(ctx, base);
   const gta4::input::InputEpoch epoch =
       gta4::input::CaptureEpoch(ctx, base, caller, helicopter_controls);
+  GTA4_SonyEndPoll(ctx, base);
   gta4::input::ProcessPauseTabShoulders(ctx, base, epoch);
   gta4::GTA4MotionBridge::Get().SetReloadContextActive(
       !epoch.frontend_active && !epoch.phone_visible && !GTA4_TouchTitleInputOwned() &&
@@ -2191,6 +2262,7 @@ extern "C" void sub_822B7DD0(PPCContext& ctx, uint8_t* base) {
         gta4::input::g_keyboard_action_trace);
   }
   GTA4_TouchObserveControlReplay(ctx, base, control, caller, epoch.sequence);
+  GTA4_SonyReplay(ctx, base, control);
   if (native_user_control) {
     gta4::input::TraceActionState(
         "gta-actions-final", epoch,
@@ -2203,6 +2275,14 @@ extern "C" void sub_822B7DD0(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_8224FFC8(PPCContext& ctx, uint8_t* base) {
+  // Shared native frontend event query (including callers outside the list
+  // poll). Keep keyboard/controller navigation behind the explicit editor's
+  // pointer ownership, through its closing fade. Ordinary menus retain the
+  // complete existing consumer below.
+  if (gta4::input::ContextTouchEditorCapturesInput()) {
+    ctx.r3.u64 = 0;
+    return;
+  }
   const uint32_t event = ctx.r3.u32;
   const uint32_t caller = ctx.lr;
   const bool one_shot_before =
@@ -2480,37 +2560,54 @@ extern "C" void sub_822D4158(PPCContext& ctx, uint8_t* base) {
 
 extern "C" void sub_825D1AF8(PPCContext& ctx, uint8_t* base) {
   const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
   __imp__sub_825D1AF8(ctx, base);
   const uint64_t epoch = gta4::input::ReadEpoch().sequence;
   const gta4::input::ParachuteScriptContext parachute =
       gta4::input::ReadParachuteScriptContext(base);
   if (parachute.active) {
-    gta4::input::ObserveTouchParachuteState(parachute.state, epoch);
+    gta4::input::ObserveTouchParachuteState(parachute.state, epoch, touch_thread);
   }
   const bool forced =
       gta4::input::ForceParachuteRawButtonResult(base, call_context) |
       gta4::input::MergeTouchScriptQueryResult(
           base, call_context, gta4::input::TouchScriptQueryKind::kRawButton,
-          epoch);
+          epoch, touch_thread, touch_context.generation);
   if (forced && REXCVAR_GET(gta4_native_input_trace)) {
     REXLOG_INFO("gta4-input: parachute smoke button forced");
   }
 }
 
+extern "C" void sub_825D1B40(PPCContext& ctx, uint8_t* base) {
+  const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
+  const auto parachute = gta4::input::ReadTouchParachuteState(base);
+  __imp__sub_825D1B40(ctx, base);
+  if (parachute)
+    gta4::input::ObserveTouchParachuteState(*parachute, touch_context.epoch, touch_thread);
+  gta4::input::MergeTouchScriptQueryResult(
+      base, call_context, gta4::input::TouchScriptQueryKind::kRawButtonPressed,
+      touch_context.epoch, touch_thread, touch_context.generation);
+}
+
 extern "C" void sub_825D1B88(PPCContext& ctx, uint8_t* base) {
   const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
   __imp__sub_825D1B88(ctx, base);
   const uint64_t epoch = gta4::input::ReadEpoch().sequence;
   const gta4::input::ParachuteScriptContext parachute =
       gta4::input::ReadParachuteScriptContext(base);
   if (parachute.active) {
-    gta4::input::ObserveTouchParachuteState(parachute.state, epoch);
+    gta4::input::ObserveTouchParachuteState(parachute.state, epoch, touch_thread);
   }
   const bool forced =
       gta4::input::ForceParachuteControlResult(base, call_context, false, 1) |
       gta4::input::MergeTouchScriptQueryResult(
           base, call_context, gta4::input::TouchScriptQueryKind::kControlHeld,
-          epoch);
+          epoch, touch_thread, touch_context.generation);
   if (forced && REXCVAR_GET(gta4_native_input_trace)) {
     REXLOG_INFO("gta4-input: parachute held control forced");
   }
@@ -2518,18 +2615,21 @@ extern "C" void sub_825D1B88(PPCContext& ctx, uint8_t* base) {
 
 extern "C" void sub_825D1BD0(PPCContext& ctx, uint8_t* base) {
   const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
   __imp__sub_825D1BD0(ctx, base);
   const uint64_t epoch = gta4::input::ReadEpoch().sequence;
   const gta4::input::ParachuteScriptContext parachute =
       gta4::input::ReadParachuteScriptContext(base);
   if (parachute.active) {
-    gta4::input::ObserveTouchParachuteState(parachute.state, epoch);
+    gta4::input::ObserveTouchParachuteState(parachute.state, epoch, touch_thread);
   }
   const bool forced =
       gta4::input::ForceParachuteControlResult(base, call_context, true, 1) |
       gta4::input::MergeTouchScriptQueryResult(
           base, call_context,
-          gta4::input::TouchScriptQueryKind::kControlPressed, epoch);
+          gta4::input::TouchScriptQueryKind::kControlPressed, epoch,
+          touch_thread, touch_context.generation);
   if (forced && REXCVAR_GET(gta4_native_input_trace)) {
     REXLOG_INFO("gta4-input: parachute edge control forced");
   }
@@ -2537,18 +2637,21 @@ extern "C" void sub_825D1BD0(PPCContext& ctx, uint8_t* base) {
 
 extern "C" void sub_825D1C18(PPCContext& ctx, uint8_t* base) {
   const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
   __imp__sub_825D1C18(ctx, base);
   const uint64_t epoch = gta4::input::ReadEpoch().sequence;
   const gta4::input::ParachuteScriptContext parachute =
       gta4::input::ReadParachuteScriptContext(base);
   if (parachute.active) {
-    gta4::input::ObserveTouchParachuteState(parachute.state, epoch);
+    gta4::input::ObserveTouchParachuteState(parachute.state, epoch, touch_thread);
   }
   const bool forced =
       gta4::input::ForceParachuteControlResult(base, call_context, false, 255) |
       gta4::input::MergeTouchScriptQueryResult(
           base, call_context,
-          gta4::input::TouchScriptQueryKind::kControlAnalog, epoch);
+          gta4::input::TouchScriptQueryKind::kControlAnalog, epoch,
+          touch_thread, touch_context.generation);
   if (forced && REXCVAR_GET(gta4_native_input_trace)) {
     REXLOG_INFO("gta4-input: parachute analogue brake forced");
   }
@@ -2556,17 +2659,19 @@ extern "C" void sub_825D1C18(PPCContext& ctx, uint8_t* base) {
 
 extern "C" void sub_825D20A0(PPCContext& ctx, uint8_t* base) {
   const uint32_t call_context = ctx.r3.u32;
+  const uint32_t touch_thread = gta4::input::ReadTouchScriptThread(base);
+  const auto touch_context = gta4::input::GetTouchContextSnapshot();
   __imp__sub_825D20A0(ctx, base);
   const uint64_t epoch = gta4::input::ReadEpoch().sequence;
   const gta4::input::ParachuteScriptContext parachute =
       gta4::input::ReadParachuteScriptContext(base);
   if (parachute.active) {
-    gta4::input::ObserveTouchParachuteState(parachute.state, epoch);
+    gta4::input::ObserveTouchParachuteState(parachute.state, epoch, touch_thread);
   }
   const bool forced =
       gta4::input::ApplyParachuteAnalogueSticks(base, call_context) |
       gta4::input::MergeTouchScriptAnalogueStickResults(base, call_context,
-                                                        epoch);
+                                                        epoch, touch_thread, touch_context.generation);
   if (forced && REXCVAR_GET(gta4_native_input_trace)) {
     REXLOG_INFO("gta4-input: parachute keyboard stick forced");
   }
@@ -2695,3 +2800,5 @@ extern "C" void sub_825D1980(PPCContext& ctx, uint8_t* base) {
       base, gta4::input::ScriptInputQueryTraceKind::kControlPressed, group, action,
       caller, ctx.r3.u32);
 }
+
+#include "gta4_mouse_camera_hooks.inc"

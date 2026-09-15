@@ -105,13 +105,15 @@ bool Gta4NativeGraphicsSystem::PublishIndexedWorkingSet() {
     // A shorter working set must overwrite stale descriptors, including pages
     // not used at all this frame. Leaving old views in Metal argument buffers
     // can retain their allocations beyond the resource's logical lifetime.
-    for (uint32_t i = used ? live_images : 0; i < images; ++i) {
+    for (uint32_t i = 0; i < images; ++i) {
+      if (used && i < live_images && planner.page(local).images[i]) continue;
       if (!(page.image_slots[i] == null_image)) {
         page.image_slots[i] = null_image;
         page.images_dirty = true;
       }
     }
-    for (uint32_t i = used ? live_samplers : 0; i < samplers; ++i) {
+    for (uint32_t i = 0; i < samplers; ++i) {
+      if (used && i < live_samplers && planner.page(local).samplers[i]) continue;
       if (!(page.sampler_slots[i] == null_sampler)) {
         page.sampler_slots[i] = null_sampler;
         page.samplers_dirty = true;
@@ -119,42 +121,51 @@ bool Gta4NativeGraphicsSystem::PublishIndexedWorkingSet() {
     }
     page.published_image_count = live_images;
     page.published_sampler_count = live_samplers;
-    const size_t image_entries = page.images_dirty ? size_t(images) * 4 : 0;
-    const size_t sampler_entries = page.samplers_dirty ? samplers : 0;
-    if (!image_entries && !sampler_entries)
-      continue;
-    page.update_scratch.resize(image_entries + sampler_entries);
-    std::array<VkWriteDescriptorSet, 5> writes{};
-    uint32_t count = 0;
-    if (page.images_dirty) {
-      for (uint32_t dimension = 0; dimension < 4; ++dimension) {
-        auto* infos = page.update_scratch.data() + size_t(dimension) * images;
-        for (uint32_t i = 0; i < images; ++i)
-          infos[i] = {VK_NULL_HANDLE, page.image_slots[i].views[dimension],
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        auto& write = writes[count++];
+    if (!page.images_dirty && !page.samplers_dirty) continue;
+    // Scratch is sized once before storing pointers into it. Keep published
+    // snapshots separate: sparse updates must also clear holes and old tails.
+    page.update_scratch.resize(size_t(images) * 4 + samplers);
+    page.update_writes.clear();
+    uint64_t entries = 0;
+    for (uint32_t dimension = 0; dimension < 5; ++dimension) {
+      const bool sampler = dimension == 4;
+      if (sampler ? !page.samplers_dirty : !page.images_dirty) continue;
+      const uint32_t limit = sampler ? samplers : images;
+      auto* infos = page.update_scratch.data() + size_t(dimension) * images;
+      // Recycled Vulkan handle values still need publication for a new lifetime.
+      const auto changed = [&](uint32_t i) {
+        return sampler ? (i >= page.published_samplers.size() ||
+                          page.published_samplers[i].generation != page.sampler_slots[i].generation ||
+                          page.published_samplers[i].sampler != page.sampler_slots[i].sampler)
+                       : (i >= page.published_images.size() ||
+                          page.published_images[i].generation != page.image_slots[i].generation ||
+                          page.published_images[i].views[dimension] != page.image_slots[i].views[dimension]);
+      };
+      for (uint32_t i = 0; i < limit;) {
+        if (!changed(i)) { ++i; continue; }
+        const uint32_t first = i;
+        do {
+          infos[i] = sampler ? VkDescriptorImageInfo{page.sampler_slots[i].sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED}
+                             : VkDescriptorImageInfo{VK_NULL_HANDLE, page.image_slots[i].views[dimension], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+          ++i;
+        } while (i < limit && changed(i));
+        VkWriteDescriptorSet write{};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstSet = page.descriptor_sets[dimension];
         write.dstBinding = 0;
-        write.descriptorCount = images;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        write.pImageInfo = infos;
+        write.dstArrayElement = first;
+        write.descriptorCount = i - first;
+        write.descriptorType = sampler ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.pImageInfo = infos + first;
+        entries += write.descriptorCount;
+        page.update_writes.push_back(write);
       }
     }
-    if (page.samplers_dirty) {
-      auto* infos = page.update_scratch.data() + image_entries;
-      for (uint32_t i = 0; i < samplers; ++i)
-        infos[i] = {page.sampler_slots[i].sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
-      auto& write = writes[count++];
-      write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      write.dstSet = page.descriptor_sets[4];
-      write.dstBinding = 0;
-      write.descriptorCount = samplers;
-      write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-      write.pImageInfo = infos;
-    }
-    device->functions().vkUpdateDescriptorSets(device->device(), count, writes.data(), 0, nullptr);
-    const uint64_t entries = image_entries + sampler_entries;
+    if (!page.update_writes.empty())
+      device->functions().vkUpdateDescriptorSets(device->device(), uint32_t(page.update_writes.size()),
+                                                page.update_writes.data(), 0, nullptr);
+    page.published_images.assign(page.image_slots.begin(), page.image_slots.begin() + images);
+    page.published_samplers.assign(page.sampler_slots.begin(), page.sampler_slots.begin() + samplers);
     AddNativeGpuProfileCounter(performance::Counter::kDescriptorEntriesWritten, entries);
     frame_descriptor_entries_written_ += uint32_t(entries);
     page.images_dirty = page.samplers_dirty = false;

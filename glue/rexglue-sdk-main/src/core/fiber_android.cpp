@@ -84,9 +84,17 @@ void Fiber::SwitchTo(Fiber* target) {
           :
           : [newsp] "r"(sp), [func] "r"(trampoline)
           : "memory");
+#elif defined(__x86_64__)
+      __asm__ volatile(
+          "mov %[newsp], %%rsp\n\t"
+          "xor %%rbp, %%rbp\n\t"
+          "call *%[func]\n\t"
+          "ud2\n\t"
+          :
+          : [newsp] "r"(sp), [func] "a"(trampoline)
+          : "memory");
 #else
-      (void)sp;
-      trampoline();
+#error Unsupported Android fiber architecture
 #endif
       __builtin_unreachable();
     }

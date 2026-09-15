@@ -287,22 +287,17 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
   if (imgui_drawer_) {
     auto* input_sys = static_cast<rex::input::InputSystem*>(runtime_->input_system());
     if (input_sys) {
-      input_sys->SetActiveCallback([this]() {
-        const bool title_captured = title_input_captured_.load(std::memory_order_acquire);
-        bool active = !title_captured;
-        bool overlay_present = false;
-        bool imgui_captured = false;
-        if (active &&
-            (debug_overlay_ || console_overlay_ || settings_overlay_ || achievements_overlay_)) {
-          overlay_present = true;
-          const ImGuiIO& io = imgui_drawer_->GetIO();
-          imgui_captured = io.WantCaptureMouse || io.WantCaptureKeyboard || io.WantTextInput;
-          active = !imgui_captured;
-        }
+      input_sys->SetActiveCallback([capture = input_capture_,
+                                    imgui_capture = imgui_drawer_->input_capture_snapshot()]() {
+        const bool title_captured = capture->title.load(std::memory_order_acquire);
+        const bool overlay_present = capture->overlay.load(std::memory_order_acquire);
+        const bool imgui_captured = imgui_capture->load(std::memory_order_acquire);
+        const bool active = !capture->stopping.load(std::memory_order_acquire) &&
+                            !title_captured && !(overlay_present && imgui_captured);
         if (rex::input::IsInputTraceEnabled()) {
           const int32_t state = active ? 1 : 0;
           const int32_t previous =
-              input_trace_last_active_state_.exchange(state, std::memory_order_acq_rel);
+              capture->last_trace.exchange(state, std::memory_order_acq_rel);
           if (previous != state) {
             REXLOG_INFO(
                 "input-e2e: seq={} stage=focus-capture owner=app active={} title-captured={} "
@@ -457,6 +452,7 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
       debug_overlay_ =
           std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(), frame_stats_provider_);
     }
+    PublishInputOverlayState();
   });
   rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
     if (console_overlay_) {
@@ -464,6 +460,7 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
     } else {
       console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
     }
+    PublishInputOverlayState();
   });
   rex::ui::RegisterBind("bind_settings", "F4", "Toggle settings overlay", [this] {
     if (settings_overlay_) {
@@ -471,6 +468,7 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
     } else {
       settings_overlay_ = std::make_unique<ui::SettingsDialog>(imgui_drawer_.get(), config_path_);
     }
+    PublishInputOverlayState();
   });
   rex::ui::RegisterBind("bind_achievements", "F7", "Toggle achievements overlay", [this] {
     if (achievements_overlay_) {
@@ -478,9 +476,15 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
     } else {
       achievements_overlay_ = CreateAchievementsOverlay();
     }
+    PublishInputOverlayState();
   });
 
   OnCreateDialogs(imgui_drawer_.get());
+}
+
+void ReXApp::PublishInputOverlayState() {
+  input_capture_->overlay.store(debug_overlay_ || console_overlay_ || settings_overlay_ ||
+                                 achievements_overlay_, std::memory_order_release);
 }
 
 void ReXApp::LaunchModule() {
@@ -555,7 +559,7 @@ std::function<void(PathConfig)> ReXApp::MakeResumeCallback() {
 }
 
 void ReXApp::OnKeyDown(ui::KeyEvent& e) {
-  if (title_input_captured_.load(std::memory_order_acquire)) {
+  if (input_capture_->title.load(std::memory_order_acquire)) {
     if (rex::input::IsInputTraceEnabled()) {
       REXLOG_INFO("input-e2e: seq={} stage=focus-capture owner=app key=down result=title-captured",
                   e.input_trace_sequence());
@@ -573,6 +577,7 @@ void ReXApp::OnClosing(ui::UIEvent& e) {
   (void)e;
   REXLOG_INFO("Window closing, shutting down...");
   shutting_down_.store(true, std::memory_order_release);
+  input_capture_->stopping.store(true, std::memory_order_release);
   if (runtime_ && runtime_->kernel_state()) {
     runtime_->kernel_state()->TerminateTitle();
   }
@@ -630,6 +635,7 @@ void ReXApp::OnRestored(ui::UIEvent& e) {
 }
 
 void ReXApp::OnDestroy() {
+  input_capture_->stopping.store(true, std::memory_order_release);
   // Notify subclass before cleanup
   OnShutdown();
 

@@ -294,15 +294,12 @@ TEST_CASE("virtual touch controller keys use retail phone and flight bindings", 
   SetNativeControllerCompatibilityBindings(before);
 }
 
-TEST_CASE("touch frontend and map expose an accessible back button", "[controls_fix][touch]") {
+TEST_CASE("native menu navigation is not covered by touch overlay buttons", "[controls_fix][touch]") {
   using namespace gta4::input;
   ContextTouchViewport v{};v.valid=v.focused=true;v.safe_width=1280;v.safe_height=720;
   for (auto mode : {ContextTouchMode::kFrontend,ContextTouchMode::kMap}) {
     const auto layout=BuildContextTouchLayout(mode,v,{});
-    REQUIRE(layout.control_count==1);
-    CHECK(layout.controls[0].key==rex::ui::VirtualKey::kBack);
-    CHECK(layout.controls[0].minimum_x>=v.safe_x);
-    CHECK(layout.controls[0].maximum_y<=v.safe_y+v.safe_height);
+    CHECK(layout.control_count==0);
   }
 }
 

@@ -8,7 +8,8 @@ namespace gta4::frame_limiter {
 inline constexpr int64_t kNanosecondsPerSecond = 1'000'000'000;
 
 constexpr bool IsSupportedLimit(uint32_t frames_per_second) noexcept {
-  return frames_per_second == 0 || frames_per_second == 30 || frames_per_second == 60 ||
+  return frames_per_second == 0 || frames_per_second == 30 || frames_per_second == 40 ||
+         frames_per_second == 60 ||
          frames_per_second == 120;
 }
 

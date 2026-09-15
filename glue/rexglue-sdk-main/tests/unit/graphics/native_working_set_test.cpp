@@ -229,7 +229,7 @@ TEST_CASE("explicit present modes cannot be overridden by the macOS FIFO prefere
   REQUIRE(mailbox.mailbox);
   REQUIRE(mailbox.vsync);
   REQUIRE_FALSE(mailbox.prefer_fifo);
-  auto fifo = ResolveMode("fifo");
+  auto fifo = ResolveMode("vsync");
   REQUIRE(fifo.explicit_mode);
   REQUIRE(fifo.prefer_fifo);
   REQUIRE(fifo.vsync);

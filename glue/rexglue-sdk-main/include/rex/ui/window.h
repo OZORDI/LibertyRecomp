@@ -371,6 +371,14 @@ class Window {
       RequestPaintAtUITickImpl();
     }
   }
+  // A cap deadline defers work, not the UI thread. Platforms with a native
+  // timer implement the delay; others retain their existing UI-tick fallback.
+  void RequestPaintAfterNanoseconds(uint64_t delay_ns) {
+    if (presenter_surface_) RequestPaintAfterNanosecondsImpl(delay_ns);
+  }
+  void RequestPaintAfter(uint32_t delay_ms) {
+    if (presenter_surface_) RequestPaintAfterImpl(delay_ms);
+  }
   void RequestPresenterUIPaintFromUIThread() {
     if (presenter_) {
       presenter_->RequestUIPaintFromUIThread();
@@ -572,6 +580,14 @@ class Window {
   // Called only if the Surface exists.
   virtual void RequestPaintImpl() = 0;
   virtual void RequestPaintAtUITickImpl() { RequestPaintImpl(); }
+  virtual void RequestPaintAfterNanosecondsImpl(uint64_t delay_ns) {
+    RequestPaintAfterImpl(uint32_t(std::min<uint64_t>(1000,
+        delay_ns / 1'000'000 + (delay_ns % 1'000'000 != 0))));
+  }
+  virtual void RequestPaintAfterImpl(uint32_t delay_ms) {
+    (void)delay_ms;
+    RequestPaintAtUITickImpl();
+  }
 
   // Will also disconnect the surface if needed.
   void OnBeforeClose(WindowDestructionReceiver& destruction_receiver);

@@ -1,6 +1,8 @@
 // Opt-in help-box observation. Sources are the compiled generated .7
 // sub_82223CF8, .6 sub_821F32B8/32F8/6E38, .4 DC constructors/executors,
 // and .0 sub_82146790. No game state, geometry, or command order is changed.
+#include "input/context_touch_context.h"
+
 namespace {
 struct HelpTraceConfig {
   bool enabled = false;
@@ -259,6 +261,8 @@ void GTA4_HelpTraceNativeSubmission(uint32_t type, uint32_t device,
 
 void GTA4_HelpTraceTextSubmit(PPCContext& ctx, uint8_t* base,
                              void (*original)(PPCContext&, uint8_t*)) {
+  gta4::input::ObserveTouchHelpText(base, ctx.r5.u32);
+  struct TouchTextScope { ~TouchTextScope() { gta4::input::EndTouchHelpText(); } } touch_text;
   if (!g_help_call) { original(ctx, base); return; }
   auto& call = *g_help_call;
   ++call.text_submits;
@@ -283,6 +287,8 @@ void GTA4_HelpTraceTextSubmit(PPCContext& ctx, uint8_t* base,
 
 extern "C" void sub_82223CF8(PPCContext& ctx, uint8_t* base) {
   const gta4::aspect::Scope aspect_scope(gta4::aspect::UiRole::kHelp);
+  gta4::input::BeginTouchHelpDraw(base, ctx.r3.u32);
+  struct TouchHelpScope { ~TouchHelpScope() { gta4::input::EndTouchHelpDraw(); } } touch_help;
   if (!HelpEnabled() || !base || !ctx.r3.u32) { __imp__sub_82223CF8(ctx, base); return; }
   HelpCall call;
   call.object = ctx.r3.u32;

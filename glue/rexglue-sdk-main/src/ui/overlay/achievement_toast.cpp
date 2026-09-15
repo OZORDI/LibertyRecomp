@@ -25,8 +25,16 @@ AchievementToastDialog::AchievementToastDialog(ImGuiDrawer* drawer,
 AchievementToastDialog::~AchievementToastDialog() {}
 
 void AchievementToastDialog::Push(const rex::system::AchievementEvent& event) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  queue_.push_back({event, std::chrono::steady_clock::now()});
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queue_.push_back({event, std::chrono::steady_clock::now()});
+  }
+  RequestRepaint();
+}
+
+bool AchievementToastDialog::WantsContinuousRepaint() const {
+  std::lock_guard lock(mutex_);
+  return !queue_.empty();
 }
 
 void AchievementToastDialog::OnDraw(ImGuiIO& io) {

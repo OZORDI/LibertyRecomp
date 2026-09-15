@@ -3,10 +3,8 @@
 #include <user/config.h>
 #include <hid/hid.h>
 #include <hid/mouse_camera.h>
-#include <hid/dualsense.h>
 #include <os/logger.h>
 #include <ui/game_window.h>
-#include <kernel/xdm.h>
 #include <kernel/xam.h>
 #include <kernel/button_prompts.h>
 #include <app.h>
@@ -15,6 +13,201 @@
 #include <mutex>
 #include <cstring>
 #include <cmath>
+
+namespace {
+// Xbox input status and virtual-key values do not depend on legacy guest memory.
+constexpr uint32_t kInputSuccess = 0x0;
+constexpr uint32_t kInputBadArguments = 0xA0;
+constexpr uint32_t kInputNotConnected = 0x48F;
+constexpr uint32_t kKeystrokeDown = 0x0001;
+constexpr uint32_t kKeystrokeUp = 0x0002;
+constexpr uint32_t kKeystrokeRepeat = 0x0004;
+constexpr uint32_t kVirtualBack = 0x08;
+constexpr uint32_t kVirtualTab = 0x09;
+constexpr uint32_t kVirtualReturn = 0x0D;
+constexpr uint32_t kVirtualShift = 0x10;
+constexpr uint32_t kVirtualControl = 0x11;
+constexpr uint32_t kVirtualEscape = 0x1B;
+constexpr uint32_t kVirtualSpace = 0x20;
+constexpr uint32_t kVirtualLeft = 0x25;
+constexpr uint32_t kVirtualUp = 0x26;
+constexpr uint32_t kVirtualRight = 0x27;
+constexpr uint32_t kVirtualDown = 0x28;
+constexpr uint32_t kVirtualDelete = 0x2E;
+} // namespace
+
+#if defined(GTA4_SONY_LEGACY_OWNER)
+#include <rex/input/input_driver.h>
+#include <rex/input/input_system.h>
+#include <rex/input/sony_feedback.h>
+
+namespace sony = rex::input::sony;
+
+namespace {
+
+using rex::X_RESULT;
+using rex::X_STATUS;
+
+// SDL handles stay with this file's event/main-thread owner. Guest input only
+// copies these values or posts a rumble request under the snapshot mutex.
+struct LegacyInputSnapshot {
+    bool connected = false;
+    bool rumble = false;
+    bool wireless = false;
+    bool physicalBack = false;
+    bool touchClick = false;
+    uint64_t generation = 0;
+    rex::input::X_INPUT_STATE state{};
+    uint16_t nativeLow = 0, nativeHigh = 0;
+    uint64_t nativeUntil = 0;
+};
+
+std::mutex g_legacySnapshotMutex;
+std::recursive_mutex g_legacyControllerMutex;
+// SDL event watches run under SDL's event/joystick lock. Always acquire that
+// recursive lock before our controller lock, including main-thread output.
+struct LegacySDLJoystickLock {
+    LegacySDLJoystickLock() { SDL_LockJoysticks(); }
+    ~LegacySDLJoystickLock() { SDL_UnlockJoysticks(); }
+};
+class LegacyControllerLock {
+public:
+    LegacyControllerLock() : controllerLock_(g_legacyControllerMutex) {}
+private:
+    LegacySDLJoystickLock joystickLock_;
+    std::lock_guard<std::recursive_mutex> controllerLock_;
+};
+std::array<LegacyInputSnapshot, 4> g_legacySnapshots;
+uint64_t g_legacyDeviceGeneration = 0;
+bool g_legacyFocused = true;
+bool g_legacySonyRunning = true;
+
+struct LegacySonyOutput {
+    sony::Device device{};
+    sony::EffectPacket packet{};
+    std::array<uint8_t, 3> color{};
+    uint16_t appliedLow = 0, appliedHigh = 0;
+    bool lightSet = false;
+    bool triggersSet = false;
+    unsigned rumbleFailures = 0, lightFailures = 0, triggerFailures = 0;
+    uint64_t nextRumble = 0, rumbleRetryAt = 0, retryAt = 0;
+};
+
+// Put the existing default input system behind the real legacy SDL driver.
+// Its NOP fallback must not hide the physical controller's capabilities.
+class DefaultInputFallback final : public rex::input::InputDriver {
+public:
+    explicit DefaultInputFallback(bool toolMode)
+        : InputDriver(nullptr, 0), input_(rex::input::CreateDefaultInputSystem(toolMode)) {}
+    rex::X_STATUS Setup() override { return input_->Setup(); }
+    const char* trace_name() const override { return "legacy-default-fallback"; }
+    rex::X_RESULT GetCapabilities(uint32_t user, uint32_t flags,
+                                  rex::input::X_INPUT_CAPABILITIES* out) override {
+        return input_->GetCapabilities(user, flags, out);
+    }
+    rex::X_RESULT GetState(uint32_t user, rex::input::X_INPUT_STATE* out) override {
+        return input_->GetState(user, out);
+    }
+    rex::X_RESULT SetState(uint32_t user, rex::input::X_INPUT_VIBRATION* value) override {
+        return input_->SetState(user, value);
+    }
+    rex::X_RESULT GetKeystroke(uint32_t user, uint32_t flags,
+                               rex::input::X_INPUT_KEYSTROKE* out) override {
+        return input_->GetKeystroke(user, flags, out);
+    }
+    bool TryGetMotionState(uint32_t user, rex::input::MotionState* out) override {
+        return input_->TryGetMotionState(user, out);
+    }
+private:
+    std::unique_ptr<rex::input::InputSystem> input_;
+};
+
+class LegacySDLInputDriver final : public rex::input::InputDriver {
+public:
+    LegacySDLInputDriver() : InputDriver(nullptr, 0) {}
+    rex::X_STATUS Setup() override { return X_STATUS_SUCCESS; }
+    const char* trace_name() const override { return "legacy-sdl-owner"; }
+
+    rex::X_RESULT GetCapabilities(uint32_t user, uint32_t,
+                                  rex::input::X_INPUT_CAPABILITIES* out) override {
+        std::lock_guard lock(g_legacySnapshotMutex);
+        if (user >= g_legacySnapshots.size() || !g_legacySnapshots[user].connected)
+            return X_ERROR_DEVICE_NOT_CONNECTED;
+        if (out) {
+            const auto& pad = g_legacySnapshots[user];
+            *out = {};
+            out->type = 1;
+            out->sub_type = 1;
+            out->flags = (pad.rumble ? rex::input::X_INPUT_CAPS_FFB_SUPPORTED : 0) |
+                         (pad.wireless ? rex::input::X_INPUT_CAPS_WIRELESS : 0);
+            out->gamepad.buttons = 0xF3FF;
+            out->gamepad.left_trigger = out->gamepad.right_trigger = 255;
+            out->gamepad.thumb_lx = out->gamepad.thumb_ly = 32767;
+            out->gamepad.thumb_rx = out->gamepad.thumb_ry = 32767;
+            out->vibration.left_motor_speed = pad.rumble ? 65535 : 0;
+            out->vibration.right_motor_speed = pad.rumble ? 65535 : 0;
+        }
+        return X_ERROR_SUCCESS;
+    }
+
+    rex::X_RESULT GetState(uint32_t user, rex::input::X_INPUT_STATE* out) override {
+        LegacyInputSnapshot snapshot;
+        bool focused;
+        {
+            std::lock_guard lock(g_legacySnapshotMutex);
+            if (user >= g_legacySnapshots.size() || !g_legacySnapshots[user].connected)
+                return X_ERROR_DEVICE_NOT_CONNECTED;
+            snapshot = g_legacySnapshots[user];
+            focused = g_legacyFocused;
+        }
+        if (out) {
+            *out = snapshot.state;
+            if (!focused) out->gamepad = {};
+            else {
+                // Re-evaluate the claim at the guest poll so context changes
+                // don't require another SDL button event to update Back.
+                uint16_t buttons = out->gamepad.buttons;
+                buttons &= ~rex::input::X_INPUT_GAMEPAD_BACK;
+                if (snapshot.physicalBack ||
+                    (snapshot.touchClick && !sony::GetService().ClaimsClick(
+                         user, SDL_GetTicks(), sony::GetOptions()))) {
+                    buttons |= rex::input::X_INPUT_GAMEPAD_BACK;
+                }
+                out->gamepad.buttons = buttons;
+            }
+        }
+        return X_ERROR_SUCCESS;
+    }
+
+    rex::X_RESULT SetState(uint32_t user, rex::input::X_INPUT_VIBRATION* value) override {
+        if (!value) return X_ERROR_BAD_ARGUMENTS;
+        std::lock_guard lock(g_legacySnapshotMutex);
+        if (user >= g_legacySnapshots.size() || !g_legacySnapshots[user].connected ||
+            !g_legacySnapshots[user].rumble) return X_ERROR_DEVICE_NOT_CONNECTED;
+        auto& pad = g_legacySnapshots[user];
+        pad.nativeLow = g_legacyFocused ? static_cast<uint16_t>(value->left_motor_speed) : 0;
+        pad.nativeHigh = g_legacyFocused ? static_cast<uint16_t>(value->right_motor_speed) : 0;
+        pad.nativeUntil = SDL_GetTicks() + 5000;
+        return X_ERROR_SUCCESS;
+    }
+
+    rex::X_RESULT GetKeystroke(uint32_t user, uint32_t,
+                               rex::input::X_INPUT_KEYSTROKE* out) override {
+        if (user >= g_legacySnapshots.size()) return X_ERROR_DEVICE_NOT_CONNECTED;
+        if (!out) return X_ERROR_BAD_ARGUMENTS;
+        hid::KeystrokeEvent event{};
+        if (!hid::DequeueKeystroke(static_cast<uint8_t>(user), event)) return X_ERROR_EMPTY;
+        *out = {};
+        out->virtual_key = event.virtualKey;
+        out->unicode = event.unicode;
+        out->flags = event.flags;
+        out->user_index = event.userIndex;
+        return X_ERROR_SUCCESS;
+    }
+};
+
+} // namespace
+#endif
 
 #include <rex/platform.h>
 #if REX_PLATFORM_IOS
@@ -47,6 +240,11 @@
 static hid::MotionState g_motionState{};
 static bool g_motionSensorEnabled = false;
 
+class Controller;
+#if defined(GTA4_SONY_LEGACY_OWNER)
+static void NeutralizeSonyController(Controller& controller, bool disconnect);
+#endif
+
 class Controller
 {
 public:
@@ -56,6 +254,9 @@ public:
     XAMINPUT_GAMEPAD state{};
     XAMINPUT_VIBRATION vibration{ 0, 0 };
     int index{};
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacySonyOutput sonyOutput{};
+#endif
     
     // Motion sensor state
     bool hasGyro{};
@@ -167,6 +368,9 @@ public:
     {
         if (!controller)
             return;
+#if defined(GTA4_SONY_LEGACY_OWNER)
+        NeutralizeSonyController(*this, true);
+#endif
         
         // Disable motion sensors before closing
         if (motionEnabled) {
@@ -344,7 +548,11 @@ public:
 
         pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_START, XAMINPUT_GAMEPAD_START);
         pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_BACK, XAMINPUT_GAMEPAD_BACK);
-        pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_TOUCHPAD, XAMINPUT_GAMEPAD_BACK);
+#if defined(GTA4_SONY_LEGACY_OWNER)
+        if (!sony::GetService().ClaimsClick(static_cast<uint32_t>(index), SDL_GetTicks(),
+                                             sony::GetOptions()))
+#endif
+            pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_TOUCHPAD, XAMINPUT_GAMEPAD_BACK);
 
         pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_LEFT_STICK, XAMINPUT_GAMEPAD_LEFT_THUMB);
         pad.wButtons |= TRANSLATE_INPUT(SDL_GAMEPAD_BUTTON_RIGHT_STICK, XAMINPUT_GAMEPAD_RIGHT_THUMB);
@@ -364,6 +572,16 @@ public:
             return;
 
         this->vibration = vibration;
+
+#if defined(GTA4_SONY_LEGACY_OWNER)
+        // Legacy callers share the main-thread output composer as well.
+        std::lock_guard lock(g_legacySnapshotMutex);
+        auto& snapshot = g_legacySnapshots[index];
+        snapshot.nativeLow = g_legacyFocused ? vibration.wLeftMotorSpeed : 0;
+        snapshot.nativeHigh = g_legacyFocused ? vibration.wRightMotorSpeed : 0;
+        snapshot.nativeUntil = SDL_GetTicks() + VIBRATION_TIMEOUT_MS;
+        return;
+#endif
 
         const uint16_t low  = static_cast<uint16_t>(vibration.wLeftMotorSpeed  * 256);
         const uint16_t high = static_cast<uint16_t>(vibration.wRightMotorSpeed * 256);
@@ -404,6 +622,214 @@ public:
 
 std::array<Controller, 4> g_controllers;
 Controller* g_activeController;
+
+#if defined(GTA4_SONY_LEGACY_OWNER)
+static void RegisterSonyController(Controller& pad)
+{
+    const auto properties = SDL_GetGamepadProperties(pad.controller);
+    const auto type = SDL_GetRealGamepadType(pad.controller);
+    auto& output = pad.sonyOutput;
+    auto& device = output.device;
+    device.instance_id = pad.id;
+    if (++g_legacyDeviceGeneration == 0) ++g_legacyDeviceGeneration;
+    device.generation = g_legacyDeviceGeneration;
+    device.model = type == SDL_GAMEPAD_TYPE_PS4 ? sony::Model::kDualShock4 :
+                   type == SDL_GAMEPAD_TYPE_PS5 ? sony::Model::kDualSense : sony::Model::kNone;
+    device.rumble = SDL_GetBooleanProperty(properties, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+    device.light = SDL_GetBooleanProperty(properties, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false);
+    device.touchpad = SDL_GetNumGamepadTouchpads(pad.controller) > 0;
+    if (device.model == sony::Model::kDualSense) {
+        output.packet = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+        device.triggers = SDL_SendGamepadEffect(pad.controller, output.packet.data(),
+                                                static_cast<int>(output.packet.size()));
+        output.triggersSet = device.triggers;
+    }
+    if (device.model != sony::Model::kNone) {
+        sony::GetService().Connect(static_cast<uint32_t>(pad.index), device);
+        LOGFN("sony-controller: legacy user={} instance={} generation={} model={} touch={} light={} rumble={} triggers={}",
+              pad.index, pad.id, device.generation, static_cast<int>(device.model),
+              device.touchpad, device.light, device.rumble, device.triggers);
+    }
+    std::lock_guard lock(g_legacySnapshotMutex);
+    auto& snapshot = g_legacySnapshots[pad.index];
+    snapshot = {};
+    snapshot.connected = true;
+    snapshot.generation = device.generation;
+    snapshot.rumble = device.rumble;
+    snapshot.wireless = SDL_GetGamepadConnectionState(pad.controller) == SDL_JOYSTICK_CONNECTION_WIRELESS;
+}
+
+static void NeutralizeSonyController(Controller& pad, bool disconnect)
+{
+    auto& output = pad.sonyOutput;
+    if (pad.controller) {
+        if (SDL_RumbleGamepad(pad.controller, 0, 0, 0))
+            output.appliedLow = output.appliedHigh = 0;
+        if (output.device.model == sony::Model::kDualSense && output.triggersSet) {
+            const auto neutral = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+            const unsigned attempts = disconnect ? 3 : 1;
+            for (unsigned attempt = 0; attempt < attempts; ++attempt) {
+                if (SDL_SendGamepadEffect(pad.controller, neutral.data(), static_cast<int>(neutral.size()))) {
+                    output.packet = neutral;
+                    break;
+                }
+            }
+        }
+        if (output.lightSet && SDL_SetGamepadLED(pad.controller, 0, 0, 0)) {
+            output.color = {};
+            output.lightSet = false;
+        }
+    }
+    output.nextRumble = 0;
+    if (disconnect && output.device.model != sony::Model::kNone)
+        sony::GetService().Disconnect(pad.id);
+    std::lock_guard lock(g_legacySnapshotMutex);
+    auto& snapshot = g_legacySnapshots[pad.index];
+    snapshot.nativeLow = snapshot.nativeHigh = 0;
+    snapshot.nativeUntil = 0;
+    if (disconnect) snapshot = {};
+}
+
+static void SnapshotLegacyController(Controller& pad, bool initial = false)
+{
+    // The legacy event watch updates ordinary axes/buttons. Poll once when a
+    // device is discovered; keep copying input at every main-loop iteration.
+    if (initial) {
+        pad.PollAxis();
+        pad.Poll();
+    }
+    rex::input::X_INPUT_GAMEPAD state{};
+    state.buttons = pad.state.wButtons;
+    state.left_trigger = pad.state.bLeftTrigger;
+    state.right_trigger = pad.state.bRightTrigger;
+    state.thumb_lx = pad.state.sThumbLX;
+    state.thumb_ly = pad.state.sThumbLY;
+    state.thumb_rx = pad.state.sThumbRX;
+    state.thumb_ry = pad.state.sThumbRY;
+    sony::GetService().UpdateAxes(static_cast<uint32_t>(pad.index), state.left_trigger, state.right_trigger);
+    const bool back = SDL_GetGamepadButton(pad.controller, SDL_GAMEPAD_BUTTON_BACK);
+    const bool touch = SDL_GetGamepadButton(pad.controller, SDL_GAMEPAD_BUTTON_TOUCHPAD);
+    std::lock_guard lock(g_legacySnapshotMutex);
+    auto& snapshot = g_legacySnapshots[pad.index];
+    if (memcmp(&snapshot.state.gamepad, &state, sizeof(state)) != 0)
+        snapshot.state.packet_number = static_cast<uint32_t>(snapshot.state.packet_number) + 1;
+    snapshot.state.gamepad = state;
+    snapshot.physicalBack = back;
+    snapshot.touchClick = touch;
+}
+
+void hid::UpdateSonyFeedback()
+{
+    LegacyControllerLock controllerLock;
+    if (!g_legacySonyRunning) return;
+    const uint64_t now = SDL_GetTicks();
+    static uint64_t nextOutput = 0;
+    for (auto& pad : g_controllers) {
+        if (pad.controller && SDL_GamepadConnected(pad.controller)) SnapshotLegacyController(pad);
+    }
+    if (now < nextOutput) return;
+    nextOutput = now + 10;
+    const auto options = sony::GetOptions();
+    for (auto& pad : g_controllers) {
+        if (!pad.controller || !SDL_GamepadConnected(pad.controller)) continue;
+        auto& cached = pad.sonyOutput;
+        const uint32_t user = static_cast<uint32_t>(pad.index);
+        const bool sonyPad = cached.device.model != sony::Model::kNone;
+        const auto effect = sonyPad ? sony::GetService().Compose(user, now, options) : sony::Output{};
+        uint16_t nativeLow = 0, nativeHigh = 0;
+        {
+            std::lock_guard lock(g_legacySnapshotMutex);
+            auto& snapshot = g_legacySnapshots[user];
+            if (!g_legacyFocused || effect.suppress_native || now >= snapshot.nativeUntil)
+                snapshot.nativeLow = snapshot.nativeHigh = 0;
+            nativeLow = snapshot.nativeLow;
+            nativeHigh = snapshot.nativeHigh;
+        }
+        const uint16_t low = effect.suppress_native ? 0 : std::max(nativeLow, effect.low_motor);
+        const uint16_t high = effect.suppress_native ? 0 : std::max(nativeHigh, effect.high_motor);
+        if (cached.device.rumble && cached.rumbleFailures < 3 && now >= cached.rumbleRetryAt &&
+            (low != cached.appliedLow || high != cached.appliedHigh ||
+             ((low || high) && now >= cached.nextRumble))) {
+            // Finite packets silence the motors if the UI owner stops pumping.
+            if (SDL_RumbleGamepad(pad.controller, low, high, 100)) {
+                cached.appliedLow = low;
+                cached.appliedHigh = high;
+                cached.rumbleFailures = 0;
+            } else {
+                ++cached.rumbleFailures;
+                cached.rumbleRetryAt = now + 100;
+                if (cached.rumbleFailures == 3) SDL_RumbleGamepad(pad.controller, 0, 0, 0);
+            }
+            cached.nextRumble = now + 50;
+        }
+        if (!sonyPad || now < cached.retryAt) continue;
+        const auto device = sony::GetService().ReadDevice(user);
+        if (device.generation != cached.device.generation) continue;
+        const auto color = effect.lighting ? effect.color : std::array<uint8_t, 3>{};
+        if (device.light && (cached.lightFailures < 3 || !effect.lighting) &&
+            (cached.lightSet || effect.lighting) && color != cached.color) {
+            if (SDL_SetGamepadLED(pad.controller, color[0], color[1], color[2])) {
+                cached.color = color;
+                cached.lightSet = effect.lighting;
+                cached.lightFailures = 0;
+            } else {
+                ++cached.lightFailures;
+                cached.retryAt = now + 100;
+                if (cached.lightFailures <= 3)
+                    LOGFN("sony-controller: legacy LED output failed user={} attempt={}: {}",
+                          user, cached.lightFailures, SDL_GetError());
+            }
+        }
+        const auto neutral = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+        const bool neutralPending = cached.triggersSet && cached.packet != neutral;
+        if ((device.triggers && cached.triggerFailures < 3) || neutralPending) {
+            const auto packet = device.triggers && cached.triggerFailures < 3
+                ? sony::EncodeTriggers(effect.left, effect.right) : neutral;
+            if (!cached.triggersSet || packet != cached.packet) {
+                if (SDL_SendGamepadEffect(pad.controller, packet.data(), static_cast<int>(packet.size()))) {
+                    cached.packet = packet;
+                    cached.triggersSet = true;
+                    cached.triggerFailures = 0;
+                } else {
+                    ++cached.triggerFailures;
+                    cached.retryAt = now + 100;
+                    if (cached.triggerFailures <= 3)
+                        LOGFN("sony-controller: legacy trigger output failed user={} attempt={}: {}",
+                              user, cached.triggerFailures, SDL_GetError());
+                    if (cached.triggerFailures == 3) {
+                        if (SDL_SendGamepadEffect(pad.controller, neutral.data(), static_cast<int>(neutral.size())))
+                            cached.packet = neutral;
+                        sony::GetService().DisableTriggers(user, device.generation);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void hid::ShutdownSonyFeedback()
+{
+    LegacyControllerLock controllerLock;
+    if (!g_legacySonyRunning) return;
+    g_legacySonyRunning = false;
+    sony::GetService().SetFocused(false);
+    {
+        std::lock_guard lock(g_legacySnapshotMutex);
+        g_legacyFocused = false;
+    }
+    for (auto& pad : g_controllers) {
+        if (pad.controller) NeutralizeSonyController(pad, true);
+    }
+}
+
+std::unique_ptr<rex::input::InputSystem> hid::CreateRexInputSystem(bool toolMode)
+{
+    auto input = std::make_unique<rex::input::InputSystem>(nullptr);
+    if (!toolMode) input->AddDriver(std::make_unique<LegacySDLInputDriver>());
+    input->AddDriver(std::make_unique<DefaultInputFallback>(toolMode));
+    return input;
+}
+#endif
 
 // Mouse state tracking
 static bool s_isMouseCaptured = false;
@@ -612,19 +1038,53 @@ static void SetControllerTimeOfDayLED(Controller& controller, EPlayerCharacter p
 
 bool HID_OnSDLEvent(void*, SDL_Event* event)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+    if (!g_legacySonyRunning) return true;
+    if (event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ||
+        event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION ||
+        event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP) {
+        if (event->gtouchpad.touchpad == 0) {
+            const auto phase = event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? sony::ContactPhase::kDown :
+                               event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? sony::ContactPhase::kUp :
+                                                                                 sony::ContactPhase::kMove;
+            sony::GetService().ObserveTouch(event->gtouchpad.which, event->gtouchpad.finger,
+                phase, event->gtouchpad.x, event->gtouchpad.y, SDL_GetTicks());
+        }
+    } else if ((event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+               event->gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
+        sony::GetService().ObserveClick(event->gbutton.which,
+            event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_GetTicks());
+    }
+#endif
     switch (event->type)
     {
         case SDL_EVENT_GAMEPAD_ADDED:
         {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+            if (FindController(event->gdevice.which)) break;
+#endif
             const auto freeIndex = FindFreeController();
 
             if (freeIndex != -1)
             {
-                auto controller = Controller(event->cdevice.which);
+                auto controller = Controller(event->gdevice.which);
+
+#if defined(GTA4_SONY_LEGACY_OWNER)
+                if (!controller.controller) break;
+                controller.index = static_cast<int>(freeIndex);
+#endif
 
                 g_controllers[freeIndex] = controller;
 
-                SetControllerTimeOfDayLED(controller, App::s_playerCharacter);
+#if defined(GTA4_SONY_LEGACY_OWNER)
+                auto& connected = g_controllers[freeIndex];
+                RegisterSonyController(connected);
+                SnapshotLegacyController(connected, true);
+                if (connected.sonyOutput.device.model == sony::Model::kNone)
+#endif
+                    SetControllerTimeOfDayLED(controller, App::s_playerCharacter);
             }
 
             break;
@@ -632,10 +1092,13 @@ bool HID_OnSDLEvent(void*, SDL_Event* event)
 
         case SDL_EVENT_GAMEPAD_REMOVED:
         {
-            auto* controller = FindController(event->cdevice.which);
+            auto* controller = FindController(event->gdevice.which);
 
             if (controller)
                 controller->Close();
+#if defined(GTA4_SONY_LEGACY_OWNER)
+            if (controller == g_activeController) g_activeController = nullptr;
+#endif
 
             break;
         }
@@ -645,7 +1108,10 @@ bool HID_OnSDLEvent(void*, SDL_Event* event)
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
         {
-            auto* controller = FindController(event->cdevice.which);
+            const auto instance = event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION ? event->gaxis.which :
+                                  event->type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? event->gtouchpad.which :
+                                                                                event->gbutton.which;
+            auto* controller = FindController(instance);
 
             if (!controller)
                 break;
@@ -767,9 +1233,20 @@ bool HID_OnSDLEvent(void*, SDL_Event* event)
 
         case SDL_EVENT_WINDOW_FOCUS_LOST:
         {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+            sony::GetService().SetFocused(false);
+            {
+                std::lock_guard lock(g_legacySnapshotMutex);
+                g_legacyFocused = false;
+            }
+            for (auto& controller : g_controllers) {
+                if (controller.controller) NeutralizeSonyController(controller, false);
+            }
+#else
             // Stop vibrating controllers on focus lost.
             for (auto& controller : g_controllers)
                 controller.SetVibration({ 0, 0 });
+#endif
 
             // Reset mouse camera
             MouseCamera::Reset();
@@ -778,6 +1255,13 @@ bool HID_OnSDLEvent(void*, SDL_Event* event)
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
         {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+            sony::GetService().SetFocused(true);
+            {
+                std::lock_guard lock(g_legacySnapshotMutex);
+                g_legacyFocused = true;
+            }
+#endif
             // Reset mouse state on focus gain
             s_lastMouseMovement = std::chrono::steady_clock::now();
             break;
@@ -785,8 +1269,12 @@ bool HID_OnSDLEvent(void*, SDL_Event* event)
 
         case SDL_USER_PLAYER_CHAR:
         {
-            for (auto& controller : g_controllers)
+            for (auto& controller : g_controllers) {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+                if (controller.sonyOutput.device.model != sony::Model::kNone) continue;
+#endif
                 SetControllerTimeOfDayLED(controller, static_cast<EPlayerCharacter>(event->user.code));
+            }
 
             break;
         }
@@ -827,6 +1315,27 @@ void hid::Init()
 
     SDL_InitSubSystem(SDL_INIT_GAMEPAD);
 
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    const bool focused = GameWindow::s_pWindow &&
+        (SDL_GetWindowFlags(GameWindow::s_pWindow) & SDL_WINDOW_INPUT_FOCUS);
+    {
+        std::lock_guard lock(g_legacySnapshotMutex);
+        g_legacyFocused = focused;
+    }
+    sony::GetService().SetFocused(focused);
+    // SDL may have been initialized by the installer before our event watch.
+    int count = 0;
+    if (auto* ids = SDL_GetGamepads(&count)) {
+        for (int i = 0; i < count; ++i) {
+            SDL_Event added{};
+            added.type = SDL_EVENT_GAMEPAD_ADDED;
+            added.gdevice.which = ids[i];
+            HID_OnSDLEvent(nullptr, &added);
+        }
+        SDL_free(ids);
+    }
+#endif
+
     // Load controller mappings from SDL_GameControllerDB
     if (int mappings = SDL_AddGamepadMappingsFromFile("gamecontrollerdb.txt"); mappings > 0) {
         LOGFN("Loaded {} controller mapping(s) from SDL_GameControllerDB ({})", mappings, "gamecontrollerdb.txt");
@@ -841,43 +1350,52 @@ void hid::Init()
 
 uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     static uint32_t packet;
 
     if (!pState)
-        return ERROR_BAD_ARGUMENTS;
+        return kInputBadArguments;
 
     memset(pState, 0, sizeof(*pState));
 
     pState->dwPacketNumber = packet++;
 
     if (!g_activeController)
-        return ERROR_DEVICE_NOT_CONNECTED;
+        return kInputNotConnected;
 
     pState->Gamepad = g_activeController->state;
 
-    return ERROR_SUCCESS;
+    return kInputSuccess;
 }
 
 uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!pVibration)
-        return ERROR_BAD_ARGUMENTS;
+        return kInputBadArguments;
 
     if (!g_activeController)
-        return ERROR_DEVICE_NOT_CONNECTED;
+        return kInputNotConnected;
 
     g_activeController->SetVibration(*pVibration);
 
-    return ERROR_SUCCESS;
+    return kInputSuccess;
 }
 
 uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!pCaps)
-        return ERROR_BAD_ARGUMENTS;
+        return kInputBadArguments;
 
     if (!g_activeController)
-        return ERROR_DEVICE_NOT_CONNECTED;
+        return kInputNotConnected;
 
     memset(pCaps, 0, sizeof(*pCaps));
 
@@ -887,7 +1405,7 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
     pCaps->Gamepad = g_activeController->state;
     pCaps->Vibration = g_activeController->vibration;
 
-    return ERROR_SUCCESS;
+    return kInputSuccess;
 }
 
 // Convert SDL scancode to Xbox virtual key
@@ -907,20 +1425,20 @@ static uint16_t SDLScancodeToVirtualKey(SDL_Scancode scancode, uint16_t mod) {
     
     // Special keys
     switch (scancode) {
-        case SDL_SCANCODE_RETURN:    return VK_RETURN;
-        case SDL_SCANCODE_ESCAPE:    return VK_ESCAPE;
-        case SDL_SCANCODE_BACKSPACE: return VK_BACK;
-        case SDL_SCANCODE_TAB:       return VK_TAB;
-        case SDL_SCANCODE_SPACE:     return VK_SPACE;
-        case SDL_SCANCODE_DELETE:    return VK_DELETE;
-        case SDL_SCANCODE_LEFT:      return VK_LEFT;
-        case SDL_SCANCODE_RIGHT:     return VK_RIGHT;
-        case SDL_SCANCODE_UP:        return VK_UP;
-        case SDL_SCANCODE_DOWN:      return VK_DOWN;
+        case SDL_SCANCODE_RETURN:    return kVirtualReturn;
+        case SDL_SCANCODE_ESCAPE:    return kVirtualEscape;
+        case SDL_SCANCODE_BACKSPACE: return kVirtualBack;
+        case SDL_SCANCODE_TAB:       return kVirtualTab;
+        case SDL_SCANCODE_SPACE:     return kVirtualSpace;
+        case SDL_SCANCODE_DELETE:    return kVirtualDelete;
+        case SDL_SCANCODE_LEFT:      return kVirtualLeft;
+        case SDL_SCANCODE_RIGHT:     return kVirtualRight;
+        case SDL_SCANCODE_UP:        return kVirtualUp;
+        case SDL_SCANCODE_DOWN:      return kVirtualDown;
         case SDL_SCANCODE_LSHIFT:
-        case SDL_SCANCODE_RSHIFT:    return VK_SHIFT;
+        case SDL_SCANCODE_RSHIFT:    return kVirtualShift;
         case SDL_SCANCODE_LCTRL:
-        case SDL_SCANCODE_RCTRL:     return VK_CONTROL;
+        case SDL_SCANCODE_RCTRL:     return kVirtualControl;
         default: return 0;
     }
 }
@@ -968,9 +1486,9 @@ static void ProcessKeyboardEvent(const SDL_KeyboardEvent& key) {
     event.userIndex = 0;
     
     if (key.type == SDL_EVENT_KEY_DOWN) {
-        event.flags = key.repeat ? XINPUT_KEYSTROKE_REPEAT : XINPUT_KEYSTROKE_KEYDOWN;
+        event.flags = key.repeat ? kKeystrokeRepeat : kKeystrokeDown;
     } else {
-        event.flags = XINPUT_KEYSTROKE_KEYUP;
+        event.flags = kKeystrokeUp;
     }
     
     hid::EnqueueKeystroke(event);
@@ -1012,6 +1530,9 @@ void hid::ClearKeystrokeQueue(uint8_t userIndex) {
 
 bool hid::HasMotionSensor()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController)
         return false;
     
@@ -1020,6 +1541,9 @@ bool hid::HasMotionSensor()
 
 void hid::SetMotionSensorEnabled(bool enabled)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     g_motionSensorEnabled = enabled;
     
     if (g_activeController) {
@@ -1039,6 +1563,9 @@ const hid::MotionState& hid::GetMotionState()
 
 void hid::UpdateMotionState()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_motionSensorEnabled) {
         g_motionState = {};
         return;
@@ -1049,6 +1576,9 @@ void hid::UpdateMotionState()
 
 void hid::ResetMotionOrientation()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (g_activeController) {
         g_activeController->ResetMotionOrientation();
     }
@@ -1064,6 +1594,9 @@ void hid::ResetMotionOrientation()
 
 bool hid::HasLightBar()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_activeController->controller)
         return false;
     
@@ -1074,6 +1607,9 @@ bool hid::HasLightBar()
 
 void hid::SetLightBarColor(uint8_t r, uint8_t g, uint8_t b)
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_activeController->controller)
         return;
     
@@ -1091,6 +1627,9 @@ static uint64_t g_lastTouchTime = 0;
 
 bool hid::HasTouchpad()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_activeController->controller)
         return false;
     
@@ -1106,6 +1645,9 @@ const hid::TouchpadState& hid::GetTouchpadState()
 
 void hid::UpdateTouchpadState()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_activeController->controller || !HasTouchpad()) {
         g_touchpadState = {};
         return;
@@ -1161,25 +1703,13 @@ void hid::UpdateTouchpadState()
 
 bool hid::HasAdaptiveTriggers()
 {
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    LegacyControllerLock controllerLock;
+#endif
     if (!g_activeController || !g_activeController->controller)
         return false;
     
     // Only DualSense has adaptive triggers
     auto type = SDL_GetGamepadType(g_activeController->controller);
     return type == SDL_GAMEPAD_TYPE_PS5;
-}
-
-void hid::InitDualSense()
-{
-    DualSense::Initialize();
-}
-
-void hid::UpdateDualSense()
-{
-    DualSense::Update();
-}
-
-void hid::ShutdownDualSense()
-{
-    DualSense::Shutdown();
 }

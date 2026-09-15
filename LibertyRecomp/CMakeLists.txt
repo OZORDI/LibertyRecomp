@@ -336,7 +336,6 @@ else()
     set(LIBERTY_RECOMP_HID_CXX_SOURCES
         "hid/hid.cpp"
         "hid/mouse_camera.cpp"
-        "hid/dualsense.cpp"
         "hid/driver/sdl_hid.cpp"
     )
 endif()
@@ -344,7 +343,6 @@ endif()
 set(LIBERTY_RECOMP_PATCHES_CXX_SOURCES
     # Input (GTA IV keyboard/mouse remapping moved to the active RexGlue target.)
     "patches/gta4_motion_patches.cpp"        # GTA IV motion (PlayStation gyro/accel)
-    "patches/gta4_ds4_patches.cpp"           # DualShock 4/DualSense features
 
     # High-frame-rate corrections verified against GTA IV Xbox 360 PPC
     "patches/gta4_fps_camera_shake_fix.cpp"
@@ -1667,6 +1665,57 @@ if(USE_REXGLUE_RUNTIME)
         rex::kernel
         rex::audio
     )
+    if(NOT LIBERTY_RECOMP_PS4)
+        set(LIBERTY_TOUCH_SOURCE_ROOT
+            "${CMAKE_CURRENT_SOURCE_DIR}/../glue/rexglue-sdk-main/gta4-recomp/src")
+        set(LIBERTY_TOUCH_SHARED_SOURCES
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/gta4_touch_coordinator.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/gta4_touch_guest_hooks.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_context.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_camera_hooks.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_controls.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_layout.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_draw.cpp"
+            "${LIBERTY_TOUCH_SOURCE_ROOT}/input/context_touch_settings.cpp")
+        target_sources(LibertyRecomp PRIVATE ${LIBERTY_TOUCH_SHARED_SOURCES}
+            hid/context_touch_host.cpp gpu/context_touch_renderer.cpp)
+        set_source_files_properties(${LIBERTY_TOUCH_SHARED_SOURCES}
+            hid/context_touch_host.cpp gpu/context_touch_renderer.cpp
+            PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+        if(LIBERTY_RECOMP_NX)
+            set_property(SOURCE "${LIBERTY_TOUCH_SOURCE_ROOT}/gta4_touch_guest_hooks.cpp"
+                APPEND PROPERTY COMPILE_DEFINITIONS GTA4_TOUCH_STANDALONE_POLL_OWNER)
+        endif()
+        target_include_directories(LibertyRecomp PRIVATE
+            "${LIBERTY_TOUCH_SOURCE_ROOT}" "${LIBERTY_TOUCH_SOURCE_ROOT}/../generated")
+        target_compile_definitions(LibertyRecomp PRIVATE GTA4_TOUCH_LEGACY_HOST)
+        # ImGui 1.91's allocation diagnostics mutate the menu's global context
+        # even for a private ImDrawList. Gameplay uses a render-worker draw list;
+        # disable that optional instrumentation consistently for the legacy ABI.
+        target_compile_definitions(LibertyRecomp PRIVATE IMGUI_DISABLE_DEBUG_TOOLS)
+        target_link_libraries(LibertyRecomp PRIVATE rex::input)
+    endif()
+    if(NOT (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX))
+        set(LIBERTY_SONY_SOURCE_ROOT
+            "${CMAKE_CURRENT_SOURCE_DIR}/../glue/rexglue-sdk-main/gta4-recomp/src")
+        target_sources(LibertyRecomp PRIVATE
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_feedback.cpp"
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_event_hooks.cpp"
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_legacy_hooks.cpp")
+        target_include_directories(LibertyRecomp PRIVATE
+            "${LIBERTY_SONY_SOURCE_ROOT}/../generated")
+        set_source_files_properties(
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_feedback.cpp"
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_event_hooks.cpp"
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_legacy_hooks.cpp"
+            PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+        set_source_files_properties(
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_feedback.cpp"
+            "${LIBERTY_SONY_SOURCE_ROOT}/gta4_sony_legacy_hooks.cpp"
+            PROPERTIES COMPILE_DEFINITIONS GTA4_SONY_LEGACY_HOST)
+        target_link_libraries(LibertyRecomp PRIVATE rex::input)
+        target_compile_definitions(LibertyRecomp PRIVATE GTA4_SONY_LEGACY_OWNER)
+    endif()
 endif()
 
 # Link abseil libraries for GameNetworkingSockets (protobuf dependency)

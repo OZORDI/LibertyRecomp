@@ -1,5 +1,10 @@
 #pragma once
 
+#if defined(GTA4_SONY_LEGACY_OWNER)
+#include <memory>
+namespace rex::input { class InputSystem; }
+#endif
+
 namespace hid
 {
     enum class EInputDevice
@@ -41,6 +46,13 @@ namespace hid
     extern bool g_isRightStickProhibited;
 
     void Init();
+
+#if defined(GTA4_SONY_LEGACY_OWNER)
+    // Existing SDL owner, pumped on the legacy host's main thread.
+    std::unique_ptr<rex::input::InputSystem> CreateRexInputSystem(bool toolMode);
+    void UpdateSonyFeedback();
+    void ShutdownSonyFeedback();
+#endif
 
     uint32_t GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState);
     uint32_t SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration);
@@ -166,12 +178,4 @@ namespace hid
     // Check if current controller is DualSense with adaptive trigger support
     bool HasAdaptiveTriggers();
     
-    // Initialize DualSense subsystem (call once at startup)
-    void InitDualSense();
-    
-    // Update DualSense state (call each frame in main loop)
-    void UpdateDualSense();
-    
-    // Shutdown DualSense subsystem
-    void ShutdownDualSense();
 }

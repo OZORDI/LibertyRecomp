@@ -11,7 +11,7 @@ struct ModePolicy {
 constexpr ModePolicy ResolveMode(std::string_view mode) {
   if (mode == "immediate") return {true, false, false, true, false};
   if (mode == "mailbox") return {true, true, false, false, true};
-  if (mode == "fifo") return {true, true, true, false, false};
+  if (mode == "vsync" || mode == "fifo") return {true, true, true, false, false};
   return {};
 }
 } // namespace gta4::presentation

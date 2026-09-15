@@ -48,6 +48,7 @@ class GTA4App final : public rex::ReXApp {
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override;
   bool RequiresSynchronizedInitialThreadResume() const override;
   void OnShutdown() override;
+  bool OnWindowCloseRequested() override;
   void QueueAchievementUpload(uint32_t achievement_id);
   void AchievementSyncWorkerMain();
   void TitleProfileSyncWorkerMain();

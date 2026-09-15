@@ -13,9 +13,11 @@
 #define REX_UI_IMGUI_DRAWER_H_
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -43,9 +45,15 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   ~ImGuiDrawer();
 
   ImGuiIO& GetIO();
+  // Poll threads read this snapshot without touching ImGui or drawer lifetime.
+  std::shared_ptr<const std::atomic<bool>> input_capture_snapshot() const {
+    return input_capture_snapshot_;
+  }
 
   void AddDialog(ImGuiDialog* dialog);
   void RemoveDialog(ImGuiDialog* dialog);
+  void RequestPaint();
+  std::function<void()> CreateRepaintRequester();
 
   // SetPresenter may be called from the destructor.
   void SetPresenter(Presenter* new_presenter);
@@ -78,6 +86,8 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   void RenderDrawLists(ImDrawData* data, UIDrawContext& ui_draw_context);
 
   void ClearInput();
+  void RequestInputPaint();
+  bool visible_ui_last_frame_ = false;
   void OnKey(KeyEvent& e, bool is_down);
   void UpdateMousePosition(float x, float y);
   void SwitchToPhysicalMouseAndUpdateMousePosition(const MouseEvent& e);
@@ -87,11 +97,19 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
 
   std::optional<ImGuiKey> VirtualKeyToImGuiKey(VirtualKey vkey);
 
+  struct RepaintRequestState {
+    std::mutex mutex;
+    ImGuiDrawer* owner = nullptr;
+    bool pending = false;
+  };
+  std::shared_ptr<RepaintRequestState> repaint_request_ = std::make_shared<RepaintRequestState>();
   Window* window_;
   size_t z_order_;
   FontSetupCallback font_setup_;
 
   ImGuiContext* internal_state_ = nullptr;
+  std::shared_ptr<std::atomic<bool>> input_capture_snapshot_ =
+      std::make_shared<std::atomic<bool>>(false);
 
   // All currently-attached dialogs that get drawn.
   std::vector<ImGuiDialog*> dialogs_;
@@ -112,6 +130,7 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   // If it's TouchEvent::kPointerIDNone, the ImGui mouse is controlled by the
   // mouse.
   uint64_t touch_pointer_id_ = TouchEvent::kPointerIDNone;
+  uint64_t touch_device_id_ = 0;
   // Whether after the next frame (since the mouse up event needs to be handled
   // with the correct mouse position still), the ImGui mouse position should be
   // reset (for instance, after releasing a touch), so it's not hovering over

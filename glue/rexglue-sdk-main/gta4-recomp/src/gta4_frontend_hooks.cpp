@@ -13,18 +13,22 @@
 #include <system_error>
 #include <vector>
 
+#include <fmt/format.h>
 #include <rex/cvar.h>
 #include <rex/diagnostics/policy.h>
 #include <rex/graphics/gta4_native/anti_aliasing_policy.h>
 #include <rex/graphics/gta4_native/hdr_policy.h>
 #include <rex/input/input_trace.h>
+#include <rex/input/sony_feedback.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
 
 #include "gta4_frontend_menu_policy.h"
+#include "gta4_draw_distance_policy.h"
 #include "gta4_init.h"
 #include "gta4_touch_coordinator.h"
+#include "input/context_touch_controls.h"
 
 REXCVAR_DECLARE(std::string, gta4_episode_startup_prompt);
 REXCVAR_DEFINE_BOOL(gta4_frontend_advanced_graphics_menu, true, "GTA IV/Frontend",
@@ -46,6 +50,7 @@ constexpr uint32_t kDisplayOptionsPointer = 0x831DAEF8;
 constexpr uint32_t kDisplayOptionsCount = 0x831DAEFC;
 constexpr uint32_t kDisplayOptionsCapacity = 0x831DAEFE;
 constexpr uint32_t kCurrentScreenAddress = 0x82BFA124;
+constexpr uint32_t kPauseMenuActiveAddress = 0x82BF9EF4;
 constexpr uint32_t kOptionRecordSize = 22;
 constexpr uint32_t kOptionActionOffset = 0;
 constexpr uint32_t kOptionLabelOffset = 1;
@@ -81,6 +86,7 @@ enum class TextId : uint8_t {
   kFullscreenLabel,
   kPresentationLabel,
   kFrameLimitLabel,
+  kDrawDistanceLabel,
   kHdrLabel,
   kPaperWhiteLabel,
   kPeakBrightnessLabel,
@@ -95,6 +101,9 @@ enum class TextId : uint8_t {
   kDitherLabel,
   kModernShadersLabel,
   kMotionControlsLabel,
+  kTouchControlsLabel,
+  kEditTouchLayoutLabel,
+  kSonyFeaturesLabel,
   kSkipIntroLabel,
   kFilmGrainLabel,
   kAdvancedLabel,
@@ -121,6 +130,7 @@ enum class TextId : uint8_t {
   kFullscreen,
   kOff,
   kOn,
+  kAuto,
   kScRgb,
   kAutoHdr,
   k80Nits,
@@ -170,9 +180,13 @@ enum class TextId : uint8_t {
   k1080p,
   kFull,
   k30Fps,
+  k40Fps,
   k60Fps,
   k120Fps,
   kUnlocked,
+  kMouseAimLabel,
+  kHold,
+  kToggle,
   kCount,
 };
 
@@ -186,6 +200,9 @@ enum class SettingBinding : uint8_t {
   kAntiAliasing,
   kHdr,
   kUpscaler,
+  kDrawDistanceSlider,
+  kTouchLayoutEditor,
+  kSonyFeatures,
 };
 
 struct Setting {
@@ -221,6 +238,15 @@ constexpr std::array kToggleChoices = {
     Choice{"false", TextId::kOff},
     Choice{"true", TextId::kOn},
 };
+constexpr std::array kMouseAimChoices = {
+    Choice{"false", TextId::kHold},
+    Choice{"true", TextId::kToggle},
+};
+constexpr std::array kTouchControlsChoices = {
+    Choice{"off", TextId::kOff},
+    Choice{"on", TextId::kOn},
+    Choice{"auto", TextId::kAuto},
+};
 constexpr std::array kFilmGrainChoices = {
     Choice{"true", TextId::kOff},
     Choice{"false", TextId::kOn},
@@ -253,13 +279,12 @@ constexpr std::array kDisplayModeChoices = {
     Choice{"true", TextId::kFullscreen},
 };
 constexpr std::array kPresentChoices = {
-    Choice{"auto", TextId::kAutomatic},
     Choice{"vsync", TextId::kOn},
-    Choice{"mailbox", TextId::kMailbox},
     Choice{"immediate", TextId::kOff},
 };
 constexpr std::array kFrameLimitChoices = {
     Choice{"30", TextId::k30Fps},
+    Choice{"40", TextId::k40Fps},
     Choice{"60", TextId::k60Fps},
     Choice{"120", TextId::k120Fps},
     Choice{"0", TextId::kUnlocked},
@@ -323,6 +348,8 @@ constexpr std::array kSettings = {
             kResolutionChoices.size(), true},
     Setting{"LR_ASPECT", TextId::kAspectLabel, "gta4_aspect_ratio", kAspectChoices.data(),
             kAspectChoices.size(), true},
+    Setting{"LR_DRAW_DIST", TextId::kDrawDistanceLabel, "gta4_draw_distance_scale", nullptr,
+            gta4::draw_distance::kSliderPositions, false, SettingBinding::kDrawDistanceSlider},
     Setting{"LR_HDR", TextId::kHdrLabel, "gta4_native_hdr_mode", kHdrChoices.data(),
             kHdrChoices.size(), false, SettingBinding::kHdr},
     Setting{"LR_HDR_WHITE", TextId::kPaperWhiteLabel,
@@ -332,7 +359,7 @@ constexpr std::array kSettings = {
             "gta4_native_hdr_peak_nits", kPeakBrightnessChoices.data(),
             kPeakBrightnessChoices.size()},
     Setting{"LR_PRESENT", TextId::kPresentationLabel, "gta4_present_mode", kPresentChoices.data(),
-            kPresentChoices.size(), true},
+            kPresentChoices.size()},
     Setting{"LR_FPS", TextId::kFrameLimitLabel, "gta4_frame_limit", kFrameLimitChoices.data(),
             kFrameLimitChoices.size()},
     Setting{"LR_UPSCALE", TextId::kUpscalingLabel, "gta4_native_upscaler", kUpscalerChoices.data(),
@@ -357,6 +384,14 @@ constexpr std::array kSettings = {
             kToggleChoices.data(), kToggleChoices.size()},
     Setting{"LR_MOTION", TextId::kMotionControlsLabel, "gta4_motion_enabled",
             kToggleChoices.data(), kToggleChoices.size()},
+    Setting{"LR_MOUSE_AIM", TextId::kMouseAimLabel, "gta4_mouse_aim_toggle",
+            kMouseAimChoices.data(), kMouseAimChoices.size()},
+    Setting{"LR_TOUCH", TextId::kTouchControlsLabel, "touch_controls",
+            kTouchControlsChoices.data(), kTouchControlsChoices.size()},
+    Setting{"LR_TOUCH_EDIT", TextId::kEditTouchLayoutLabel, "", nullptr, 0, false,
+            SettingBinding::kTouchLayoutEditor},
+    Setting{"LR_SONY", TextId::kSonyFeaturesLabel, "gta4_sony_enabled",
+            kToggleChoices.data(), kToggleChoices.size(), false, SettingBinding::kSonyFeatures},
     Setting{"LR_SKIPINTRO", TextId::kSkipIntroLabel, "gta4_skip_intro",
             kToggleChoices.data(), kToggleChoices.size(), true},
     Setting{"LR_TLAD_GRAIN", TextId::kFilmGrainLabel, "gta4_disable_tlad_film_grain",
@@ -368,6 +403,7 @@ constexpr std::string_view kSaveKey = "LR_SAVE";
 constexpr std::string_view kBackKey = "LR_BACK";
 constexpr std::string_view kPreviousPageKey = "LR_PREV";
 constexpr std::string_view kNextPageKey = "LR_NEXT";
+constexpr std::string_view kTouchLayoutEditorKey = "LR_TOUCH_EDIT";
 
 constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStringPool = {
     "Resolution",
@@ -375,6 +411,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "Display Mode",
     "Vertical Sync",
     "Frame Rate Limit",
+    "Draw Distance",
     "HDR",
     "Paper White",
     "Peak Brightness",
@@ -389,6 +426,9 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "Output Dithering",
     "Modern shaders",
     "Motion Controls",
+    "Touch Controls",
+    "Edit Touch Layout",
+    "DualSense Features",
     "Skip Intro",
     "Film Grain",
     "Advanced",
@@ -415,6 +455,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "Fullscreen",
     "Off",
     "On",
+    "Auto",
     "scRGB",
     "Auto HDR",
     "80 nits",
@@ -464,9 +505,13 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
     "1080p",
     "Full",
     "30 FPS",
+    "40 FPS",
     "60 FPS",
     "120 FPS",
     "Unlocked",
+    "Mouse Aim",
+    "Hold",
+    "Toggle",
 };
 
 struct NativePageState {
@@ -944,6 +989,8 @@ std::string CurrentSettingValue(const Setting& setting) {
     return std::string(rex::graphics::gta4_native::GetConfiguredHdrModeName());
   }
   std::string value = rex::cvar::GetFlagByName(setting.cvar);
+  if (setting.cvar == "gta4_present_mode" && value != "immediate")
+    value = "vsync";  // Legacy auto/FIFO/mailbox settings all synchronize.
   if (std::string_view(setting.cvar) == "gta4_aspect_ratio" && value == "original")
     value = "16:9";
   return value;
@@ -967,6 +1014,37 @@ uint8_t CurrentChoiceIndex(const Setting& setting) {
     }
   }
   return 0;
+}
+
+double CurrentDrawDistanceScale() {
+  return rex::cvar::Query<double>("gta4_draw_distance_scale");
+}
+
+// Used at the single preference read in the retail slider renderer. Keep
+// native values out of the stock preference array (slot zero is brightness).
+uint32_t ReadFrontendSliderPosition(uint8_t* base, int32_t row_index,
+                                    uint32_t retail_preference_address) {
+  const Setting* setting = FindSettingByRow(base, row_index);
+  if (setting && setting->binding == SettingBinding::kDrawDistanceSlider) {
+    return static_cast<uint32_t>(gta4::draw_distance::SliderPosition(CurrentDrawDistanceScale()));
+  }
+  return REX_LOAD_U32(retail_preference_address);
+}
+
+uint8_t ReadFrontendSliderDisplayType(uint8_t* base, int32_t row_index,
+                                    uint32_t display_type_address) {
+  const std::size_t visible_capacity =
+      g_display_menu.primary_count > 1 ? g_display_menu.primary_count - 1 : 0;
+  if (!gta4::frontend_menu::policy::IsSliderRowVisible(
+          row_index, g_owned_scroll_window_first, visible_capacity)) {
+    return kSafeStockDisplayValue;
+  }
+  return REX_LOAD_U8(display_type_address);
+}
+
+double FrontendSliderStartY(double row_height, double top) {
+  return gta4::frontend_menu::policy::SliderStartY(row_height, top,
+                                                 g_owned_scroll_window_first);
 }
 
 bool WriteInlineKey(uint8_t* base, uint32_t destination, std::string_view key) {
@@ -1003,7 +1081,12 @@ bool ValidateNativeMenuKeys() {
   return true;
 }
 
+bool WriteJumpRow(uint8_t* base, uint32_t destination, std::string_view key);
+
 bool WriteSettingRow(uint8_t* base, uint32_t destination, const Setting& setting) {
+  if (setting.binding == SettingBinding::kTouchLayoutEditor) {
+    return WriteJumpRow(base, destination, setting.key);
+  }
   std::memset(base + destination, 0, kOptionRecordSize);
   REX_STORE_U8(destination + kOptionActionOffset, kMenuOptionAdjust);
   if (!WriteInlineKey(base, destination + kOptionLabelOffset, setting.key)) {
@@ -1011,7 +1094,10 @@ bool WriteSettingRow(uint8_t* base, uint32_t destination, const Setting& setting
   }
   REX_STORE_U16(destination + kOptionValueOffset, kSafeStockPreference);
   REX_STORE_U8(destination + kOptionScalerOffset, setting.choice_count);
-  REX_STORE_U8(destination + kOptionDisplayValueOffset, kSafeStockDisplayValue);
+  REX_STORE_U8(destination + kOptionDisplayValueOffset,
+               setting.binding == SettingBinding::kDrawDistanceSlider
+                   ? gta4::draw_distance::kSliderDisplayType
+                   : kSafeStockDisplayValue);
   return true;
 }
 
@@ -1318,7 +1404,25 @@ void SwitchDisplayPage(PPCContext& ctx, uint8_t* base, gta4::frontend_menu::poli
 }
 
 void ChangeSetting(const Setting& setting, int32_t delta) {
-  if (delta == 0) {
+  if (delta == 0 || setting.binding == SettingBinding::kTouchLayoutEditor) {
+    return;
+  }
+  if (setting.binding == SettingBinding::kDrawDistanceSlider) {
+    const double previous = CurrentDrawDistanceScale();
+    const double requested = gta4::draw_distance::AdjustSlider(previous, delta);
+    if (requested == previous) {
+      return;
+    }
+    if (!rex::cvar::SetFlagByName(setting.cvar, std::to_string(requested))) {
+      REXLOG_ERROR("GTA IV Advanced Graphics: rejected {}={}", setting.cvar, requested);
+      return;
+    }
+    g_display_menu.rebuild_pending = true;
+    REXLOG_INFO(
+        "GTA4MenuTrace seq={} point=setting-change key='{}' cvar={} old={} new={} "
+        "direction={} apply=live",
+        ++g_menu_trace_sequence, setting.key, setting.cvar, previous,
+        CurrentDrawDistanceScale(), delta);
     return;
   }
   const std::string old_value = CurrentSettingValue(setting);
@@ -1344,6 +1448,11 @@ void ChangeSetting(const Setting& setting, int32_t delta) {
   } else if (setting.binding == SettingBinding::kHdr) {
     if (!rex::graphics::gta4_native::SetConfiguredHdrMode(choice.value)) {
       REXLOG_ERROR("GTA IV Advanced Graphics: rejected {}={}", setting.cvar, choice.value);
+      return;
+    }
+  } else if (setting.binding == SettingBinding::kSonyFeatures) {
+    if (!rex::input::sony::SetFeaturesEnabled(choice.value == "true")) {
+      REXLOG_ERROR("GTA IV controller features: rejected enabled={}", choice.value);
       return;
     }
   } else if (setting.binding == SettingBinding::kUpscaler && choice.value != "native" &&
@@ -1516,7 +1625,17 @@ extern "C" void sub_82252A98(PPCContext& ctx, uint8_t* base) {
   const uint32_t selected_value = ctx.r5.u32;
   const int32_t row_index = ctx.r6.s32;
   if (screen == kDisplayScreen && IsOwnedAdvancedPage(base)) {
+    if (IsOwnedJumpRow(base, row_index, kTouchLayoutEditorKey)) {
+      ctx.r3.u64 = 0;
+      return;
+    }
     if (const Setting* setting = FindSettingByRow(base, ctx.r6.s32)) {
+      if (setting->binding == SettingBinding::kDrawDistanceSlider) {
+        // The retail slider draws its bar separately. The multiplier is
+        // materialized beside the left-hand label instead of over the bar.
+        ctx.r3.u64 = 0;
+        return;
+      }
       ctx.r3.u64 = TextAddress(CurrentChoice(*setting).text);
       if (diagnostics) {
         REXLOG_INFO(
@@ -1682,7 +1801,12 @@ extern "C" void sub_8229CD40(PPCContext& ctx, uint8_t* base) {
       }
       const uint32_t payload_row =
           row_payload + static_cast<uint32_t>(index) * kUiRowRecordSize;
-      const std::string_view label = TextString(text);
+      std::string slider_label;
+      const Setting* setting = FindSettingByRow(base, index);
+      if (setting && setting->binding == SettingBinding::kDrawDistanceSlider) {
+        slider_label = fmt::format("{} ({:.1f}x)", TextString(text), CurrentDrawDistanceScale());
+      }
+      const std::string_view label = slider_label.empty() ? TextString(text) : slider_label;
       const std::string raw_label =
           trace_page ? ReadGuestString(base, payload_row, kUiRowLabelCapacity) : std::string{};
       if (WriteUiRowLabel(base, payload_row, label) && trace_page) {
@@ -1724,6 +1848,12 @@ extern "C" void sub_8229CD40(PPCContext& ctx, uint8_t* base) {
 }
 
 extern "C" void sub_82258FB0(PPCContext& ctx, uint8_t* base) {
+  if (gta4::input::ContextTouchEditorCapturesInput()) {
+    // This routine polls list events, dispatches selection/adjustment and
+    // rebuilds changed values. Frontend drawing runs outside this input path.
+    ctx.r3.u64 = 0;
+    return;
+  }
   const uint32_t frontend_channel = ctx.r3.u32;
   {
     ScopedAdjustment adjustment(frontend_channel,
@@ -1759,6 +1889,12 @@ extern "C" void sub_8229C4F8(PPCContext& ctx, uint8_t* base) {
 extern "C" void sub_82253370(PPCContext& ctx, uint8_t* base) {
   if (g_adjustment.active) {
     const int32_t row_index = ctx.r3.s32;
+    if (IsOwnedAdvancedPage(base) &&
+        IsOwnedJumpRow(base, row_index, kTouchLayoutEditorKey)) {
+      // Action rows have no choice list and respond only to native Accept.
+      ctx.r3.u64 = 0;
+      return;
+    }
     if (const Setting* setting = FindSettingByRow(base, row_index)) {
       if (FrontendDiagnosticsEnabled()) {
         REXLOG_INFO(
@@ -1778,6 +1914,16 @@ extern "C" void sub_82253370(PPCContext& ctx, uint8_t* base) {
 extern "C" void sub_82258388(PPCContext& ctx, uint8_t* base) {
   const uint32_t frontend_channel = ctx.r3.u32;
   const int32_t selected_row = ctx.r4.s32;
+  if (IsDisplayScreen(base) && IsOwnedAdvancedPage(base) &&
+      IsOwnedJumpRow(base, selected_row, kTouchLayoutEditorKey)) {
+    if (!gta4::input::ContextTouchEditorCapturesInput()) {
+      gta4::input::RequestContextTouchEditor();
+      ctx.r3.u64 = 1;
+    } else {
+      ctx.r3.u64 = 0;
+    }
+    return;
+  }
   if (IsDisplayScreen(base) && IsOwnedPrimaryPage(base) &&
       IsOwnedJumpRow(base, selected_row, kAdvancedKey)) {
     if (FrontendDiagnosticsEnabled()) {
@@ -1790,15 +1936,25 @@ extern "C" void sub_82258388(PPCContext& ctx, uint8_t* base) {
     ctx.r3.u64 = 1;
     return;
   }
-  if (IsDisplayScreen(base) && IsOwnedAdvancedPage(base) &&
-      FindSettingByRow(base, selected_row) != nullptr) {
-    if (FrontendDiagnosticsEnabled()) {
-      REXLOG_INFO(
-          "GTA4MenuTrace seq={} point=activate action=setting-consumed channel={} row={}",
-          ++g_menu_trace_sequence, frontend_channel, selected_row);
+  if (IsDisplayScreen(base) && IsOwnedAdvancedPage(base)) {
+    if (const Setting* setting = FindSettingByRow(base, selected_row)) {
+      // Absolute touch menus emit the native Accept action. Keep this setting
+      // reachable while the gameplay overlay is Off, including its live label.
+      if (setting->cvar == "touch_controls") {
+        ChangeSetting(*setting, 1);
+        if (g_display_menu.rebuild_pending) {
+          g_display_menu.rebuild_pending = false;
+          InvokeGuest(ctx, base, sub_82255D00, frontend_channel);
+        }
+      }
+      if (FrontendDiagnosticsEnabled()) {
+        REXLOG_INFO(
+            "GTA4MenuTrace seq={} point=activate action=setting-consumed channel={} row={}",
+            ++g_menu_trace_sequence, frontend_channel, selected_row);
+      }
+      ctx.r3.u64 = 0;
+      return;
     }
-    ctx.r3.u64 = 0;
-    return;
   }
   if (IsDisplayScreen(base) && IsOwnedAdvancedPage(base) &&
       IsOwnedJumpRow(base, selected_row, kPreviousPageKey)) {
@@ -1880,3 +2036,6 @@ extern "C" void sub_82258EC0(PPCContext& ctx, uint8_t* base) {
   }
   __imp__sub_82258EC0(ctx, base);
 }
+
+// The retail bar renderer reads our slider's position through the cvar bridge.
+#include "gta4_frontend_slider_guest.inc"

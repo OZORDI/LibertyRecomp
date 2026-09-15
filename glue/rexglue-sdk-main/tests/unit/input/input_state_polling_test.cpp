@@ -214,6 +214,7 @@ struct VirtualTouchFixture {
     mnk::SetNativeControllerCompatibilityBindings(test);
   }
   ~VirtualTouchFixture() {
+    SetTouchGamepadProvider(nullptr);
     mnk::PublishVirtualControllerCompatibilityKeys(0,{},false);
     mnk::SetNativeControllerCompatibilityBindings(bindings);
     REXCVAR_SET(touch_controls,mode);
@@ -266,6 +267,39 @@ TEST_CASE("touch polling preserves physical buttons and stronger opposite stick"
   GetAbsolutePointerService().SetFocused(false,0);
   CHECK(input.GetState(0,&state)==X_ERROR_SUCCESS);
   CHECK(state.gamepad.buttons==X_INPUT_GAMEPAD_B);
+}
+
+TEST_CASE("native touch and compatibility input merge without hiding either source",
+          "[controls_fix][touch][polling]") {
+  VirtualTouchFixture fixture;
+  InputSystem input(nullptr);
+  bool active = true;
+  input.SetActiveCallback([&] { return active; });
+  SetTouchGamepadProvider([](uint32_t user, X_INPUT_GAMEPAD* pad) noexcept {
+    if (user != 0) return false;
+    *pad = {};
+    pad->buttons = X_INPUT_GAMEPAD_X;
+    pad->right_trigger = 190;
+    pad->thumb_rx = -21000;
+    return true;
+  });
+  std::array<uint8_t, 256> keys{};
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kReturn)] = 1;
+  keys[static_cast<uint16_t>(rex::ui::VirtualKey::kD)] = 1;
+  mnk::PublishVirtualControllerCompatibilityKeys(0, keys, true);
+  X_INPUT_STATE state{};
+  REQUIRE(input.GetState(0, &state) == X_ERROR_SUCCESS);
+  CHECK(state.gamepad.buttons == (X_INPUT_GAMEPAD_A | X_INPUT_GAMEPAD_X));
+  CHECK(state.gamepad.right_trigger == 190);
+  CHECK(state.gamepad.thumb_lx == 32767);
+  CHECK(state.gamepad.thumb_rx == -21000);
+  CHECK(input.GetState(1, &state) == X_ERROR_DEVICE_NOT_CONNECTED);
+  active = false;
+  REQUIRE(input.GetState(0, &state) == X_ERROR_SUCCESS);
+  CHECK(state.gamepad.buttons == 0);
+  CHECK(state.gamepad.right_trigger == 0);
+  CHECK(state.gamepad.thumb_lx == 0);
+  CHECK(state.gamepad.thumb_rx == 0);
 }
 
 }  // namespace rex::input

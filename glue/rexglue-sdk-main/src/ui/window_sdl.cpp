@@ -24,6 +24,7 @@
 #include <rex/cvar.h>
 #include <rex/graphics/video_mode_util.h>
 #include <rex/input/input_trace.h>
+#include <rex/input/absolute_pointer.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/flags.h>
@@ -34,9 +35,13 @@
 #elif REX_PLATFORM_MAC
 #include <SDL3/SDL_metal.h>
 #include <rex/ui/surface_mac.h>
+#if !REX_PLATFORM_IOS
 #include "accelerated_pointer_mac.h"
 #include "sdl_mouse_motion_policy.h"
-#else
+#endif
+#elif REX_PLATFORM_ANDROID
+#include <rex/ui/surface_android.h>
+#elif REX_PLATFORM_GNU_LINUX
 #include <X11/Xlib-xcb.h>
 #include <rex/ui/surface_gnulinux.h>
 #endif
@@ -50,17 +55,18 @@ constexpr Uint32 kDeferredPaintDelayMs = 1;
 struct DeferredPaintRequest {
   uint32_t event_type;
   SDL_WindowID window_id;
+  uint32_t ticket;
+  std::shared_ptr<PaintWakeupState> state;
 };
 
-Uint32 DeferredPaintTimerCallback(void* userdata, SDL_TimerID timer_id, Uint32 interval) {
-  (void)timer_id;
-  (void)interval;
-  std::unique_ptr<DeferredPaintRequest> request(
-      static_cast<DeferredPaintRequest*>(userdata));
+Uint64 DeferredPaintTimerCallback(void* userdata, SDL_TimerID, Uint64) {
+  std::unique_ptr<DeferredPaintRequest> request(static_cast<DeferredPaintRequest*>(userdata));
+  if (!request->state->IsCurrent(request->ticket)) return 0;
   SDL_Event event{};
   event.type = request->event_type;
   event.user.windowID = request->window_id;
-  SDL_PushEvent(&event);
+  event.user.code = static_cast<Sint32>(request->ticket);
+  if (!SDL_PushEvent(&event)) request->state->Complete(request->ticket);
   return 0;
 }
 
@@ -154,6 +160,7 @@ WindowSDL::~WindowSDL() {
 }
 
 bool WindowSDL::OpenImpl() {
+  paint_wakeup_ = std::make_shared<PaintWakeupState>();
   // SDL window coordinates are physical pixels on Windows and X11.
   SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
 #if REX_PLATFORM_MAC
@@ -219,6 +226,7 @@ bool WindowSDL::OpenImpl() {
     REXLOG_WARN("SDL_SyncWindow timed out while entering fullscreen; continuing asynchronously");
   }
 
+
   // Actualize state for the common Window code. Listener dispatch is handled
   // by Window::Open after OpenImpl returns; these only record initial state.
   int pixel_width = 0;
@@ -251,15 +259,18 @@ void WindowSDL::PerformClose() {
 }
 
 void WindowSDL::DestroySDLWindow() {
+  paint_wakeup_->Stop();
   if (cursor_hide_timer_) {
     SDL_RemoveTimer(cursor_hide_timer_);
     cursor_hide_timer_ = 0;
   }
 #if REX_PLATFORM_MAC
+#if !REX_PLATFORM_IOS
   if (accelerated_pointer_monitor_) {
     RemoveAcceleratedPointerMonitor(accelerated_pointer_monitor_);
     accelerated_pointer_monitor_ = nullptr;
   }
+#endif
   DestroyMetalView();
 #endif
   if (sdl_window_) {
@@ -309,7 +320,14 @@ void* WindowSDL::GetNativeWindowHandle() const {
                                 SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
 #elif REX_PLATFORM_MAC
   return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
+#if REX_PLATFORM_IOS
+                                SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
+#else
                                 SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+#endif
+#elif REX_PLATFORM_ANDROID
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window_),
+                                SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 #else
   return nullptr;
 #endif
@@ -377,7 +395,7 @@ bool WindowSDL::SetRelativeMouseMode(bool enabled) {
           return;
         }
 
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
         if (!enabled && accelerated_pointer_monitor_) {
           RemoveAcceleratedPointerMonitor(accelerated_pointer_monitor_);
           accelerated_pointer_monitor_ = nullptr;
@@ -390,7 +408,7 @@ bool WindowSDL::SetRelativeMouseMode(bool enabled) {
           return;
         }
 
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
         if (enabled && !accelerated_pointer_monitor_) {
           accelerated_pointer_monitor_ = InstallAcceleratedPointerMonitor(
               GetNativeWindowHandle(), &WindowSDL::AcceleratedPointerCallbackThunk, this);
@@ -474,7 +492,12 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
       return std::make_unique<CAMetalLayerSurface>(sdl_window_, layer);
     }
   }
-#else
+#elif REX_PLATFORM_ANDROID
+  if (allowed_types & Surface::kTypeFlag_AndroidNativeWindow) {
+    auto* native_window = static_cast<ANativeWindow*>(GetNativeWindowHandle());
+    if (native_window) return std::make_unique<AndroidNativeWindowSurface>(native_window);
+  }
+#elif REX_PLATFORM_GNU_LINUX
   if (allowed_types & Surface::kTypeFlag_XcbWindow) {
     SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
     auto* display = static_cast<Display*>(
@@ -490,42 +513,56 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
 }
 
 void WindowSDL::RequestPaintImpl() {
-  // Coalesce: at most one queued paint event at a time. Callable from non-UI
-  // threads; SDL_PushEvent is thread-safe.
-  if (paint_pending_.exchange(true, std::memory_order_acq_rel)) {
-    return;
-  }
+  const uint32_t ticket = paint_wakeup_->Request(SDL_GetTicksNS());
+  if (!ticket) return;
   SDL_Event event{};
   event.type = sdl_app_context().paint_event_type();
   event.user.windowID = sdl_window_id_;
-  SDL_PushEvent(&event);
+  event.user.code = static_cast<Sint32>(ticket);
+  if (!SDL_PushEvent(&event)) paint_wakeup_->Complete(ticket);
 }
 
 void WindowSDL::RequestPaintAtUITickImpl() {
-  // Reserve the same coalesced slot as an immediate paint. The timer callback
-  // owns only immutable routing data, so it remains safe if the WindowSDL is
-  // destroyed before the event reaches the UI loop (the registry will drop
-  // the event for the stale window ID).
-  if (paint_pending_.exchange(true, std::memory_order_acq_rel)) {
-    return;
-  }
-  auto request = std::make_unique<DeferredPaintRequest>(
-      DeferredPaintRequest{sdl_app_context().paint_event_type(), sdl_window_id_});
-  if (!SDL_AddTimer(kDeferredPaintDelayMs, DeferredPaintTimerCallback, request.get())) {
-    paint_pending_.store(false, std::memory_order_release);
-    REXLOG_WARN("SDL_AddTimer failed for deferred paint retry: {}", SDL_GetError());
+  RequestPaintAfterImpl(kDeferredPaintDelayMs);
+}
+
+void WindowSDL::RequestPaintAfterImpl(uint32_t delay_ms) {
+  RequestPaintAfterNanosecondsImpl(uint64_t(delay_ms) * 1'000'000);
+}
+
+void WindowSDL::RequestPaintAfterNanosecondsImpl(uint64_t delay_ns) {
+  delay_ns = std::clamp<uint64_t>(delay_ns, 1, 1'000'000'000);
+  const uint32_t ticket = paint_wakeup_->Request(SDL_GetTicksNS() + delay_ns);
+  if (!ticket) return;
+  auto request = std::make_unique<DeferredPaintRequest>(DeferredPaintRequest{
+      sdl_app_context().paint_event_type(), sdl_window_id_, ticket, paint_wakeup_});
+  if (!SDL_AddTimerNS(delay_ns, DeferredPaintTimerCallback, request.get())) {
+    paint_wakeup_->Complete(ticket);
+    REXLOG_WARN("SDL_AddTimerNS failed for paint scheduling: {}", SDL_GetError());
     RequestPaintImpl();
     return;
   }
   request.release();
 }
 
-void WindowSDL::HandlePaintEvent() {
-  paint_pending_.store(false, std::memory_order_release);
-  OnPaint();
+void WindowSDL::HandlePaintEvent(uint32_t ticket) {
+  if (paint_wakeup_->Complete(ticket)) OnPaint();
 }
 
 void WindowSDL::HandleWindowEvent(SDL_Event& event) {
+  switch (event.type) {
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+    case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED:
+      rex::input::GetAbsolutePointerService().CancelAll(event.common.timestamp);
+      break;
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    case SDL_EVENT_WINDOW_HIDDEN:
+      rex::input::GetAbsolutePointerService().SetFocused(false, event.common.timestamp);
+      break;
+  }
   WindowDestructionReceiver destruction_receiver(this);
   switch (event.type) {
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -695,7 +732,7 @@ void WindowSDL::HandleTextInputEvent(SDL_Event& event) {
   }
 }
 
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
 void WindowSDL::AcceleratedPointerCallbackThunk(void* userdata, float delta_x, float delta_y) {
   static_cast<WindowSDL*>(userdata)->HandleAcceleratedPointerMotion(delta_x, delta_y);
 }
@@ -732,7 +769,7 @@ void WindowSDL::HandleMouseEvent(SDL_Event& event) {
       }
 
       MouseEvent::MotionSource motion_source = MouseEvent::MotionSource::kGeneric;
-#if REX_PLATFORM_MAC
+#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
       switch (ClassifySdlMouseMotion(event.motion.which, accelerated_pointer_monitor_ != nullptr)) {
         case SdlMouseMotionRoute::kSuppressAcceleratedDuplicate:
           break;
@@ -780,6 +817,9 @@ void WindowSDL::HandleMouseEvent(SDL_Event& event) {
 }
 
 void WindowSDL::HandleTouchEvent(SDL_Event& event) {
+  // Trackpads can also emit SDL finger events. Only a direct screen contact
+  // may own a game touch control; relative/indirect devices keep mouse semantics.
+  if (SDL_GetTouchDeviceType(event.tfinger.touchID) != SDL_TOUCH_DEVICE_DIRECT) return;
   if (event.tfinger.touchID == SDL_MOUSE_TOUCHID) {
     return;
   }

@@ -673,6 +673,7 @@ build-codegen/
 *.sh
 *.py
 /tools/*.py
+!glue/rexglue-sdk-main/gta4-recomp/tools/derive_draw_distance_hooks.py
 !glue/rexglue-sdk-main/gta4-recomp/tools/derive_frontend_advanced_menu_layout.py
 !glue/rexglue-sdk-main/gta4-recomp/tools/verify_gta4_keyboard_consumers.py
 !tools/analyze_native_memory.py
@@ -735,6 +736,11 @@ scripts/
 !/tools/extract_xma_loop_fixtures.py
 !/tools/generate_xma_loop_cases.py
 
+# Sony controller feature documentation and reproducible regression tools.
+!/docs/SONY_CONTROLLER_FEATURES.md
+!/glue/rexglue-sdk-main/tools/run_sony_feedback_tests.py
+!/glue/rexglue-sdk-main/gta4-recomp/tools/verify_gta4_sony_sites.py
+
 # Repository setup and validation are maintained source, not local scripts.
 !/tools/setup_repo.py
 !/tools/test_setup_repo.py
@@ -749,3 +755,9 @@ CMakeUserPresets.json
 /.github/workflows/*
 !/.github/workflows/repository-checks.yml
 !/.github/workflows/build-macos.yml
+
+# Reproducible touch regression runner and arithmetic fixtures.
+!/glue/rexglue-sdk-main/tools/verify_controls_regressions.py
+!/glue/rexglue-sdk-main/tests/regression/controls/touch_samples.py
+!/glue/rexglue-sdk-main/tests/regression/controls/touch_icon_samples.py
+!/glue/rexglue-sdk-main/tests/regression/touch_frontend_activation_runtime_test.py

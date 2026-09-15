@@ -634,11 +634,8 @@ bool IsFinalized() {
 }
 
 bool SaveConfig(const std::filesystem::path& config_path) {
-  std::string content = SerializeToTOML();
-  if (content.empty()) {
-    REXLOG_DEBUG("SaveConfig: no modified flags to save");
-    return true;
-  }
+  const std::string content = SerializeToTOML();
+  // An empty configuration still replaces obsolete saved overrides.
 
   try {
     std::ofstream file(config_path);

@@ -9,6 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -19,5 +20,8 @@ namespace rex::ui {
 // out_width/out_height and returns width*height*4 bytes.
 std::vector<uint8_t> DecodeImageRGBA(const uint8_t* data, size_t size, int& out_width,
                                      int& out_height);
+// Reads image dimensions before allocating pixel storage.
+std::vector<uint8_t> DecodeImageRGBA(const uint8_t* data, size_t size, int& out_width,
+                                    int& out_height, int max_width, int max_height);
 
 }  // namespace rex::ui

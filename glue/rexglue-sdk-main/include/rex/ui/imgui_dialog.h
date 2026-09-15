@@ -38,6 +38,9 @@ class ImGuiDialog {
   void Then(rex::thread::Fence* fence);
 
   void Draw();
+  virtual bool WantsContinuousRepaint() const { return true; }
+  // Safe from notification threads; no direct ImGui or Window access there.
+  void RequestRepaint() const { if (request_repaint_) request_repaint_(); }
 
  protected:
   ImGuiDialog(ImGuiDrawer* imgui_drawer);
@@ -54,6 +57,7 @@ class ImGuiDialog {
 
  private:
   ImGuiDrawer* imgui_drawer_ = nullptr;
+  std::function<void()> request_repaint_;
   bool has_close_pending_ = false;
   std::vector<rex::thread::Fence*> waiting_fences_;
 };

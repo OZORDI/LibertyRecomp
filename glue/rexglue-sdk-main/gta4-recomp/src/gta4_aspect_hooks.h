@@ -31,6 +31,9 @@ inline void PublishOutput(Extent render, Extent output) {
 UiContext CurrentUi(uint8_t* base);
 // Labels, sliders and hit regions share the current menu's authored divider.
 UiContext MenuBodyUi(uint8_t* base);
+UiContext RadarUi(uint8_t* base);
+// Gameplay radar vertices are local to its privately laid-out viewport.
+UiContext RadarLocalUi();
 UiContext TextUi(const PPCContext& context, uint8_t* base);
 class Scope {
  public:

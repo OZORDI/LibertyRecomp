@@ -34,6 +34,10 @@ class SwitchInputDriver final : public InputDriver {
     HidNpadIdType id;
     uint32_t packet_number;
     uint16_t last_buttons;
+    uint8_t last_left_trigger = 0;
+    uint8_t last_right_trigger = 0;
+    HidAnalogStickState last_left_stick{};
+    HidAnalogStickState last_right_stick{};
     HidVibrationDeviceHandle vibration[2];
     bool vibration_ready;
     HidSixAxisSensorHandle sixaxis[2];

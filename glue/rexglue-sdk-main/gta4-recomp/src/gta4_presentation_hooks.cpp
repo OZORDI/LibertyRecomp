@@ -1,5 +1,6 @@
 #include "gta4_presentation_options.h"
 #include "gta4_presentation_policy.h"
+#include "input/context_touch_controls.h"
 
 #include <array>
 #include <atomic>
@@ -90,6 +91,7 @@ class ParserScope final {
 }  // namespace
 
 extern "C" void sub_82145420(PPCContext& ctx, uint8_t* base) {
+  const gta4::input::ContextTouchGameplayTransition touch_transition;
   const uint32_t caller = ctx.lr;
   const bool cold = policy::IsColdStart(caller, ctx.r3.u32, ctx.r4.u32);
   const bool eligible = cold && GuestSpan(base, kActive, 1) && !REX_LOAD_U8(kActive);

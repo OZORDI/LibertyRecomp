@@ -161,6 +161,19 @@ class AuthoritativeConstantState {
   const std::vector<uint8_t>& canonical() const { return canonical_; }
   const std::shared_ptr<const ConstantStateVersion>& current_version() const { return current_; }
 
+  // Draw capture owns the authoritative state before later commands mutate it.
+  // Copy that complete state once here, rather than reconstructing a chain of
+  // deltas on the frame's Vulkan recording critical path. Unconsumed updates
+  // stay deferred and allocate no full-size snapshot.
+  const std::shared_ptr<const ConstantStateVersion>& SnapshotCurrentVersion() const {
+    if (current_ && !current_->materialized) {
+      current_->materialized = std::make_shared<const std::vector<uint8_t>>(canonical_);
+      current_->parent.reset();
+    }
+    return current_;
+  }
+
+
   template <typename HashCallback>
   ConstantApplyResult Apply(const ConstantPayloadDelta& delta, HashCallback&& hash_callback) {
     if (!ValidateConstantPayloadDelta(delta, canonical_.size())) {

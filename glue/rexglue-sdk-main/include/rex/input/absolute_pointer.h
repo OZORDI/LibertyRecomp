@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,6 +12,12 @@
 #include <rex/ui/guest_output_transform.h>
 
 namespace rex::input {
+
+struct X_INPUT_GAMEPAD;
+using TouchGamepadProvider = bool (*)(uint32_t user_index, X_INPUT_GAMEPAD* state) noexcept;
+void SetTouchGamepadProvider(TouchGamepadProvider provider) noexcept;
+bool ReadTouchGamepad(uint32_t user_index, X_INPUT_GAMEPAD* state) noexcept;
+void SetTouchInputActiveCallback(std::function<bool()> callback);
 
 enum class AbsolutePointerPhase : uint8_t {
   kDown,
@@ -29,6 +36,9 @@ struct AbsolutePointerEvent {
   uint64_t timestamp_ns = 0;
   float x = 0.0f;
   float y = 0.0f;
+  // Window logical coordinates for host controls, independent of letterboxing.
+  float logical_x = 0.0f;
+  float logical_y = 0.0f;
   float output_width = 0.0f;
   float output_height = 0.0f;
   float pressure = 0.0f;
@@ -48,6 +58,12 @@ struct TouchPresentationState {
   float physical_output_height = 0.0f;
   float physical_surface_width = 0.0f;
   float physical_surface_height = 0.0f;
+  float logical_width = 0.0f;
+  float logical_height = 0.0f;
+  float logical_safe_x = 0.0f;
+  float logical_safe_y = 0.0f;
+  float logical_safe_width = 0.0f;
+  float logical_safe_height = 0.0f;
   int32_t safe_area_x = 0;
   int32_t safe_area_y = 0;
   int32_t safe_area_width = 0;
@@ -63,7 +79,8 @@ enum class TouchControlsMode : uint8_t {
 };
 
 bool ShouldEnableTouchControls(TouchControlsMode mode, bool controller_connected,
-                               bool physical_keyboard_connected, bool focused) noexcept;
+                               bool physical_keyboard_connected, bool focused,
+                               bool physical_mouse_connected = false) noexcept;
 
 class AbsolutePointerService {
  public:
@@ -75,6 +92,8 @@ class AbsolutePointerService {
                           int32_t safe_area_y, int32_t safe_area_width, int32_t safe_area_height,
                           uint64_t timestamp_ns);
   void SetFocused(bool focused, uint64_t timestamp_ns);
+  void SetLogicalSize(float width, float height, uint64_t timestamp_ns = 0);
+  void NotifyPhysicalInput(uint64_t timestamp_ns = 0);
 
   void SubmitPointer(uint64_t source_device_id, uint64_t source_pointer_id,
                      AbsolutePointerPhase phase, float physical_x, float physical_y, float pressure,
@@ -87,15 +106,22 @@ class AbsolutePointerService {
   void ReplacePhysicalKeyboards(const std::vector<uint64_t>& device_ids, uint64_t timestamp_ns = 0);
   void AddPhysicalKeyboard(uint64_t device_id, uint64_t timestamp_ns = 0);
   void RemovePhysicalKeyboard(uint64_t device_id, uint64_t timestamp_ns = 0);
+  void ReplacePhysicalMice(const std::vector<uint64_t>& device_ids, uint64_t timestamp_ns = 0);
+  void AddPhysicalMouse(uint64_t device_id, uint64_t timestamp_ns = 0);
+  void RemovePhysicalMouse(uint64_t device_id, uint64_t timestamp_ns = 0);
   void ReplaceGameControllers(const std::vector<uint64_t>& device_ids, uint64_t timestamp_ns = 0);
   void AddGameController(uint64_t device_id, uint64_t timestamp_ns = 0);
   void RemoveGameController(uint64_t device_id, uint64_t timestamp_ns = 0);
   void SetAndroidPhysicalKeyboardPresence(bool present, bool query_succeeded,
                                           uint64_t timestamp_ns = 0);
+  void SetAndroidPhysicalMousePresence(bool present, bool query_succeeded,
+                                       uint64_t timestamp_ns = 0);
 
   bool HasPhysicalKeyboard() const noexcept;
+  bool HasPhysicalMouse() const noexcept;
   bool HasGameController() const noexcept;
   bool TouchControlsActive(TouchControlsMode mode) noexcept;
+  bool TouchControlsVisible(TouchControlsMode mode) const noexcept;
   size_t queued_move_count() const noexcept;
 
  private:
@@ -117,6 +143,8 @@ class AbsolutePointerService {
     float x;
     float y;
     float pressure;
+    float logical_x = 0.0f;
+    float logical_y = 0.0f;
   };
 
   bool PresentationGeometryEqualsLocked(const rex::ui::GuestOutputTransform& transform,
@@ -138,6 +166,10 @@ class AbsolutePointerService {
   int32_t safe_area_width_ = 0;
   int32_t safe_area_height_ = 0;
   bool focused_ = false;
+  float logical_width_ = 0.0f;
+  float logical_height_ = 0.0f;
+  bool touch_seen_ = false;
+  bool physical_input_latest_ = false;
   uint64_t generation_ = 1;
   uint64_t next_sequence_ = 1;
   uint64_t next_pointer_id_ = 1;
@@ -145,12 +177,16 @@ class AbsolutePointerService {
   std::deque<AbsolutePointerEvent> events_;
   std::unordered_map<SourcePointerKey, ActivePointer, SourcePointerKeyHash> active_pointers_;
   std::unordered_set<uint64_t> physical_keyboards_;
+  std::unordered_set<uint64_t> physical_mice_;
   std::unordered_set<uint64_t> game_controllers_;
   bool android_keyboard_presence_valid_ = false;
   bool android_physical_keyboard_present_ = false;
+  bool android_mouse_presence_valid_ = false;
+  bool android_physical_mouse_present_ = false;
   bool policy_log_initialized_ = false;
   TouchControlsMode logged_policy_mode_ = TouchControlsMode::kAuto;
   size_t logged_keyboard_count_ = 0;
+  size_t logged_mouse_count_ = 0;
   size_t logged_controller_count_ = 0;
   bool logged_focus_ = false;
   bool logged_touch_active_ = false;
@@ -158,7 +194,12 @@ class AbsolutePointerService {
 
 // Guest-facing, process-wide single-consumer API.
 bool TryDequeueAbsolutePointerEvent(AbsolutePointerEvent* out_event) noexcept;
+// Device availability is stable while host UI temporarily captures game input.
+bool TouchControlsAvailable() noexcept;
 bool TouchControlsActive() noexcept;
+bool TouchControlsVisible() noexcept;
+// Native menu/map touch remains available when the gameplay overlay is Off.
+bool TouchPointerInputActive() noexcept;
 bool GetTouchPresentationState(TouchPresentationState* out_state) noexcept;
 
 // Host ingress used by the SDL window/input bridge.

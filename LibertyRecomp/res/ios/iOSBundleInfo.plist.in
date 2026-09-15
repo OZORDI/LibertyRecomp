@@ -77,6 +77,11 @@
     <key>UIRequiresFullScreen</key>
     <true/>
 
+    <!-- SDL uses this opt-in to enumerate real mice and distinguish indirect
+         pointer events from direct touchscreen contacts. -->
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+
     <!-- Disable ATS for local LAN game session networking -->
     <key>NSAppTransportSecurity</key>
     <dict>

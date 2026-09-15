@@ -33,11 +33,13 @@
 #include "postfx_resource_pool.h"
 #include "dirty_state_delta.h"
 #include "frame_constant_arena.h"
+#include "native_constant_upload.h"
 #include "native_working_set.h"
 #include "native_immutable_bindings.h"
 #include "native_texture_protection.h"
 #include "native_prepared_bindings.h"
 #include "native_image_reuse.h"
+#include "native_resource_reclaimer.h"
 #include "native_texture_eviction_index.h"
 #include <memory_resource>
 #include "stateful_constant_state.h"
@@ -92,6 +94,8 @@ class VulkanSubmissionTracker;
 }  // namespace rex::ui
 
 namespace rex::graphics::gta4_native {
+
+class NativeTextureUploadBatch;
 
 class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
  public:
@@ -873,6 +877,9 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     uint32_t published_image_count = 0, published_sampler_count = 0;
     bool images_dirty = false, samplers_dirty = false;
     std::vector<VkDescriptorImageInfo> update_scratch;
+    std::vector<NativeDescriptorImageSlot> published_images;
+    std::vector<NativeDescriptorSamplerSlot> published_samplers;
+    std::vector<VkWriteDescriptorSet> update_writes;
   };
 
   struct NativeDescriptorRetirement {
@@ -1049,9 +1056,10 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
     uint32_t height = 0;
     uint32_t logical_width = 0;
     uint32_t logical_height = 0;
-    // Only attachments that the current command can access participate in the
-    // render scope. Keeping this separate from the bound target arrays prevents
-    // an unwritten MRT alias from being cleared, transitioned, or claimed.
+    // Realized attachments normally follow the command's access mask. A
+    // stencil-only light setup may borrow already-active color attachments to
+    // keep the pass open, while its zero write mask prevents ownership claims.
+    // Inactive guest MRT aliases are never materialized for this optimization.
     uint32_t color_attachment_mask = 0;
     uint32_t color_write_mask = 0;
     bool depth_stencil_attachment_active = false;
@@ -1181,6 +1189,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   struct NativeFrameConstantArena {
     NativeUploadBuffer storage;
     FrameConstantArenaIndex index;
+    NativeConstantUploadTracker uploads;
+    bool compare_upload_bytes = false;
     FrameGenerationMap<NativeSharedConstantSemanticKey, uint64_t,
                        NativeSharedConstantSemanticKeyHash>
         shared_versions;
@@ -1284,7 +1294,8 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   VkPipeline PublishNativePipeline(const NativePipelineKey& key, VkPipeline pipeline,
                                     uint64_t compile_ticks);
   void RecordNativePipelineTiming(uint64_t compile_ticks, uint64_t wait_ticks = 0);
-  bool CreateNativeUploadBuffer(VkDeviceSize capacity, NativeUploadBuffer& upload_buffer);
+  bool CreateNativeUploadBuffer(VkDeviceSize capacity, NativeUploadBuffer& upload_buffer,
+                                bool prefer_cached = false);
   void DestroyNativeUploadBuffer(NativeUploadBuffer& upload_buffer);
   bool EnsureFrameUploadCapacity(
       const std::shared_ptr<const NativeTextureResource>& present_source);
@@ -1449,11 +1460,14 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   void RetireNativeTextureImage(std::unique_ptr<NativeTextureImage> image);
   bool ReleaseRetiredTextureImages(bool drain_all = false);
   void DestroyNativeTextureImage(NativeTextureImage& image);
+  void DestroyNativeTextureViews(NativeTextureImage& image);
   void DestroyNativeSurfaceImage(NativeSurfaceImage& image);
   void ReleasePendingSurfaceImages();
   void QueueSurfaceImageRelease(uint32_t handle);
   NativeTextureImage* GetOrCreateTextureImage(
-      VkCommandBuffer command_buffer, const std::shared_ptr<const NativeTextureResource>& texture);
+      VkCommandBuffer command_buffer, const std::shared_ptr<const NativeTextureResource>& texture,
+      NativeTextureUploadBatch* upload_batch = nullptr);
+  void FlushTextureUploads(VkCommandBuffer command_buffer, NativeTextureUploadBatch& batch);
   NativeSurfaceImage* GetOrCreateSurfaceImage(
       const SurfaceDescriptor& descriptor, bool depth,
       VkSampleCountFlagBits host_sample_override = VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM,
@@ -1626,6 +1640,11 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   std::condition_variable render_condition_;
   std::pmr::synchronized_pool_resource snapshot_pool_;
   std::deque<NativeCommand> render_queue_;
+  // Worker-owned bulk handoff. Pending commands remain resource-protected
+  // across presents, allocation recovery and synchronous readback boundaries.
+  std::vector<NativeCommand> worker_command_batch_;
+  size_t worker_command_cursor_ = 0;
+  void AppendWorkerTextureProtection(std::unordered_set<uint64_t>& generations) const;
   NativeTextureProtectionIndex queued_texture_protection_; // render_mutex_ owns this.
   uint32_t queued_title_presents_ = 0;
   bool producer_waiting_ = false;
@@ -1971,10 +1990,16 @@ class Gta4NativeGraphicsSystem final : public system::IGraphicsSystem {
   uint64_t next_native_image_lifetime_ = 0;
   struct ReusableNativeImage {
     NativeImageResource resource{};
+    VkComponentMapping view_components{};
+    VkImageSubresourceRange view_range{};
+    VkImageViewType view_type = VK_IMAGE_VIEW_TYPE_2D;
+    std::vector<VkImageView> mip_views;
+    VkImageView packed_stencil_view = VK_NULL_HANDLE;
     VkDeviceSize bytes=0;
     uint32_t memory_type=UINT32_MAX, memory_heap=UINT32_MAX;
   };
   NativeImageReusePool<ReusableNativeImage> texture_allocation_pool_{33554432, 64};
+  std::unique_ptr<NativeResourceReclaimer<ReusableNativeImage>> texture_reclaimer_;
   bool image_allocation_pool_enabled_=true;
   uint64_t texture_allocation_reuses_=0;
   void TrimTextureAllocationPool(bool all);

@@ -12,8 +12,7 @@
  *
  * This works on both arm64 and arm64e devices. On arm64e the stack pivot is
  * a plain `mov sp, x*` which does not interact with pointer authentication;
- * the subsequent `br` to the trampoline uses an unsigned (raw) function
- * pointer so no PAC discriminator is needed.
+ * the subsequent `br` strips the function-pointer signature before branching.
  *
  * @license     BSD 3-Clause License
  */
@@ -28,6 +27,9 @@
 #include <csetjmp>
 #include <cstdlib>
 #include <cstring>
+#if defined(__arm64e__)
+#include <ptrauth.h>
+#endif
 
 // The fiber struct reserves 512 bytes for the jmp_buf. Darwin's jmp_buf on
 // arm64 is (14 * 8) + (8 * 8) + 8 + 8 = 192 bytes, but _JBLEN is platform
@@ -91,24 +93,33 @@ void Fiber::SwitchTo(Fiber* target) {
     } else {
       // First switch — pivot SP to the fiber's private stack and tail-call
       // the trampoline. AArch64 stack grows downward, SP must be 16-byte
-      // aligned, and we leave 16 bytes of red-zone headroom.
+      // aligned.
       target->started_ = true;
       uintptr_t sp =
           (reinterpret_cast<uintptr_t>(target->stack_) + target->stack_size_) & ~uintptr_t(15);
       void (*trampoline)() = &Fiber::Trampoline;
 #if defined(__aarch64__)
+#if defined(__arm64e__)
+      trampoline = reinterpret_cast<void (*)()>(
+          ptrauth_strip(trampoline, ptrauth_key_function_pointer));
+#endif
       __asm__ volatile(
           "mov sp, %[newsp]\n\t"  // pivot to the fiber's stack
           "br  %[func]\n\t"       // tail-call trampoline (never returns)
           :
           : [newsp] "r"(sp), [func] "r"(trampoline)
           : "memory");
+#elif defined(__x86_64__)
+      __asm__ volatile(
+          "mov %[newsp], %%rsp\n\t"
+          "xor %%rbp, %%rbp\n\t"
+          "call *%[func]\n\t"
+          "ud2\n\t"
+          :
+          : [newsp] "r"(sp), [func] "a"(trampoline)
+          : "memory");
 #else
-      // iOS simulator on x86_64 (development only) — fall back to a direct
-      // call. This will grow the thread's own stack, but the simulator does
-      // not actually run guest code, it's for UI/build smoke tests.
-      (void)sp;
-      trampoline();
+#error Unsupported iOS fiber architecture
 #endif
       __builtin_unreachable();
     }

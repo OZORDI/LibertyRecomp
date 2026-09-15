@@ -43,14 +43,19 @@ class NativeDescriptorWorkingSet {
  public:
   struct Page {
     FrameGenerationMap<uint64_t, uint32_t> image_lookup, sampler_lookup;
+    FrameGenerationMap<uint64_t, uint32_t> previous_images, previous_samplers;
     std::vector<uint64_t> images, samplers;
-    bool Reset() {
+    size_t image_free_cursor = 1, sampler_free_cursor = 1;
+    bool Reset(uint32_t image_capacity, uint32_t sampler_capacity) {
+      // Keep the previous slot's assignments so draw reordering alone does not
+      // rewrite Metal argument buffers. Only current-frame entries are live.
+      std::swap(image_lookup, previous_images);
+      std::swap(sampler_lookup, previous_samplers);
       if (!image_lookup.ResetGeneration() || !sampler_lookup.ResetGeneration())
         return false;
-      images.clear();
-      samplers.clear();
-      images.push_back(0);
-      samplers.push_back(0);
+      images.assign(std::clamp<size_t>(images.size(), 1, image_capacity), 0);
+      samplers.assign(std::clamp<size_t>(samplers.size(), 1, sampler_capacity), 0);
+      image_free_cursor = sampler_free_cursor = 1;
       return bool(image_lookup.Insert(0, 0)) && bool(sampler_lookup.Insert(0, 0));
     }
   };
@@ -78,8 +83,8 @@ class NativeDescriptorWorkingSet {
     if (!active_pages_ && !StartPage())
       return std::nullopt;
     auto fits = [&](const Page& page) {
-      return page.images.size() + Missing(page.image_lookup, images) <= image_capacity_ &&
-             page.samplers.size() + Missing(page.sampler_lookup, samplers) <= sampler_capacity_;
+      return page.image_lookup.size() + Missing(page.image_lookup, images) <= image_capacity_ &&
+             page.sampler_lookup.size() + Missing(page.sampler_lookup, samplers) <= sampler_capacity_;
     };
     if (!fits(pages_[active_pages_ - 1])) {
       if (!StartPage() || !fits(pages_[active_pages_ - 1]))
@@ -89,8 +94,10 @@ class NativeDescriptorWorkingSet {
     out.page = uint32_t(active_pages_ - 1);
     Page& page = pages_[out.page];
     for (size_t i = 0; i < Stages; ++i) {
-      out.images[i] = Insert(page.image_lookup, page.images, images[i]);
-      out.samplers[i] = Insert(page.sampler_lookup, page.samplers, samplers[i]);
+      out.images[i] = Insert(page.image_lookup, page.previous_images, page.images, images[i],
+                             image_capacity_, page.image_free_cursor);
+      out.samplers[i] = Insert(page.sampler_lookup, page.previous_samplers, page.samplers, samplers[i],
+                               sampler_capacity_, page.sampler_free_cursor);
       if (out.images[i] == UINT32_MAX || out.samplers[i] == UINT32_MAX)
         return std::nullopt;
     }
@@ -117,15 +124,24 @@ class NativeDescriptorWorkingSet {
     return count;
   }
   static uint32_t Insert(FrameGenerationMap<uint64_t, uint32_t>& lookup,
-                         std::vector<uint64_t>& values, uint64_t key) {
-    if (const auto* existing = lookup.Find(key))
-      return *existing;
-    if (values.size() >= UINT32_MAX)
-      return UINT32_MAX;
-    const auto index = uint32_t(values.size());
-    if (!lookup.Insert(key, index))
-      return UINT32_MAX;
-    values.push_back(key);
+                         const FrameGenerationMap<uint64_t, uint32_t>& previous,
+                         std::vector<uint64_t>& values, uint64_t key,
+                         uint32_t capacity, size_t& free_cursor) {
+    if (const auto* existing = lookup.Find(key)) return *existing;
+    uint32_t index = UINT32_MAX;
+    if (const auto* old = previous.Find(key); old && *old < values.size() && !values[*old]) {
+      index = *old;
+    } else if (values.size() < capacity) {
+      // Prefer fresh space to displacing an old binding used by a later draw.
+      index = uint32_t(values.size());
+      values.push_back(0);
+    } else {
+      while (free_cursor < values.size() && values[free_cursor]) ++free_cursor;
+      if (free_cursor == values.size()) return UINT32_MAX;
+      index = uint32_t(free_cursor++);
+    }
+    if (!lookup.Insert(key, index)) return UINT32_MAX;
+    values[index] = key;
     return index;
   }
   bool StartPage() {
@@ -133,7 +149,7 @@ class NativeDescriptorWorkingSet {
       return false;
     if (active_pages_ == pages_.size())
       pages_.emplace_back();
-    if (!pages_[active_pages_].Reset())
+    if (!pages_[active_pages_].Reset(image_capacity_, sampler_capacity_))
       return false;
     ++active_pages_;
     return true;

@@ -69,14 +69,6 @@ static_assert(kXInputButtonFromSDL.size() == SDL_GAMEPAD_BUTTON_COUNT);
 
 }  // namespace
 
-#if REX_PLATFORM_ANDROID
-namespace {
-
-constexpr uint64_t kAndroidKeyboardRefreshIntervalMs = 1000;
-
-}  // namespace
-#endif
-
 SDLInputDriver::SDLInputDriver(rex::ui::Window* window, size_t window_z_order,
                                bool expose_gamepad_state)
     : InputDriver(window, window_z_order),
@@ -88,7 +80,47 @@ SDLInputDriver::SDLInputDriver(rex::ui::Window* window, size_t window_z_order,
       controllers_mutex_(),
       keystroke_states_() {}
 
-SDLInputDriver::~SDLInputDriver() {}
+SDLInputDriver::~SDLInputDriver() {
+  // InputSystem::Shutdown may destroy drivers before a window closing event.
+  // Retire controller output without relying on the window still being alive.
+  accepting_input_requests_.store(false, std::memory_order_release);
+  ui_callback_alive_->store(false, std::memory_order_release);
+  StopSonyWorker();
+  if (event_watch_installed_) {
+    SDL_RemoveEventWatch(EventWatch, this);
+    event_watch_installed_ = false;
+  }
+  if (attached_app_context_) {
+    const auto detach_window = [this] {
+      if (attached_window_) {
+        attached_window_->RemoveInputListener(this);
+        attached_window_->RemoveListener(this);
+        attached_window_ = nullptr;
+      }
+    };
+    // No controller mutex is held across the UI fence. If the loop already
+    // quit, its queue is drained and listeners can be retired without dispatch.
+    if (!attached_app_context_->CallInUIThreadSynchronous([this, &detach_window] {
+          detach_window();
+          attached_app_context_->ExecutePendingFunctionsFromUIThread();
+        })) {
+      detach_window();
+    }
+  }
+  std::lock_guard lock(controllers_mutex_);
+  for (size_t index = 0; index < controllers_.size(); ++index) {
+    if (SDL_WasInit(SDL_INIT_GAMEPAD)) {
+      CloseControllerLocked(index, "input-shutdown");
+    } else {
+      // SDL itself already retired the handles; only copied service state
+      // remains valid to access at this point.
+      const auto device = sony::GetService().ReadDevice(static_cast<uint32_t>(index));
+      if (controllers_[index].sony_model != sony::Model::kNone)
+        sony::GetService().Disconnect(device.instance_id);
+      controllers_[index] = {};
+    }
+  }
+}
 
 X_STATUS SDLInputDriver::Setup() {
   if (!TestSDLVersion()) {
@@ -101,6 +133,8 @@ X_STATUS SDLInputDriver::Setup() {
 void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
   if (window && !attached_window_) {
     attached_window_ = window;
+    attached_app_context_ = &window->app_context();
+    ui_callback_alive_ = std::make_shared<std::atomic<bool>>(true);
     window->AddListener(this);
     window->AddInputListener(this, window_z_order());
     window->app_context().CallInUIThreadSynchronous([this]() {
@@ -127,9 +161,9 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
       SDL_Gamepad_initialized_ = true;
 
       const uint64_t inventory_timestamp_ns = SDL_GetTicksNS();
-      RefreshDeviceInventoryFromUIThread(inventory_timestamp_ns);
-      RefreshAndroidKeyboardFromUIThread(inventory_timestamp_ns, true);
+      RefreshDeviceInventoryFromUIThread(inventory_timestamp_ns, true);
       GetAbsolutePointerService().SetFocused(attached_window_->HasFocus(), inventory_timestamp_ns);
+      sony::GetService().SetFocused(attached_window_->HasFocus());
       RefreshPointerPresentation(inventory_timestamp_ns);
 
       // Load custom controller mappings if available
@@ -151,6 +185,7 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
       }
       REXLOG_INFO("SDL input driver initialized successfully");
       accepting_input_requests_.store(true, std::memory_order_release);
+      StartSonyWorker();
     });
   }
 }
@@ -161,6 +196,9 @@ void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
     // controllers_mutex_. DrainAndLock rechecks this flag after taking the
     // mutex, so no SDL gamepad call can race subsystem teardown.
     accepting_input_requests_.store(false, std::memory_order_release);
+    ui_callback_alive_->store(false, std::memory_order_release);
+    StopSonyWorker();
+    sony::GetService().SetFocused(false);
     GetAbsolutePointerService().SetFocused(false, SDL_GetTicksNS());
     attached_window_->RemoveInputListener(this);
     attached_window_->RemoveListener(this);
@@ -169,11 +207,12 @@ void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
       event_watch_installed_ = false;
     }
 
-    std::unique_lock controllers_guard(controllers_mutex_);
     if (sdl_pumpevents_queued_) {
       attached_window_->app_context().CallInUIThreadSynchronous(
           [this]() { attached_window_->app_context().ExecutePendingFunctionsFromUIThread(); });
     }
+    sdl_pumpevents_queued_ = false;
+    std::unique_lock controllers_guard(controllers_mutex_);
     for (size_t i = 0; i < controllers_.size(); i++) {
       CloseControllerLocked(i, "window-closing");
     }
@@ -190,14 +229,15 @@ void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
 }
 
 void SDLInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {
+  sony::GetService().SetFocused(false);
   GetAbsolutePointerService().SetFocused(false, SDL_GetTicksNS());
 }
 
 void SDLInputDriver::OnGotFocus(rex::ui::UISetupEvent&) {
+  sony::GetService().SetFocused(true);
   const uint64_t timestamp_ns = SDL_GetTicksNS();
   GetAbsolutePointerService().SetFocused(true, timestamp_ns);
-  RefreshDeviceInventoryFromUIThread(timestamp_ns);
-  RefreshAndroidKeyboardFromUIThread(timestamp_ns, true);
+  RefreshDeviceInventoryFromUIThread(timestamp_ns, true);
   RefreshPointerPresentation(timestamp_ns);
 }
 
@@ -240,12 +280,58 @@ bool SDLCALL SDLInputDriver::EventWatch(void* userdata, SDL_Event* event) {
   }
 
   const auto type = event->type;
+  // Preserve activity timestamps for input ownership. Auto mode separately
+  // follows the inventory of actual keyboard, mouse, and controller devices.
+  bool physical_activity = false;
+  switch (type) {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+      physical_activity = event->key.which != 0;
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      physical_activity = IsPhysicalMouseId(event->button.which);
+      break;
+    case SDL_EVENT_MOUSE_MOTION:
+      physical_activity = IsPhysicalMouseId(event->motion.which) &&
+          (event->motion.xrel != 0.0f || event->motion.yrel != 0.0f);
+      break;
+    case SDL_EVENT_MOUSE_WHEEL:
+      physical_activity = IsPhysicalMouseId(event->wheel.which);
+      break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+      physical_activity = true;
+      break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+      physical_activity = std::abs(int(event->gaxis.value)) > 8192;
+      break;
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+    case SDL_EVENT_TERMINATING:
+      static_cast<SDLInputDriver*>(userdata)->pointer_foreground_refresh_pending_.store(
+          false, std::memory_order_release);
+      GetAbsolutePointerService().SetFocused(false, event->common.timestamp);
+      break;
+    case SDL_EVENT_DID_ENTER_FOREGROUND: {
+      auto* self = static_cast<SDLInputDriver*>(userdata);
+      self->pointer_foreground_refresh_pending_.store(true, std::memory_order_release);
+      self->physical_device_inventory_.MarkDirty();
+      break;
+    }
+  }
+  if (physical_activity) GetAbsolutePointerService().NotifyPhysicalInput(event->common.timestamp);
   const bool controller_event =
       type == SDL_EVENT_GAMEPAD_ADDED || type == SDL_EVENT_GAMEPAD_REMOVED;
-  const bool keyboard_inventory_event =
-      type == SDL_EVENT_KEYBOARD_ADDED || type == SDL_EVENT_KEYBOARD_REMOVED;
+  const bool pointer_keyboard_inventory_event = type == SDL_EVENT_KEYBOARD_ADDED ||
+      type == SDL_EVENT_KEYBOARD_REMOVED || type == SDL_EVENT_MOUSE_ADDED ||
+      type == SDL_EVENT_MOUSE_REMOVED;
   const bool sensor_event = type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
-  if (!controller_event && !keyboard_inventory_event && !sensor_event) {
+  const bool touchpad_event = type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ||
+      type == SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION || type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ||
+      ((type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+       event->gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD);
+  if (!controller_event && !pointer_keyboard_inventory_event && !sensor_event && !touchpad_event) {
     return false;
   }
 
@@ -255,40 +341,11 @@ bool SDLCALL SDLInputDriver::EventWatch(void* userdata, SDL_Event* event) {
   return false;
 }
 
-void SDLInputDriver::RefreshDeviceInventoryFromUIThread(uint64_t timestamp_ns) {
-  int keyboard_count = 0;
-  SDL_KeyboardID* keyboard_ids = SDL_GetKeyboards(&keyboard_count);
-  std::vector<uint64_t> keyboards;
-  if (keyboard_ids) {
-    keyboards.reserve(size_t(std::max(keyboard_count, 0)));
-    for (int i = 0; i < keyboard_count; ++i) {
-      if (keyboard_ids[i]) {
-        keyboards.push_back(uint64_t(keyboard_ids[i]));
-      }
-    }
-    SDL_free(keyboard_ids);
-  } else if (keyboard_count) {
-    REXLOG_WARN("SDL keyboard inventory failed: {}", SDL_GetError());
-  }
-  GetAbsolutePointerService().ReplacePhysicalKeyboards(keyboards, timestamp_ns);
-
-  int gamepad_count = 0;
-  SDL_ClearError();
-  SDL_JoystickID* gamepad_ids = SDL_GetGamepads(&gamepad_count);
-  std::vector<uint64_t> gamepads;
-  if (gamepad_ids) {
-    gamepads.reserve(size_t(std::max(gamepad_count, 0)));
-    for (int i = 0; i < gamepad_count; ++i) {
-      if (gamepad_ids[i]) {
-        gamepads.push_back(uint64_t(gamepad_ids[i]));
-      }
-    }
-    SDL_free(gamepad_ids);
-  } else {
-    REXLOG_WARN("SDL gamepad inventory failed: {}", SDL_GetError());
-    return;
-  }
-  GetAbsolutePointerService().ReplaceGameControllers(gamepads, timestamp_ns);
+void SDLInputDriver::RefreshDeviceInventoryFromUIThread(uint64_t timestamp_ns, bool force) {
+  physical_device_inventory_.Refresh(timestamp_ns, force);
+  if (pointer_foreground_refresh_pending_.exchange(false, std::memory_order_acq_rel) &&
+      attached_window_)
+    GetAbsolutePointerService().SetFocused(attached_window_->HasFocus(), timestamp_ns);
 }
 
 std::optional<std::vector<SDL_JoystickID>> SDLInputDriver::QueryControllerInventory() {
@@ -311,20 +368,6 @@ std::optional<std::vector<SDL_JoystickID>> SDLInputDriver::QueryControllerInvent
   return inventory;
 }
 
-void SDLInputDriver::RefreshAndroidKeyboardFromUIThread(uint64_t timestamp_ns, bool force) {
-#if REX_PLATFORM_ANDROID
-  const uint64_t now_ms = SDL_GetTicks();
-  if (!force && now_ms < next_android_keyboard_refresh_ms_) {
-    return;
-  }
-  next_android_keyboard_refresh_ms_ = now_ms + kAndroidKeyboardRefreshIntervalMs;
-  RefreshAndroidPhysicalKeyboardPresence(timestamp_ns);
-#else
-  (void)timestamp_ns;
-  (void)force;
-#endif
-}
-
 void SDLInputDriver::RefreshPointerPresentation(uint64_t timestamp_ns) {
   if (!attached_window_) {
     return;
@@ -334,6 +377,8 @@ void SDLInputDriver::RefreshPointerPresentation(uint64_t timestamp_ns) {
   int32_t safe_width = 0;
   int32_t safe_height = 0;
   attached_window_->GetPhysicalSafeArea(safe_x, safe_y, safe_width, safe_height);
+  GetAbsolutePointerService().SetLogicalSize(float(attached_window_->GetActualLogicalWidth()),
+      float(attached_window_->GetActualLogicalHeight()), timestamp_ns);
   GetAbsolutePointerService().UpdatePresentation(attached_window_->GetGuestOutputTransform(),
                                                  safe_x, safe_y, safe_width, safe_height,
                                                  timestamp_ns);
@@ -627,6 +672,24 @@ void SDLInputDriver::HandleEvent(const SDL_Event& event) {
   // may be a dedicated thread SDL has created for the joystick subsystem.
 
   switch (event.type) {
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_UP: {
+      if (event.gtouchpad.touchpad != 0) return;
+      const auto phase = event.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? sony::ContactPhase::kDown
+                         : event.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? sony::ContactPhase::kUp
+                                                                      : sony::ContactPhase::kMove;
+      sony::GetService().ObserveTouch(event.gtouchpad.which, event.gtouchpad.finger, phase,
+                                     event.gtouchpad.x, event.gtouchpad.y, SDL_GetTicks());
+      return;
+    }
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+      if (event.gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
+        sony::GetService().ObserveClick(event.gbutton.which,
+                                        event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_GetTicks());
+      }
+      break;
     case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: {
       const uint32_t sensor = event.gsensor.sensor == SDL_SENSOR_ACCEL
                                   ? kMotionSensorAccelerometer
@@ -638,21 +701,15 @@ void SDLInputDriver::HandleEvent(const SDL_Event& event) {
       return;
     }
     case SDL_EVENT_KEYBOARD_ADDED:
-      GetAbsolutePointerService().AddPhysicalKeyboard(uint64_t(event.kdevice.which),
-                                                      event.kdevice.timestamp);
-      return;
     case SDL_EVENT_KEYBOARD_REMOVED:
-      GetAbsolutePointerService().RemovePhysicalKeyboard(uint64_t(event.kdevice.which),
-                                                         event.kdevice.timestamp);
-      return;
+    case SDL_EVENT_MOUSE_ADDED:
+    case SDL_EVENT_MOUSE_REMOVED:
     case SDL_EVENT_GAMEPAD_ADDED:
-      GetAbsolutePointerService().AddGameController(uint64_t(event.gdevice.which),
-                                                    event.gdevice.timestamp);
-      break;
     case SDL_EVENT_GAMEPAD_REMOVED:
-      GetAbsolutePointerService().RemoveGameController(uint64_t(event.gdevice.which),
-                                                       event.gdevice.timestamp);
-      break;
+      // Classification may need SDL window/device queries or native inventory;
+      // reconcile on the UI thread instead of trusting a virtual/default ID.
+      physical_device_inventory_.MarkDirty();
+      return;
     default:
       break;
   }
@@ -691,7 +748,13 @@ void SDLInputDriver::CloseControllerLocked(size_t index, const char* reason) {
   }
   const SDL_JoystickID instance_id = SDL_GetGamepadID(state.sdl);
   if (SDL_GamepadConnected(state.sdl)) {
-    if (state.rumble_supported && (state.left_motor_speed || state.right_motor_speed)) {
+    if (state.sony_model == sony::Model::kDualSense && state.sony_triggers_set) {
+      const auto neutral = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+      SDL_SendGamepadEffect(state.sdl, neutral.data(), static_cast<int>(neutral.size()));
+    }
+    if (state.sony_light_set) SDL_SetGamepadLED(state.sdl, 0, 0, 0);
+    if (state.rumble_supported && (state.left_motor_speed || state.right_motor_speed ||
+                                   state.applied_low_motor || state.applied_high_motor)) {
       SDL_RumbleGamepad(state.sdl, 0, 0, 0);
     }
     if (state.motion.available_sensors & kMotionSensorAccelerometer) {
@@ -702,6 +765,7 @@ void SDLInputDriver::CloseControllerLocked(size_t index, const char* reason) {
     }
   }
   motion_samples_.EndDevice(instance_id);
+  sony::GetService().Disconnect(instance_id);
   SDL_CloseGamepad(state.sdl);
   state = {};
   keystroke_states_.at(index) = {};
@@ -795,6 +859,7 @@ void SDLInputDriver::OpenControllerLocked(SDL_JoystickID instance_id) {
     auto& state = controllers_.at(user_id);
     state = {};
     state.sdl = controller;
+    state.user_index = static_cast<uint32_t>(user_id);
     state.motion.device_generation =
         next_motion_device_generation_.fetch_add(1, std::memory_order_relaxed);
     motion_samples_.BeginDevice(instance_id, state.motion.device_generation, SDL_GetTicksNS());
@@ -819,6 +884,31 @@ void SDLInputDriver::OpenControllerLocked(SDL_JoystickID instance_id) {
     // XInput seems to start with packet_number = 1 .
     state.state_changed = true;
     UpdateXCapabilities(state);
+    const SDL_GamepadType real_type = SDL_GetRealGamepadType(controller);
+    state.sony_model = real_type == SDL_GAMEPAD_TYPE_PS4 ? sony::Model::kDualShock4
+                       : real_type == SDL_GAMEPAD_TYPE_PS5 ? sony::Model::kDualSense
+                                                          : sony::Model::kNone;
+    if (expose_gamepad_state_ && state.sony_model != sony::Model::kNone) {
+      sony::Device device{};
+      device.instance_id = instance_id;
+      device.generation = state.motion.device_generation;
+      device.model = state.sony_model;
+      device.touchpad = SDL_GetNumGamepadTouchpads(controller) > 0;
+      device.rumble = state.rumble_supported;
+      device.light = SDL_GetBooleanProperty(SDL_GetGamepadProperties(controller),
+                                            SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false);
+      if (device.model == sony::Model::kDualSense) {
+        state.sony_packet = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+        device.triggers = SDL_SendGamepadEffect(controller, state.sony_packet.data(),
+                                                static_cast<int>(state.sony_packet.size()));
+        state.sony_triggers_set = device.triggers;
+      }
+      sony::GetService().Connect(state.user_index, device);
+      REXLOG_INFO("sony-controller: user={} instance={} generation={} model={} connection={} touch={} light={} rumble={} triggers={}",
+                  state.user_index, instance_id, device.generation, static_cast<int>(device.model),
+                  static_cast<int>(SDL_GetGamepadConnectionState(controller)), device.touchpad,
+                  device.light, device.rumble, device.triggers);
+    }
 
     REXLOG_INFO(
         "SDL OpenController: instance-id={} added at player-index={} "
@@ -846,7 +936,11 @@ void SDLInputDriver::PollControllerStateLocked(ControllerState& state) {
   polled.right_trigger =
       static_cast<uint8_t>(SDL_GetGamepadAxis(state.sdl, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >> 7);
 
+  sony::GetService().UpdateAxes(state.user_index, polled.left_trigger, polled.right_trigger);
+  const bool owns_touchpad = sony::GetService().ClaimsClick(state.user_index, SDL_GetTicks(), sony::GetOptions());
+
   for (size_t button_index = 0; button_index < kXInputButtonFromSDL.size(); ++button_index) {
+    if (button_index == SDL_GAMEPAD_BUTTON_TOUCHPAD && owns_touchpad) continue;
     if (!SDL_GetGamepadButton(state.sdl, static_cast<SDL_GamepadButton>(button_index))) {
       continue;
     }
@@ -973,12 +1067,24 @@ void SDLInputDriver::UpdateXCapabilities(ControllerState& state) {
 X_RESULT SDLInputDriver::ApplyRumbleLocked(uint32_t user_index, ControllerState& state,
                                            uint16_t left_motor, uint16_t right_motor,
                                            bool is_refresh) {
-  const uint32_t duration_ms = GetRumbleDurationMs(left_motor, right_motor);
-  const bool succeeded = SDL_RumbleGamepad(state.sdl, left_motor, right_motor, duration_ms);
+  uint16_t low_output = left_motor, high_output = right_motor;
+  if (state.sony_model != sony::Model::kNone) {
+    const auto output = sony::GetService().Compose(user_index, SDL_GetTicks(), sony::GetOptions());
+    if (output.suppress_native) {
+      left_motor = right_motor = low_output = high_output = 0;
+    } else {
+      low_output = std::max(left_motor, output.low_motor);
+      high_output = std::max(right_motor, output.high_motor);
+    }
+  }
+  const uint32_t duration_ms = GetRumbleDurationMs(low_output, high_output);
+  const bool succeeded = SDL_RumbleGamepad(state.sdl, low_output, high_output, duration_ms);
   if (!succeeded) {
     state.left_motor_speed = 0;
     state.right_motor_speed = 0;
     state.next_rumble_refresh_ms = 0;
+    // Keep the last successfully applied output. In particular, a failed
+    // stop must remain different from the desired zero so the worker retries.
     REXLOG_WARN("SDL HID: {} vibration failed for player index {} on '{}': {}",
                 is_refresh ? "Refreshing" : "Setting", user_index, SDL_GetGamepadName(state.sdl),
                 SDL_GetError());
@@ -987,8 +1093,99 @@ X_RESULT SDLInputDriver::ApplyRumbleLocked(uint32_t user_index, ControllerState&
 
   state.left_motor_speed = left_motor;
   state.right_motor_speed = right_motor;
+  state.applied_low_motor = low_output;
+  state.applied_high_motor = high_output;
   state.next_rumble_refresh_ms = duration_ms ? SDL_GetTicks() + kRumbleRefreshIntervalMs : 0;
   return TranslateSdlRumbleResult(true);
+}
+
+void SDLInputDriver::StartSonyWorker() {
+  if (sony_worker_.joinable()) return;
+  sony_stopping_.store(false, std::memory_order_release);
+  sony_worker_ = std::thread([this]() {
+    std::unique_lock wait_lock(sony_wait_mutex_);
+    while (!sony_stopping_.load(std::memory_order_acquire)) {
+      wait_lock.unlock();
+      {
+        std::lock_guard controllers_lock(controllers_mutex_);
+        if (accepting_input_requests_.load(std::memory_order_acquire)) RefreshSonyFeedbackLocked();
+      }
+      wait_lock.lock();
+      sony_wait_.wait_for(wait_lock, std::chrono::milliseconds(10), [this]() {
+        return sony_stopping_.load(std::memory_order_acquire);
+      });
+    }
+  });
+}
+
+void SDLInputDriver::StopSonyWorker() {
+  sony_stopping_.store(true, std::memory_order_release);
+  sony_wait_.notify_all();
+  if (sony_worker_.joinable()) sony_worker_.join();
+}
+
+void SDLInputDriver::RefreshSonyFeedbackLocked() {
+  const auto options = sony::GetOptions();
+  const uint64_t now = SDL_GetTicks();
+  for (auto& state : controllers_) {
+    if (!state.sdl || state.sony_model == sony::Model::kNone || !SDL_GamepadConnected(state.sdl)) continue;
+    const auto device = sony::GetService().ReadDevice(state.user_index);
+    if (!device.generation || device.generation != state.motion.device_generation) continue;
+    const auto output = sony::GetService().Compose(state.user_index, now, options);
+    const uint16_t low = output.suppress_native ? 0 : std::max(state.left_motor_speed, output.low_motor);
+    const uint16_t high = output.suppress_native ? 0 : std::max(state.right_motor_speed, output.high_motor);
+    if (state.rumble_supported && state.sony_rumble_failures < 3 && now >= state.sony_rumble_retry_ms &&
+        (low != state.applied_low_motor || high != state.applied_high_motor ||
+        ((low || high) && ShouldRefreshRumble(now, state.next_rumble_refresh_ms)))) {
+      const auto result = ApplyRumbleLocked(state.user_index, state, state.left_motor_speed,
+                                           state.right_motor_speed, true);
+      if (result == X_ERROR_SUCCESS) {
+        state.sony_rumble_failures = 0;
+      } else {
+        ++state.sony_rumble_failures;
+        state.sony_rumble_retry_ms = now + 100;
+        // SDL rumble has a finite duration even when the device stops accepting
+        // writes. Stop retrying the enhancement until this device reconnects.
+        if (state.sony_rumble_failures == 3) SDL_RumbleGamepad(state.sdl, 0, 0, 0);
+      }
+    }
+    if (now < state.sony_retry_ms) continue;
+    if (device.light && state.sony_light_failures < 3) {
+      const auto color = output.lighting ? output.color : std::array<uint8_t, 3>{};
+      if ((state.sony_light_set || output.lighting) && color != state.sony_color) {
+        if (SDL_SetGamepadLED(state.sdl, color[0], color[1], color[2])) {
+          state.sony_color = color;
+          state.sony_light_set = output.lighting;
+          state.sony_light_failures = 0;
+        } else {
+          ++state.sony_light_failures;
+          state.sony_retry_ms = now + 100;
+          REXLOG_WARN("sony-controller: LED output failed user={} attempt={}: {}",
+                      state.user_index, state.sony_light_failures, SDL_GetError());
+        }
+      }
+    }
+    if (device.triggers && state.sony_trigger_failures < 3) {
+      const auto packet = sony::EncodeTriggers(output.left, output.right);
+      if (!state.sony_triggers_set || packet != state.sony_packet) {
+        if (SDL_SendGamepadEffect(state.sdl, packet.data(), static_cast<int>(packet.size()))) {
+          state.sony_packet = packet;
+          state.sony_triggers_set = true;
+          state.sony_trigger_failures = 0;
+        } else {
+          ++state.sony_trigger_failures;
+          state.sony_retry_ms = now + 100;
+          REXLOG_WARN("sony-controller: trigger output failed user={} attempt={}: {}",
+                      state.user_index, state.sony_trigger_failures, SDL_GetError());
+          if (state.sony_trigger_failures == 3) {
+            const auto neutral = sony::EncodeTriggers(sony::Resistance(0, 0), sony::Resistance(0, 0));
+            SDL_SendGamepadEffect(state.sdl, neutral.data(), static_cast<int>(neutral.size()));
+            sony::GetService().DisableTriggers(state.user_index, device.generation);
+          }
+        }
+      }
+    }
+  }
 }
 
 void SDLInputDriver::RefreshRumbleLocked() {
@@ -1005,7 +1202,7 @@ void SDLInputDriver::RefreshRumbleLocked() {
 }
 
 void SDLInputDriver::QueueControllerUpdate() {
-  if (!accepting_input_requests_.load(std::memory_order_acquire) || !attached_window_) {
+  if (!accepting_input_requests_.load(std::memory_order_acquire) || !attached_app_context_) {
     return;
   }
   // Keep platform events and host keyboard/touch inventory moving on SDL's
@@ -1014,11 +1211,15 @@ void SDLInputDriver::QueueControllerUpdate() {
   bool is_queued = false;
   sdl_pumpevents_queued_.compare_exchange_strong(is_queued, true);
   if (!is_queued) {
-    if (!attached_window_->app_context().CallInUIThread([this]() {
+    if (!attached_app_context_->CallInUIThread([this, alive = ui_callback_alive_]() {
+          // The shared token remains valid after driver destruction. A window
+          // callback triggered by PumpEvents may also retire this driver, so
+          // check again before accessing any member after pumping SDL.
+          if (!alive->load(std::memory_order_acquire)) return;
           SDL_PumpEvents();
+          if (!alive->load(std::memory_order_acquire)) return;
           const uint64_t timestamp_ns = SDL_GetTicksNS();
           RefreshDeviceInventoryFromUIThread(timestamp_ns);
-          RefreshAndroidKeyboardFromUIThread(timestamp_ns, false);
           RefreshPointerPresentation(timestamp_ns);
           sdl_pumpevents_queued_ = false;
         })) {

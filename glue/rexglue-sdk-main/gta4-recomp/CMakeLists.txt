@@ -101,6 +101,8 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
         src/gta4_aspect_hooks.cpp
         src/gta4_quicksave_hooks.cpp
         src/gta4_input_hooks.cpp
+        src/gta4_sony_feedback.cpp
+        src/gta4_sony_event_hooks.cpp
         src/gta4_loading_parallax_fix.cpp
         src/gta4_motion_bridge.cpp
         src/gta4_motion_hooks.cpp
@@ -123,8 +125,13 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
         src/achievement_bridge_gc.mm
         src/input/text_chat_dialog.cpp
         src/input/context_touch_controls.cpp
+        src/input/context_touch_context.cpp
+        src/input/context_touch_camera_hooks.cpp
+        src/input/context_touch_settings.cpp
+        src/input/context_touch_draw.cpp
         src/input/context_touch_layout.cpp
         src/input/context_touch_overlay.cpp
+        src/gta4_touch_guest_hooks.cpp
         src/input/user_music_player.mm
         src/network/community_multiplayer.cpp
         src/network/gta4_microphone_permission.mm
@@ -153,7 +160,11 @@ if(APPLE AND LIBERTY_RECOMP_TARGET_PLATFORM STREQUAL "desktop")
         ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/inja/third_party/include
     )
 
+    set_source_files_properties(src/gta4_sony_feedback.cpp src/gta4_sony_event_hooks.cpp
+        PROPERTIES COMPILE_DEFINITIONS GTA4_SONY_PRIMARY_PLAYER_ALIAS)
+
     target_compile_definitions(LibertyRecomp PRIVATE
+        GTA4_TOUCH_PRIMARY_PLAYER_ALIAS=1
         GTA4_RECOMP_ASSET_XEX="${CMAKE_CURRENT_SOURCE_DIR}/assets/default_v8.xex"
         GTA4_BUTTON_PROMPT_ASSET_ROOT="${LIBERTY_BUTTON_PROMPT_SOURCE}"
         GTA4_RPF_AES_KEY_SOURCE="${LIBERTY_RPF_AES_KEY_SOURCE}"

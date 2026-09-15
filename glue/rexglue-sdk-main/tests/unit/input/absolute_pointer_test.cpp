@@ -163,11 +163,12 @@ TEST_CASE("touch presentation exposes safe area and reverse physical transform",
   CHECK(state.safe_area_height == 640);
 }
 
-TEST_CASE("touch auto policy requires focus and no physical keyboard or controller",
+TEST_CASE("touch auto requires no physical input devices while On overrides presence",
           "[input][absolute_pointer]") {
   CHECK(ShouldEnableTouchControls(TouchControlsMode::kAuto, false, false, true));
   CHECK_FALSE(ShouldEnableTouchControls(TouchControlsMode::kAuto, true, false, true));
   CHECK_FALSE(ShouldEnableTouchControls(TouchControlsMode::kAuto, false, true, true));
+  CHECK_FALSE(ShouldEnableTouchControls(TouchControlsMode::kAuto, false, false, true, true));
   CHECK_FALSE(ShouldEnableTouchControls(TouchControlsMode::kAuto, false, false, false));
   CHECK(ShouldEnableTouchControls(TouchControlsMode::kOn, true, true, true));
   CHECK_FALSE(ShouldEnableTouchControls(TouchControlsMode::kOff, false, false, true));
@@ -183,6 +184,12 @@ TEST_CASE("touch auto policy requires focus and no physical keyboard or controll
   CHECK(service.HasGameController());
   CHECK_FALSE(service.TouchControlsActive(TouchControlsMode::kAuto));
   CHECK(service.TouchControlsActive(TouchControlsMode::kOn));
+  service.RemoveGameController(8,5);
+  service.AddPhysicalMouse(9,6);
+  CHECK(service.HasPhysicalMouse());
+  CHECK_FALSE(service.TouchControlsActive(TouchControlsMode::kAuto));
+  service.RemovePhysicalMouse(9,7);
+  CHECK(service.TouchControlsActive(TouchControlsMode::kAuto));
 }
 
 }  // namespace

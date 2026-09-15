@@ -20,6 +20,7 @@ add_executable(unit_tests
     graphics/alpha_to_coverage_util_test.cpp
     graphics/native_clip_control_test.cpp
     graphics/native_fixed_function_policy_test.cpp
+    graphics/native_hotspot_fixes_test.cpp
     graphics/native_pipeline_policy_test.cpp
     graphics/native_pipeline_recipe_test.cpp
     graphics/native_pipeline_compiler_test.cpp
@@ -27,6 +28,8 @@ add_executable(unit_tests
     graphics/native_draw_state_cache_test.cpp
     graphics/native_resource_content_policy_test.cpp
     graphics/native_sampler_cache_key_test.cpp
+    graphics/native_texture_image_identity_test.cpp
+    graphics/native_constant_upload_test.cpp
     graphics/native_sampler_lod_bias_test.cpp
     graphics/smaa_source_sync_test.cpp
     graphics/lighting_semantics_test.cpp
@@ -82,6 +85,9 @@ add_executable(unit_tests
     input/pointer_motion_test.cpp
     input/sdl_hotplug_policy_test.cpp
     input/sdl_rumble_policy_test.cpp
+    input/gta4_sony_event_policy_test.cpp
+    input/gta4_sony_action_policy_test.cpp
+    input/sony_feedback_options_test.cpp
     codegen/config_test.cpp
     codegen/template_registry_test.cpp
     ppc/import_function_test.cpp
@@ -92,6 +98,7 @@ add_executable(unit_tests
     system/gta4_quicksave_policy_test.cpp
     system/gta4_draw_distance_policy_test.cpp
     system/gta4_frame_limiter_test.cpp
+    rexglue/presentation_rate_limit_test.cpp
     system/gta4_touch_policy_test.cpp
     system/gta4_loading_parallax_fix_test.cpp
     system/gta4_source_inspector_test.cpp
@@ -171,6 +178,7 @@ target_link_libraries(unit_tests PRIVATE
 # Normal application builds still compile the production hook and renderer users.
 if(REXGLUE_USE_VULKAN)
 add_executable(native_lighting_tests
+    graphics/native_hotspot_fixes_test.cpp
     graphics/lighting_semantics_test.cpp
     graphics/native_lighting_transport_test.cpp
     graphics/native_fixed_function_policy_test.cpp
@@ -313,6 +321,20 @@ endif()
 
 # Discover tests
 include(Catch)
+
+add_executable(sony_feedback_tests
+    input/gta4_sony_event_policy_test.cpp
+    input/gta4_sony_action_policy_test.cpp
+    input/sony_feedback_options_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/input/sony_feedback_options.cpp)
+target_include_directories(sony_feedback_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/gta4-recomp/src)
+target_link_libraries(sony_feedback_tests PRIVATE Catch2::Catch2WithMain rexcore)
+catch_discover_tests(sony_feedback_tests
+    TEST_PREFIX "unit.sony-controller."
+    PROPERTIES LABELS "unit;sony-controller" TIMEOUT 60)
+
 if(TARGET native_lighting_tests)
 catch_discover_tests(native_lighting_tests
     TEST_PREFIX "unit.native-lighting."
@@ -355,6 +377,15 @@ catch_discover_tests(arbitration_async_tests
 )
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME unit.sony-controller-runtime
+    COMMAND ${Python3_EXECUTABLE}
+        ${PROJECT_SOURCE_DIR}/tools/run_sony_feedback_tests.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --sdl-library $<TARGET_FILE:SDL3-static>
+        --cxx ${CMAKE_CXX_COMPILER})
+set_tests_properties(unit.sony-controller-runtime
+    PROPERTIES LABELS "unit;sony-controller" TIMEOUT 180)
+
 add_test(
     NAME unit.diagnostics-source-audit
     COMMAND ${Python3_EXECUTABLE}
@@ -369,6 +400,22 @@ add_test(
 )
 set_tests_properties(unit.gta4-frontend-advanced-menu-layout
     PROPERTIES LABELS "unit" TIMEOUT 60)
+
+add_test(
+    NAME unit.gta4-draw-distance-guest-contracts
+    COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/gta4-recomp/tools/derive_draw_distance_hooks.py)
+set_tests_properties(unit.gta4-draw-distance-guest-contracts
+    PROPERTIES LABELS "unit;draw-distance" TIMEOUT 60)
+
+add_executable(draw_distance_tests
+    system/gta4_draw_distance_policy_test.cpp
+    system/gta4_frontend_menu_policy_test.cpp)
+target_link_libraries(draw_distance_tests PRIVATE Catch2::Catch2WithMain)
+set_target_properties(draw_distance_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+catch_discover_tests(draw_distance_tests TEST_PREFIX "unit.draw-distance."
+    PROPERTIES LABELS "unit;draw-distance" TIMEOUT 60)
 
 add_test(
     NAME unit.gta4-presentation-original-contracts
@@ -468,3 +515,35 @@ target_include_directories(modern_shader_tests PRIVATE
 target_link_libraries(modern_shader_tests PRIVATE rexcore Catch2::Catch2WithMain)
 set_target_properties(modern_shader_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+
+# Focused native lifetime/descriptor/pacing validation without linking the game.
+add_executable(native_pacing_tests
+    graphics/native_pacing_lifetime_test.cpp
+    graphics/native_working_set_test.cpp
+    graphics/native_working_set_vulkan_contract_test.cpp
+    graphics/native_hotpath_cache_test.cpp
+    graphics/dirty_state_delta_test.cpp
+    system/gta4_frame_limiter_test.cpp
+)
+target_include_directories(native_pacing_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/gta4-recomp/src)
+target_link_libraries(native_pacing_tests PRIVATE Catch2::Catch2WithMain volk_headers)
+set_target_properties(native_pacing_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+
+# Upload identity and immutable snapshot regressions without linking the game.
+add_executable(native_upload_tests
+    graphics/native_texture_image_identity_test.cpp
+    graphics/native_constant_upload_test.cpp
+)
+target_include_directories(native_upload_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(native_upload_tests PRIVATE rexcore Catch2::Catch2WithMain)
+set_target_properties(native_upload_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexruntime>)
+catch_discover_tests(native_upload_tests TEST_PREFIX "unit.native-upload.")
+
+# One presentation schedule and cancellation-safe producer handoff.
+add_executable(frame_pacer_tests rexglue/frame_pacer_test.cpp)
+target_include_directories(frame_pacer_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(frame_pacer_tests PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(frame_pacer_tests TEST_PREFIX "unit.frame-pacer.")

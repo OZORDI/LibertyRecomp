@@ -29,6 +29,7 @@ void TextChatDialog::RequestOpen(TextChatChannel channel) {
   requested_channel_.store(channel == TextChatChannel::kTeam ? 2u : 1u,
                            std::memory_order_release);
   set_input_capture_(true);
+  RequestRepaint();
 }
 
 void TextChatDialog::Stop() {

@@ -21,6 +21,7 @@
 #include <csetjmp>
 #include <cstdlib>
 #include <cstring>
+#include <malloc.h>
 
 // Verify our jmpbuf_ storage is large enough for the platform jmp_buf.
 static_assert(sizeof(jmp_buf) <= 256, "jmp_buf exceeds Fiber::jmpbuf_ storage");
@@ -46,8 +47,7 @@ Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
   // Minimum 64 KiB, aligned to 16 bytes for AArch64 calling convention.
   if (stack_size < 65536) stack_size = 65536;
 
-  void* stack = nullptr;
-  if (posix_memalign(&stack, 16, stack_size) != 0) stack = nullptr;
+  void* stack = memalign(16, stack_size);
   if (!stack) return nullptr;
 
   auto* f = new Fiber();
@@ -100,8 +100,7 @@ void Fiber::SwitchTo(Fiber* target) {
           : [newsp] "r"(sp), [func] "r"(trampoline)
           : "memory");
 #else
-      (void)sp;
-      trampoline();
+#error Switch fibers require AArch64
 #endif
       __builtin_unreachable();
     }

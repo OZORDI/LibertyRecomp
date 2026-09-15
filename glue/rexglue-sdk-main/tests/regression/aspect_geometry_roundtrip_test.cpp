@@ -114,6 +114,56 @@ void CheckAspectPolicy() {
       ASPECT_REQUIRE(Near((1-clip(matrix,1)/w)*0.5,expected.y,1e-7));
     }
   }
+  // Standalone route sections and the enclosing radar widget must never pick
+  // different anchors on non-16:9 outputs.
+  for (a::Extent output : {a::Extent{2560,1600}, a::Extent{3456,2234},
+                           a::Extent{1024,768}, a::Extent{3440,1440}}) {
+    const auto radar = a::RadarLayout(output);
+    const auto expected = a::Layout(output,{0,1});
+    ASPECT_REQUIRE(Near(radar.sx,expected.sx) && Near(radar.sy,expected.sy));
+    ASPECT_REQUIRE(Near(radar.ox,expected.ox) && Near(radar.oy,expected.oy));
+    for (a::Point point : {a::Point{0.1,0.9}, a::Point{0.25,0.8}, a::Point{0.5,0.75}}) {
+      const auto map_layer=radar.Map(point);
+      const auto route_layer=a::RadarLayout(output).Map(point);
+      ASPECT_REQUIRE(Near(map_layer.x,route_layer.x) && Near(map_layer.y,route_layer.y));
+    }
+  }
+  // Expected placements calculated with Python from an authored HUD rectangle.
+  struct RadarCase { a::Extent output; double inset, top, bottom; };
+  const std::array radar_cases = {
+      RadarCase{{1280,720}, 0.0, 0.040000000000000036, 0.26},
+      RadarCase{{1280,720}, 0.05, 0.09000000000000004, 0.31},
+      RadarCase{{2560,1600}, 0.0, 0.03600000000000003, 0.2340000000000001},
+      RadarCase{{2560,1600}, 0.05, 0.08600000000000003, 0.2840000000000001},
+      RadarCase{{1024,768}, 0.0, 0.030000000000000027, 0.19500000000000006},
+      RadarCase{{1024,768}, 0.05, 0.08000000000000003, 0.24500000000000005},
+      RadarCase{{3440,1440}, 0.0, 0.040000000000000036, 0.26},
+      RadarCase{{3440,1440}, 0.05, 0.09000000000000004, 0.31},
+      RadarCase{{1080,1920}, 0.0, 0.012656250000000036, 0.08226562500000001},
+      RadarCase{{1080,1920}, 0.05, 0.06265625000000004, 0.132265625},
+  };
+  const a::Rect radar_box{0.04,0.74,0.24,0.96};
+  for (const auto& item : radar_cases) {
+    const auto normal = a::RadarLayout(item.output);
+    const auto moved = a::TopLeftRadarLayout(item.output, radar_box, item.inset);
+    const auto bounds = moved.Map(radar_box);
+    ASPECT_REQUIRE(Near(bounds.top, item.top));
+    ASPECT_REQUIRE(Near(bounds.bottom, item.bottom));
+    ASPECT_REQUIRE(Near(bounds.left, normal.Map(radar_box).left));
+    ASPECT_REQUIRE(Near(bounds.right, normal.Map(radar_box).right));
+    ASPECT_REQUIRE(Near(moved.sx, normal.sx) && Near(moved.sy, normal.sy));
+    // Every layer and its hit point move by the identical translation.
+    for (a::Point point : {a::Point{0.14,0.85}, {0.08,0.78}, {0.22,0.94}}) {
+      const auto roundtrip = moved.Unmap(moved.Map(point));
+      ASPECT_REQUIRE(Near(roundtrip.x, point.x) && Near(roundtrip.y, point.y));
+    }
+  }
+  ASPECT_REQUIRE(a::TopLeftRadarLayout({}, radar_box).identity());
+  for (auto invalid : {a::Rect{}, a::Rect{0,0,1,2},
+                       a::Rect{0,0,1,std::numeric_limits<double>::quiet_NaN()}}) {
+    const auto untouched = a::TopLeftRadarLayout({1280,720}, invalid);
+    ASPECT_REQUIRE(untouched.identity());
+  }
   const auto mac=a::Layout({2560,1600});
   ASPECT_REQUIRE(mac.sx==1 && Near(mac.sy,0.9));
   ASPECT_REQUIRE(Near(mac.oy*1600,80));
