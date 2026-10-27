@@ -627,6 +627,13 @@ bool CoreAudioOutput::ConfigureDevice() {
                            kAudioUnitScope_Global, 0, &maximum_frames,
                            &maximum_frames_size) == noErr &&
       maximum_frames) {
+    // The slice limit is in device frames; on a slower device the sample-rate converter pulls
+    // proportionally more 48 kHz client frames per slice (e.g. 279 for 256 at 44.1 kHz).
+    if (nominal_rate > 0 && nominal_rate < kGuestAudioSampleRate) {
+      maximum_frames = static_cast<UInt32>(
+                           std::ceil(maximum_frames * (kGuestAudioSampleRate / nominal_rate))) +
+                       1;
+    }
     maximum_frames_per_slice_.store(maximum_frames, std::memory_order_release);
   }
 
