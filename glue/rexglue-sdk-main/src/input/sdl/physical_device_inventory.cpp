@@ -81,12 +81,24 @@ std::optional<PointerKeyboardInventory> QueryCocoaPhysicalDevices() {
     return std::nullopt;
   PointerKeyboardInventory result;
   bool succeeded = true;
+  // Copying every property can take hundreds of milliseconds for some built-in
+  // devices, and this runs on the UI thread that presents frames.
+  const CFStringRef keys[] = {CFSTR(kIOHIDVirtualHIDevice), CFSTR(kIOHIDTransportKey),
+                              CFSTR(kIOHIDDeviceUsagePairsKey), CFSTR(kIOHIDPrimaryUsagePageKey),
+                              CFSTR(kIOHIDPrimaryUsageKey)};
   while (const io_registry_entry_t device = IOIteratorNext(iterator)) {
-    CFMutableDictionaryRef properties = nullptr;
+    CFMutableDictionaryRef properties = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (properties) {
+      for (const auto key : keys) {
+        if (const auto value = IORegistryEntryCreateCFProperty(device, key, kCFAllocatorDefault, 0)) {
+          CFDictionarySetValue(properties, key, value);
+          CFRelease(value);
+        }
+      }
+    }
     uint64_t id = 0;
-    if (IORegistryEntryCreateCFProperties(device, &properties, kCFAllocatorDefault, 0) !=
-            KERN_SUCCESS || !properties ||
-        IORegistryEntryGetRegistryEntryID(device, &id) != KERN_SUCCESS) {
+    if (!properties || IORegistryEntryGetRegistryEntryID(device, &id) != KERN_SUCCESS) {
       succeeded = false;
     } else {
       const auto virtual_device = CFDictionaryGetValue(properties, CFSTR(kIOHIDVirtualHIDevice));
