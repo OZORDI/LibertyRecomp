@@ -110,7 +110,13 @@ See [MOD_SUPPORT.md](/docs/MOD_SUPPORT.md) for detailed documentation.
 ### Quick Start
 
 ```bash
-# Clone with submodules
+# Linux (this fork, with the Linux build fixes)
+git clone --recurse-submodules --branch linux-build-fixes \
+  https://github.com/eusouobn/LibertyRecomp.git
+cd LibertyRecomp
+./build-linux.sh
+
+# Windows / macOS (upstream main)
 git clone --recurse-submodules https://github.com/OZORDI/LibertyRecomp.git
 cd LibertyRecomp
 
