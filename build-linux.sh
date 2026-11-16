@@ -84,6 +84,7 @@ SUBMODULES=(
   "glue/rexglue-sdk-main/thirdparty/cli11|https://github.com/CLIUtils/CLI11|bfffd37e1f804ca4fae1caae106935791696b6a9"
   "glue/rexglue-sdk-main/thirdparty/catch2|https://github.com/catchorg/Catch2.git|88abf9bf325c798c33f54f6b9220ef885b267f4f"
   "glue/rexglue-sdk-main/thirdparty/snappy|https://github.com/google/snappy.git|6af9287fbdb913f0794d0148c6aa43b58e63c8e3"
+  "glue/rexglue-sdk-main/thirdparty/libmspack|https://github.com/kyz/libmspack.git|305907723a4e7ab2018e58040059ffb5e77db837"
 )
 
 # vcpkg primeiro (é o toolchain do CMake)
@@ -96,7 +97,7 @@ fi
 CLONED=0
 for entry in "${SUBMODULES[@]}"; do
   IFS='|' read -r path url commit <<< "$entry"
-  if [ ! -d "$path" ] || [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+  if [ ! -d "$path" ] || [ -z "$(ls -A "$path" 2>/dev/null | grep -v '^\.git$')" ]; then
     info "  clone $path"
     rm -rf "$path"
     mkdir -p "$path"
@@ -104,22 +105,30 @@ for entry in "${SUBMODULES[@]}"; do
       cd "$path" || exit 1
       git init -q
       git remote add origin "$url"
+
+      # Fetch: tenta depth 1 (rápido), fallback para full
+      fetched=0
       if git fetch -q --depth 1 origin "$commit" 2>/dev/null; then
-        git checkout -q FETCH_HEAD
-      else
-        # Fallback: fetch completo se --depth 1 falhar (raro, alguns hosts)
-        git fetch -q origin
-        git checkout -q "$commit" 2>/dev/null || warn "  checkout $commit falhou em $path"
+        git checkout -q FETCH_HEAD 2>/dev/null && fetched=1
       fi
-    ) || warn "  FALHOU: $path"
+      if [ "$fetched" -eq 0 ]; then
+        git fetch -q origin 2>/dev/null
+        git checkout -q "$commit" 2>/dev/null && fetched=1
+      fi
+      if [ "$fetched" -eq 0 ]; then
+        warn "    FALHOU checkout $commit em $path"
+        exit 1
+      fi
+
+      # Sub-submódulos: se o repo tem .gitmodules, inicializa recursivamente
+      if [ -f .gitmodules ]; then
+        git submodule update --init --recursive --quiet 2>/dev/null || \
+          warn "    sub-submódulos falharam em $path (pode continuar)"
+      fi
+    ) || warn "  clone incompleto: $path"
     CLONED=$((CLONED+1))
   fi
 done
-if [ "$CLONED" -gt 0 ]; then
-  info "Submódulos clonados: $CLONED"
-else
-  info "Todos os submódulos já presentes."
-fi
 
 # ─── 3. Checkout do commit alinhado com o SDK ─────────────────────────────
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
