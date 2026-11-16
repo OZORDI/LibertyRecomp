@@ -254,6 +254,21 @@ elif [ -f "$CMDPARSER_H" ]; then
   info "command_parser.h já patchado (cstdint)."
 fi
 
+# ─── 5.7. Patch main.cpp (dlfcn.h no Linux) ──────────────────────────────
+MAIN_CPP="LibertyRecomp/main.cpp"
+if [ -f "$MAIN_CPP" ] && ! grep -q "#include <dlfcn.h>" "$MAIN_CPP"; then
+  info "Patch main.cpp (dlfcn.h)..."
+  # Adiciona include logo após o primeiro #include do arquivo
+  sed -i '0,/#include </{s|#include <|#include <dlfcn.h>\n#include <|}' "$MAIN_CPP"
+  if grep -q "#include <dlfcn.h>" "$MAIN_CPP"; then
+    info "  ok: main.cpp patched"
+  else
+    warn "  falhou ao patch main.cpp"
+  fi
+elif [ -f "$MAIN_CPP" ]; then
+  info "main.cpp já patchado (dlfcn.h)."
+fi
+
 # ─── 6. o1heap v3.0 (verificação defensiva) ───────────────────────────────
 cd glue/rexglue-sdk-main/thirdparty/o1heap
 # o upstream tem o código dentro de uma subpasta "o1heap/"
