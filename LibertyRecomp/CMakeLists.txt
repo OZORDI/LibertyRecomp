@@ -440,6 +440,12 @@ if (NOT (LIBERTY_RECOMP_PS4 OR LIBERTY_RECOMP_NX))
     list(APPEND LIBERTY_RECOMP_THIRDPARTY_SOURCES
         "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl3.cpp"
     )
+    # The pinned imgui 1.91.0 backend still uses the SDL_TRUE/SDL_FALSE names,
+    # which modern SDL3 only exposes when SDL_ENABLE_OLD_NAMES is defined.
+    set_source_files_properties(
+        "${LIBERTY_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl3.cpp"
+        PROPERTIES COMPILE_DEFINITIONS SDL_ENABLE_OLD_NAMES
+    )
 endif()
 
 set(LIBERTY_RECOMP_THIRDPARTY_INCLUDES
