@@ -235,6 +235,25 @@ elif [ -f "$SNAPPY_CC" ]; then
   info "snappy.cc já patchado (immintrin.h)."
 fi
 
+# ─── 5.6. Patch command_parser.h (cstdint no Linux) ──────────────────────
+CMDPARSER_H="tools/liberty_debugger/command_parser.h"
+if [ -f "$CMDPARSER_H" ] && ! grep -q "#include <cstdint>" "$CMDPARSER_H"; then
+  info "Patch command_parser.h (cstdint)..."
+  # Adiciona #include <cstdint> logo após o #pragma once
+  sed -i '/#pragma once/a #include <cstdint>' "$CMDPARSER_H"
+  # Se não tinha #pragma once, adiciona no topo
+  if ! grep -q "#include <cstdint>" "$CMDPARSER_H"; then
+    sed -i '1i #include <cstdint>' "$CMDPARSER_H"
+  fi
+  if grep -q "#include <cstdint>" "$CMDPARSER_H"; then
+    info "  ok: command_parser.h patched"
+  else
+    warn "  falhou ao patch command_parser.h"
+  fi
+elif [ -f "$CMDPARSER_H" ]; then
+  info "command_parser.h já patchado (cstdint)."
+fi
+
 # ─── 6. o1heap v3.0 (verificação defensiva) ───────────────────────────────
 cd glue/rexglue-sdk-main/thirdparty/o1heap
 # o upstream tem o código dentro de uma subpasta "o1heap/"
