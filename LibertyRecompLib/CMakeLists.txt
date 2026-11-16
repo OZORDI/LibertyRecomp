@@ -86,6 +86,7 @@ file(GLOB XENOS_RECOMP_SOURCES
 # )
 
 add_library(LibertyRecompLib
+    stubs_linux.cpp
     ${LIBERTY_RECOMP_PPC_RECOMPILED_SOURCES}
     "shader/shader_cache.h"
     "shader/shader_cache.cpp"
@@ -104,5 +105,5 @@ target_include_directories(LibertyRecompLib PRIVATE
 
 # RexGlue generated code needs access to RexGlue SDK headers
 if(TARGET rexcore)
-    target_link_libraries(LibertyRecompLib PRIVATE rexcore rexruntime rexkernel)
+    target_link_libraries(LibertyRecompLib PRIVATE rexcore rexkernel)
 endif()
