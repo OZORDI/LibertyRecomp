@@ -54,12 +54,50 @@ else
   info "FindPythonInterp.cmake já presente."
 fi
 
-# ─── 2.5. Submódulos de terceiros (SDL3, glslang, spirv-tools, etc.) ──────
-if [ ! -f glue/rexglue-sdk-main/thirdparty/sdl3/CMakeLists.txt ] || \
-   [ ! -f glue/rexglue-sdk-main/thirdparty/glslang/CMakeLists.txt ]; then
-  info "Inicializando submódulos (pode demorar na primeira vez)..."
-  git submodule update --init --recursive 2>&1 | \
-    grep -E "Submodule|Cloning|fatal" || true
+# ─── 2.5. Submódulos críticos (paths explícitos, pula FFmpeg quebrado) ────
+NEEDS_SUBMODULES=0
+for f in \
+    thirdparty/vcpkg/scripts/buildsystems/vcpkg.cmake \
+    glue/rexglue-sdk-main/thirdparty/sdl3/CMakeLists.txt \
+    glue/rexglue-sdk-main/thirdparty/glslang/CMakeLists.txt; do
+  [ -f "$f" ] || NEEDS_SUBMODULES=1
+done
+
+if [ "$NEEDS_SUBMODULES" -eq 1 ]; then
+  info "Inicializando submódulos com paths explícitos..."
+  # FFmpeg é gitlink sem URL no .gitmodules (bug do upstream), pulamos.
+  SUBMODULES=(
+    "thirdparty/vcpkg"
+    "glue/rexglue-sdk-main/thirdparty/sdl3"
+    "glue/rexglue-sdk-main/thirdparty/glslang"
+    "glue/rexglue-sdk-main/thirdparty/spirv-tools"
+    "glue/rexglue-sdk-main/thirdparty/spirv-headers"
+    "glue/rexglue-sdk-main/thirdparty/imgui"
+    "glue/rexglue-sdk-main/thirdparty/fmt"
+    "glue/rexglue-sdk-main/thirdparty/spdlog"
+    "glue/rexglue-sdk-main/thirdparty/tracy"
+    "glue/rexglue-sdk-main/thirdparty/volk"
+    "glue/rexglue-sdk-main/thirdparty/vulkan-headers"
+    "glue/rexglue-sdk-main/thirdparty/vulkan-memory-allocator"
+    "glue/rexglue-sdk-main/thirdparty/xxHash"
+    "glue/rexglue-sdk-main/thirdparty/simde"
+    "glue/rexglue-sdk-main/thirdparty/tomlplusplus"
+    "glue/rexglue-sdk-main/thirdparty/utfcpp"
+    "glue/rexglue-sdk-main/thirdparty/inja"
+    "glue/rexglue-sdk-main/thirdparty/cli11"
+    "glue/rexglue-sdk-main/thirdparty/catch2"
+    "glue/rexglue-sdk-main/thirdparty/snappy"
+  )
+  for sub in "${SUBMODULES[@]}"; do
+    if git config -f .gitmodules --get "submodule.$sub.url" >/dev/null 2>&1; then
+      info "  → $sub"
+      git submodule update --init --recursive "$sub" 2>&1 | tail -1 || \
+        warn "  falhou: $sub (pode continuar)"
+    else
+      warn "  skip $sub (sem URL em .gitmodules)"
+    fi
+  done
+  info "Submódulos inicializados (FFmpeg pulado — console-only)."
 else
   info "Submódulos já inicializados."
 fi
