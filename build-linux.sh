@@ -85,6 +85,7 @@ SUBMODULES=(
   "glue/rexglue-sdk-main/thirdparty/catch2|https://github.com/catchorg/Catch2.git|88abf9bf325c798c33f54f6b9220ef885b267f4f"
   "glue/rexglue-sdk-main/thirdparty/snappy|https://github.com/google/snappy.git|6af9287fbdb913f0794d0148c6aa43b58e63c8e3"
   "glue/rexglue-sdk-main/thirdparty/libmspack|https://github.com/kyz/libmspack.git|305907723a4e7ab2018e58040059ffb5e77db837"
+  "glue/rexglue-sdk-main/thirdparty/FFmpeg|https://github.com/wmarti/FFmpeg.git|0604b464c7cb4ebc94940cf1f324a3b26b87717c"
 )
 
 # vcpkg primeiro (é o toolchain do CMake)
