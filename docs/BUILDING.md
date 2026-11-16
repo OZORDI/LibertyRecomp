@@ -27,6 +27,14 @@ git clone --recurse-submodules https://github.com/OZORDI/LibertyRecomp.git
 ### Windows
 If you skipped the `--recurse-submodules` argument during cloning, you can run `update_submodules.bat` to ensure the submodules are pulled.
 
+### Linux
+
+The Linux build fixes for this fork live on the `linux-build-fixes` branch:
+
+```bash
+git clone --recurse-submodules --branch linux-build-fixes https://github.com/eusouobn/LibertyRecomp.git
+```
+
 ## 2. Add the Required Game Files
 
 Copy the following files from your GTA IV Xbox 360 game and place them inside `./LibertyRecompLib/private/`:
@@ -66,7 +74,7 @@ sudo apt install autoconf automake libtool pkg-config curl cmake ninja-build cla
 ```
 The following command will install the required dependencies on a distro that uses `pacman` (such as Arch-based distros).
 ```bash
-sudo pacman -S base-devel ninja lld clang gtk3
+sudo pacman -S base-devel ninja lld clang gtk3 glslang libxss python curl unzip
 ```
 You can also find the equivalent packages for your preferred distro.
 
@@ -125,13 +133,27 @@ cmake --build .\out\build\arm64-Clang-Release --target LibertyRecomp
 ### Linux (x64 and ARM64)
 The build process is the same for both x64 and ARM64 - the architecture is auto-detected.
 
+#### Automated (recommended)
+
+The repository ships `build-linux.sh`, which checks the system dependencies, prepares the submodules, applies the remaining Linux fixes and builds:
+
+```bash
+./build-linux.sh            # Arch Linux: installs missing packages via pacman
+./build-linux.sh --no-deps  # other distros: install the dependencies yourself first
+```
+
+The resulting binary is written to `out/build/linux-release/LibertyRecomp/LibertyRecomp`.
+
+#### Manual CMake
+
 1. Configure the project using CMake by navigating to the repository and running the following command.
 ```bash
-cmake . --preset linux-release
+cmake . --preset linux-release -DSDL_X11_XSCRNSAVER=OFF
 ```
 
 > [!NOTE]
 > The available presets are `linux-debug`, `linux-relwithdebinfo` and `linux-release`.
+> `-DSDL_X11_XSCRNSAVER=OFF` is only needed when `libXss` is not installed.
 
 2. Build the recompiled game library, then the main application:
 ```bash
@@ -139,10 +161,15 @@ cmake --build ./out/build/linux-release --target LibertyRecompLib
 cmake --build ./out/build/linux-release --target LibertyRecomp
 ```
 
-3. Navigate to the directory that was specified as the output in the previous step and run the game.
+3. Navigate to the directory specified as the output in the previous step and run the game.
 ```bash
-./LibertyRecomp
+./out/build/linux-release/LibertyRecomp/LibertyRecomp
 ```
+
+> [!NOTE]
+> Without the game files in `LibertyRecompLib/private/`, codegen is skipped and the
+> resulting binary contains no recompiled game code. This is expected for a
+> build-only validation; add `default.xex` and `xbox360.rpf` to build a runnable game.
 
 ### macOS (ARM64 and x64)
 The build process works for both Apple Silicon (ARM64) and Intel (x64) Macs.

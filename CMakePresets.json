@@ -106,7 +106,11 @@
                     "value": "x64-linux",
                     "type": "STRING"
                 },
-                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchains/linux-clang.cmake"
+                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchains/linux-clang.cmake",
+                "CMAKE_MODULE_PATH": {
+                    "value": "${sourceDir}/cmake",
+                    "type": "STRING"
+                }
             },
             "environment": {
                 "VCPKG_ROOT": "${sourceDir}/thirdparty/vcpkg"

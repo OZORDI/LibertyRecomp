@@ -187,6 +187,16 @@ if(USE_REXGLUE_RUNTIME)
     add_subdirectory("glue")
 endif()
 
+# snappy 1.2.2 compiles AVX intrinsics in snappy.cc whenever __AVX__ is defined,
+# but only includes <immintrin.h> if its configure-time detection found BMI2 or
+# SSE4.2. Cross-configure runs can miss that (e.g. -march=sandybridge is applied
+# after the check), leaving the header out and breaking the Linux build. Force
+# the include instead of patching the submodule.
+if(TARGET snappy AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND
+   LIBERTY_RECOMP_ARCHITECTURE MATCHES "^(x86_64|amd64)$")
+    target_compile_options(snappy PRIVATE -include immintrin.h)
+endif()
+
 # Include sub-projects.
 add_subdirectory("LibertyRecompLib")
 add_subdirectory("LibertyRecomp")

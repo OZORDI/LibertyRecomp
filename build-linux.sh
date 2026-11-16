@@ -45,18 +45,20 @@ if [ "${SKIP_DEPS}" -eq 0 ]; then
 fi
 
 # ─── 2. FindPythonInterp.cmake (CMake 4.x removeu) ────────────────────────
-mkdir -p "${MODULES_DIR}"
-if [ ! -f "${MODULES_DIR}/FindPythonInterp.cmake" ]; then
-  info "Baixando FindPythonInterp.cmake..."
-  curl -fsSL -o "${MODULES_DIR}/FindPythonInterp.cmake" \
-    "https://raw.githubusercontent.com/Kitware/CMake/v3.26.0/Modules/FindPythonInterp.cmake"
-else
-  info "FindPythonInterp.cmake já presente."
+# O repo traz cmake/FindPythonInterp.cmake (usado pelo preset linux-base).
+# Mantemos o download como fallback para checkouts antigos.
+if [ ! -f "${WORKSPACE}/cmake/FindPythonInterp.cmake" ]; then
+  mkdir -p "${MODULES_DIR}"
+  if [ ! -f "${MODULES_DIR}/FindPythonInterp.cmake" ]; then
+    info "Baixando FindPythonInterp.cmake (fallback)..."
+    curl -fsSL -o "${MODULES_DIR}/FindPythonInterp.cmake" \
+      "https://raw.githubusercontent.com/Kitware/CMake/v3.26.0/Modules/FindPythonInterp.cmake"
+  fi
 fi
 
-# ─── 2.5. Submódulos (clone direto por URL+commit, ignora .gitmodules quebrado) ─
-# O .gitmodules do upstream está incompleto: vários paths têm gitlink mas sem URL.
-# Solução: lista hardcoded com (path|url|commit) extraída de um checkout funcional.
+# ─── 2.5. Submódulos (garante os que o build Linux precisa) ────────────────
+# `git clone --recurse-submodules` já traz tudo; esta lista cobre clones sem
+# submódulos e fixa os commits validados.
 SUBMODULES=(
   "thirdparty/msdf-atlas-gen|https://github.com/Chlumsky/msdf-atlas-gen.git|7e8d34645a67c6e4def5d281f7adec1c2501dc49"
   "thirdparty/nativefiledialog-extended|https://github.com/btzy/nativefiledialog-extended.git|388549a5badaa7cbd138f5f189f50c67d5bf060c"
@@ -221,20 +223,6 @@ else
   info "rpf_extractor.cpp já patchado."
 fi
 
-# ─── 5.5. Patch snappy.cc (immintrin.h no Linux) ──────────────────────────
-SNAPPY_CC="glue/rexglue-sdk-main/thirdparty/snappy/snappy.cc"
-if [ -f "$SNAPPY_CC" ] && ! grep -q "#include <immintrin.h>" "$SNAPPY_CC"; then
-  info "Patch snappy.cc (immintrin.h)..."
-  sed -i '/#include "snappy-internal.h"/i #include <immintrin.h>' "$SNAPPY_CC"
-  if grep -q "#include <immintrin.h>" "$SNAPPY_CC"; then
-    info "  ok: snappy.cc patched"
-  else
-    warn "  falhou ao patch snappy.cc"
-  fi
-elif [ -f "$SNAPPY_CC" ]; then
-  info "snappy.cc já patchado (immintrin.h)."
-fi
-
 # ─── 5.6. Patch command_parser.h (cstdint no Linux) ──────────────────────
 CMDPARSER_H="tools/liberty_debugger/command_parser.h"
 if [ -f "$CMDPARSER_H" ] && ! grep -q "#include <cstdint>" "$CMDPARSER_H"; then
@@ -302,8 +290,7 @@ if [ "${SKIP_BUILD}" -eq 0 ]; then
   rm -rf out/build/linux-release
   cmake --preset linux-release \
     -DSDL_X11_XSCRNSAVER=OFF \
-    -DCMAKE_MODULE_PATH="${MODULES_DIR}" \
-    -DGTA4_NATIVE_GLSLANG_VALIDATOR=/usr/bin/glslangValidator
+    -DCMAKE_MODULE_PATH="${WORKSPACE}/cmake;${MODULES_DIR}"
 
   info "Compilando..."
   cmake --build --preset linux-release --parallel "$(nproc)"
