@@ -37,9 +37,42 @@ git clone --recurse-submodules --branch linux-build-fixes https://github.com/eus
 
 ## 2. Add the Required Game Files
 
-Copy the following files from your GTA IV Xbox 360 game and place them inside `./LibertyRecompLib/private/`:
-- `default.xex` - Main executable (from game root)
-- `xbox360.rpf` - Main game archive (from game root)
+This step is optional for a build-only validation. Without the game files the
+recompiler is skipped and the resulting binary only contains the host runtime
+(no recompiled game code). For a runnable build you need a legally obtained
+copy of GTA IV for Xbox 360.
+
+### 2.1 Code generation input (build time)
+
+The PowerPC to C++ recompiler reads the executable through
+`glue/rexglue-sdk-main/gta4-recomp/gta4_config.toml`, which resolves paths
+relative to its own directory. Place the executable at:
+
+```
+glue/rexglue-sdk-main/gta4-recomp/assets/default.xex
+```
+
+A title-updated executable named `assets/default_v8.xex` is used automatically
+when present, and takes precedence over `default.xex`.
+
+After configuring the project, generate the sources and rebuild:
+
+```bash
+cmake --build ./out/build/linux-release --target gta4_codegen
+cmake --build ./out/build/linux-release
+```
+
+### 2.2 Runtime game files (running the game)
+
+The remaining data files are not needed to compile. The installer copies them
+into the platform install directory (`~/.local/share/LibertyRecomp/game/` on
+Linux) when you point it at the folder or ISO that contains:
+
+- `default.xex` - Main executable
+- `common.rpf` - Common game data
+- `xbox360.rpf` - Xbox 360 specific data
+- `audio.rpf` - Audio data
+- `dlc/TLAD/` and `dlc/TBOGT/` - Optional DLC content
 
 > [!TIP]
 > It is recommended that you install the game using [an existing Liberty Recompiled release](https://github.com/OZORDI/LibertyRecomp/releases/latest) to acquire these files, otherwise you'll need to rely on third-party tools to extract them from your Xbox 360 disc or ISO.
@@ -167,9 +200,11 @@ cmake --build ./out/build/linux-release --target LibertyRecomp
 ```
 
 > [!NOTE]
-> Without the game files in `LibertyRecompLib/private/`, codegen is skipped and the
-> resulting binary contains no recompiled game code. This is expected for a
-> build-only validation; add `default.xex` and `xbox360.rpf` to build a runnable game.
+> Without `default.xex` in `glue/rexglue-sdk-main/gta4-recomp/assets/`, codegen is
+> skipped and the resulting binary contains no recompiled game code. This is
+> expected for a build-only validation; see
+> [section 2](#2-add-the-required-game-files) to generate the game code and to
+> install the runtime files.
 
 ### macOS (ARM64 and x64)
 The build process works for both Apple Silicon (ARM64) and Intel (x64) Macs.

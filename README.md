@@ -114,13 +114,15 @@ See [MOD_SUPPORT.md](/docs/MOD_SUPPORT.md) for detailed documentation.
 git clone --recurse-submodules https://github.com/OZORDI/LibertyRecomp.git
 cd LibertyRecomp
 
-# Add game files to LibertyRecompLib/private/
-# - default.xex
-# - xbox360.rpf
+# (optional) enable recompiled game code
+# cp default.xex glue/rexglue-sdk-main/gta4-recomp/assets/
 
 # Configure and build (macOS example)
 cmake . --preset macos-release
 cmake --build ./out/build/macos-release --target LibertyRecomp
+
+# (optional) generate the game code, then rebuild
+# cmake --build ./out/build/macos-release --target gta4_codegen
 ```
 
 ## Documentation
