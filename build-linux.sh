@@ -54,52 +54,71 @@ else
   info "FindPythonInterp.cmake já presente."
 fi
 
-# ─── 2.5. Submódulos críticos (paths explícitos, pula FFmpeg quebrado) ────
-NEEDS_SUBMODULES=0
-for f in \
-    thirdparty/vcpkg/scripts/buildsystems/vcpkg.cmake \
-    glue/rexglue-sdk-main/thirdparty/sdl3/CMakeLists.txt \
-    glue/rexglue-sdk-main/thirdparty/glslang/CMakeLists.txt; do
-  [ -f "$f" ] || NEEDS_SUBMODULES=1
-done
+# ─── 2.5. Submódulos (clone direto por URL+commit, ignora .gitmodules quebrado) ─
+# O .gitmodules do upstream está incompleto: vários paths têm gitlink mas sem URL.
+# Solução: lista hardcoded com (path|url|commit) extraída de um checkout funcional.
+SUBMODULES=(
+  "thirdparty/msdf-atlas-gen|https://github.com/Chlumsky/msdf-atlas-gen.git|7e8d34645a67c6e4def5d281f7adec1c2501dc49"
+  "thirdparty/nativefiledialog-extended|https://github.com/btzy/nativefiledialog-extended.git|388549a5badaa7cbd138f5f189f50c67d5bf060c"
+  "thirdparty/plume|https://github.com/renderbag/plume|519e3258048fe0bc65044e75fba7b1543e4c8e90"
+  "thirdparty/ffmpeg-core|https://github.com/sonicnext-dev/ffmpeg-core|5089f001a5442308599fbab8e35282f5ad8ccf13"
+  "thirdparty/GameNetworkingSockets|https://github.com/ValveSoftware/GameNetworkingSockets.git|517fff0cf6866ba163f4f016b0ef28f365c06c05"
+  "thirdparty/ddspp|https://github.com/redorav/ddspp.git|98ce1d384706c8d7121876742a786f4eb89a23ef"
+  "tools/XenosRecomp|https://github.com/sonicnext-dev/XenosRecomp.git|fb32631ee398e46f2a113d8f9103201dbaa000b4"
+  "glue/rexglue-sdk-main/thirdparty/sdl3|https://github.com/libsdl-org/SDL|0fb1177405bb4c35a6f0b7991744f98293ac27fc"
+  "glue/rexglue-sdk-main/thirdparty/glslang|https://github.com/KhronosGroup/glslang.git|f4f1d8a352ca1908943aea2ad8c54b39b4879080"
+  "glue/rexglue-sdk-main/thirdparty/spirv-tools|https://github.com/KhronosGroup/SPIRV-Tools.git|04d0b166dcd62e29509bf2aac3ca0c5ccdcb6929"
+  "glue/rexglue-sdk-main/thirdparty/spirv-headers|https://github.com/KhronosGroup/SPIRV-Headers.git|04f10f650d514df88b76d25e83db360142c7b174"
+  "glue/rexglue-sdk-main/thirdparty/imgui|https://github.com/ocornut/imgui.git|6d910d5487d11ca567b61c7824b0c78c569d62f0"
+  "glue/rexglue-sdk-main/thirdparty/fmt|https://github.com/fmtlib/fmt.git|407c905e45ad75fc29bf0f9bb7c5c2fd3475976f"
+  "glue/rexglue-sdk-main/thirdparty/spdlog|https://github.com/gabime/spdlog.git|79524ddd08a4ec981b7fea76afd08ee05f83755d"
+  "glue/rexglue-sdk-main/thirdparty/tracy|https://github.com/wolfpld/tracy.git|05cceee0df3b8d7c6fa87e9638af311dbabc63cb"
+  "glue/rexglue-sdk-main/thirdparty/volk|https://github.com/zeux/volk.git|0b17a763ba5643e32da1b2152f8140461b3b7345"
+  "glue/rexglue-sdk-main/thirdparty/vulkan-headers|https://github.com/KhronosGroup/Vulkan-Headers.git|49f1a381e2aec33ef32adf4a377b5a39ec016ec4"
+  "glue/rexglue-sdk-main/thirdparty/vulkan-memory-allocator|https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git|1d8f600fd424278486eade7ed3e877c99f0846b1"
+  "glue/rexglue-sdk-main/thirdparty/xxHash|https://github.com/Cyan4973/xxHash.git|e626a72bc2321cd320e953a0ccf1584cad60f363"
+  "glue/rexglue-sdk-main/thirdparty/simde|https://github.com/simd-everywhere/simde.git|71fd833d9666141edcd1d3c109a80e228303d8d7"
+  "glue/rexglue-sdk-main/thirdparty/tomlplusplus|https://github.com/marzer/tomlplusplus.git|30172438cee64926dc41fdd9c11fb3ba5b2ba9de"
+  "glue/rexglue-sdk-main/thirdparty/utfcpp|https://github.com/nemtrif/utfcpp.git|63d64de49fd6b829f7c8694df5ab2ee625cb7134"
+  "glue/rexglue-sdk-main/thirdparty/inja|https://github.com/pantor/inja.git|7d1b4600b68595085a949743331c2e5673f511ea"
+  "glue/rexglue-sdk-main/thirdparty/cli11|https://github.com/CLIUtils/CLI11|bfffd37e1f804ca4fae1caae106935791696b6a9"
+  "glue/rexglue-sdk-main/thirdparty/catch2|https://github.com/catchorg/Catch2.git|88abf9bf325c798c33f54f6b9220ef885b267f4f"
+  "glue/rexglue-sdk-main/thirdparty/snappy|https://github.com/google/snappy.git|6af9287fbdb913f0794d0148c6aa43b58e63c8e3"
+)
 
-if [ "$NEEDS_SUBMODULES" -eq 1 ]; then
-  info "Inicializando submódulos com paths explícitos..."
-  # FFmpeg é gitlink sem URL no .gitmodules (bug do upstream), pulamos.
-  SUBMODULES=(
-    "thirdparty/vcpkg"
-    "glue/rexglue-sdk-main/thirdparty/sdl3"
-    "glue/rexglue-sdk-main/thirdparty/glslang"
-    "glue/rexglue-sdk-main/thirdparty/spirv-tools"
-    "glue/rexglue-sdk-main/thirdparty/spirv-headers"
-    "glue/rexglue-sdk-main/thirdparty/imgui"
-    "glue/rexglue-sdk-main/thirdparty/fmt"
-    "glue/rexglue-sdk-main/thirdparty/spdlog"
-    "glue/rexglue-sdk-main/thirdparty/tracy"
-    "glue/rexglue-sdk-main/thirdparty/volk"
-    "glue/rexglue-sdk-main/thirdparty/vulkan-headers"
-    "glue/rexglue-sdk-main/thirdparty/vulkan-memory-allocator"
-    "glue/rexglue-sdk-main/thirdparty/xxHash"
-    "glue/rexglue-sdk-main/thirdparty/simde"
-    "glue/rexglue-sdk-main/thirdparty/tomlplusplus"
-    "glue/rexglue-sdk-main/thirdparty/utfcpp"
-    "glue/rexglue-sdk-main/thirdparty/inja"
-    "glue/rexglue-sdk-main/thirdparty/cli11"
-    "glue/rexglue-sdk-main/thirdparty/catch2"
-    "glue/rexglue-sdk-main/thirdparty/snappy"
-  )
-  for sub in "${SUBMODULES[@]}"; do
-    if git config -f .gitmodules --get "submodule.$sub.url" >/dev/null 2>&1; then
-      info "  → $sub"
-      git submodule update --init --recursive "$sub" 2>&1 | tail -1 || \
-        warn "  falhou: $sub (pode continuar)"
-    else
-      warn "  skip $sub (sem URL em .gitmodules)"
-    fi
-  done
-  info "Submódulos inicializados (FFmpeg pulado — console-only)."
+# vcpkg primeiro (é o toolchain do CMake)
+if [ ! -f thirdparty/vcpkg/scripts/buildsystems/vcpkg.cmake ]; then
+  info "Inicializando vcpkg..."
+  git submodule update --init --recursive thirdparty/vcpkg 2>&1 | tail -2
+fi
+
+# Clona cada submódulo por URL+commit (não depende do .gitmodules)
+CLONED=0
+for entry in "${SUBMODULES[@]}"; do
+  IFS='|' read -r path url commit <<< "$entry"
+  if [ ! -d "$path" ] || [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+    info "  clone $path"
+    rm -rf "$path"
+    mkdir -p "$path"
+    (
+      cd "$path" || exit 1
+      git init -q
+      git remote add origin "$url"
+      if git fetch -q --depth 1 origin "$commit" 2>/dev/null; then
+        git checkout -q FETCH_HEAD
+      else
+        # Fallback: fetch completo se --depth 1 falhar (raro, alguns hosts)
+        git fetch -q origin
+        git checkout -q "$commit" 2>/dev/null || warn "  checkout $commit falhou em $path"
+      fi
+    ) || warn "  FALHOU: $path"
+    CLONED=$((CLONED+1))
+  fi
+done
+if [ "$CLONED" -gt 0 ]; then
+  info "Submódulos clonados: $CLONED"
 else
-  info "Submódulos já inicializados."
+  info "Todos os submódulos já presentes."
 fi
 
 # ─── 3. Checkout do commit alinhado com o SDK ─────────────────────────────
