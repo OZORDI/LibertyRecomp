@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <cstdio>
 #include <stdafx.h>
 #ifdef __x86_64__
