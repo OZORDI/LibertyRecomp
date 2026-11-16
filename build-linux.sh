@@ -86,6 +86,14 @@ SUBMODULES=(
   "glue/rexglue-sdk-main/thirdparty/snappy|https://github.com/google/snappy.git|6af9287fbdb913f0794d0148c6aa43b58e63c8e3"
   "glue/rexglue-sdk-main/thirdparty/libmspack|https://github.com/kyz/libmspack.git|305907723a4e7ab2018e58040059ffb5e77db837"
   "glue/rexglue-sdk-main/thirdparty/FFmpeg|https://github.com/wmarti/FFmpeg.git|0604b464c7cb4ebc94940cf1f324a3b26b87717c"
+    # ── LibertyRecomp (raiz) terceiros ────────────────────────────────────────
+  "thirdparty/imgui|https://github.com/ocornut/imgui.git|8199457a7d9e453f8d3d9cadc14683fb54a858b5"
+  "thirdparty/implot|https://github.com/epezent/implot.git|77674d270e851d3f3718aad00234201af2b76ac9"
+  "thirdparty/json|https://github.com/nlohmann/json|606b6347edf0758c531abb6c36743e09a4c48a84"
+  "thirdparty/magic_enum|https://github.com/Neargye/magic_enum.git|1a1824df7ac798177a521eed952720681b0bf482"
+  "thirdparty/stb|https://github.com/nothings/stb.git|5c205738c191bcb0abc65c4febfa9bd25ff35234"
+  "thirdparty/unordered_dense|https://github.com/martinus/unordered_dense.git|d911053e390816ecc5dedd5a9d6b4bb5ed92b4c9"
+  "thirdparty/concurrentqueue|https://github.com/cameron314/concurrentqueue.git|6dd38b8a1dbaa7863aa907045f32308a56a6ff5d"
 )
 
 # vcpkg primeiro (é o toolchain do CMake)
