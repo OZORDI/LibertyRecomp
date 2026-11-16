@@ -34,7 +34,22 @@ if(NOT _VCPKG_LINUX_CLANG_TOOLCHAIN)
     set(CMAKE_CXX_COMPILER clang++)
     SET(CMAKE_ASM_COMPILER clang)
 
-    # Pick target architecture for clang
+    # Pick target architecture for clang.
+    # vcpkg's chainload happens before VCPKG_TARGET_ARCHITECTURE is derived from
+    # the triplet, so fall back to the triplet/host here; otherwise
+    # CMAKE_SYSTEM_PROCESSOR ends up empty and arch detection (e.g. FFmpeg's
+    # x86 sources) silently turns off.
+    if(NOT VCPKG_TARGET_ARCHITECTURE AND VCPKG_TARGET_TRIPLET MATCHES "^([^-]+)-")
+        set(VCPKG_TARGET_ARCHITECTURE "${CMAKE_MATCH_1}")
+    endif()
+    if(NOT VCPKG_TARGET_ARCHITECTURE)
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+            set(VCPKG_TARGET_ARCHITECTURE x64)
+        elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+            set(VCPKG_TARGET_ARCHITECTURE arm64)
+        endif()
+    endif()
+
     if(VCPKG_TARGET_ARCHITECTURE STREQUAL "x64")
         set(CMAKE_SYSTEM_PROCESSOR x86_64 CACHE STRING "")
         set(CLANG_TARGET x86_64-unknown-linux-gnu)
