@@ -19,7 +19,8 @@
 // Android: RPF decryption not needed — game data is pre-extracted.
 // Provide a stub that always fails so the code compiles.
 #else
-#include <CommonCrypto/CommonCrypto.h>
+// Linux/Unix: OpenSSL para descriptografia AES-256-ECB
+#include <openssl/evp.h>
 #endif
 
 namespace RpfExtractor
@@ -126,25 +127,31 @@ namespace RpfExtractor
         // Android: RPF decryption not supported — game data is pre-extracted.
         (void)data; (void)key; (void)dataLen;
         return false;
-#else
+#elif defined(__APPLE__)
         // macOS/iOS CommonCrypto - decrypt 16 times like SparkIV
-        for (int round = 0; round < 16; round++)
-        {
+        for (int round = 0; round < 16; round++) {
             size_t outLength = 0;
             CCCryptorStatus status = CCCrypt(
-                kCCDecrypt,
-                kCCAlgorithmAES,
-                kCCOptionECBMode,
-                key.data(), kCCKeySizeAES256,
-                nullptr,  // No IV for ECB
-                data.data(), dataLen,
-                data.data(), dataLen,
-                &outLength);
-            
-            if (status != kCCSuccess)
-            {
-                return false;
-            }
+                kCCDecrypt, kCCAlgorithmAES, kCCOptionECBMode,
+                key.data(), kCCKeySizeAES256, nullptr,
+                data.data(), dataLen, data.data(), dataLen, &outLength);
+            if (status != kCCSuccess) return false;
+        }
+        return true;
+#else
+        // Linux/Unix: OpenSSL AES-256-ECB, sem padding
+        if (dataLen % 16 != 0) return false;
+        for (int round = 0; round < 16; round++) {
+            EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+            if (!ctx) return false;
+            int outLen = 0, finalLen = 0;
+            bool ok = true;
+            ok &= (EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), nullptr, key.data(), nullptr) == 1);
+            ok &= (EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
+            ok &= (EVP_DecryptUpdate(ctx, data.data(), &outLen, data.data(), (int)dataLen) == 1);
+            ok &= (EVP_DecryptFinal_ex(ctx, data.data() + outLen, &finalLen) == 1);
+            EVP_CIPHER_CTX_free(ctx);
+            if (!ok) return false;
         }
         return true;
 #endif

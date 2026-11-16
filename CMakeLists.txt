@@ -1,4 +1,5 @@
 cmake_minimum_required (VERSION 3.20)
+cmake_policy(SET CMP0148 OLD)
 
 set(LIBERTY_RECOMP_THIRDPARTY_ROOT ${CMAKE_SOURCE_DIR}/thirdparty)
 set(LIBERTY_RECOMP_TOOLS_ROOT ${CMAKE_SOURCE_DIR}/tools)
@@ -14,6 +15,7 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project("LibertyRecomp-ALL")
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 
 # Force FMT_USE_CONSTEVAL off - Homebrew LLVM consteval is broken with vcpkg spdlog
 add_compile_definitions(FMT_USE_CONSTEVAL=0)

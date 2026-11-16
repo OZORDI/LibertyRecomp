@@ -1495,6 +1495,7 @@ target_link_libraries(LibertyRecomp PRIVATE
     xxHash::xxhash
     plume
     liberty_debugger
+    OpenSSL::Crypto
 )
 
 # SDL3 — desktop only (consoles use native HID/audio drivers)
