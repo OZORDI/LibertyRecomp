@@ -54,14 +54,27 @@ else
   info "FindPythonInterp.cmake já presente."
 fi
 
+# ─── 2.5. Submódulos de terceiros (SDL3, glslang, spirv-tools, etc.) ──────
+if [ ! -f glue/rexglue-sdk-main/thirdparty/sdl3/CMakeLists.txt ] || \
+   [ ! -f glue/rexglue-sdk-main/thirdparty/glslang/CMakeLists.txt ]; then
+  info "Inicializando submódulos (pode demorar na primeira vez)..."
+  git submodule update --init --recursive 2>&1 | \
+    grep -E "Submodule|Cloning|fatal" || true
+else
+  info "Submódulos já inicializados."
+fi
+
 # ─── 3. Checkout do commit alinhado com o SDK ─────────────────────────────
-CUR=$(git rev-parse --short HEAD)
-if [ "${CUR}" != "${LIBERTY_COMMIT}" ]; then
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+if [ "${CURRENT_BRANCH}" = "linux-build-fixes" ]; then
+  info "Já no branch linux-build-fixes (patches commitados)."
+elif git merge-base --is-ancestor "${LIBERTY_COMMIT}" HEAD 2>/dev/null; then
+  info "HEAD já contém ${LIBERTY_COMMIT} (e patches)."
+else
+  CUR=$(git rev-parse --short HEAD)
   info "Checkout ${LIBERTY_COMMIT} (atual: ${CUR})..."
   git stash push -u -m "build-linux-autostash-$(date +%s)" 2>/dev/null || true
   git checkout "${LIBERTY_COMMIT}"
-else
-  info "Já no commit ${LIBERTY_COMMIT}."
 fi
 
 # ─── 4. Patches CMake (idempotentes) ──────────────────────────────────────
