@@ -221,6 +221,20 @@ else
   info "rpf_extractor.cpp já patchado."
 fi
 
+# ─── 5.5. Patch snappy.cc (immintrin.h no Linux) ──────────────────────────
+SNAPPY_CC="glue/rexglue-sdk-main/thirdparty/snappy/snappy.cc"
+if [ -f "$SNAPPY_CC" ] && ! grep -q "#include <immintrin.h>" "$SNAPPY_CC"; then
+  info "Patch snappy.cc (immintrin.h)..."
+  sed -i '/#include "snappy-internal.h"/i #include <immintrin.h>' "$SNAPPY_CC"
+  if grep -q "#include <immintrin.h>" "$SNAPPY_CC"; then
+    info "  ok: snappy.cc patched"
+  else
+    warn "  falhou ao patch snappy.cc"
+  fi
+elif [ -f "$SNAPPY_CC" ]; then
+  info "snappy.cc já patchado (immintrin.h)."
+fi
+
 # ─── 6. o1heap v3.0 (verificação defensiva) ───────────────────────────────
 cd glue/rexglue-sdk-main/thirdparty/o1heap
 # o upstream tem o código dentro de uma subpasta "o1heap/"
